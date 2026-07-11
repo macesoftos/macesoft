@@ -78,6 +78,13 @@ export function loadMyWorkspace() {
   return requestJson("/api/me/workspace");
 }
 
+export function createBranchRecord(values) {
+  return requestJson("/api/branches", {
+    method: "POST",
+    body: JSON.stringify(values),
+  });
+}
+
 export function recordAttendance(type, note = "") {
   return requestJson("/api/me/attendance", {
     method: "POST",

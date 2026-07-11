@@ -2438,6 +2438,27 @@ app.post("/api/me/attendance", asyncRoute(async (request, response) => {
   response.status(201).json({ event, workspace: await buildMyWorkspace(account) });
 }));
 
+app.post("/api/branches", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  if (!["Owner", "Super Admin"].includes(account.role)) throw apiError("Only an Owner or Super Admin can create branches.", 403);
+  const name = requireText(request.body?.name, "Branch name");
+  const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
+  const branch = await prisma.branch.create({
+    data: {
+      name,
+      city: clean(request.body?.city),
+      address: clean(request.body?.address),
+      phone: clean(request.body?.phone),
+      hours: clean(request.body?.hours),
+      devices: jsonText(request.body?.devices || [], []),
+      image: clean(request.body?.image),
+      rooms: roomCount ? { create: Array.from({ length: roomCount }, (_value, index) => ({ name: `Room ${index + 1}` })) } : undefined,
+    },
+    include: { rooms: true },
+  });
+  response.status(201).json({ branch: serializeBranch(branch) });
+}));
+
 app.get("/api/health", asyncRoute(async (_request, response) => {
   let clientCount;
   try {

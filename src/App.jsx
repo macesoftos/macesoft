@@ -75,6 +75,7 @@ import { navItems, navSections } from "./config/sidebar.jsx";
 import {
   checkApiHealth,
   changeAccountPassword,
+  createBranchRecord,
   addLeadActivity,
   bookLeadAppointment,
   completePosCheckout,
@@ -532,6 +533,7 @@ function App() {
   const [discounts, setDiscounts] = useStoredState("discounts", []);
   const [smsTemplates, setSmsTemplates] = useStoredState("sms-templates", []);
   const [campaigns, setCampaigns] = useStoredState("campaigns", []);
+  const [branchRecords, setBranchRecords] = useStoredState("branch-records", []);
   const [settings, setSettings] = useStoredState("settings", initialSettings);
   const [leadIntegrations, setLeadIntegrations] = useStoredState("lead-integrations", []);
   const [webhookEvents, setWebhookEvents] = useStoredState("lead-webhook-events", []);
@@ -762,6 +764,7 @@ function App() {
         setInventoryMovements(Array.isArray(bootstrap.inventoryMovements) ? bootstrap.inventoryMovements : []);
         setLeadIntegrations(Array.isArray(bootstrap.leadIntegrations) ? bootstrap.leadIntegrations : []);
         setWebhookEvents(Array.isArray(bootstrap.webhookEvents) ? bootstrap.webhookEvents : []);
+        setBranchRecords(Array.isArray(bootstrap.branches) ? bootstrap.branches : []);
         if (bootstrap.settings) {
           setSettings(bootstrap.settings);
         }
@@ -1008,6 +1011,13 @@ function App() {
     const result = await changeAccountPassword(currentPassword, newPassword);
     setSession(result.account);
     notify("Password updated securely.");
+  }
+
+  async function createBranch(values) {
+    const result = await createBranchRecord(values);
+    setBranchRecords((current) => [...current.filter((item) => item.id !== result.branch.id), result.branch].sort((a, b) => a.name.localeCompare(b.name)));
+    notify(`${result.branch.name} created.`);
+    return result.branch;
   }
 
   function openModal(type, payload = {}) {
@@ -1681,7 +1691,7 @@ function App() {
                 <Store size={17} aria-hidden="true" />
                 <select value={branchScope} onChange={(event) => setBranchScope(event.target.value)} aria-label="Select branch">
                   <option>All branches</option>
-                  {branches.map((branch) => (
+                  {branchRecords.map((branch) => (
                     <option key={branch.id}>{branch.name}</option>
                   ))}
                 </select>
@@ -1881,7 +1891,17 @@ function App() {
               globalSearch={globalSearch}
             />
           )}
-          {activeModule === "branches" && <BranchesModule branchScope={branchScope} />}
+          {activeModule === "branches" && (
+            <BranchesModule
+              branchScope={branchScope}
+              branchRecords={branchRecords}
+              staff={staff}
+              transactions={transactions}
+              appointments={appointments}
+              canManage={["Owner", "Super Admin"].includes(session.role)}
+              onCreateBranch={createBranch}
+            />
+          )}
           {activeModule === "expenses" && (
             <ExpensesModule expenses={expenses} openModal={openModal} globalSearch={globalSearch} />
           )}
@@ -6307,31 +6327,103 @@ function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
   );
 }
 
-function BranchesModule({ branchScope }) {
+function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, onCreateBranch }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "" });
+  const today = new Date().toISOString().slice(0, 10);
+  const totalSales = transactions.reduce((sum, item) => sum + Number(item.total || 0), 0);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onCreateBranch({
+        ...form,
+        roomCount: Number(form.roomCount) || 0,
+        devices: form.devices.split(",").map((item) => item.trim()).filter(Boolean),
+      });
+      setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "" });
+      setShowCreate(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <section className="branch-grid">
-      {branches.map((item) => (
-        <article className="branch-card" key={item.id}>
-          <img src={item.image} alt={item.name} />
-          <div>
-            <span>{item.city}</span>
-            <h2>{item.name}</h2>
-            <p>{item.address}</p>
-            <dl>
-              <div><dt>Rooms</dt><dd>{item.rooms.length}</dd></div>
-              <div><dt>Staff</dt><dd>{item.staff}</dd></div>
-              <div><dt>Hours</dt><dd>{item.hours}</dd></div>
-            </dl>
-            <div className="workflow-chips">
-              {item.devices.map((device) => <span key={device}>{device}</span>)}
-            </div>
-          </div>
-        </article>
-      ))}
-      <div className="surface-panel full-span">
-        <SectionHeader icon={Store} title="Multi-Branch Support" action={branchScope} />
-        <Checklist items={["Central dashboard with branch filters", "Shared client database", "Stock transfer-ready structure", "Package and gift certificate redemption across branches", "Branch permissions and settings"]} />
+    <section className="branches-workspace">
+      <div className="branches-hero surface-panel">
+        <div>
+          <p className="eyebrow">Organization setup</p>
+          <h2>Branches</h2>
+          <p>Manage locations, operating details, rooms, and employee assignments from one place.</p>
+        </div>
+        {canManage && <button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={17} /> Add branch</button>}
       </div>
+
+      <div className="branch-summary-grid">
+        <article><Store size={19} /><div><strong>{branchRecords.length}</strong><span>Active branches</span></div></article>
+        <article><Users size={19} /><div><strong>{staff.length}</strong><span>Assigned employees</span></div></article>
+        <article><CalendarDays size={19} /><div><strong>{appointments.filter((item) => item.date === today).length}</strong><span>Bookings today</span></div></article>
+        <article><CircleDollarSign size={19} /><div><strong>{money.format(totalSales)}</strong><span>Recorded sales</span></div></article>
+      </div>
+
+      {!branchRecords.length ? (
+        <div className="branch-empty surface-panel">
+          <div className="branch-empty-icon"><Store size={28} /></div>
+          <h3>Create the first clinic branch</h3>
+          <p>Add each physical location first. Employees, rooms, appointments, inventory, and reports can then be assigned to the correct branch.</p>
+          <div className="branch-onboarding-steps">
+            <span><b>1</b> Add location details</span>
+            <span><b>2</b> Assign rooms and staff</span>
+            <span><b>3</b> Start branch operations</span>
+          </div>
+          {canManage && <button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={17} /> Add first branch</button>}
+        </div>
+      ) : (
+        <div className="branch-grid">
+          {branchRecords.map((item) => {
+            const assignedStaff = staff.filter((person) => person.branch === item.name).length;
+            const branchSales = transactions.filter((sale) => sale.branch === item.name).reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+            return (
+              <article className="branch-card" key={item.id}>
+                <div className="branch-card-header">
+                  <div className="branch-avatar"><Store size={22} /></div>
+                  <div><span>{item.city || "Location pending"}</span><h2>{item.name}</h2></div>
+                  <StatusBadge status="Active" />
+                </div>
+                <p className="branch-address"><MapPin size={15} /> {item.address || "Add the complete clinic address"}</p>
+                <dl>
+                  <div><dt>Rooms</dt><dd>{item.rooms?.length ?? 0}</dd></div>
+                  <div><dt>Employees</dt><dd>{assignedStaff}</dd></div>
+                  <div><dt>Sales</dt><dd>{money.format(branchSales)}</dd></div>
+                </dl>
+                <div className="branch-meta-row"><Clock size={15} /><span>{item.hours || "Operating hours not set"}</span></div>
+                <div className="workflow-chips">{(item.devices || []).map((device) => <span key={device}>{device}</span>)}</div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {showCreate && (
+        <div className="modal-backdrop">
+          <form className="modal-card branch-create-modal" onSubmit={submit}>
+            <button className="modal-close" type="button" aria-label="Close" onClick={() => setShowCreate(false)}><X size={18} /></button>
+            <div className="section-title"><div className="section-icon"><Store size={18} /></div><div><p className="eyebrow">New location</p><h2>Add a clinic branch</h2></div></div>
+            <div className="form-grid">
+              <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE BGC" /></label>
+              <label><span>City</span><input required value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label>
+              <label className="full-span"><span>Complete address</span><input required value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Building, street, city" /></label>
+              <label><span>Phone</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Branch contact number" /></label>
+              <label><span>Operating hours</span><input value={form.hours} onChange={(event) => setForm({ ...form, hours: event.target.value })} placeholder="9:00 AM - 7:00 PM" /></label>
+              <label><span>Number of rooms</span><input min="0" max="50" type="number" value={form.roomCount} onChange={(event) => setForm({ ...form, roomCount: event.target.value })} /></label>
+              <label><span>Devices</span><input value={form.devices} onChange={(event) => setForm({ ...form, devices: event.target.value })} placeholder="Comma-separated" /></label>
+            </div>
+            <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Creating..." : "Create branch"}</button></div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
