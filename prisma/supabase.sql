@@ -1,6 +1,9 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateTable
 CREATE TABLE "Client" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "fullName" TEXT NOT NULL,
     "photo" TEXT NOT NULL DEFAULT '',
     "mobile" TEXT NOT NULL DEFAULT '',
@@ -25,16 +28,18 @@ CREATE TABLE "Client" (
     "retention" TEXT NOT NULL DEFAULT 'New',
     "lastVisit" TEXT NOT NULL DEFAULT '',
     "nextVisit" TEXT NOT NULL DEFAULT '',
-    "balance" REAL NOT NULL DEFAULT 0,
+    "balance" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "packageBalance" TEXT NOT NULL DEFAULT 'None',
-    "giftBalance" REAL NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "giftBalance" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Client_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Branch" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "city" TEXT NOT NULL DEFAULT '',
     "address" TEXT NOT NULL DEFAULT '',
@@ -43,42 +48,47 @@ CREATE TABLE "Branch" (
     "staff" INTEGER NOT NULL DEFAULT 0,
     "devices" TEXT NOT NULL DEFAULT '[]',
     "image" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Branch_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Room" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "branchId" TEXT,
     "status" TEXT NOT NULL DEFAULT 'Available',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Room_branchId_fkey" FOREIGN KEY ("branchId") REFERENCES "Branch" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Room_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "StaffMember" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "role" TEXT NOT NULL,
     "branch" TEXT NOT NULL DEFAULT '',
     "schedule" TEXT NOT NULL DEFAULT '',
     "commissionType" TEXT NOT NULL DEFAULT '',
-    "commissionRate" REAL NOT NULL DEFAULT 0,
+    "commissionRate" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "services" TEXT NOT NULL DEFAULT '',
     "status" TEXT NOT NULL DEFAULT 'Available',
     "attendance" TEXT NOT NULL DEFAULT 'Clocked out',
     "employmentDate" TEXT NOT NULL DEFAULT '',
     "phone" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "StaffMember_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Account" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "staffId" TEXT,
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
@@ -88,45 +98,47 @@ CREATE TABLE "Account" (
     "status" TEXT NOT NULL DEFAULT 'Active',
     "mustChangePassword" BOOLEAN NOT NULL DEFAULT true,
     "failedLoginCount" INTEGER NOT NULL DEFAULT 0,
-    "lockedUntil" DATETIME,
-    "lastLoginAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Account_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "StaffMember" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "lockedUntil" TIMESTAMP(3),
+    "lastLoginAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Account_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AuthSession" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "tokenHash" TEXT NOT NULL,
     "accountId" TEXT NOT NULL,
-    "expiresAt" DATETIME NOT NULL,
-    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "AuthSession_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuthSession_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AttendanceEvent" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "staffId" TEXT NOT NULL,
     "accountId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "branch" TEXT NOT NULL DEFAULT '',
     "note" TEXT NOT NULL DEFAULT '',
-    "occurredAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "AttendanceEvent_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "StaffMember" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "AttendanceEvent_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "occurredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AttendanceEvent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Service" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "category" TEXT NOT NULL,
     "duration" INTEGER NOT NULL DEFAULT 60,
-    "price" REAL NOT NULL DEFAULT 0,
+    "price" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "commission" TEXT NOT NULL DEFAULT '',
     "consumables" TEXT NOT NULL DEFAULT '[]',
     "branches" TEXT NOT NULL DEFAULT '[]',
@@ -137,13 +149,15 @@ CREATE TABLE "Service" (
     "description" TEXT NOT NULL DEFAULT '',
     "contraindications" TEXT NOT NULL DEFAULT '',
     "aftercare" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Service_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Appointment" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "date" TEXT NOT NULL,
     "time" TEXT NOT NULL,
     "clientId" TEXT,
@@ -154,19 +168,19 @@ CREATE TABLE "Appointment" (
     "room" TEXT NOT NULL DEFAULT '',
     "staff" TEXT NOT NULL DEFAULT '',
     "status" TEXT NOT NULL DEFAULT 'Pending',
-    "deposit" REAL NOT NULL DEFAULT 0,
+    "deposit" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "leadId" TEXT NOT NULL DEFAULT '',
     "notes" TEXT NOT NULL DEFAULT '',
     "internalNotes" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Appointment_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "Appointment_serviceId_fkey" FOREIGN KEY ("serviceId") REFERENCES "Service" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Appointment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Treatment" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "clientId" TEXT,
     "client" TEXT NOT NULL,
     "date" TEXT NOT NULL,
@@ -183,14 +197,15 @@ CREATE TABLE "Treatment" (
     "outcome" TEXT NOT NULL DEFAULT '',
     "satisfaction" TEXT NOT NULL DEFAULT '',
     "photos" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Treatment_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Treatment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "InventoryItem" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "item" TEXT NOT NULL,
     "sku" TEXT NOT NULL DEFAULT '',
     "brand" TEXT NOT NULL DEFAULT '',
@@ -198,68 +213,75 @@ CREATE TABLE "InventoryItem" (
     "type" TEXT NOT NULL DEFAULT 'Consumable',
     "unit" TEXT NOT NULL DEFAULT '',
     "packQty" INTEGER NOT NULL DEFAULT 1,
-    "beginning" REAL NOT NULL DEFAULT 0,
-    "stock" REAL NOT NULL DEFAULT 0,
+    "beginning" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "stock" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "branch" TEXT NOT NULL DEFAULT '',
     "location" TEXT NOT NULL DEFAULT '',
-    "reorder" REAL NOT NULL DEFAULT 0,
+    "reorder" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "expiry" TEXT NOT NULL DEFAULT '',
     "batch" TEXT NOT NULL DEFAULT '',
     "supplier" TEXT NOT NULL DEFAULT '',
-    "cost" REAL NOT NULL DEFAULT 0,
-    "price" REAL NOT NULL DEFAULT 0,
+    "cost" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "price" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "image" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "InventoryItem_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "InventoryMovement" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "date" TEXT NOT NULL,
     "itemId" TEXT NOT NULL DEFAULT '',
     "item" TEXT NOT NULL,
     "branch" TEXT NOT NULL DEFAULT '',
-    "qty" REAL NOT NULL,
+    "qty" DOUBLE PRECISION NOT NULL,
     "reason" TEXT NOT NULL,
     "user" TEXT NOT NULL DEFAULT 'System',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "InventoryMovement_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Sale" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "invoice" TEXT NOT NULL,
     "date" TEXT NOT NULL,
     "time" TEXT NOT NULL,
     "client" TEXT NOT NULL,
     "branch" TEXT NOT NULL,
     "staff" TEXT NOT NULL,
-    "subtotal" REAL NOT NULL DEFAULT 0,
-    "discount" REAL NOT NULL DEFAULT 0,
-    "total" REAL NOT NULL DEFAULT 0,
+    "subtotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "discount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "total" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "payments" TEXT NOT NULL DEFAULT '[]',
     "status" TEXT NOT NULL DEFAULT 'Paid',
     "leadId" TEXT NOT NULL DEFAULT '',
     "notes" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Sale_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SaleItem" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "saleId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
-    "qty" REAL NOT NULL DEFAULT 1,
-    "price" REAL NOT NULL DEFAULT 0,
-    CONSTRAINT "SaleItem_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "Sale" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "qty" DOUBLE PRECISION NOT NULL DEFAULT 1,
+    "price" DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+    CONSTRAINT "SaleItem_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ClinicPackage" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "clientId" TEXT,
     "client" TEXT NOT NULL,
@@ -269,27 +291,30 @@ CREATE TABLE "ClinicPackage" (
     "branch" TEXT NOT NULL DEFAULT 'All branches',
     "transferable" BOOLEAN NOT NULL DEFAULT false,
     "status" TEXT NOT NULL DEFAULT 'Active',
-    "price" REAL NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "ClinicPackage_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "price" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ClinicPackage_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "GiftCertificate" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
     "client" TEXT NOT NULL,
-    "balance" REAL NOT NULL DEFAULT 0,
+    "balance" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "expires" TEXT NOT NULL DEFAULT '',
     "status" TEXT NOT NULL DEFAULT 'Active',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "GiftCertificate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Lead" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "firstName" TEXT NOT NULL DEFAULT '',
     "middleName" TEXT NOT NULL DEFAULT '',
@@ -362,13 +387,15 @@ CREATE TABLE "Lead" (
     "duplicateConfidence" INTEGER NOT NULL DEFAULT 0,
     "duplicateReasons" TEXT NOT NULL DEFAULT '[]',
     "archivedAt" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Lead_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LeadActivity" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "leadId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "title" TEXT NOT NULL,
@@ -379,14 +406,15 @@ CREATE TABLE "LeadActivity" (
     "previousStatus" TEXT NOT NULL DEFAULT '',
     "newStatus" TEXT NOT NULL DEFAULT '',
     "metadata" TEXT NOT NULL DEFAULT '{}',
-    "occurredAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "LeadActivity_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "occurredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LeadActivity_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LeadFollowUp" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "leadId" TEXT NOT NULL,
     "type" TEXT NOT NULL DEFAULT 'Phone call',
     "dueAt" TEXT NOT NULL,
@@ -398,14 +426,15 @@ CREATE TABLE "LeadFollowUp" (
     "outcome" TEXT NOT NULL DEFAULT '',
     "status" TEXT NOT NULL DEFAULT 'Upcoming',
     "completedAt" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "LeadFollowUp_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "LeadFollowUp_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LeadTouchpoint" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "leadId" TEXT NOT NULL,
     "source" TEXT NOT NULL,
     "platform" TEXT NOT NULL DEFAULT '',
@@ -420,14 +449,15 @@ CREATE TABLE "LeadTouchpoint" (
     "utmContent" TEXT NOT NULL DEFAULT '',
     "utmTerm" TEXT NOT NULL DEFAULT '',
     "clickId" TEXT NOT NULL DEFAULT '',
-    "occurredAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "LeadTouchpoint_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "occurredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LeadTouchpoint_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ExternalLeadIdentity" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "leadId" TEXT NOT NULL,
     "provider" TEXT NOT NULL,
     "externalLeadId" TEXT NOT NULL,
@@ -435,14 +465,15 @@ CREATE TABLE "ExternalLeadIdentity" (
     "pageId" TEXT NOT NULL DEFAULT '',
     "contactRef" TEXT NOT NULL DEFAULT '',
     "payloadRef" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "ExternalLeadIdentity_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ExternalLeadIdentity_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LeadIntegration" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "provider" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'Needs Configuration',
@@ -455,19 +486,21 @@ CREATE TABLE "LeadIntegration" (
     "defaultBranch" TEXT NOT NULL DEFAULT '',
     "defaultOwner" TEXT NOT NULL DEFAULT 'Front Desk',
     "configSummary" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "LeadIntegration_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "WebhookEvent" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "provider" TEXT NOT NULL,
     "providerEventId" TEXT NOT NULL,
     "idempotencyKey" TEXT NOT NULL,
     "externalLeadId" TEXT NOT NULL DEFAULT '',
     "leadId" TEXT,
-    "receivedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "receivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "status" TEXT NOT NULL DEFAULT 'Received',
     "attempts" INTEGER NOT NULL DEFAULT 0,
     "error" TEXT NOT NULL DEFAULT '',
@@ -475,52 +508,57 @@ CREATE TABLE "WebhookEvent" (
     "payloadSummary" TEXT NOT NULL DEFAULT '{}',
     "mappedFields" TEXT NOT NULL DEFAULT '{}',
     "duplicateResult" TEXT NOT NULL DEFAULT '{}',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "WebhookEvent_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "WebhookEvent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LeadConversion" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "leadId" TEXT NOT NULL,
     "clientId" TEXT NOT NULL,
     "appointmentId" TEXT NOT NULL DEFAULT '',
     "convertedBy" TEXT NOT NULL DEFAULT '',
-    "convertedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "convertedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "source" TEXT NOT NULL DEFAULT '',
     "campaign" TEXT NOT NULL DEFAULT '',
-    "revenueAttributed" REAL NOT NULL DEFAULT 0,
+    "revenueAttributed" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "notes" TEXT NOT NULL DEFAULT '',
-    CONSTRAINT "LeadConversion_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+
+    CONSTRAINT "LeadConversion_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LeadAssignment" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "leadId" TEXT NOT NULL,
     "previousOwner" TEXT NOT NULL DEFAULT '',
     "newOwner" TEXT NOT NULL,
     "changedBy" TEXT NOT NULL DEFAULT 'System',
     "reason" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "LeadAssignment_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LeadAssignment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SmsTemplate" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "category" TEXT NOT NULL DEFAULT '',
     "text" TEXT NOT NULL DEFAULT '',
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SmsTemplate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "MarketingCampaign" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "segment" TEXT NOT NULL,
     "channel" TEXT NOT NULL,
@@ -531,59 +569,69 @@ CREATE TABLE "MarketingCampaign" (
     "booked" INTEGER NOT NULL DEFAULT 0,
     "credits" INTEGER NOT NULL DEFAULT 0,
     "status" TEXT NOT NULL DEFAULT 'Draft',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "MarketingCampaign_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Expense" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "date" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "category" TEXT NOT NULL,
     "branch" TEXT NOT NULL,
-    "amount" REAL NOT NULL DEFAULT 0,
+    "amount" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "method" TEXT NOT NULL DEFAULT '',
     "approver" TEXT NOT NULL DEFAULT '',
     "status" TEXT NOT NULL DEFAULT 'For approval',
     "notes" TEXT NOT NULL DEFAULT '',
     "receipt" TEXT NOT NULL DEFAULT '',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Expense_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Discount" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
-    "value" REAL NOT NULL DEFAULT 0,
+    "value" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "permission" TEXT NOT NULL DEFAULT '',
     "applicable" TEXT NOT NULL DEFAULT '',
     "expiry" TEXT NOT NULL DEFAULT '',
     "usage" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Discount_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AuditLog" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "time" TEXT NOT NULL,
     "actor" TEXT NOT NULL,
     "role" TEXT NOT NULL,
     "area" TEXT NOT NULL,
     "action" TEXT NOT NULL,
     "details" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SystemSetting" (
-    "key" TEXT NOT NULL PRIMARY KEY,
+    "key" TEXT NOT NULL,
     "value" TEXT NOT NULL,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SystemSetting_pkey" PRIMARY KEY ("key")
 );
 
 -- CreateIndex
@@ -819,3 +867,54 @@ CREATE INDEX "AuditLog_area_idx" ON "AuditLog"("area");
 
 -- CreateIndex
 CREATE INDEX "AuditLog_actor_idx" ON "AuditLog"("actor");
+
+-- AddForeignKey
+ALTER TABLE "Room" ADD CONSTRAINT "Room_branchId_fkey" FOREIGN KEY ("branchId") REFERENCES "Branch"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Account" ADD CONSTRAINT "Account_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "StaffMember"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AuthSession" ADD CONSTRAINT "AuthSession_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AttendanceEvent" ADD CONSTRAINT "AttendanceEvent_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "StaffMember"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AttendanceEvent" ADD CONSTRAINT "AttendanceEvent_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Appointment" ADD CONSTRAINT "Appointment_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Appointment" ADD CONSTRAINT "Appointment_serviceId_fkey" FOREIGN KEY ("serviceId") REFERENCES "Service"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Treatment" ADD CONSTRAINT "Treatment_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SaleItem" ADD CONSTRAINT "SaleItem_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "Sale"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ClinicPackage" ADD CONSTRAINT "ClinicPackage_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LeadActivity" ADD CONSTRAINT "LeadActivity_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LeadFollowUp" ADD CONSTRAINT "LeadFollowUp_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LeadTouchpoint" ADD CONSTRAINT "LeadTouchpoint_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ExternalLeadIdentity" ADD CONSTRAINT "ExternalLeadIdentity_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "WebhookEvent" ADD CONSTRAINT "WebhookEvent_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LeadConversion" ADD CONSTRAINT "LeadConversion_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LeadAssignment" ADD CONSTRAINT "LeadAssignment_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;

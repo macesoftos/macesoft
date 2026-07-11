@@ -2417,7 +2417,7 @@ app.get("/api/health", asyncRoute(async (_request, response) => {
   const clientCount = await prisma.client.count();
   response.json({
     ok: true,
-    database: "sqlite",
+    database: "supabase-postgres",
     clientCount,
     modules: sidebarModules.length,
     mvpModules,

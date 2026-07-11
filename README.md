@@ -1,6 +1,6 @@
 # MACE ClinicOS
 
-A local Vite/React aesthetic clinic management system with a vertical clinic sidebar, SQLite database foundation, Express API, Prisma schema, and seeded demo records.
+A Vite/React aesthetic clinic management system with a vertical clinic sidebar, Supabase Postgres, an Express API, a Prisma schema, and seeded demo records.
 
 ## Run Locally
 
@@ -16,12 +16,12 @@ Open the Vite URL shown in the terminal. If port `5173` is already busy, Vite wi
 
 ## Database
 
-- SQLite file: `prisma/dev.db`
-- Schema: `prisma/schema.prisma`
-- SQL initializer: `prisma/init.sql`
+- Hosted database: Supabase Postgres
+- Prisma schema: `prisma/schema.prisma`
+- Supabase bootstrap SQL: `prisma/supabase.sql`
 - Seed data: `server/seed.js`
 
-The local `pnpm db:push` command initializes the SQLite schema from `prisma/init.sql`. This avoids the Windows schema-engine failure observed with Prisma 7 `db push` while keeping Prisma Client for API queries.
+Copy `.env.example` to `.env`, set the Supabase session-pooler `DATABASE_URL`, and set the direct `DIRECT_URL` used for schema operations. The API never exposes these values to the browser.
 
 ## Implemented Foundation
 

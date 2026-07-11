@@ -1,9 +1,22 @@
+import "dotenv/config";
 import prismaClientPackage from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const { PrismaClient } = prismaClientPackage;
 const globalForPrisma = globalThis;
-const adapter = new PrismaBetterSqlite3({ url: "file:./prisma/dev.db" });
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error("DATABASE_URL is required. Use the Supabase session-pooler connection string.");
+}
+
+const databaseUrl = new URL(connectionString);
+databaseUrl.searchParams.delete("sslmode");
+
+const adapter = new PrismaPg({
+  connectionString: databaseUrl.toString(),
+  ssl: { rejectUnauthorized: false },
+});
 
 export const prisma =
   globalForPrisma.macePrisma ??
