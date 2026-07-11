@@ -66,21 +66,7 @@ import {
 import {
   assets,
   branches,
-  initialAppointments,
-  initialCampaigns,
-  initialClients,
-  initialDiscounts,
-  initialExpenses,
-  initialGiftCertificates,
-  initialInventory,
-  initialLeads,
-  initialPackages,
-  initialServices,
   initialSettings,
-  initialSmsTemplates,
-  initialStaff,
-  initialTransactions,
-  initialTreatments,
   roleAccess,
   serviceCategories,
   users,
@@ -532,36 +518,26 @@ function App() {
     message: "Checking database connection...",
   });
 
-  const [clients, setClients] = useStoredState("clients", initialClients);
-  const [appointments, setAppointments] = useStoredState("appointments", initialAppointments);
-  const [services, setServices] = useStoredState("services", initialServices);
-  const [inventory, setInventory] = useStoredState("inventory", initialInventory);
-  const [transactions, setTransactions] = useStoredState("transactions", initialTransactions);
-  const [treatments, setTreatments] = useStoredState("treatments", initialTreatments);
-  const [packages, setPackages] = useStoredState("packages", initialPackages);
-  const [giftCertificates, setGiftCertificates] = useStoredState("gift-certificates", initialGiftCertificates);
-  const [leads, setLeads] = useStoredState("leads", initialLeads);
-  const [staff, setStaff] = useStoredState("staff", initialStaff);
-  const [expenses, setExpenses] = useStoredState("expenses", initialExpenses);
-  const [discounts, setDiscounts] = useStoredState("discounts", initialDiscounts);
-  const [smsTemplates, setSmsTemplates] = useStoredState("sms-templates", initialSmsTemplates);
-  const [campaigns, setCampaigns] = useStoredState("campaigns", initialCampaigns);
+  const [clients, setClients] = useStoredState("clients", []);
+  const [appointments, setAppointments] = useStoredState("appointments", []);
+  const [services, setServices] = useStoredState("services", []);
+  const [inventory, setInventory] = useStoredState("inventory", []);
+  const [transactions, setTransactions] = useStoredState("transactions", []);
+  const [treatments, setTreatments] = useStoredState("treatments", []);
+  const [packages, setPackages] = useStoredState("packages", []);
+  const [giftCertificates, setGiftCertificates] = useStoredState("gift-certificates", []);
+  const [leads, setLeads] = useStoredState("leads", []);
+  const [staff, setStaff] = useStoredState("staff", []);
+  const [expenses, setExpenses] = useStoredState("expenses", []);
+  const [discounts, setDiscounts] = useStoredState("discounts", []);
+  const [smsTemplates, setSmsTemplates] = useStoredState("sms-templates", []);
+  const [campaigns, setCampaigns] = useStoredState("campaigns", []);
   const [settings, setSettings] = useStoredState("settings", initialSettings);
   const [leadIntegrations, setLeadIntegrations] = useStoredState("lead-integrations", []);
   const [webhookEvents, setWebhookEvents] = useStoredState("lead-webhook-events", []);
-  const [auditLogs, setAuditLogs] = useStoredState("audit-logs", [
-    {
-      id: "audit-seed",
-      time: new Date().toLocaleString("en-PH"),
-      actor: "System",
-      role: "System",
-      area: "Setup",
-      action: "Workspace initialized",
-      details: "MACE ClinicOS workspace is ready for branch operations.",
-    },
-  ]);
+  const [auditLogs, setAuditLogs] = useStoredState("audit-logs", []);
   const [inventoryMovements, setInventoryMovements] = useStoredState("inventory-movements", []);
-  const [selectedClientId, setSelectedClientId] = useStoredState("selected-client", initialClients[0]?.id);
+  const [selectedClientId, setSelectedClientId] = useStoredState("selected-client", "");
   const [cart, setCart] = useStoredState("pos-cart", []);
   const [sendingCampaignId, setSendingCampaignId] = useState("");
   const [isPosChromeRevealed, setIsPosChromeRevealed] = useState(false);
@@ -800,11 +776,11 @@ function App() {
           ? Number(health.clientCount)
           : Array.isArray(apiClients)
             ? apiClients.length
-            : initialClients.length;
+            : 0;
 
         setApiState({
           status: "connected",
-          message: `SQLite connected / ${connectedClientCount} clients / ${bootstrap.appointments?.length ?? 0} bookings`,
+          message: `Supabase connected / ${connectedClientCount} clients / ${bootstrap.appointments?.length ?? 0} bookings`,
         });
       } catch {
         if (!cancelled) {

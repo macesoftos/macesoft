@@ -2262,6 +2262,7 @@ function hashPassword(password) {
 }
 
 async function ensureDefaultAccounts() {
+  if (clean(process.env.ENABLE_DEMO_ACCOUNTS).toLowerCase() !== "true") return;
   const staff = await prisma.staffMember.findMany();
   const defaultPassword = process.env.SEED_STAFF_PASSWORD || "Mace2026!";
   for (const user of users) {
