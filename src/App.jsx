@@ -2409,22 +2409,8 @@ function LoginScreen({ onLogin, settings }) {
   return (
     <main className="login-page">
       <section className="login-panel">
-        <div className="login-brand">
-          <img src={assets.logo} alt="MACE by Dr. Mace" />
-          <p className="eyebrow">{settings.productName}</p>
-          <h1>Run your medical aesthetics clinic paperless and automated.</h1>
-          <p>
-            A premium, all-in-one operating system for bookings, POS, client records, treatments,
-            inventory, marketing, staff, and branch reporting.
-          </p>
-          <div className="login-phrases">
-            <span>The brand behind beautiful faces</span>
-            <span>We love your face</span>
-            <span>Advanced treatments. Tailored results.</span>
-          </div>
-        </div>
-
         <form className="login-card" onSubmit={submit}>
+          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
           <div>
             <p className="eyebrow">Secure role login</p>
             <h2>Sign in to your workspace</h2>
@@ -2451,7 +2437,6 @@ function LoginScreen({ onLogin, settings }) {
               <span>Ask an administrator to reset the password for {email || "your account"}.</span>
             </div>
           )}
-          <p className="login-seed-note">Initial staff password: <strong>Mace2026!</strong></p>
         </form>
       </section>
     </main>

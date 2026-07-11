@@ -4886,56 +4886,21 @@ td .inline-actions { flex-wrap: nowrap; }
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 28px 20px;
+  background:
+    linear-gradient(rgba(54, 43, 32, 0.14), rgba(54, 43, 32, 0.14)),
+    url("/brand/login-background.jpg") center / cover no-repeat fixed;
 }
 
 .login-panel {
-  width: min(1180px, 100%);
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.7fr);
-  gap: 18px;
+  width: min(450px, 100%);
 }
 
-.login-brand {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 640px;
-  padding: clamp(28px, 5vw, 64px);
-  border-radius: 16px;
-  background:
-    linear-gradient(135deg, rgba(101, 80, 61, 0.86), rgba(41, 38, 33, 0.92)),
-    url("/brand/clinic.jpg") center / cover;
-  color: #fff;
-}
-
-.login-brand img {
-  width: 210px;
-  max-height: 80px;
+.login-logo {
+  width: 190px;
+  max-height: 76px;
   object-fit: contain;
-  padding: 12px;
-  margin-bottom: 38px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-}
-
-.login-brand .eyebrow,
-.login-brand p { color: rgba(255, 255, 255, 0.84); }
-
-.login-phrases {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-  margin-top: 26px;
-}
-
-.login-phrases span {
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  border-radius: 999px;
-  color: #fff;
-  font-size: 0.82rem;
-  font-weight: 800;
+  margin: 0 auto 64px;
 }
 
 .login-card {
@@ -4943,7 +4908,13 @@ td .inline-actions { flex-wrap: nowrap; }
   flex-direction: column;
   justify-content: center;
   gap: 14px;
-  padding: clamp(22px, 3vw, 32px);
+  min-height: 680px;
+  padding: 44px 32px;
+  border: 1px solid rgba(112, 86, 61, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(50, 38, 27, 0.24);
+  backdrop-filter: blur(8px);
 }
 
 .login-card h2 { margin: 4px 0 0; font-size: 1.65rem; }
@@ -5843,22 +5814,18 @@ td .inline-actions { flex-wrap: nowrap; }
   .clinic-copy, .login-brand, .booking-hero { padding: 24px; }
   .clinic-copy h2, .login-brand h1, .booking-hero h2 { font-size: clamp(2rem, 12vw, 3rem); }
   .login-page {
-    place-items: start center;
-    padding: 16px;
-  }
-  .login-brand {
-    min-height: auto;
-    border-radius: 12px;
-  }
-  .login-brand img {
-    width: 170px;
-    margin-bottom: 26px;
-  }
-  .login-brand h1 {
-    font-size: clamp(2.05rem, 10vw, 2.75rem);
+    place-items: center;
+    padding: 18px;
+    background-attachment: scroll;
   }
   .login-card {
-    border-radius: 12px;
+    min-height: auto;
+    padding: 34px 22px;
+    border-radius: 10px;
+  }
+  .login-logo {
+    width: 165px;
+    margin-bottom: 38px;
   }
   .timeline-item, .appointment-card, .cart-row { grid-template-columns: 1fr; }
   .role-detail-row {
