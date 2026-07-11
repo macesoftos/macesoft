@@ -474,7 +474,10 @@ function normalizedPathname(pathname) {
 }
 
 function moduleFromPath(pathname) {
-  return normalizedPathname(pathname) === "/pos" ? "pos" : "";
+  const path = normalizedPathname(pathname);
+  if (path === "/pos") return "pos";
+  if (path === "/attendance") return "facetrack-attendance";
+  return "";
 }
 
 function downloadCsv(filename, rows, columns) {
@@ -546,6 +549,7 @@ function App() {
   const [isPosChromeRevealed, setIsPosChromeRevealed] = useState(false);
   const isPosView = activeModule === "pos";
   const isApplicationsView = activeModule === "applications";
+  const isFaceTrackView = activeModule === "facetrack-attendance";
   const posTouchStartRef = useRef(null);
   const posChromeHideTimerRef = useRef(0);
 
@@ -659,7 +663,11 @@ function App() {
       setActiveModuleState(nextModule);
 
       if (typeof window !== "undefined") {
-        const nextUrl = nextModule === "pos" ? "/pos" : `/#/${nextModule}`;
+        const nextUrl = nextModule === "pos"
+          ? "/pos"
+          : nextModule === "facetrack-attendance"
+            ? "/attendance"
+            : `/#/${nextModule}`;
         const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
         if (currentUrl !== nextUrl) {
           if (options.replace) {
@@ -1567,7 +1575,7 @@ function App() {
       ? `${session.role} Workspace`
       : navItems.find((item) => item.id === activeModule)?.label ?? "Overview";
   const sensitiveAllowed = ["Super Admin", "Owner", "Branch Manager", "Doctor"].includes(session.role);
-  const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView;
+  const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = (roleAccess[session.role] ?? roleAccess.Employee).includes("pos");
   const shellClassName = [
@@ -1577,6 +1585,7 @@ function App() {
     showSidebar && isSidebarDrawerOpen ? "sidebar-drawer-open" : "",
     isPosView ? "pos-page-shell" : "",
     isApplicationsView ? "applications-page-shell" : "",
+    isFaceTrackView ? "facetrack-page-shell" : "",
     isPosView && isPosChromeRevealed ? "pos-chrome-revealed" : "",
     "has-mobile-navigation",
   ].filter(Boolean).join(" ");
@@ -1609,7 +1618,7 @@ function App() {
           />
         )}
 
-        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""}`}>
+        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""}`}>
           {isPosView && (
             <div
               aria-label="Show POS header"
@@ -1631,7 +1640,7 @@ function App() {
           )}
 
           <div
-            className={isApplicationsView ? "app-top-chrome applications-hidden-chrome" : isPosView ? `pos-top-chrome ${isPosChromeRevealed ? "is-revealed" : ""}` : "app-top-chrome"}
+            className={isApplicationsView || isFaceTrackView ? "app-top-chrome applications-hidden-chrome" : isPosView ? `pos-top-chrome ${isPosChromeRevealed ? "is-revealed" : ""}` : "app-top-chrome"}
             {...posChromeHandlers}
           >
             <header className="topbar" id={isPosView ? "pos-system-chrome" : undefined}>
@@ -1705,9 +1714,9 @@ function App() {
           </div>
 
         <section className="content-area">
-          {!isPosView && !isApplicationsView && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
+          {!isPosView && !isApplicationsView && !isFaceTrackView && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
-          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} />}
+          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
             <Dashboard
               session={session}
@@ -1936,7 +1945,7 @@ function App() {
         </section>
       </main>
 
-      {!isPosView && !isApplicationsView && (
+      {!isPosView && !isApplicationsView && !isFaceTrackView && (
         <>
           <MobileBottomNavigation
             activeModule={activeModule}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Camera, CheckCircle2, Clock, FilePenLine, RefreshCw, Settings, ShieldCheck, Timer, UserCheck, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Clock, FilePenLine, RefreshCw, Settings, ShieldCheck, Timer, UserCheck, X } from "lucide-react";
 import {
   createFaceTrackChallenge,
   enrollFaceTrackProfile,
@@ -164,13 +164,13 @@ function CorrectionDialog({ record, onClose, onSaved }) {
   return <div className="facetrack-dialog-backdrop"><form className="facetrack-form-dialog" onSubmit={submit}><header><div><span className="facetrack-kicker">Employee request</span><h2>Request time correction</h2></div><button type="button" onClick={onClose}><X /></button></header><p>The original attendance remains unchanged until an administrator approves this request.</p><div className="facetrack-form-grid"><label><span>Requested Time In</span><input type="datetime-local" value={timeIn} onChange={(event) => setTimeIn(event.target.value)} /></label><label><span>Requested Time Out</span><input type="datetime-local" value={timeOut} onChange={(event) => setTimeOut(event.target.value)} /></label><label className="wide"><span>Reason</span><textarea required minLength={10} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why the attendance record needs correction." /></label><label className="wide"><span>Supporting attachment link (optional)</span><input type="url" value={attachmentUrl} onChange={(event) => setAttachmentUrl(event.target.value)} placeholder="https://…" /></label></div>{error && <div className="facetrack-error"><AlertCircle size={17} /> {error}</div>}<button className="facetrack-primary" disabled={saving} type="submit"><FilePenLine size={18} /> {saving ? "Submitting…" : "Submit for admin approval"}</button></form></div>;
 }
 
-export default function FaceTrackAttendance({ session, notify }) {
+export default function FaceTrackAttendance({ session, notify, onExit }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [camera, setCamera] = useState(null);
   const [correction, setCorrection] = useState(null);
-  const [tab, setTab] = useState("attendance");
+  const [tab, setTab] = useState("dashboard");
   const [selectedStaff, setSelectedStaff] = useState("");
   const [policyDraft, setPolicyDraft] = useState(null);
 
@@ -228,34 +228,65 @@ export default function FaceTrackAttendance({ session, notify }) {
   const stats = data?.stats || {};
   const records = data?.records || [];
   const requests = data?.requests || [];
+  const pendingRequests = requests.filter((item) => item.status === "PENDING").length;
+  const navigation = [
+    { id: "dashboard", label: "Dashboard", icon: CheckCircle2 },
+    { id: "attendance", label: "Timesheets", icon: Clock },
+    { id: "requests", label: "Corrections", icon: FilePenLine, count: pendingRequests },
+    { id: "profiles", label: "Face profiles", icon: UserCheck },
+    ...(data.admin ? [
+      { id: "settings", label: "Policies", icon: Settings },
+      { id: "audit", label: "Audit trail", icon: ShieldCheck },
+    ] : []),
+  ];
+  const activeLabel = navigation.find((item) => item.id === tab)?.label || "Dashboard";
 
   return (
-    <div className="facetrack-page">
-      <section className="facetrack-hero">
-        <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Separate attendance module</span><h1>FaceTrack Attendance</h1><p>Face-verified Time In and Time Out, with transparent late, overtime, and correction approvals.</p></div>
-        <div className="facetrack-hero-actions">
-          {session.staffId && <button className="facetrack-primary light" disabled={!myEnrolled} onClick={() => setCamera({ mode: "clock", staffId: session.staffId, staffName: session.name })} type="button"><Camera /> {myEnrolled ? "Time In / Time Out" : "Enrollment required"}</button>}
-          {session.staffId && !myEnrolled && <button className="facetrack-secondary light" onClick={() => setCamera({ mode: "enroll", staffId: session.staffId, staffName: session.name })} type="button"><UserCheck /> Enroll my face</button>}
-          <button className="facetrack-icon-button" onClick={refresh} type="button" aria-label="Refresh"><RefreshCw /></button>
+    <div className="facetrack-app-shell">
+      <aside className="facetrack-module-sidebar" aria-label="FaceTrack menu">
+        <div className="facetrack-module-brand">
+          <span className="facetrack-module-logo"><Camera size={22} /></span>
+          <div><strong>FaceTrack</strong><span>Attendance workspace</span></div>
         </div>
-      </section>
+        <nav>
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            return <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)} type="button" aria-current={tab === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{item.count ? <b>{item.count}</b> : null}</button>;
+          })}
+        </nav>
+        <div className="facetrack-module-account"><span>{session.name?.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{session.name}</strong><small>{session.role}</small></div></div>
+        <button className="facetrack-exit" type="button" onClick={onExit}><ArrowLeft size={17} /> Back to ClinicOS</button>
+      </aside>
 
-      <section className="facetrack-stats">
-        <article><UserCheck /><div><strong>{stats.clockedIn || 0}</strong><span>Clocked in</span></div></article>
-        <article><CheckCircle2 /><div><strong>{stats.completedToday || 0}</strong><span>Completed today</span></div></article>
-        <article><Clock /><div><strong>{stats.lateToday || 0}</strong><span>Late today</span></div></article>
-        <article><FilePenLine /><div><strong>{stats.pendingCorrections || 0}</strong><span>Pending corrections</span></div></article>
-        <article><Timer /><div><strong>{stats.pendingOvertime || 0}</strong><span>Pending overtime</span></div></article>
-      </section>
+      <div className="facetrack-page">
+        <header className="facetrack-workspace-header"><div><span>FaceTrack Attendance</span><h1>{activeLabel}</h1></div><button onClick={refresh} type="button"><RefreshCw className={loading ? "spin" : ""} size={18} /> Refresh</button></header>
 
-      {data.admin && <section className="facetrack-enrollment-panel"><div><span className="facetrack-kicker">Authorized enrollment</span><h2>Employee face profiles</h2><p>Enroll or replace a profile while the employee is physically present and has provided consent.</p></div><div className="facetrack-enroll-controls"><select value={selectedStaff} onChange={(event) => setSelectedStaff(event.target.value)}>{data.staff.map((person) => <option value={person.id} key={person.id}>{person.name} · {profileIds.has(person.id) ? "Enrolled" : "Not enrolled"}</option>)}</select><button className="facetrack-primary" disabled={!selectedPerson} onClick={() => setCamera({ mode: "enroll", staffId: selectedPerson.id, staffName: selectedPerson.name })} type="button"><Camera size={18} /> {profileIds.has(selectedStaff) ? "Re-enroll profile" : "Enroll profile"}</button></div></section>}
+        {tab === "dashboard" && <>
+          <section className="facetrack-hero">
+            <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Verified attendance</span><h2>Accurate time, ready for payroll.</h2><p>Face-verified Time In and Time Out with automatic late, overtime, and approval tracking.</p></div>
+            <div className="facetrack-hero-actions">
+              {session.staffId && <button className="facetrack-primary light" disabled={!myEnrolled} onClick={() => setCamera({ mode: "clock", staffId: session.staffId, staffName: session.name })} type="button"><Camera /> {myEnrolled ? "Time In / Time Out" : "Enrollment required"}</button>}
+              {session.staffId && !myEnrolled && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Set up face profile</button>}
+            </div>
+          </section>
+          <section className="facetrack-stats">
+            <article><UserCheck /><div><strong>{stats.clockedIn || 0}</strong><span>Clocked in</span></div></article>
+            <article><CheckCircle2 /><div><strong>{stats.completedToday || 0}</strong><span>Completed today</span></div></article>
+            <article><Clock /><div><strong>{stats.lateToday || 0}</strong><span>Late today</span></div></article>
+            <article><FilePenLine /><div><strong>{stats.pendingCorrections || 0}</strong><span>Pending corrections</span></div></article>
+            <article><Timer /><div><strong>{stats.pendingOvertime || 0}</strong><span>Pending overtime</span></div></article>
+          </section>
+          <section className="facetrack-dashboard-grid">
+            <article><span className="facetrack-kicker">Today</span><h3>Live attendance</h3><strong>{stats.clockedIn || 0}</strong><p>employees currently clocked in</p><button onClick={() => setTab("attendance")} type="button">Open timesheets</button></article>
+            <article><span className="facetrack-kicker">Approvals</span><h3>Needs attention</h3><strong>{(stats.pendingCorrections || 0) + (stats.pendingOvertime || 0)}</strong><p>correction or overtime items awaiting review</p><button onClick={() => setTab("requests")} type="button">Review requests</button></article>
+          </section>
+        </>}
 
-      <nav className="facetrack-tabs" aria-label="FaceTrack sections">
-        <button className={tab === "attendance" ? "active" : ""} onClick={() => setTab("attendance")} type="button">Attendance logs</button>
-        <button className={tab === "requests" ? "active" : ""} onClick={() => setTab("requests")} type="button">Correction requests {requests.filter((item) => item.status === "PENDING").length ? <b>{requests.filter((item) => item.status === "PENDING").length}</b> : null}</button>
-        {data.admin && <button className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")} type="button"><Settings size={16} /> Policy</button>}
-        {data.admin && <button className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")} type="button"><ShieldCheck size={16} /> Audit trail</button>}
-      </nav>
+        {tab === "profiles" && <>
+          <section className="facetrack-section-intro"><span className="facetrack-kicker">Identity verification</span><h2>Employee face profiles</h2><p>Enroll only while the employee is physically present and has provided consent. Raw camera images stay on the device.</p></section>
+          {data.admin ? <section className="facetrack-enrollment-panel"><div><span className="facetrack-kicker">Authorized enrollment</span><h2>Choose an employee</h2><p>Enroll a new profile or securely replace an existing one.</p></div><div className="facetrack-enroll-controls"><select value={selectedStaff} onChange={(event) => setSelectedStaff(event.target.value)}>{data.staff.map((person) => <option value={person.id} key={person.id}>{person.name} · {profileIds.has(person.id) ? "Enrolled" : "Not enrolled"}</option>)}</select><button className="facetrack-primary" disabled={!selectedPerson} onClick={() => setCamera({ mode: "enroll", staffId: selectedPerson.id, staffName: selectedPerson.name })} type="button"><Camera size={18} /> {profileIds.has(selectedStaff) ? "Re-enroll profile" : "Enroll profile"}</button></div></section> : session.staffId && <section className="facetrack-enrollment-panel"><div><span className="facetrack-kicker">My profile</span><h2>{myEnrolled ? "Face profile enrolled" : "Enrollment required"}</h2><p>{myEnrolled ? "Your profile is ready for verified Time In and Time Out." : "Complete enrollment before recording attendance."}</p></div>{!myEnrolled && <button className="facetrack-primary" onClick={() => setCamera({ mode: "enroll", staffId: session.staffId, staffName: session.name })} type="button"><Camera size={18} /> Enroll my face</button>}</section>}
+          {data.admin && <section className="facetrack-profile-grid">{data.staff.map((person) => <article key={person.id}><span className="facetrack-profile-avatar">{person.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{person.name}</strong><small>{person.branch}</small></div><Status value={profileIds.has(person.id) ? "ENROLLED" : "NOT_ENROLLED"} /></article>)}</section>}
+        </>}
 
       {tab === "attendance" && <section className="facetrack-table-panel"><header><div><span className="facetrack-kicker">Audit-ready records</span><h2>Attendance history</h2></div><span>{records.length} records</span></header><div className="facetrack-table-scroll"><table><thead><tr><th>Employee / date</th><th>Time In</th><th>Time Out</th><th>Worked</th><th>Late</th><th>Overtime</th><th>Status</th><th>Action</th></tr></thead><tbody>{records.length ? records.map((record) => <tr key={record.id}><td><strong>{record.staffName || session.name}</strong><span>{record.workDate} · {record.branch}</span></td><td>{dateTime(record.timeIn)}</td><td>{dateTime(record.timeOut)}</td><td>{duration(record.workedMinutes)}</td><td className={record.lateMinutes ? "facetrack-warning-text" : ""}>{duration(record.lateMinutes)}</td><td><span>{duration(record.calculatedOvertimeMinutes)}</span><Status value={record.overtimeStatus} />{data.admin && record.overtimeStatus === "PENDING_APPROVAL" && <div className="facetrack-inline-actions"><button onClick={() => reviewOvertime(record, "APPROVED")} type="button">Approve</button><button onClick={() => reviewOvertime(record, "REJECTED")} type="button">Reject</button></div>}</td><td><Status value={record.status} /></td><td>{record.staffId === session.staffId && <button className="facetrack-link-button" disabled={record.correctionRequests?.some((item) => item.status === "PENDING")} onClick={() => setCorrection(record)} type="button">Request edit</button>}</td></tr>) : <tr><td className="facetrack-empty" colSpan="8">No FaceTrack attendance records yet.</td></tr>}</tbody></table></div></section>}
 
@@ -267,6 +298,7 @@ export default function FaceTrackAttendance({ session, notify }) {
 
       {camera && <CameraDialog {...camera} onClose={() => setCamera(null)} onComplete={(result) => { setCamera(null); notify(result.action ? `${result.action === "TIME_IN" ? "Time In" : "Time Out"} recorded successfully.` : "Face profile enrolled."); refresh(); }} />}
       {correction && <CorrectionDialog record={correction} onClose={() => setCorrection(null)} onSaved={() => { setCorrection(null); notify("Correction request sent for administrator approval."); refresh(); }} />}
+      </div>
     </div>
   );
 }
