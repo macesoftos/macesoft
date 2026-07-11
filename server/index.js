@@ -1,16 +1,24 @@
 import "dotenv/config";
 import cors from "cors";
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { resolve } from "node:path";
 import express from "express";
+import helmet from "helmet";
 import nodemailer from "nodemailer";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess, users } from "../src/data.js";
 
 const app = express();
-const port = Number(process.env.API_PORT || 3001);
+const port = Number(process.env.PORT || process.env.API_PORT || 3001);
+const allowedOrigins = clean(process.env.APP_ORIGIN)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors({ origin: true, credentials: true }));
+app.set("trust proxy", 1);
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : true, credentials: true }));
 app.use(express.json({
   limit: "12mb",
   verify: (request, _response, buffer) => {
@@ -3278,6 +3286,15 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
   });
 }));
 
+if (process.env.NODE_ENV === "production") {
+  const distPath = resolve("dist");
+  app.use(express.static(distPath, { maxAge: "1d", index: false }));
+  app.use((request, response, next) => {
+    if (request.method !== "GET" || request.path.startsWith("/api/")) return next();
+    return response.sendFile(resolve(distPath, "index.html"));
+  });
+}
+
 app.use((error, _request, response, _next) => {
   const status = error.status || 500;
   const message = status === 500 ? "Clinic API failed to process the request." : error.message;
@@ -3289,8 +3306,8 @@ app.use((error, _request, response, _next) => {
 
 await ensureDefaultAccounts();
 
-const server = app.listen(port, "127.0.0.1", () => {
-  console.log(`MACE ClinicOS API listening on http://127.0.0.1:${port}`);
+const server = app.listen(port, "0.0.0.0", () => {
+  console.log(`MACE ClinicOS listening on port ${port}`);
 });
 
 function shutdown() {

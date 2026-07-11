@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
     "dev": "concurrently -k -n API,VITE -c blue,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:web": "vite --host 127.0.0.1",
     "dev:api": "node server/index.js",
     "build": "vite build",
+    "start": "node server/index.js",
+    "postinstall": "prisma generate",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node server/api-smoke-test.js",
     "db:generate": "prisma generate",
@@ -21,6 +26,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "helmet": "^8.2.0",
     "lucide-react": "^0.468.0",
     "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
