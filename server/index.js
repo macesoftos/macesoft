@@ -3304,10 +3304,11 @@ app.use((error, _request, response, _next) => {
   response.status(status).json({ error: message });
 });
 
-await ensureDefaultAccounts();
-
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`MACE ClinicOS listening on port ${port}`);
+  ensureDefaultAccounts().catch((error) => {
+    console.error("Failed to ensure default accounts after startup.", error);
+  });
 });
 
 function shutdown() {
