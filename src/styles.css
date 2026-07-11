@@ -5919,8 +5919,28 @@ td .inline-actions { flex-wrap: nowrap; }
   }
   .appointment-view-tabs {
     width: 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .appointment-view-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .appointment-view-tabs button {
+    flex: 0 0 auto;
+    min-width: 112px;
+    scroll-snap-align: start;
+  }
+  .appointment-search-filter,
+  .appointment-more-filters,
+  .appointment-reset-filters,
+  .appointment-filters.advanced-filters {
+    display: none;
   }
   .appointment-command-header .primary-button {
     width: 100%;

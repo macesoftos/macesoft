@@ -4557,9 +4557,9 @@ function AppointmentsModule({
       <div className="surface-panel appointment-calendar-panel">
         <div className="appointment-panel-heading">
           <SectionHeader icon={CalendarDays} title="Schedule" action={`${rows.length} shown`} />
-          <div className="segmented-control appointment-view-tabs">
+          <div className="segmented-control appointment-view-tabs" role="tablist" aria-label="Appointment view">
             {calendarViews.map((item) => (
-              <button type="button" className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>
+              <button type="button" role="tab" aria-selected={view === item} className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>
             ))}
           </div>
         </div>
@@ -4572,14 +4572,14 @@ function AppointmentsModule({
                 {appointmentStatuses.map((item) => <option key={item}>{item}</option>)}
               </select>
             </label>
-            <label className="appointment-filter-field">
+            <label className="appointment-filter-field appointment-search-filter">
               <span>Search</span>
               <input value={filters.query} onChange={(event) => setFilter("query", event.target.value)} placeholder="Patient, phone, doctor, booking ID" />
             </label>
-            <button className="secondary-button" type="button" onClick={() => setShowAdvancedFilters((value) => !value)}>
+            <button className="secondary-button appointment-more-filters" type="button" onClick={() => setShowAdvancedFilters((value) => !value)}>
               <Filter size={16} /> {showAdvancedFilters ? "Hide filters" : "More filters"}
             </button>
-            <button className="ghost-button" type="button" onClick={resetFilters}>
+            <button className="ghost-button appointment-reset-filters" type="button" onClick={resetFilters}>
               <RefreshCw size={16} /> Reset
             </button>
           </div>
