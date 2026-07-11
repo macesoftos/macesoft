@@ -3357,19 +3357,14 @@ app.use((error, _request, response, _next) => {
   response.status(status).json({ error: message });
 });
 
-let server;
-
-if (!process.env.VERCEL) {
-  server = app.listen(port, "0.0.0.0", () => {
-    console.log(`MACE ClinicOS listening on port ${port}`);
-    ensureDefaultAccounts().catch((error) => {
-      console.error("Failed to ensure default accounts after startup.", error);
-    });
+const server = app.listen(port, "0.0.0.0", () => {
+  console.log(`MACE ClinicOS listening on port ${port}`);
+  ensureDefaultAccounts().catch((error) => {
+    console.error("Failed to ensure default accounts after startup.", error);
   });
-}
+});
 
 function shutdown() {
-  if (!server) return;
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);
@@ -3378,5 +3373,3 @@ function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-
-export default app;
