@@ -723,6 +723,7 @@ function normalizeLeadPayload(payload, existingId = "") {
 function normalizeStaffPayload(payload, existingId = "") {
   const data = {
     name: requireText(payload.name, "Employee name"),
+    photo: clean(payload.photo),
     role: requireText(payload.role, "Employee role"),
     branch: requireText(payload.branch, "Branch"),
     schedule: clean(payload.schedule),

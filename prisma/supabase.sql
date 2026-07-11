@@ -70,6 +70,7 @@ CREATE TABLE "Room" (
 CREATE TABLE "StaffMember" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "photo" TEXT NOT NULL DEFAULT '',
     "role" TEXT NOT NULL,
     "branch" TEXT NOT NULL DEFAULT '',
     "schedule" TEXT NOT NULL DEFAULT '',

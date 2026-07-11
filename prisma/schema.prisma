@@ -76,6 +76,7 @@ model Room {
 model StaffMember {
   id               String            @id @default(cuid())
   name             String
+  photo            String            @default("")
   role             String
   branch           String            @default("")
   schedule         String            @default("")

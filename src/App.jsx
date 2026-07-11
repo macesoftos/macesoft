@@ -6305,7 +6305,7 @@ function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
             </button>
           )}
           columns={[
-            { key: "name", label: "Name" },
+            { key: "name", label: "Name", className: "staff-name-column", render: (row) => <div className="staff-name-with-photo"><ClientAvatar client={{ fullName: row.name, photo: row.photo }} size="small" /><strong>{row.name}</strong></div> },
             { key: "role", label: "Role" },
             { key: "branch", label: "Branch" },
             { key: "schedule", label: "Schedule" },
@@ -6314,6 +6314,7 @@ function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
             {
               key: "actions",
               label: "Actions",
+              className: "staff-actions-column",
               render: (row) => (
                 <div className="inline-actions">
                   <button type="button" onClick={() => toggleAttendance(row.id)}><Clock size={15} /> Clock</button>
@@ -7325,10 +7326,11 @@ function ModalHost({
     },
     staff: {
       title: modal.payload?.id ? "Edit Employee" : "Add Employee",
-      initial: { name: "", role: "Nurse / Aesthetician", branch: branches[0]?.name, schedule: "9:00 AM - 6:00 PM", commissionType: "", commissionRate: 0, services: "", status: "Available", attendance: "Clocked out", employmentDate: todayDate(), phone: "", ...modal.payload },
+      initial: { name: "", photo: "", role: "Nurse / Aesthetician", branch: branches[0]?.name, schedule: "9:00 AM - 6:00 PM", commissionType: "", commissionRate: 0, services: "", status: "Available", attendance: "Clocked out", employmentDate: todayDate(), phone: "", ...modal.payload },
       submitLabel: "Save employee",
       onSubmit: saveStaff,
       fields: [
+        field("photo", "Employee photo", "photo", null, "span-2"),
         field("name", "Name"),
         field("role", "Role", "select", Object.keys(roleAccess)),
         field("branch", "Branch", "select", branchOptions),
@@ -7741,7 +7743,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
             {value ? <img src={value} alt="" /> : <Image size={28} aria-hidden="true" />}
           </span>
         ) : (
-          <ClientAvatar client={{ fullName: form.fullName || "Client", photo: value }} size="large" />
+          <ClientAvatar client={{ fullName: form.fullName || form.name || "Profile", photo: value }} size="large" />
         )}
         <div>
           <FieldLabel required={required}>{item.label}</FieldLabel>
@@ -7954,7 +7956,7 @@ function SmartTable({ rows, columns, globalSearch = "", pageSize = 6, emptyTitle
                 />
               </th>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+                <th className={column.className ?? ""} key={column.key} scope="col" aria-sort={sort.key === column.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
                   {!isSortable(column) ? (
                     column.label
                   ) : (
@@ -7979,7 +7981,7 @@ function SmartTable({ rows, columns, globalSearch = "", pageSize = 6, emptyTitle
                   />
                 </td>
                 {columns.map((column) => (
-                  <td key={column.key} data-label={column.label}>{column.render ? column.render(row) : String(row[column.key] ?? "")}</td>
+                  <td className={column.className ?? ""} key={column.key} data-label={column.label}>{column.render ? column.render(row) : String(row[column.key] ?? "")}</td>
                 ))}
               </tr>
             ))}

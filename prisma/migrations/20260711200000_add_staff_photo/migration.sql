@@ -1,0 +1,2 @@
+ALTER TABLE "StaffMember"
+ADD COLUMN "photo" TEXT NOT NULL DEFAULT '';
