@@ -6330,7 +6330,8 @@ function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
 function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, onCreateBranch }) {
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "" });
+  const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+  const [photoError, setPhotoError] = useState("");
   const today = new Date().toISOString().slice(0, 10);
   const totalSales = transactions.reduce((sum, item) => sum + Number(item.total || 0), 0);
 
@@ -6343,11 +6344,31 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
         roomCount: Number(form.roomCount) || 0,
         devices: form.devices.split(",").map((item) => item.trim()).filter(Boolean),
       });
-      setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "" });
+      setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+      setPhotoError("");
       setShowCreate(false);
     } finally {
       setSaving(false);
     }
+  }
+
+  function selectPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Choose a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setPhotoError("The clinic photo must be 3 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((current) => ({ ...current, image: String(reader.result || "") }));
+      setPhotoError("");
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -6387,6 +6408,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             const branchSales = transactions.filter((sale) => sale.branch === item.name).reduce((sum, sale) => sum + Number(sale.total || 0), 0);
             return (
               <article className="branch-card" key={item.id}>
+                {item.image && <img className="branch-cover-photo" src={item.image} alt={`${item.name} clinic`} />}
                 <div className="branch-card-header">
                   <div className="branch-avatar"><Store size={22} /></div>
                   <div><span>{item.city || "Location pending"}</span><h2>{item.name}</h2></div>
@@ -6411,6 +6433,16 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
           <form className="modal-card branch-create-modal" onSubmit={submit}>
             <button className="modal-close" type="button" aria-label="Close" onClick={() => setShowCreate(false)}><X size={18} /></button>
             <div className="section-title"><div className="section-icon"><Store size={18} /></div><div><p className="eyebrow">New location</p><h2>Add a clinic branch</h2></div></div>
+            <div className="branch-photo-field">
+              <div className={`branch-photo-preview ${form.image ? "has-photo" : ""}`}>
+                {form.image ? <img src={form.image} alt="Clinic preview" /> : <><Camera size={25} /><strong>Add clinic cover photo</strong><span>JPG, PNG, or WebP · Maximum 3 MB</span></>}
+              </div>
+              <div className="branch-photo-actions">
+                <label className="ghost-button branch-photo-button"><Upload size={16} /> {form.image ? "Replace photo" : "Choose photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto} /></label>
+                {form.image && <button className="ghost-button" type="button" onClick={() => setForm({ ...form, image: "" })}><Trash2 size={16} /> Remove</button>}
+              </div>
+              {photoError && <div className="inline-state danger"><AlertCircle size={16} /><span>{photoError}</span></div>}
+            </div>
             <div className="form-grid">
               <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE BGC" /></label>
               <label><span>City</span><input required value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label>
