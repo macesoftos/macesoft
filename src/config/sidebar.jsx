@@ -1,0 +1,63 @@
+import {
+  BarChart3,
+  Boxes,
+  BriefcaseBusiness,
+  CalendarDays,
+  ClipboardCheck,
+  Gift,
+  Globe2,
+  HeartPulse,
+  Home,
+  Inbox,
+  LayoutDashboard,
+  LayoutGrid,
+  MessageSquareText,
+  ReceiptText,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Store,
+  UserCheck,
+  Users,
+  WalletCards,
+} from "lucide-react";
+
+export const navItems = [
+  { id: "my-workspace", label: "My Workspace", icon: UserCheck, section: "main" },
+  { id: "overview", label: "Overview", icon: LayoutDashboard, section: "main" },
+  { id: "applications", label: "Applications", icon: LayoutGrid, section: "main" },
+  { id: "appointments", label: "Appointments", icon: CalendarDays, section: "main" },
+  { id: "clients", label: "Clients", icon: Users, section: "main" },
+  { id: "leads", label: "Leads", icon: Inbox, section: "main" },
+  { id: "pos", label: "POS", icon: WalletCards, section: "clinic-operations" },
+  { id: "card-view", label: "Card View", icon: ClipboardCheck, section: "clinic-operations" },
+  { id: "room-view", label: "Room View", icon: Home, section: "clinic-operations" },
+  { id: "treatments", label: "Treatments", icon: HeartPulse, section: "clinic-operations" },
+  { id: "services", label: "Services", icon: Sparkles, section: "clinic-operations" },
+  { id: "packages", label: "Packages", icon: Gift, section: "clinic-operations" },
+  { id: "booking", label: "Online Booking", icon: Globe2, section: "clinic-operations" },
+  { id: "staff-view", label: "Staff Schedule", icon: UserCheck, section: "staff-branches" },
+  { id: "staff", label: "Staff Management", icon: BriefcaseBusiness, section: "staff-branches" },
+  { id: "branches", label: "Branches", icon: Store, section: "staff-branches" },
+  { id: "inventory", label: "Inventory", icon: Boxes, section: "inventory-finance" },
+  { id: "expenses", label: "Expenses", icon: ReceiptText, section: "inventory-finance" },
+  { id: "reports", label: "Reports", icon: BarChart3, section: "inventory-finance" },
+  { id: "sms", label: "Marketing", icon: MessageSquareText, section: "marketing" },
+  { id: "settings", label: "Settings", icon: Settings, section: "system" },
+  { id: "support", label: "Support", icon: ShieldCheck, section: "support" },
+];
+
+export const navSections = [
+  { id: "main", label: "Main" },
+  { id: "clinic-operations", label: "Clinic Operations" },
+  { id: "staff-branches", label: "Staff & Branches" },
+  { id: "inventory-finance", label: "Inventory & Finance" },
+  { id: "marketing", label: "Marketing" },
+  { id: "system", label: "System" },
+  { id: "support", label: "Support" },
+].map((section) => ({
+  ...section,
+  items: navItems.filter((item) => item.section === section.id),
+}));
+
+export const coreClinicModules = ["clients", "appointments", "treatments"];

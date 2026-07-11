@@ -1,0 +1,1437 @@
+/* =====================================================================
+   MACE ClinicOS — UI/UX enhancement layer
+   Additive polish on top of styles.css. Adds: keyboard focus rings
+   (accessibility), interaction transitions, missing hover/press states,
+   and entrance motion for toasts/modals. No layout changes.
+   ===================================================================== */
+
+:root {
+  /* Design system tokens */
+  --ink: #292621;
+  --muted: #6f675d;
+  --faint: #958b7e;
+  --line: #ded5c8;
+  --paper: #f5f1e9;
+  --panel: #fffdf9;
+  --rose: #cfbea4;
+  --rose-soft: #eee7dc;
+  --wine: #65503d;
+  --wine-dark: #3f3329;
+  --gold: #a57d48;
+  --gold-soft: #f1e6d3;
+  --green: #5f7463;
+  --green-soft: #e8eee8;
+  --blue: #586f75;
+  --blue-soft: #e7edef;
+  --danger: #9d3545;
+  --danger-soft: #f7e7eb;
+  --shadow: 0 18px 42px rgba(63, 51, 41, 0.11);
+  --soft-shadow: 0 1px 2px rgba(63, 51, 41, 0.07);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+
+  /* Motion tokens */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur: 160ms;
+  --focus-ring: 0 0 0 3px rgba(101, 80, 61, 0.2);
+}
+
+/* ---------------------------------------------------------------------
+   1. Transitions — make state changes feel intentional, not instant
+   --------------------------------------------------------------------- */
+.nav-item,
+.primary-button,
+.secondary-button,
+.ghost-button,
+.icon-button,
+.topbar-pos-button,
+.topbar-back-button,
+.account-menu summary,
+.account-dropdown button,
+.action-item,
+.role-app-tile,
+.role-detail-row,
+.service-card,
+.segmented-control button,
+.status-actions button,
+.status-badge,
+.pagination button,
+.role-grid button,
+.stepper button,
+.search-box,
+.branch-select,
+.report-filters label,
+.form-grid label,
+.stacked-field,
+.client-row,
+.modal-close,
+.payment-options button,
+.payment-row button,
+.cart-row button,
+.system-pill,
+.login-card button {
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+/* ---------------------------------------------------------------------
+   2. Keyboard focus rings — accessibility (none existed before)
+   --------------------------------------------------------------------- */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible,
+.nav-item:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--wine);
+  outline-offset: 2px;
+}
+
+/* Field wrappers glow as one unit when the control inside is focused,
+   instead of relying on the inner control's (removed) outline. */
+.search-box:focus-within,
+.branch-select:focus-within,
+.report-filters label:focus-within,
+.form-grid label:focus-within,
+.stacked-field:focus-within,
+.account-menu summary:focus-visible {
+  border-color: var(--wine);
+  box-shadow: var(--focus-ring);
+}
+
+/* Controls that live inside a wrapper defer to the wrapper ring above,
+   so we don't draw a second box inside the first. */
+.search-box input:focus-visible,
+.branch-select select:focus-visible,
+.report-filters label input:focus-visible,
+.report-filters label select:focus-visible,
+.form-grid label input:focus-visible,
+.form-grid label select:focus-visible,
+.form-grid label textarea:focus-visible,
+.stacked-field select:focus-visible,
+.stacked-field textarea:focus-visible {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------------
+   3. Hover / press states that were missing
+   --------------------------------------------------------------------- */
+.primary-button:hover:not(:disabled) {
+  background: var(--wine-dark);
+  box-shadow: 0 12px 24px rgba(101, 80, 61, 0.24);
+}
+.primary-button.danger:hover:not(:disabled) {
+  background: #8a2e3b;
+}
+.primary-button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 6px 14px rgba(101, 80, 61, 0.2);
+}
+
+.secondary-button:hover:not(:disabled),
+.inline-actions button:hover:not(:disabled),
+.status-actions button:hover:not(:disabled),
+.pagination button:hover:not(:disabled),
+.role-grid button:hover:not(:disabled),
+.payment-options button:hover:not(:disabled) {
+  border-color: var(--wine);
+  background: var(--rose-soft);
+}
+.secondary-button:active:not(:disabled),
+.status-actions button:active:not(:disabled),
+.pagination button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ghost-button:hover:not(:disabled) {
+  background: var(--rose-soft);
+  color: var(--wine);
+}
+
+.icon-button:hover {
+  border-color: var(--wine);
+  background: var(--rose-soft);
+}
+.icon-button:active {
+  transform: translateY(1px);
+}
+
+.modal-close:hover {
+  border-color: var(--wine);
+  background: var(--rose-soft);
+  color: var(--wine);
+}
+
+/* Clickable list items / cards get a clear affordance */
+.action-item:hover,
+.client-row:hover {
+  border-color: rgba(119, 51, 66, 0.26);
+  background: var(--rose-soft);
+}
+.service-card:hover {
+  border-color: rgba(119, 51, 66, 0.26);
+  box-shadow: var(--soft-shadow);
+  transform: translateY(-2px);
+}
+
+.cart-row button:hover,
+.payment-row button:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* ---------------------------------------------------------------------
+   4. Sidebar active wayfinding — subtle accent bar
+   --------------------------------------------------------------------- */
+.nav-item {
+  position: relative;
+}
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--wine);
+}
+
+/* ---------------------------------------------------------------------
+   5. Entrance motion for overlays
+   --------------------------------------------------------------------- */
+@keyframes mace-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes mace-modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mace-toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.modal-backdrop {
+  animation: mace-backdrop-in var(--dur) ease;
+}
+.modal-card {
+  animation: mace-modal-in 220ms var(--ease);
+}
+.toast {
+  animation: mace-toast-in 220ms var(--ease);
+}
+
+/* ---------------------------------------------------------------------
+   6. Data tables — row hover for scannability (all modules)
+   --------------------------------------------------------------------- */
+.table-wrap table tbody tr {
+  transition: background-color var(--dur) var(--ease);
+}
+.table-wrap table tbody tr:hover {
+  background: rgba(248, 238, 235, 0.6);
+}
+
+/* ---------------------------------------------------------------------
+   7. Segmented controls / steppers — hover on inactive options
+   --------------------------------------------------------------------- */
+.segmented-control button:not(.active):hover,
+.stepper button:not(.active):hover {
+  color: var(--wine);
+  background: var(--rose-soft);
+}
+
+/* ---------------------------------------------------------------------
+   8. Branded scrollbars — subtle premium finish across scroll areas
+   --------------------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(119, 51, 66, 0.28) transparent;
+}
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(119, 51, 66, 0.24);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(119, 51, 66, 0.42);
+  background-clip: padding-box;
+}
+
+/* ---------------------------------------------------------------------
+   9. Enterprise design system pass: shell, primitives, tables, forms
+   --------------------------------------------------------------------- */
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+button,
+input,
+select,
+textarea {
+  line-height: 1.2;
+}
+
+button svg,
+.primary-button svg,
+.secondary-button svg,
+.ghost-button svg,
+.icon-button svg {
+  flex: 0 0 auto;
+}
+
+.app-shell.app-shell-with-sidebar {
+  grid-template-columns: 264px minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: #fff;
+  backdrop-filter: none;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-mark {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  justify-content: flex-start;
+  margin: 0;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+}
+
+.brand-mark img {
+  width: 154px;
+  max-height: 34px;
+}
+
+.sidebar-collapse-button,
+.sidebar-mobile-button {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--wine);
+}
+
+.sidebar-collapse-button:hover,
+.sidebar-mobile-button:hover {
+  border-color: rgba(113, 48, 68, 0.28);
+  background: var(--rose-soft);
+}
+
+.sidebar-scroll {
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 2px 2px 8px;
+}
+
+.sidebar-section {
+  display: grid;
+  gap: 5px;
+}
+
+.sidebar-section-label {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--faint);
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.sidebar .nav-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.nav-item {
+  min-height: 36px;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.nav-item:hover {
+  border-color: var(--line);
+  background: #faf8f7;
+  color: var(--ink);
+}
+
+.nav-item.active {
+  border-color: var(--wine);
+  background: var(--wine);
+  color: #fff;
+}
+
+.nav-item.active::before {
+  display: none;
+}
+
+.nav-item.active svg,
+.nav-item:hover svg {
+  color: currentColor;
+}
+
+.sidebar-account {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #faf8f7;
+}
+
+.sidebar-account-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-account-copy strong,
+.sidebar-account-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-copy strong {
+  font-size: 0.84rem;
+}
+
+.sidebar-account-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.sidebar-collapsed .sidebar {
+  align-items: center;
+  padding-inline: 10px;
+}
+
+.sidebar-collapsed .sidebar-header {
+  display: grid;
+  justify-items: center;
+}
+
+.sidebar-collapsed .brand-mark {
+  width: 44px;
+  flex: 0 0 auto;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.sidebar-collapsed .brand-mark img {
+  width: 38px;
+  max-width: none;
+  object-fit: contain;
+}
+
+.sidebar-collapsed .sidebar-scroll,
+.sidebar-collapsed .sidebar-section,
+.sidebar-collapsed .sidebar .nav-list {
+  justify-items: center;
+}
+
+.sidebar-collapsed .sidebar-section-label,
+.sidebar-collapsed .nav-item span,
+.sidebar-collapsed .sidebar-account-copy {
+  display: none;
+}
+
+.sidebar-collapsed .nav-item {
+  width: 44px;
+  min-height: 42px;
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar-collapsed .sidebar-account {
+  width: 44px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 5px;
+}
+
+.sidebar-backdrop,
+.sidebar-mobile-button {
+  display: none;
+}
+
+.workspace {
+  --workspace-top-pad: 18px;
+  --workspace-inline-pad: clamp(16px, 2.4vw, 30px);
+}
+
+.topbar {
+  gap: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(247, 245, 243, 0.94);
+  box-shadow: none;
+}
+
+.topbar-heading,
+.topbar-title-row {
+  min-width: 0;
+}
+
+.topbar-actions {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.topbar-actions .search-box {
+  min-width: 260px;
+  max-width: 360px;
+  flex: 1 1 300px;
+}
+
+.topbar-actions .account-menu,
+.topbar-actions .icon-button,
+.topbar-actions .topbar-pos-button,
+.topbar-actions .branch-select {
+  flex: 0 0 auto;
+}
+
+.topbar h1 {
+  font-size: clamp(1.28rem, 2vw, 1.78rem);
+  line-height: 1.14;
+}
+
+.eyebrow,
+.user-card span,
+.user-card small {
+  color: var(--wine);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.search-box,
+.branch-select,
+.account-menu summary,
+.icon-button,
+.topbar-pos-button,
+.topbar-back-button,
+.stacked-field,
+.report-filters label,
+.form-grid label,
+.toolbar-row select,
+.payment-row select,
+.payment-row input {
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.search-box input {
+  height: 40px;
+}
+
+.branch-select,
+.icon-button,
+.topbar-pos-button,
+.account-menu summary {
+  min-height: 40px;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.inline-actions button,
+.status-actions button,
+.table-toolbar button,
+.pagination button,
+.segmented-control button,
+.role-grid button,
+.stepper button,
+.topbar-pos-button {
+  min-height: 38px;
+  border-radius: var(--radius-sm);
+  font-weight: 750;
+}
+
+.primary-button {
+  background: var(--wine);
+  box-shadow: none;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--wine-dark);
+  box-shadow: none;
+}
+
+.secondary-button,
+.inline-actions button,
+.status-actions button,
+.pagination button {
+  border-color: var(--line);
+  background: #fff;
+}
+
+.ghost-button {
+  color: var(--muted);
+}
+
+.brand-mark,
+.user-card,
+.surface-panel,
+.clinic-panel,
+.metric-card,
+.branch-card,
+.booking-card,
+.login-card,
+.action-item,
+.timeline-item,
+.appointment-card,
+.stock-row,
+.message-item,
+.support-item,
+.treatment-card,
+.package-card,
+.client-row,
+.rank-list article,
+.mini-panel,
+.record-pill,
+.record-item,
+.service-card,
+.support-faq-card,
+.availability-scroll,
+.chart-panel,
+.modal-card {
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+
+.surface-panel,
+.metric-card,
+.branch-card,
+.booking-card,
+.login-card,
+.support-faq-card {
+  background: #fff;
+  border-color: var(--line);
+}
+
+.role-hero,
+.appointment-command-panel,
+.support-hero-panel,
+.clinic-panel,
+.next-appointment-card {
+  background: #fff;
+}
+
+.surface-panel {
+  padding: 16px;
+}
+
+.summary-grid,
+.dashboard-grid,
+.role-work-grid,
+.module-grid,
+.support-board,
+.appointments-workspace {
+  gap: 14px;
+}
+
+.metric-card {
+  min-height: 108px;
+  padding: 14px;
+}
+
+.metric-card strong {
+  font-size: clamp(1.1rem, 1.7vw, 1.48rem);
+}
+
+.metric-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+}
+
+.section-header {
+  margin-bottom: 12px;
+}
+
+.section-title,
+.section-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.25;
+}
+
+.status-badge,
+.workflow-chips span {
+  min-height: 24px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
+.role-app-tile,
+.role-detail-row,
+.appointment-flow-card,
+.availability-card,
+.staff-load-list article {
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+
+.role-app-tile:hover,
+.action-item:hover,
+.client-row:hover {
+  background: #faf8f7;
+  border-color: rgba(113, 48, 68, 0.24);
+}
+
+.form-label,
+.report-filters label span,
+.form-grid label span,
+.stacked-field span,
+.appointment-filter-field span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.helper-text {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.required-mark {
+  margin-left: 3px;
+  color: var(--danger);
+  font-style: normal;
+}
+
+/* ---------------------------------------------------------------------
+   Architectural overview dashboard
+   Warm limestone surfaces, oak accents, and an executive hierarchy.
+   --------------------------------------------------------------------- */
+.overview-dashboard {
+  display: grid;
+  gap: 18px;
+  max-width: 1680px;
+  margin-inline: auto;
+}
+
+.overview-dashboard .role-hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 270px;
+  padding: clamp(26px, 4vw, 46px);
+  border: 1px solid rgba(101, 80, 61, 0.22);
+  border-radius: 18px;
+  background:
+    linear-gradient(112deg, rgba(41, 38, 33, 0.97) 0%, rgba(63, 51, 41, 0.94) 54%, rgba(101, 80, 61, 0.78) 100%),
+    url("/brand/clinic-davao.jpg") center 44% / cover;
+  color: #fffdf9;
+  overflow: hidden;
+}
+
+.overview-dashboard .role-hero::before,
+.overview-dashboard .role-hero::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.overview-dashboard .role-hero::before {
+  right: clamp(190px, 25vw, 390px);
+  bottom: -140px;
+  width: 280px;
+  height: 330px;
+  border: 1px solid rgba(255, 253, 249, 0.14);
+  border-radius: 150px 150px 0 0;
+  transform: rotate(7deg);
+}
+
+.overview-dashboard .role-hero::after {
+  inset: 0;
+  background: linear-gradient(90deg, transparent 48%, rgba(207, 190, 164, 0.08));
+}
+
+.overview-dashboard .role-hero .eyebrow {
+  color: #d8c7ad;
+  letter-spacing: 0.08em;
+}
+
+.overview-dashboard .role-hero h2 {
+  max-width: 790px;
+  font-size: clamp(2rem, 3.8vw, 3.65rem);
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.overview-dashboard .role-hero p:not(.eyebrow) {
+  max-width: 650px;
+  color: rgba(255, 253, 249, 0.76);
+  font-size: 0.95rem;
+}
+
+.overview-dashboard .role-hero .workflow-chips span {
+  border-color: rgba(255, 253, 249, 0.18);
+  background: rgba(255, 253, 249, 0.08);
+  color: #fffdf9;
+  backdrop-filter: blur(8px);
+}
+
+.overview-dashboard .role-hero-actions {
+  align-self: end;
+  max-width: 360px;
+}
+
+.overview-dashboard .role-hero-actions .primary-button {
+  background: #f1e6d3;
+  color: #3f3329;
+  box-shadow: 0 12px 30px rgba(15, 12, 10, 0.2);
+}
+
+.overview-dashboard .role-hero-actions .secondary-button {
+  border-color: rgba(255, 253, 249, 0.26);
+  background: rgba(255, 253, 249, 0.09);
+  color: #fffdf9;
+  backdrop-filter: blur(10px);
+}
+
+.overview-dashboard .role-summary-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.overview-dashboard .metric-card {
+  position: relative;
+  min-height: 122px;
+  padding: 16px;
+  border-color: rgba(101, 80, 61, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 253, 249, 0.94);
+  overflow: hidden;
+}
+
+.overview-dashboard .metric-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  background: var(--wine);
+  opacity: 0.55;
+}
+
+.overview-dashboard .metric-card.green::after { background: var(--green); }
+.overview-dashboard .metric-card.amber::after { background: var(--gold); }
+.overview-dashboard .metric-card.blue::after { background: var(--blue); }
+.overview-dashboard .metric-card.rose::after { background: var(--danger); }
+.overview-dashboard .metric-card.muted::after { background: var(--muted); }
+
+.overview-dashboard .metric-card strong {
+  font-size: clamp(1.25rem, 1.9vw, 1.75rem);
+  letter-spacing: -0.025em;
+}
+
+.overview-dashboard .metric-icon {
+  border-radius: 10px;
+}
+
+.overview-dashboard .role-work-grid {
+  grid-template-columns: minmax(0, 1.55fr) minmax(310px, 0.75fr);
+  gap: 18px;
+}
+
+.overview-dashboard .surface-panel:not(.role-hero) {
+  border-color: rgba(101, 80, 61, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 253, 249, 0.96);
+}
+
+.overview-dashboard .role-app-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.overview-dashboard .role-app-tile {
+  min-height: 82px;
+  padding: 13px;
+  border-color: rgba(101, 80, 61, 0.14);
+  border-radius: 10px;
+  background: #f8f4ed;
+}
+
+.overview-dashboard .role-app-tile:hover {
+  border-color: rgba(101, 80, 61, 0.38);
+  background: #eee7dc;
+  transform: translateY(-2px);
+}
+
+.overview-dashboard .role-app-tile svg {
+  color: var(--wine);
+}
+
+.overview-dashboard .action-item {
+  border-color: rgba(101, 80, 61, 0.14);
+  background: #f8f4ed;
+}
+
+.overview-dashboard .dashboard-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-dashboard .role-panel {
+  min-height: 248px;
+}
+
+.overview-dashboard .role-detail-row {
+  border-color: rgba(101, 80, 61, 0.12);
+  background: #faf7f1;
+}
+
+@media (max-width: 1180px) {
+  .overview-dashboard .role-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .overview-dashboard .role-app-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .overview-dashboard .role-hero,
+  .overview-dashboard .role-work-grid,
+  .overview-dashboard .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-dashboard .role-hero-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .overview-dashboard {
+    gap: 12px;
+  }
+
+  .overview-dashboard .role-hero {
+    min-height: 0;
+    padding: 24px 18px;
+    border-radius: 14px;
+  }
+
+  .overview-dashboard .role-summary-grid,
+  .overview-dashboard .role-app-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Secure staff self-service workspace */
+.auth-loading-card {
+  width: min(420px, 100%);
+  min-height: 180px;
+  align-items: center;
+  text-align: center;
+  color: var(--wine);
+}
+
+.login-seed-note {
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--gold-soft);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.my-workspace-page {
+  display: grid;
+  gap: 16px;
+  max-width: 1500px;
+  margin-inline: auto;
+}
+
+.my-workspace-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.34fr);
+  align-items: center;
+  gap: 20px;
+  padding: clamp(26px, 4vw, 44px);
+  border-radius: 18px;
+  background: linear-gradient(120deg, #292621, #65503d);
+  color: #fffdf9;
+}
+
+.my-workspace-hero .eyebrow { color: #d8c7ad; }
+.my-workspace-hero h2 { margin: 5px 0 8px; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1; }
+.my-workspace-hero p:not(.eyebrow) { margin: 0; color: rgba(255, 253, 249, 0.72); }
+
+.attendance-status-card {
+  display: grid;
+  gap: 5px;
+  padding: 18px;
+  border: 1px solid rgba(255, 253, 249, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 253, 249, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.attendance-status-card span,
+.attendance-status-card small { color: rgba(255, 253, 249, 0.7); }
+.attendance-status-card strong { font-size: 1.45rem; }
+
+.attendance-action-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px;
+}
+
+.attendance-action-panel h2 { margin: 3px 0; }
+.attendance-action-panel p:not(.eyebrow) { margin: 0; color: var(--muted); }
+.attendance-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
+
+.my-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  gap: 16px;
+}
+
+.attendance-timeline { display: grid; gap: 4px; }
+.attendance-timeline article { display: grid; grid-template-columns: 14px 1fr; gap: 9px; align-items: start; padding: 10px 2px; }
+.attendance-timeline article + article { border-top: 1px solid var(--line); }
+.attendance-timeline article div { display: grid; gap: 2px; }
+.attendance-timeline small { color: var(--muted); }
+.attendance-dot { width: 10px; height: 10px; margin-top: 4px; border-radius: 999px; background: var(--gold); box-shadow: 0 0 0 4px var(--gold-soft); }
+
+.my-workspace-loading,
+.my-workspace-empty { display: grid; place-items: center; gap: 10px; min-height: 320px; text-align: center; }
+.my-workspace-empty p { max-width: 560px; color: var(--muted); }
+
+@media (max-width: 820px) {
+  .my-workspace-hero,
+  .my-workspace-grid { grid-template-columns: 1fr; }
+  .attendance-action-panel { align-items: stretch; flex-direction: column; }
+  .attendance-actions { justify-content: flex-start; }
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea,
+.stacked-field select,
+.stacked-field textarea,
+.appointment-filter-field input,
+.appointment-filter-field select,
+.quick-service-grid input,
+.quick-service-grid select,
+.quick-service-grid textarea {
+  border-radius: var(--radius-sm);
+}
+
+.checkbox-field input,
+.select-column input {
+  accent-color: var(--wine);
+}
+
+.modal-backdrop {
+  background: rgba(31, 26, 29, 0.38);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card {
+  background: #fff;
+  padding: 18px;
+}
+
+.modal-close {
+  border-radius: var(--radius-sm);
+}
+
+.smart-table {
+  display: grid;
+  gap: 10px;
+}
+
+.table-toolbar {
+  margin-bottom: 0;
+}
+
+.table-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bulk-actions strong {
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+table {
+  min-width: 840px;
+}
+
+th,
+td {
+  padding: 12px 11px;
+  border-bottom-color: var(--line);
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fbfaf9;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0;
+}
+
+th button {
+  gap: 6px;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+td {
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.select-column {
+  width: 44px;
+  text-align: center;
+}
+
+.select-column input {
+  width: 16px;
+  height: 16px;
+}
+
+.sort-indicator {
+  transition: transform var(--dur) var(--ease);
+}
+
+.sort-indicator.asc {
+  transform: rotate(180deg);
+}
+
+.smart-table tbody tr.is-selected {
+  background: var(--rose-soft);
+}
+
+.table-wrap table tbody tr:hover {
+  background: #fbf7f5;
+}
+
+.pagination {
+  margin-top: 0;
+}
+
+.pagination > div {
+  gap: 6px;
+}
+
+.empty-state {
+  min-height: 150px;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+}
+
+.empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--wine);
+}
+
+.empty-state small {
+  max-width: 460px;
+  color: var(--faint);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.system-strip {
+  margin-bottom: 14px;
+}
+
+.system-pill {
+  min-height: 30px;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.74rem;
+}
+
+.system-pill.loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.system-pill.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+  animation: mace-skeleton 1.3s infinite;
+}
+
+@keyframes mace-skeleton {
+  to { transform: translateX(100%); }
+}
+
+@media (max-width: 980px) {
+  .app-shell.app-shell-with-sidebar,
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 80;
+    width: min(320px, calc(100vw - 34px));
+    height: 100dvh;
+    transform: translateX(-105%);
+    box-shadow: var(--shadow);
+  }
+
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-mobile-button {
+    display: inline-grid;
+  }
+
+  .sidebar-collapse-button {
+    display: none;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: block;
+    border: 0;
+    background: rgba(31, 26, 29, 0.42);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sidebar-backdrop.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar-collapsed .brand-mark {
+    width: auto;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+  }
+
+  .sidebar-collapsed .brand-mark img {
+    width: 154px;
+  }
+
+  .sidebar-collapsed .sidebar,
+  .sidebar-collapsed .sidebar-scroll,
+  .sidebar-collapsed .sidebar-section,
+  .sidebar-collapsed .sidebar .nav-list {
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .sidebar-collapsed .sidebar-section-label,
+  .sidebar-collapsed .nav-item span,
+  .sidebar-collapsed .sidebar-account-copy {
+    display: block;
+  }
+
+  .sidebar-collapsed .nav-item,
+  .sidebar-collapsed .sidebar-account {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .sidebar-collapsed .sidebar-account {
+    grid-template-columns: 34px minmax(0, 1fr);
+    justify-items: stretch;
+    padding: 10px;
+  }
+
+  .topbar {
+    position: sticky;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: minmax(118px, 1fr) auto auto auto;
+    width: 100%;
+    align-items: center;
+  }
+
+  .topbar-actions .search-box {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .topbar-actions .branch-select {
+    grid-column: 1 / 2;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .topbar-actions .topbar-pos-button {
+    grid-column: 2 / 3;
+    grid-row: 2;
+    padding-inline: 11px;
+  }
+
+  .topbar-actions .icon-button {
+    grid-column: 3 / 4;
+    grid-row: 2;
+  }
+
+  .topbar-actions .branch-select select {
+    min-width: 0;
+  }
+
+  .topbar-actions .account-menu {
+    grid-column: 4 / 5;
+    grid-row: 2;
+    justify-self: end;
+  }
+}
+
+@media (max-width: 720px) {
+  .account-menu summary {
+    width: 42px;
+    justify-content: center;
+    padding: 4px;
+  }
+
+  .account-menu summary .account-summary,
+  .account-menu summary > svg {
+    display: none;
+  }
+
+  .table-status-row,
+  .bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bulk-actions .secondary-button,
+  .bulk-actions .ghost-button {
+    width: 100%;
+  }
+
+  .smart-table tbody tr {
+    border-radius: var(--radius-md);
+    box-shadow: none;
+  }
+
+  .smart-table td.select-column {
+    grid-template-columns: minmax(92px, 0.36fr) minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   10. Respect reduced-motion preference
+   --------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

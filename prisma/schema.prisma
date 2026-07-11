@@ -1,0 +1,675 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Client {
+  id                String          @id @default(cuid())
+  fullName          String
+  photo             String          @default("")
+  mobile            String          @default("")
+  email             String          @default("")
+  gender            String          @default("")
+  birthday          String          @default("")
+  address           String          @default("")
+  city              String          @default("")
+  emergency         String          @default("")
+  branch            String          @default("")
+  source            String          @default("Walk-in")
+  referral          String          @default("")
+  medicalNotes      String          @default("")
+  allergies         String          @default("")
+  contraindications String          @default("")
+  skinConcerns      String          @default("")
+  treatmentGoals    String          @default("")
+  consentStatus     String          @default("Pending")
+  marketingOptIn    Boolean         @default(true)
+  preferredStaff    String          @default("")
+  tag               String          @default("New")
+  retention         String          @default("New")
+  lastVisit         String          @default("")
+  nextVisit         String          @default("")
+  balance           Float           @default(0)
+  packageBalance    String          @default("None")
+  giftBalance       Float           @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  appointments      Appointment[]
+  treatments        Treatment[]
+  packages          ClinicPackage[]
+
+  @@index([fullName])
+  @@index([mobile])
+  @@index([branch])
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  city      String   @default("")
+  address   String   @default("")
+  phone     String   @default("")
+  hours     String   @default("")
+  staff     Int      @default(0)
+  devices   String   @default("[]")
+  image     String   @default("")
+  rooms     Room[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  name      String
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  status    String   @default("Available")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, branchId])
+}
+
+model StaffMember {
+  id               String            @id @default(cuid())
+  name             String
+  role             String
+  branch           String            @default("")
+  schedule         String            @default("")
+  commissionType   String            @default("")
+  commissionRate   Float             @default(0)
+  services         String            @default("")
+  status           String            @default("Available")
+  attendance       String            @default("Clocked out")
+  employmentDate   String            @default("")
+  phone            String            @default("")
+  account          Account?
+  attendanceEvents AttendanceEvent[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([branch])
+  @@index([role])
+}
+
+model Account {
+  id                 String            @id @default(cuid())
+  staffId            String?           @unique
+  staff              StaffMember?      @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  name               String
+  email              String            @unique
+  passwordHash       String
+  role               String
+  branch             String            @default("")
+  status             String            @default("Active")
+  mustChangePassword Boolean           @default(true)
+  failedLoginCount   Int               @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  sessions           AuthSession[]
+  attendanceEvents   AttendanceEvent[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([role])
+  @@index([branch])
+}
+
+model AuthSession {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([accountId])
+  @@index([expiresAt])
+}
+
+model AttendanceEvent {
+  id         String      @id @default(cuid())
+  staffId    String
+  staff      StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type       String
+  branch     String      @default("")
+  note       String      @default("")
+  occurredAt DateTime    @default(now())
+  createdAt  DateTime    @default(now())
+
+  @@index([staffId, occurredAt])
+  @@index([accountId, occurredAt])
+}
+
+model Service {
+  id                String        @id @default(cuid())
+  name              String
+  category          String
+  duration          Int           @default(60)
+  price             Float         @default(0)
+  commission        String        @default("")
+  consumables       String        @default("[]")
+  branches          String        @default("[]")
+  staff             String        @default("[]")
+  room              String        @default("")
+  active            Boolean       @default(true)
+  pos               Boolean       @default(true)
+  description       String        @default("")
+  contraindications String        @default("")
+  aftercare         String        @default("")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  appointments      Appointment[]
+
+  @@index([category])
+  @@index([active])
+}
+
+model Appointment {
+  id            String   @id @default(cuid())
+  date          String
+  time          String
+  clientId      String?
+  clientRecord  Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client        String
+  serviceId     String?
+  serviceRecord Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  service       String
+  branch        String
+  room          String   @default("")
+  staff         String   @default("")
+  status        String   @default("Pending")
+  deposit       Float    @default(0)
+  leadId        String   @default("")
+  notes         String   @default("")
+  internalNotes String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([date])
+  @@index([branch])
+  @@index([status])
+  @@index([leadId])
+}
+
+model Treatment {
+  id             String   @id @default(cuid())
+  clientId       String?
+  clientRecord   Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client         String
+  date           String
+  service        String
+  provider       String   @default("")
+  room           String   @default("")
+  preNotes       String   @default("")
+  postNotes      String   @default("")
+  consumables    String   @default("")
+  deviceSettings String   @default("")
+  batch          String   @default("")
+  consent        String   @default("Pending")
+  followUp       String   @default("")
+  outcome        String   @default("")
+  satisfaction   String   @default("")
+  photos         Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([date])
+}
+
+model InventoryItem {
+  id        String   @id @default(cuid())
+  item      String
+  sku       String   @default("")
+  brand     String   @default("")
+  category  String   @default("")
+  type      String   @default("Consumable")
+  unit      String   @default("")
+  packQty   Int      @default(1)
+  beginning Float    @default(0)
+  stock     Float    @default(0)
+  branch    String   @default("")
+  location  String   @default("")
+  reorder   Float    @default(0)
+  expiry    String   @default("")
+  batch     String   @default("")
+  supplier  String   @default("")
+  cost      Float    @default(0)
+  price     Float    @default(0)
+  image     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sku])
+  @@index([branch])
+  @@index([category])
+}
+
+model InventoryMovement {
+  id        String   @id @default(cuid())
+  date      String
+  itemId    String   @default("")
+  item      String
+  branch    String   @default("")
+  qty       Float
+  reason    String
+  user      String   @default("System")
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@index([itemId])
+  @@index([branch])
+}
+
+model Sale {
+  id        String     @id @default(cuid())
+  invoice   String     @unique
+  date      String
+  time      String
+  client    String
+  branch    String
+  staff     String
+  subtotal  Float      @default(0)
+  discount  Float      @default(0)
+  total     Float      @default(0)
+  payments  String     @default("[]")
+  status    String     @default("Paid")
+  leadId    String     @default("")
+  notes     String     @default("")
+  items     SaleItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([date])
+  @@index([branch])
+  @@index([status])
+  @@index([leadId])
+}
+
+model SaleItem {
+  id     String @id @default(cuid())
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  name   String
+  type   String
+  qty    Float  @default(1)
+  price  Float  @default(0)
+}
+
+model ClinicPackage {
+  id           String   @id @default(cuid())
+  name         String
+  clientId     String?
+  clientRecord Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client       String
+  sessions     Int      @default(0)
+  used         Int      @default(0)
+  expires      String   @default("")
+  branch       String   @default("All branches")
+  transferable Boolean  @default(false)
+  status       String   @default("Active")
+  price        Float    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+}
+
+model GiftCertificate {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  client    String
+  balance   Float    @default(0)
+  expires   String   @default("")
+  status    String   @default("Active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Lead {
+  id                  String                 @id @default(cuid())
+  name                String
+  firstName           String                 @default("")
+  middleName          String                 @default("")
+  lastName            String                 @default("")
+  preferredName       String                 @default("")
+  mobile              String                 @default("")
+  alternateMobile     String                 @default("")
+  email               String                 @default("")
+  socialProfileId     String                 @default("")
+  channelContactId    String                 @default("")
+  preferredChannel    String                 @default("Phone")
+  source              String                 @default("")
+  sourcePlatform      String                 @default("")
+  campaign            String                 @default("")
+  adSet               String                 @default("")
+  adCreative          String                 @default("")
+  landingPage         String                 @default("")
+  referrerUrl         String                 @default("")
+  utmSource           String                 @default("")
+  utmMedium           String                 @default("")
+  utmCampaign         String                 @default("")
+  utmContent          String                 @default("")
+  utmTerm             String                 @default("")
+  clickId             String                 @default("")
+  formId              String                 @default("")
+  externalLeadId      String                 @default("")
+  firstTouchSource    String                 @default("")
+  latestTouchSource   String                 @default("")
+  interest            String                 @default("")
+  interestedTreatment String                 @default("")
+  interestedPackage   String                 @default("")
+  concern             String                 @default("")
+  message             String                 @default("")
+  preferredDate       String                 @default("")
+  preferredTime       String                 @default("")
+  budgetRange         String                 @default("")
+  urgency             String                 @default("Normal")
+  inquiryType         String                 @default("First-time")
+  status              String                 @default("New Inquiry")
+  priority            String                 @default("Normal")
+  score               Int                    @default(0)
+  scoreReasons        String                 @default("[]")
+  owner               String                 @default("")
+  assignedStaffId     String                 @default("")
+  branch              String                 @default("")
+  assignedBranch      String                 @default("")
+  created             String                 @default("")
+  nextStep            String                 @default("")
+  nextAction          String                 @default("")
+  nextFollowUpAt      String                 @default("")
+  lastContactedAt     String                 @default("")
+  firstRespondedAt    String                 @default("")
+  followUpCount       Int                    @default(0)
+  slaDueAt            String                 @default("")
+  slaState            String                 @default("On time")
+  outcome             String                 @default("")
+  lossReason          String                 @default("")
+  permissionToContact Boolean                @default(true)
+  marketingConsent    Boolean                @default(false)
+  privacyConsent      Boolean                @default(false)
+  consentSource       String                 @default("")
+  consentTimestamp    String                 @default("")
+  consentVersion      String                 @default("")
+  consentText         String                 @default("")
+  linkedClientId      String                 @default("")
+  linkedAppointmentId String                 @default("")
+  convertedAt         String                 @default("")
+  convertedBy         String                 @default("")
+  duplicateOfLeadId   String                 @default("")
+  duplicateConfidence Int                    @default(0)
+  duplicateReasons    String                 @default("[]")
+  archivedAt          String                 @default("")
+  activities          LeadActivity[]
+  followUps           LeadFollowUp[]
+  touchpoints         LeadTouchpoint[]
+  externalIdentities  ExternalLeadIdentity[]
+  assignments         LeadAssignment[]
+  conversions         LeadConversion[]
+  webhookEvents       WebhookEvent[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([status])
+  @@index([branch])
+  @@index([owner])
+  @@index([mobile])
+  @@index([email])
+  @@index([externalLeadId])
+  @@index([campaign])
+  @@index([nextFollowUpAt])
+  @@index([created])
+  @@index([linkedClientId])
+}
+
+model LeadActivity {
+  id             String   @id @default(cuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type           String
+  title          String
+  note           String   @default("")
+  channel        String   @default("")
+  actor          String   @default("System")
+  actorRole      String   @default("System")
+  previousStatus String   @default("")
+  newStatus      String   @default("")
+  metadata       String   @default("{}")
+  occurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([leadId])
+  @@index([type])
+  @@index([occurredAt])
+}
+
+model LeadFollowUp {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type        String   @default("Phone call")
+  dueAt       String
+  assignedTo  String   @default("")
+  channel     String   @default("Phone")
+  purpose     String   @default("")
+  notes       String   @default("")
+  reminderAt  String   @default("")
+  outcome     String   @default("")
+  status      String   @default("Upcoming")
+  completedAt String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([leadId])
+  @@index([dueAt])
+  @@index([status])
+  @@index([assignedTo])
+}
+
+model LeadTouchpoint {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  source      String
+  platform    String   @default("")
+  campaign    String   @default("")
+  adSet       String   @default("")
+  adCreative  String   @default("")
+  landingPage String   @default("")
+  referrerUrl String   @default("")
+  utmSource   String   @default("")
+  utmMedium   String   @default("")
+  utmCampaign String   @default("")
+  utmContent  String   @default("")
+  utmTerm     String   @default("")
+  clickId     String   @default("")
+  occurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([leadId])
+  @@index([source])
+  @@index([campaign])
+  @@index([occurredAt])
+}
+
+model ExternalLeadIdentity {
+  id             String   @id @default(cuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  provider       String
+  externalLeadId String
+  formId         String   @default("")
+  pageId         String   @default("")
+  contactRef     String   @default("")
+  payloadRef     String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([provider, externalLeadId])
+  @@index([leadId])
+  @@index([provider])
+}
+
+model LeadIntegration {
+  id                   String   @id @default(cuid())
+  provider             String   @unique
+  label                String
+  status               String   @default("Needs Configuration")
+  paused               Boolean  @default(false)
+  lastEventAt          String   @default("")
+  lastSuccessfulSyncAt String   @default("")
+  lastError            String   @default("")
+  mappingVersion       String   @default("v1")
+  fieldMapping         String   @default("{}")
+  defaultBranch        String   @default("")
+  defaultOwner         String   @default("Front Desk")
+  configSummary        String   @default("")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([status])
+}
+
+model WebhookEvent {
+  id              String   @id @default(cuid())
+  provider        String
+  providerEventId String
+  idempotencyKey  String   @unique
+  externalLeadId  String   @default("")
+  leadId          String?
+  lead            Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  receivedAt      DateTime @default(now())
+  status          String   @default("Received")
+  attempts        Int      @default(0)
+  error           String   @default("")
+  mappingVersion  String   @default("v1")
+  payloadSummary  String   @default("{}")
+  mappedFields    String   @default("{}")
+  duplicateResult String   @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([provider])
+  @@index([providerEventId])
+  @@index([status])
+  @@index([leadId])
+}
+
+model LeadConversion {
+  id                String   @id @default(cuid())
+  leadId            String
+  lead              Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  clientId          String
+  appointmentId     String   @default("")
+  convertedBy       String   @default("")
+  convertedAt       DateTime @default(now())
+  source            String   @default("")
+  campaign          String   @default("")
+  revenueAttributed Float    @default(0)
+  notes             String   @default("")
+
+  @@unique([leadId])
+  @@index([clientId])
+}
+
+model LeadAssignment {
+  id            String   @id @default(cuid())
+  leadId        String
+  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  previousOwner String   @default("")
+  newOwner      String
+  changedBy     String   @default("System")
+  reason        String   @default("")
+  createdAt     DateTime @default(now())
+
+  @@index([leadId])
+  @@index([newOwner])
+}
+
+model SmsTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  category  String   @default("")
+  text      String   @default("")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MarketingCampaign {
+  id         String   @id @default(cuid())
+  name       String
+  segment    String
+  channel    String
+  templateId String   @default("")
+  subject    String   @default("")
+  message    String   @default("")
+  sent       Int      @default(0)
+  booked     Int      @default(0)
+  credits    Int      @default(0)
+  status     String   @default("Draft")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Expense {
+  id        String   @id @default(cuid())
+  date      String
+  name      String
+  category  String
+  branch    String
+  amount    Float    @default(0)
+  method    String   @default("")
+  approver  String   @default("")
+  status    String   @default("For approval")
+  notes     String   @default("")
+  receipt   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([branch])
+  @@index([status])
+}
+
+model Discount {
+  id         String   @id @default(cuid())
+  name       String
+  type       String
+  value      Float    @default(0)
+  active     Boolean  @default(true)
+  permission String   @default("")
+  applicable String   @default("")
+  expiry     String   @default("")
+  usage      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  time      String
+  actor     String
+  role      String
+  area      String
+  action    String
+  details   String
+  createdAt DateTime @default(now())
+
+  @@index([area])
+  @@index([actor])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
