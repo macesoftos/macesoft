@@ -6977,6 +6977,14 @@ function ModalHost({
   const branchOptions = branches.map((branch) => branch.name);
   const clientOptions = clients.map((client) => ({ value: client.id, label: client.fullName }));
   const serviceOptions = services.map((service) => ({ value: service.id, label: service.name }));
+  const employeeServiceSuggestions = [
+    "All services",
+    "Consultations",
+    "Injectables, consultations",
+    "Facials, IV drips",
+    "Lasers, facials",
+    ...services.map((service) => service.name),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
   const staffOptions = staff.map((person) => person.name);
   const inventoryOptions = inventory.map((item) => item.item);
   const templateOptions = [{ value: "", label: "Custom message" }, ...(templates ?? []).map((template) => ({ value: template.id, label: template.name }))];
@@ -7325,9 +7333,9 @@ function ModalHost({
         field("role", "Role", "select", Object.keys(roleAccess)),
         field("branch", "Branch", "select", branchOptions),
         field("schedule", "Schedule"),
-        field("commissionType", "Commission type"),
-        field("commissionRate", "Commission rate", "number"),
-        field("services", "Services allowed"),
+        field("commissionType", "Commission type", "suggest", ["Percentage per service", "Fixed amount per service", "Tiered commission", "Doctor rate", "Skin care", "Device care", "No commission / N/A"]),
+        field("commissionRate", "Commission rate", "number-suggest", [0, 5, 8, 10, 12, 15, 20]),
+        field("services", "Services allowed", "suggest", employeeServiceSuggestions),
         field("status", "Status", "select", ["Available", "In treatment", "On leave", "Inactive"]),
         field("attendance", "Attendance", "select", ["Clocked in", "Clocked out"]),
         field("employmentDate", "Employment date", "date"),
@@ -7664,10 +7672,13 @@ function FieldLabel({ children, required }) {
 function FormField({ field: item, form, required = false, value, onChange }) {
   const wrapperClass = item.type === "checkbox" ? "checkbox-field" : item.className ?? "";
   const fieldId = `field-${item.name}`;
+  const suggestionListId = `${fieldId}-suggestions`;
+  const hasSuggestions = item.type === "suggest" || item.type === "number-suggest";
+  const isNumberField = item.type === "number" || item.type === "number-suggest";
   const textIdentity = `${item.name} ${item.label}`.toLowerCase();
   const isPhoneField = /\b(mobile|phone|contact)\b/.test(textIdentity);
-  const inputType = isPhoneField && item.type === "text" ? "tel" : item.type;
-  const inputMode = item.type === "number" ? "decimal" : isPhoneField ? "tel" : undefined;
+  const inputType = isPhoneField && item.type === "text" ? "tel" : item.type === "suggest" ? "text" : item.type === "number-suggest" ? "number" : item.type;
+  const inputMode = isNumberField ? "decimal" : isPhoneField ? "tel" : undefined;
   const autoComplete =
     item.type === "email"
       ? "email"
@@ -7766,15 +7777,27 @@ function FormField({ field: item, form, required = false, value, onChange }) {
           })}
         </select>
       ) : (
-        <input
-          id={fieldId}
-          type={inputType}
-          inputMode={inputMode}
-          autoComplete={autoComplete}
-          value={value ?? ""}
-          onChange={(event) => onChange(item.type === "number" ? Number(event.target.value) : event.target.value)}
-          required={required}
-        />
+        <>
+          <input
+            id={fieldId}
+            type={inputType}
+            inputMode={inputMode}
+            autoComplete={autoComplete}
+            list={hasSuggestions ? suggestionListId : undefined}
+            placeholder={hasSuggestions ? "Choose a suggestion or type your own" : undefined}
+            value={value ?? ""}
+            onChange={(event) => onChange(isNumberField ? Number(event.target.value) : event.target.value)}
+            required={required}
+          />
+          {hasSuggestions && (
+            <>
+              <datalist id={suggestionListId}>
+                {(item.options ?? []).map((option) => <option key={option} value={option} />)}
+              </datalist>
+              <small className="field-suggestion-hint">Select a suggested answer or enter a custom value.</small>
+            </>
+          )}
+        </>
       )}
     </label>
   );

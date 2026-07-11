@@ -1435,3 +1435,9 @@ td {
     scroll-behavior: auto !important;
   }
 }
+.field-suggestion-hint {
+  color: var(--muted, #746b70);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
