@@ -2422,7 +2422,19 @@ app.post("/api/me/attendance", asyncRoute(async (request, response) => {
 }));
 
 app.get("/api/health", asyncRoute(async (_request, response) => {
-  const clientCount = await prisma.client.count();
+  let clientCount;
+  try {
+    clientCount = await prisma.client.count();
+  } catch (error) {
+    console.error("Supabase health check failed.", error);
+    return response.status(503).json({
+      ok: false,
+      database: "supabase-postgres",
+      databaseStatus: "unavailable",
+      errorCode: error?.code || "DATABASE_CONNECTION_FAILED",
+      checkedAt: new Date().toISOString(),
+    });
+  }
   response.json({
     ok: true,
     database: "supabase-postgres",
