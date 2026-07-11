@@ -72,6 +72,7 @@ import {
   users,
 } from "./data";
 import { navItems, navSections } from "./config/sidebar.jsx";
+import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import {
   checkApiHealth,
   changeAccountPassword,
@@ -1706,6 +1707,7 @@ function App() {
         <section className="content-area">
           {!isPosView && !isApplicationsView && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
+          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} />}
           {activeModule === "overview" && (
             <Dashboard
               session={session}

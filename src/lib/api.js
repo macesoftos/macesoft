@@ -92,6 +92,59 @@ export function recordAttendance(type, note = "") {
   });
 }
 
+export function loadFaceTrackOverview() {
+  return requestJson("/api/facetrack-attendance/overview");
+}
+
+export function createFaceTrackChallenge(purpose) {
+  return requestJson("/api/facetrack-attendance/challenge", {
+    method: "POST",
+    body: JSON.stringify({ purpose }),
+  });
+}
+
+export function enrollFaceTrackProfile(payload) {
+  return requestJson("/api/facetrack-attendance/enroll", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function recordFaceTrackAttendance(payload) {
+  return requestJson("/api/facetrack-attendance/clock", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitFaceTrackCorrection(payload) {
+  return requestJson("/api/facetrack-attendance/correction-requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reviewFaceTrackCorrection(id, payload) {
+  return requestJson(`/api/facetrack-attendance/correction-requests/${encodeURIComponent(id)}/review`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function saveFaceTrackPolicy(payload) {
+  return requestJson("/api/facetrack-attendance/policy", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reviewFaceTrackOvertime(id, payload) {
+  return requestJson(`/api/facetrack-attendance/records/${encodeURIComponent(id)}/overtime`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function checkApiHealth() {
   return requestJson("/api/health");
 }

@@ -88,6 +88,8 @@ model StaffMember {
   phone            String            @default("")
   account          Account?
   attendanceEvents AttendanceEvent[]
+  faceTrackProfile FaceTrackProfile?
+  faceTrackRecords FaceTrackAttendanceRecord[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -111,6 +113,10 @@ model Account {
   lastLoginAt        DateTime?
   sessions           AuthSession[]
   attendanceEvents   AttendanceEvent[]
+  faceTrackEnrollments FaceTrackProfile[] @relation("FaceTrackEnrolledBy")
+  faceTrackRequests FaceTrackCorrectionRequest[] @relation("FaceTrackRequestedBy")
+  faceTrackReviews FaceTrackCorrectionRequest[] @relation("FaceTrackReviewedBy")
+  faceTrackChallenges FaceTrackChallenge[]
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -145,6 +151,131 @@ model AttendanceEvent {
 
   @@index([staffId, occurredAt])
   @@index([accountId, occurredAt])
+}
+
+model FaceTrackProfile {
+  id                  String      @id @default(cuid())
+  staffId             String      @unique
+  staff               StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  encryptedDescriptor String
+  descriptorVersion   String      @default("face-api-v1")
+  consentAt           DateTime
+  enrolledById        String?
+  enrolledBy          Account?    @relation("FaceTrackEnrolledBy", fields: [enrolledById], references: [id], onDelete: SetNull)
+  lastVerifiedAt      DateTime?
+  active              Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@index([active])
+}
+
+model FaceTrackAttendanceRecord {
+  id                        String      @id @default(cuid())
+  staffId                   String
+  staff                     StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  workDate                  String
+  branch                    String      @default("")
+  timezone                  String      @default("Asia/Manila")
+  scheduledStart            DateTime
+  scheduledEnd              DateTime
+  originalTimeIn            DateTime?
+  originalTimeOut           DateTime?
+  timeIn                    DateTime?
+  timeOut                   DateTime?
+  workedMinutes             Int         @default(0)
+  lateMinutes               Int         @default(0)
+  calculatedOvertimeMinutes Int         @default(0)
+  approvedOvertimeMinutes   Int         @default(0)
+  overtimeStatus            String      @default("NOT_APPLICABLE")
+  status                    String      @default("OPEN")
+  verificationMethod        String      @default("FACE_RECOGNITION")
+  timeInConfidence          Float?
+  timeOutConfidence         Float?
+  correctionRequests        FaceTrackCorrectionRequest[]
+  auditEntries              FaceTrackAuditEntry[]
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+
+  @@unique([staffId, workDate])
+  @@index([workDate])
+  @@index([branch, workDate])
+  @@index([status])
+  @@index([overtimeStatus])
+}
+
+model FaceTrackCorrectionRequest {
+  id                 String      @id @default(cuid())
+  attendanceRecordId String
+  attendanceRecord   FaceTrackAttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  requestedById      String
+  requestedBy        Account     @relation("FaceTrackRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedById       String?
+  reviewedBy         Account?    @relation("FaceTrackReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  requestedTimeIn    DateTime?
+  requestedTimeOut   DateTime?
+  originalTimeIn     DateTime?
+  originalTimeOut    DateTime?
+  reason             String
+  attachmentUrl      String      @default("")
+  status             String      @default("PENDING")
+  adminComment       String      @default("")
+  reviewedAt         DateTime?
+  appliedAt          DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([attendanceRecordId])
+  @@index([requestedById, status])
+  @@index([status, createdAt])
+}
+
+model FaceTrackAuditEntry {
+  id                 String      @id @default(cuid())
+  attendanceRecordId String
+  attendanceRecord   FaceTrackAttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  correctionRequestId String?
+  actorAccountId     String
+  actorName          String
+  actorRole          String
+  action             String
+  originalValues     String      @default("{}")
+  requestedValues    String      @default("{}")
+  finalValues        String      @default("{}")
+  reason             String      @default("")
+  comment            String      @default("")
+  createdAt          DateTime    @default(now())
+
+  @@index([attendanceRecordId, createdAt])
+  @@index([correctionRequestId])
+}
+
+model FaceTrackChallenge {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  purpose   String
+  nonceHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([accountId, purpose])
+  @@index([expiresAt])
+}
+
+model FaceTrackPolicy {
+  id                       String   @id @default("default")
+  enabled                  Boolean  @default(true)
+  timezone                 String   @default("Asia/Manila")
+  graceMinutes             Int      @default(5)
+  matchThreshold           Float    @default(0.5)
+  overtimeMinimumMinutes   Int      @default(30)
+  overtimeRequiresApproval Boolean  @default(true)
+  retentionDays            Int      @default(730)
+  updatedBy                String   @default("")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model Service {

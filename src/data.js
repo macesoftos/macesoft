@@ -34,16 +34,16 @@ export const users = [
 ];
 
 export const roleAccess = {
-  "Super Admin": ["my-workspace", "overview", "applications", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
-  Owner: ["my-workspace", "overview", "applications", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
-  "Branch Manager": ["my-workspace", "overview", "applications", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "expenses", "reports", "booking", "support"],
-  Receptionist: ["my-workspace", "overview", "applications", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "packages", "leads", "sms", "booking", "support"],
-  Cashier: ["my-workspace", "overview", "applications", "pos", "card-view", "clients", "packages", "expenses", "reports", "support"],
-  Doctor: ["my-workspace", "overview", "applications", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "reports", "support"],
-  "Nurse / Aesthetician": ["my-workspace", "overview", "applications", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "inventory", "support"],
-  "Inventory Staff": ["my-workspace", "overview", "applications", "inventory", "services", "reports", "support"],
-  "Marketing Staff": ["my-workspace", "overview", "applications", "clients", "leads", "sms", "booking", "reports", "support"],
-  Employee: ["my-workspace", "overview", "applications", "appointments", "clients", "support"],
+  "Super Admin": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
+  Owner: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
+  "Branch Manager": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "expenses", "reports", "booking", "support"],
+  Receptionist: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "packages", "leads", "sms", "booking", "support"],
+  Cashier: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "clients", "packages", "expenses", "reports", "support"],
+  Doctor: ["my-workspace", "overview", "applications", "facetrack-attendance", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "reports", "support"],
+  "Nurse / Aesthetician": ["my-workspace", "overview", "applications", "facetrack-attendance", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "inventory", "support"],
+  "Inventory Staff": ["my-workspace", "overview", "applications", "facetrack-attendance", "inventory", "services", "reports", "support"],
+  "Marketing Staff": ["my-workspace", "overview", "applications", "facetrack-attendance", "clients", "leads", "sms", "booking", "reports", "support"],
+  Employee: ["my-workspace", "overview", "applications", "facetrack-attendance", "appointments", "clients", "support"],
 };
 
 export const branches = [

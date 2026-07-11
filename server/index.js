@@ -8,6 +8,7 @@ import nodemailer from "nodemailer";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess, users } from "../src/data.js";
+import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -2340,6 +2341,8 @@ app.use("/api", asyncRoute(async (request, _response, next) => {
   }
   next();
 }));
+
+app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
 
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();

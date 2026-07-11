@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Camera,
   Boxes,
   BriefcaseBusiness,
   CalendarDays,
@@ -38,6 +39,7 @@ export const navItems = [
   { id: "booking", label: "Online Booking", icon: Globe2, section: "clinic-operations" },
   { id: "staff-view", label: "Staff Schedule", icon: UserCheck, section: "staff-branches" },
   { id: "staff", label: "Staff Management", icon: BriefcaseBusiness, section: "staff-branches" },
+  { id: "facetrack-attendance", label: "FaceTrack Attendance", icon: Camera, section: "staff-branches" },
   { id: "branches", label: "Branches", icon: Store, section: "staff-branches" },
   { id: "inventory", label: "Inventory", icon: Boxes, section: "inventory-finance" },
   { id: "expenses", label: "Expenses", icon: ReceiptText, section: "inventory-finance" },

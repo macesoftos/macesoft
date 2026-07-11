@@ -12,6 +12,7 @@ export const sidebarModules = [
   { id: "booking", label: "Online Booking", table: "Appointment", phase: "growth", section: "Clinic Operations" },
   { id: "staff-view", label: "Staff Schedule", table: "StaffMember", phase: "operations", section: "Staff & Branches" },
   { id: "staff", label: "Staff Management", table: "StaffMember", phase: "admin", section: "Staff & Branches" },
+  { id: "facetrack-attendance", label: "FaceTrack Attendance", table: "FaceTrackAttendanceRecord", phase: "operations", section: "Staff & Branches" },
   { id: "branches", label: "Branches", table: "Branch", phase: "admin", section: "Staff & Branches" },
   { id: "inventory", label: "Inventory", table: "InventoryItem", phase: "catalog", section: "Inventory & Finance" },
   { id: "expenses", label: "Expenses", table: "Expense", phase: "finance", section: "Inventory & Finance" },

@@ -15,6 +15,7 @@
     "postinstall": "prisma generate",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node server/api-smoke-test.js",
+    "test:facetrack": "node --test server/facetrackAttendance.test.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "node server/seed.js"
@@ -26,6 +27,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "face-api.js": "0.22.2",
     "helmet": "^8.2.0",
     "lucide-react": "^0.468.0",
     "nodemailer": "^9.0.3",

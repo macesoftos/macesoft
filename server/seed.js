@@ -31,6 +31,12 @@ function hashPassword(password) {
 }
 
 async function clearDatabase() {
+  await prisma.faceTrackAuditEntry.deleteMany();
+  await prisma.faceTrackCorrectionRequest.deleteMany();
+  await prisma.faceTrackAttendanceRecord.deleteMany();
+  await prisma.faceTrackChallenge.deleteMany();
+  await prisma.faceTrackProfile.deleteMany();
+  await prisma.faceTrackPolicy.deleteMany();
   await prisma.attendanceEvent.deleteMany();
   await prisma.authSession.deleteMany();
   await prisma.account.deleteMany();
