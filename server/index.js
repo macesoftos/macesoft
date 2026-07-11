@@ -2382,6 +2382,22 @@ app.post("/api/auth/logout", asyncRoute(async (request, response) => {
   response.status(204).end();
 }));
 
+app.post("/api/auth/change-password", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  const currentPassword = requireText(request.body?.currentPassword, "Current password");
+  const newPassword = requireText(request.body?.newPassword, "New password");
+  if (!verifyPassword(currentPassword, account.passwordHash)) throw apiError("Current password is incorrect.", 401);
+  if (newPassword.length < 12 || !/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/\d/.test(newPassword) || !/[^A-Za-z0-9]/.test(newPassword)) {
+    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.", 400);
+  }
+  if (verifyPassword(newPassword, account.passwordHash)) throw apiError("Choose a different password.", 400);
+  const updated = await prisma.account.update({
+    where: { id: account.id },
+    data: { passwordHash: hashPassword(newPassword), mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+  });
+  response.json({ account: publicAccount(updated) });
+}));
+
 function attendanceState(events) {
   const lastType = events[0]?.type ?? "";
   if (!lastType || lastType === "CLOCK_OUT") return { status: "Clocked out", nextActions: ["CLOCK_IN"] };

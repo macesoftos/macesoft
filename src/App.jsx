@@ -88,6 +88,7 @@ import {
 import { navItems, navSections } from "./config/sidebar.jsx";
 import {
   checkApiHealth,
+  changeAccountPassword,
   addLeadActivity,
   bookLeadAppointment,
   completePosCheckout,
@@ -1027,6 +1028,12 @@ function App() {
     setActiveModule("overview");
   }
 
+  async function handlePasswordChange(currentPassword, newPassword) {
+    const result = await changeAccountPassword(currentPassword, newPassword);
+    setSession(result.account);
+    notify("Password updated securely.");
+  }
+
   function openModal(type, payload = {}) {
     setModal({ type, payload });
   }
@@ -1562,6 +1569,10 @@ function App() {
 
   if (!session) {
     return <LoginScreen onLogin={handleLogin} settings={settings} />;
+  }
+
+  if (session.mustChangePassword) {
+    return <ChangePasswordScreen account={session} onChangePassword={handlePasswordChange} onLogout={handleLogout} />;
   }
 
   const activeLabel =
@@ -2437,6 +2448,65 @@ function LoginScreen({ onLogin, settings }) {
               <span>Ask an administrator to reset the password for {email || "your account"}.</span>
             </div>
           )}
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    if (newPassword !== confirmPassword) {
+      setError("New passwords do not match.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onChangePassword(currentPassword, newPassword);
+    } catch (passwordError) {
+      setError(passwordError.message || "Unable to update the password.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <section className="login-panel">
+        <form className="login-card" onSubmit={submit}>
+          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+          <div>
+            <p className="eyebrow">First-time security setup</p>
+            <h2>Create your private password</h2>
+            <p className="login-helper">Signed in as {account.email}</p>
+          </div>
+          <label>
+            <span>Temporary password</span>
+            <input autoComplete="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+          </label>
+          <label>
+            <span>New password</span>
+            <input autoComplete="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+          </label>
+          <label>
+            <span>Confirm new password</span>
+            <input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+          </label>
+          <p className="login-helper">Use 12+ characters with uppercase, lowercase, a number, and a symbol.</p>
+          {error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}
+          <button className="primary-button full" type="submit" disabled={submitting || !currentPassword || !newPassword || !confirmPassword}>
+            <LockKeyhole size={17} aria-hidden="true" />
+            {submitting ? "Updating password..." : "Save private password"}
+          </button>
+          <button className="ghost-button full" type="button" onClick={onLogout}>Sign out</button>
         </form>
       </section>
     </main>

@@ -67,6 +67,13 @@ export function logoutAccount() {
   return requestJson("/api/auth/logout", { method: "POST" });
 }
 
+export function changeAccountPassword(currentPassword, newPassword) {
+  return requestJson("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
 export function loadMyWorkspace() {
   return requestJson("/api/me/workspace");
 }

@@ -4919,6 +4919,13 @@ td .inline-actions { flex-wrap: nowrap; }
 
 .login-card h2 { margin: 4px 0 0; font-size: 1.65rem; }
 
+.login-helper {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 .login-card label {
   display: grid;
   gap: 6px;
