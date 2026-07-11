@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Clock, FilePenLine, RefreshCw, Settings, ShieldCheck, Timer, UserCheck, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Clock, FilePenLine, RefreshCw, Settings, ShieldCheck, TabletSmartphone, Timer, UserCheck, X } from "lucide-react";
 import {
   createFaceTrackChallenge,
   enrollFaceTrackProfile,
@@ -234,6 +234,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
     { id: "attendance", label: "Timesheets", icon: Clock },
     { id: "requests", label: "Corrections", icon: FilePenLine, count: pendingRequests },
     { id: "profiles", label: "Face profiles", icon: UserCheck },
+    ...(data.admin ? [{ id: "kiosk", label: "Clinic iPad", icon: TabletSmartphone, external: true }] : []),
     ...(data.admin ? [
       { id: "settings", label: "Policies", icon: Settings },
       { id: "audit", label: "Audit trail", icon: ShieldCheck },
@@ -251,7 +252,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
         <nav>
           {navigation.map((item) => {
             const Icon = item.icon;
-            return <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)} type="button" aria-current={tab === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{item.count ? <b>{item.count}</b> : null}</button>;
+            return <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => item.external ? window.location.assign("/attendance/kiosk") : setTab(item.id)} type="button" aria-current={tab === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{item.count ? <b>{item.count}</b> : null}</button>;
           })}
         </nav>
         <div className="facetrack-module-account"><span>{session.name?.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{session.name}</strong><small>{session.role}</small></div></div>

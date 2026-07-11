@@ -1,9 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import express from "express";
 
 const ADMIN_ROLES = new Set(["Super Admin", "Owner", "Branch Manager"]);
 const MODULE_ID = "facetrack-attendance";
 const verificationAttempts = new Map();
+const kioskVerificationAttempts = new Map();
 
 function apiError(message, status = 400) {
   const error = new Error(message);
@@ -40,6 +41,32 @@ function enforceVerificationRateLimit(request) {
   verificationAttempts.set(key, recent);
 }
 
+function enforceKioskRateLimit(request, device) {
+  const key = `${device.id}:${request.ip}`;
+  const now = Date.now();
+  const recent = (kioskVerificationAttempts.get(key) || []).filter((timestamp) => now - timestamp < 60_000);
+  if (recent.length >= 20) throw apiError("Too many kiosk verification attempts. Please wait one minute.", 429);
+  recent.push(now);
+  kioskVerificationAttempts.set(key, recent);
+}
+
+function hashSecret(value) {
+  const salt = randomBytes(16).toString("hex");
+  return `scrypt$${salt}$${scryptSync(String(value), salt, 64).toString("hex")}`;
+}
+
+function verifySecret(value, storedHash) {
+  const [scheme, salt, expectedHex] = clean(storedHash).split("$");
+  if (scheme !== "scrypt" || !salt || !expectedHex) return false;
+  const actual = scryptSync(String(value ?? ""), salt, 64);
+  const expected = Buffer.from(expectedHex, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function kioskTokenHash(token) {
+  return createHash("sha256").update(clean(token)).digest("hex");
+}
+
 function encryptionKey() {
   const secret = process.env.FACETRACK_ENCRYPTION_KEY || (process.env.NODE_ENV !== "production" ? process.env.DATABASE_URL : "");
   if (!secret) throw apiError("FaceTrack encryption is not configured.", 503);
@@ -74,6 +101,18 @@ function averageDescriptors(descriptors) {
 
 function euclideanDistance(left, right) {
   return Math.sqrt(left.reduce((sum, value, index) => sum + (Number(value) - Number(right[index])) ** 2, 0));
+}
+
+function selectUniqueMatch(candidates, descriptor, threshold, ambiguityGap = 0.05) {
+  const ranked = candidates
+    .map((candidate) => ({ ...candidate, distance: euclideanDistance(candidate.descriptor, descriptor) }))
+    .sort((left, right) => left.distance - right.distance);
+  const best = ranked[0];
+  if (!best || best.distance > threshold) throw apiError("Face not recognized. Ask an administrator to confirm enrollment.", 403);
+  if (ranked[1] && ranked[1].distance - best.distance < ambiguityGap) {
+    throw apiError("Face match was ambiguous. Please reposition and try again.", 409);
+  }
+  return best;
 }
 
 function parseSchedule(schedule) {
@@ -175,6 +214,83 @@ async function consumeChallenge(tx, accountId, challengeId, purpose) {
   const challenge = await tx.faceTrackChallenge.findFirst({ where: { id: clean(challengeId), accountId, purpose } });
   if (!challenge || challenge.usedAt || challenge.expiresAt <= new Date()) throw apiError("The camera verification session expired. Please try again.", 409);
   await tx.faceTrackChallenge.update({ where: { id: challenge.id }, data: { usedAt: new Date() } });
+}
+
+async function kioskFromRequest(prisma, request) {
+  const token = clean(request.get("X-FaceTrack-Kiosk-Token"));
+  if (token.length < 32) throw apiError("This iPad is not registered as a FaceTrack kiosk.", 401);
+  const device = await prisma.faceTrackKioskDevice.findUnique({ where: { tokenHash: kioskTokenHash(token) } });
+  if (!device?.active) throw apiError("This FaceTrack kiosk is inactive. Ask an administrator to set it up again.", 403);
+  return device;
+}
+
+async function consumeKioskChallenge(tx, deviceId, challengeId) {
+  const challenge = await tx.faceTrackKioskChallenge.findFirst({
+    where: { id: clean(challengeId), deviceId, purpose: "KIOSK_CLOCK" },
+  });
+  if (!challenge || challenge.usedAt || challenge.expiresAt <= new Date()) {
+    throw apiError("The kiosk camera session expired. Please try again.", 409);
+  }
+  await tx.faceTrackKioskChallenge.update({ where: { id: challenge.id }, data: { usedAt: new Date() } });
+}
+
+async function recordVerifiedClock(prisma, { staff, profile, policy, confidence, idempotencyKey, actor, consume }) {
+  const now = new Date();
+  const schedule = scheduleFor(staff, policy, now);
+  const record = await prisma.$transaction(async (tx) => {
+    await consume(tx);
+    const auditAction = `CLOCK:${idempotencyKey}`;
+    const replay = await tx.faceTrackAuditEntry.findFirst({ where: { action: auditAction } });
+    if (replay) throw apiError("This attendance request was already processed.", 409);
+    const openRecord = await tx.faceTrackAttendanceRecord.findFirst({
+      where: { staffId: staff.id, timeOut: null },
+      orderBy: { scheduledStart: "desc" },
+    });
+    const existing = openRecord || await tx.faceTrackAttendanceRecord.findUnique({
+      where: { staffId_workDate: { staffId: staff.id, workDate: schedule.workDate } },
+    });
+    let updated;
+    let action;
+    if (!existing) {
+      action = "TIME_IN";
+      const base = {
+        staffId: staff.id,
+        branch: staff.branch,
+        timezone: policy.timezone,
+        ...schedule,
+        originalTimeIn: now,
+        timeIn: now,
+        timeInConfidence: confidence,
+      };
+      updated = await tx.faceTrackAttendanceRecord.create({ data: { ...base, ...calculatedFields(base, policy) } });
+    } else if (!existing.timeOut) {
+      if (now.getTime() - new Date(existing.timeIn).getTime() < 60_000) {
+        throw apiError("Please wait before recording Time Out.", 409);
+      }
+      action = "TIME_OUT";
+      const base = { ...existing, originalTimeOut: now, timeOut: now, timeOutConfidence: confidence };
+      updated = await tx.faceTrackAttendanceRecord.update({
+        where: { id: existing.id },
+        data: { originalTimeOut: now, timeOut: now, timeOutConfidence: confidence, ...calculatedFields(base, policy) },
+      });
+    } else {
+      throw apiError("Today's Time In and Time Out are already complete.", 409);
+    }
+    await tx.faceTrackProfile.update({ where: { id: profile.id }, data: { lastVerifiedAt: now } });
+    await tx.staffMember.update({ where: { id: staff.id }, data: { attendance: action === "TIME_IN" ? "Clocked in" : "Clocked out" } });
+    await tx.faceTrackAuditEntry.create({
+      data: {
+        attendanceRecordId: updated.id,
+        actorAccountId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: auditAction,
+        finalValues: JSON.stringify({ action, occurredAt: now, confidence, ...actor.metadata }),
+      },
+    });
+    return { ...updated, action, staff };
+  });
+  return { record, now };
 }
 
 export function createFaceTrackAttendanceRouter(prisma) {
@@ -298,6 +414,137 @@ export function createFaceTrackAttendanceRouter(prisma) {
     response.status(201).json({ record: serializeRecord(record), action: record.action, confidence });
   }));
 
+  router.get("/kiosks", asyncRoute(async (request, response) => {
+    const admin = requireAdmin(request);
+    const devices = await prisma.faceTrackKioskDevice.findMany({
+      where: admin.branch === "All branches" ? {} : { branch: admin.branch },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, branch: true, active: true, lastSeenAt: true, createdByName: true, createdAt: true, updatedAt: true },
+    });
+    response.json({ devices });
+  }));
+
+  router.post("/kiosks", asyncRoute(async (request, response) => {
+    const admin = requireAdmin(request);
+    const name = clean(request.body?.name);
+    const branch = clean(request.body?.branch);
+    const pin = clean(request.body?.pin);
+    if (name.length < 3 || name.length > 80) throw apiError("Enter a kiosk name between 3 and 80 characters.");
+    if (!branch || branch === "All branches") throw apiError("Assign the kiosk to one clinic branch.");
+    if (admin.branch !== "All branches" && branch !== admin.branch) throw apiError("You can only register a kiosk for your branch.", 403);
+    if (!/^\d{6}$/.test(pin)) throw apiError("Create a 6-digit administrator PIN for this kiosk.");
+    const branchStaff = await prisma.staffMember.count({ where: { branch } });
+    if (!branchStaff) throw apiError("The selected branch does not have any employees.", 409);
+    const token = randomBytes(32).toString("base64url");
+    const device = await prisma.faceTrackKioskDevice.create({
+      data: {
+        name,
+        branch,
+        tokenHash: kioskTokenHash(token),
+        pinHash: hashSecret(pin),
+        createdById: admin.id,
+        createdByName: admin.name,
+      },
+      select: { id: true, name: true, branch: true, active: true, createdAt: true },
+    });
+    response.status(201).json({ device, token });
+  }));
+
+  router.delete("/kiosks/:id", asyncRoute(async (request, response) => {
+    const admin = requireAdmin(request);
+    const device = await prisma.faceTrackKioskDevice.findUnique({ where: { id: request.params.id } });
+    if (!device) throw apiError("Kiosk device was not found.", 404);
+    if (admin.branch !== "All branches" && device.branch !== admin.branch) throw apiError("You cannot manage another branch's kiosk.", 403);
+    await prisma.faceTrackKioskDevice.update({ where: { id: device.id }, data: { active: false } });
+    response.status(204).end();
+  }));
+
+  router.get("/kiosk/status", asyncRoute(async (request, response) => {
+    const device = await kioskFromRequest(prisma, request);
+    await prisma.faceTrackKioskDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+    const enrolledEmployees = await prisma.faceTrackProfile.count({ where: { active: true, staff: { branch: device.branch } } });
+    response.json({
+      device: { id: device.id, name: device.name, branch: device.branch, active: device.active },
+      enrolledEmployees,
+      rawImagesStored: false,
+    });
+  }));
+
+  router.post("/kiosk/challenge", asyncRoute(async (request, response) => {
+    const device = await kioskFromRequest(prisma, request);
+    enforceKioskRateLimit(request, device);
+    const nonce = randomBytes(24).toString("base64url");
+    const challenge = await prisma.faceTrackKioskChallenge.create({
+      data: {
+        deviceId: device.id,
+        purpose: "KIOSK_CLOCK",
+        nonceHash: createHash("sha256").update(nonce).digest("hex"),
+        expiresAt: new Date(Date.now() + 2 * 60_000),
+      },
+    });
+    response.status(201).json({ challengeId: challenge.id, nonce, expiresAt: challenge.expiresAt });
+  }));
+
+  router.post("/kiosk/clock", asyncRoute(async (request, response) => {
+    const device = await kioskFromRequest(prisma, request);
+    enforceKioskRateLimit(request, device);
+    const idempotencyKey = clean(request.body?.idempotencyKey);
+    if (idempotencyKey.length < 12) throw apiError("A valid kiosk attendance request key is required.");
+    const descriptor = averageDescriptors(request.body?.descriptors);
+    const policy = await policyFor(prisma);
+    if (!policy.enabled) throw apiError("FaceTrack Attendance is currently disabled.", 503);
+    const profiles = await prisma.faceTrackProfile.findMany({
+      where: { active: true, staff: { branch: device.branch, status: { not: "Inactive" } } },
+      include: { staff: true },
+    });
+    const candidates = [];
+    for (const profile of profiles) {
+      try {
+        candidates.push({ profile, staff: profile.staff, descriptor: decryptDescriptor(profile.encryptedDescriptor) });
+      } catch {
+        // Skip a damaged profile instead of blocking attendance for the whole branch.
+      }
+    }
+    if (!candidates.length) throw apiError("No enrolled employees are available for this kiosk branch.", 409);
+    const match = selectUniqueMatch(candidates, descriptor, policy.matchThreshold);
+    const confidence = Math.max(0, Math.min(1, 1 - match.distance));
+    const { record, now } = await recordVerifiedClock(prisma, {
+      staff: match.staff,
+      profile: match.profile,
+      policy,
+      confidence,
+      idempotencyKey,
+      actor: {
+        id: `KIOSK:${device.id}`,
+        name: device.name,
+        role: "FaceTrack Kiosk",
+        metadata: { deviceId: device.id, deviceName: device.name, branch: device.branch },
+      },
+      consume: (tx) => consumeKioskChallenge(tx, device.id, request.body?.challengeId),
+    });
+    await prisma.faceTrackKioskDevice.update({ where: { id: device.id }, data: { lastSeenAt: now } });
+    response.status(201).json({
+      action: record.action,
+      confidence,
+      occurredAt: now,
+      employee: {
+        id: match.staff.id,
+        name: match.staff.name,
+        photo: match.staff.photo,
+        role: match.staff.role,
+        branch: match.staff.branch,
+      },
+      record: serializeRecord(record),
+    });
+  }));
+
+  router.post("/kiosk/unlock", asyncRoute(async (request, response) => {
+    const device = await kioskFromRequest(prisma, request);
+    enforceKioskRateLimit(request, device);
+    if (!verifySecret(clean(request.body?.pin), device.pinHash)) throw apiError("The administrator PIN is incorrect.", 403);
+    response.json({ verified: true });
+  }));
+
   router.post("/correction-requests", asyncRoute(async (request, response) => {
     const account = requireAccount(request);
     if (!account.staffId) throw apiError("This account is not linked to an employee profile.", 409);
@@ -398,5 +645,6 @@ export const faceTrackInternals = {
   euclideanDistance,
   parseSchedule,
   scheduleFor,
+  selectUniqueMatch,
   zonedWorkDate,
 };

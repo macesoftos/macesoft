@@ -73,6 +73,7 @@ import {
 } from "./data";
 import { navItems, navSections } from "./config/sidebar.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
+import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
 import {
   checkApiHealth,
   changeAccountPassword,
@@ -476,7 +477,7 @@ function normalizedPathname(pathname) {
 function moduleFromPath(pathname) {
   const path = normalizedPathname(pathname);
   if (path === "/pos") return "pos";
-  if (path === "/attendance") return "facetrack-attendance";
+  if (path === "/attendance" || path === "/attendance/kiosk") return "facetrack-attendance";
   return "";
 }
 
@@ -550,6 +551,7 @@ function App() {
   const isPosView = activeModule === "pos";
   const isApplicationsView = activeModule === "applications";
   const isFaceTrackView = activeModule === "facetrack-attendance";
+  const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
   const posTouchStartRef = useRef(null);
   const posChromeHideTimerRef = useRef(0);
 
@@ -1560,6 +1562,10 @@ function App() {
         </div>
       </main>
     );
+  }
+
+  if (isFaceTrackKioskView) {
+    return <FaceTrackKiosk session={session} />;
   }
 
   if (!session) {

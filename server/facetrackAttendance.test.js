@@ -57,3 +57,18 @@ test("face distance is zero for identical descriptors", () => {
   const descriptor = Array(128).fill(0.12);
   assert.equal(faceTrackInternals.euclideanDistance(descriptor, descriptor), 0);
 });
+
+test("selects one clear kiosk face match", () => {
+  const match = faceTrackInternals.selectUniqueMatch([
+    { id: "employee-a", descriptor: Array(128).fill(0.1) },
+    { id: "employee-b", descriptor: Array(128).fill(0.3) },
+  ], Array(128).fill(0.11), 0.5);
+  assert.equal(match.id, "employee-a");
+});
+
+test("rejects an ambiguous kiosk face match", () => {
+  assert.throws(() => faceTrackInternals.selectUniqueMatch([
+    { id: "employee-a", descriptor: Array(128).fill(0.1) },
+    { id: "employee-b", descriptor: Array(128).fill(0.102) },
+  ], Array(128).fill(0.101), 0.5), /ambiguous/);
+});

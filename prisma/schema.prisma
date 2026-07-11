@@ -279,6 +279,38 @@ model FaceTrackPolicy {
   updatedAt                DateTime @updatedAt
 }
 
+model FaceTrackKioskDevice {
+  id            String                     @id @default(cuid())
+  name          String
+  branch        String
+  tokenHash     String                     @unique
+  pinHash       String
+  active        Boolean                    @default(true)
+  lastSeenAt    DateTime?
+  createdById   String
+  createdByName String
+  challenges    FaceTrackKioskChallenge[]
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([branch, active])
+  @@index([createdById])
+}
+
+model FaceTrackKioskChallenge {
+  id        String                @id @default(cuid())
+  deviceId  String
+  device    FaceTrackKioskDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  purpose   String                @default("KIOSK_CLOCK")
+  nonceHash String                @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime              @default(now())
+
+  @@index([deviceId, purpose])
+  @@index([expiresAt])
+}
+
 model Service {
   id                String        @id @default(cuid())
   name              String

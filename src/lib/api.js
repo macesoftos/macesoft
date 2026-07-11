@@ -117,6 +117,45 @@ export function recordFaceTrackAttendance(payload) {
   });
 }
 
+export function createFaceTrackKiosk(payload) {
+  return requestJson("/api/facetrack-attendance/kiosks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+function kioskHeaders(token) {
+  return { "Content-Type": "application/json", "X-FaceTrack-Kiosk-Token": token };
+}
+
+export function loadFaceTrackKioskStatus(token) {
+  return requestJson("/api/facetrack-attendance/kiosk/status", { headers: kioskHeaders(token) });
+}
+
+export function createFaceTrackKioskChallenge(token) {
+  return requestJson("/api/facetrack-attendance/kiosk/challenge", {
+    method: "POST",
+    headers: kioskHeaders(token),
+    body: JSON.stringify({ purpose: "KIOSK_CLOCK" }),
+  });
+}
+
+export function recordFaceTrackKioskAttendance(token, payload) {
+  return requestJson("/api/facetrack-attendance/kiosk/clock", {
+    method: "POST",
+    headers: kioskHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export function unlockFaceTrackKiosk(token, pin) {
+  return requestJson("/api/facetrack-attendance/kiosk/unlock", {
+    method: "POST",
+    headers: kioskHeaders(token),
+    body: JSON.stringify({ pin }),
+  });
+}
+
 export function submitFaceTrackCorrection(payload) {
   return requestJson("/api/facetrack-attendance/correction-requests", {
     method: "POST",
