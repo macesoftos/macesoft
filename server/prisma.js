@@ -1,6 +1,7 @@
 import "dotenv/config";
 import prismaClientPackage from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { normalizePemCertificates } from "./databaseTls.js";
 
 const { PrismaClient } = prismaClientPackage;
 const globalForPrisma = globalThis;
@@ -15,7 +16,7 @@ const sslMode = databaseUrl.searchParams.get("sslmode");
 const databaseSchema = databaseUrl.searchParams.get("schema") || "public";
 databaseUrl.searchParams.delete("sslmode");
 databaseUrl.searchParams.delete("schema");
-const sslCa = String(process.env.DATABASE_SSL_CA || "").replace(/\\n/g, "\n");
+const sslCa = normalizePemCertificates(process.env.DATABASE_SSL_CA);
 
 const adapter = new PrismaPg({
   connectionString: databaseUrl.toString(),
