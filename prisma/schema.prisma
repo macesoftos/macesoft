@@ -74,55 +74,95 @@ model Room {
 }
 
 model StaffMember {
-  id               String            @id @default(cuid())
+  id               String                      @id @default(cuid())
   name             String
-  photo            String            @default("")
+  photo            String                      @default("")
   role             String
-  branch           String            @default("")
-  schedule         String            @default("")
-  commissionType   String            @default("")
-  commissionRate   Float             @default(0)
-  services         String            @default("")
-  status           String            @default("Available")
-  attendance       String            @default("Clocked out")
-  employmentDate   String            @default("")
-  phone            String            @default("")
+  branch           String                      @default("")
+  schedule         String                      @default("")
+  commissionType   String                      @default("")
+  commissionRate   Float                       @default(0)
+  services         String                      @default("")
+  status           String                      @default("Available")
+  attendance       String                      @default("Clocked out")
+  employmentDate   String                      @default("")
+  phone            String                      @default("")
   account          Account?
   attendanceEvents AttendanceEvent[]
   faceTrackProfile FaceTrackProfile?
   faceTrackRecords FaceTrackAttendanceRecord[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
 
   @@index([branch])
   @@index([role])
 }
 
 model Account {
-  id                 String            @id @default(cuid())
-  staffId            String?           @unique
-  staff              StaffMember?      @relation(fields: [staffId], references: [id], onDelete: SetNull)
-  name               String
-  email              String            @unique
-  passwordHash       String
-  role               String
-  branch             String            @default("")
-  status             String            @default("Active")
-  mustChangePassword Boolean           @default(true)
-  failedLoginCount   Int               @default(0)
-  lockedUntil        DateTime?
-  lastLoginAt        DateTime?
-  sessions           AuthSession[]
-  attendanceEvents   AttendanceEvent[]
-  faceTrackEnrollments FaceTrackProfile[] @relation("FaceTrackEnrolledBy")
-  faceTrackRequests FaceTrackCorrectionRequest[] @relation("FaceTrackRequestedBy")
-  faceTrackReviews FaceTrackCorrectionRequest[] @relation("FaceTrackReviewedBy")
-  faceTrackChallenges FaceTrackChallenge[]
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  id                   String                       @id @default(cuid())
+  staffId              String?                      @unique
+  staff                StaffMember?                 @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  name                 String
+  email                String                       @unique
+  passwordHash         String
+  role                 String
+  branch               String                       @default("")
+  status               String                       @default("Active")
+  mustChangePassword   Boolean                      @default(true)
+  failedLoginCount     Int                          @default(0)
+  lockedUntil          DateTime?
+  lastLoginAt          DateTime?
+  sessions             AuthSession[]
+  attendanceEvents     AttendanceEvent[]
+  faceTrackEnrollments FaceTrackProfile[]           @relation("FaceTrackEnrolledBy")
+  faceTrackRequests    FaceTrackCorrectionRequest[] @relation("FaceTrackRequestedBy")
+  faceTrackReviews     FaceTrackCorrectionRequest[] @relation("FaceTrackReviewedBy")
+  faceTrackChallenges  FaceTrackChallenge[]
+  sentInvitations      UserInvitation[]             @relation("InvitationSender")
+  passwordResetTokens  PasswordResetToken[]
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
 
   @@index([role])
   @@index([branch])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([expiresAt])
+}
+
+model UserInvitation {
+  id           String    @id @default(cuid())
+  email        String
+  name         String
+  role         String
+  branch       String    @default("All branches")
+  department   String    @default("")
+  specialty    String    @default("")
+  message      String    @default("")
+  status       String    @default("Pending")
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  revokedAt    DateTime?
+  failedReason String    @default("")
+  invitedById  String
+  invitedBy    Account   @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([email, status])
+  @@index([invitedById, createdAt])
+  @@index([expiresAt])
 }
 
 model AuthSession {
@@ -172,31 +212,31 @@ model FaceTrackProfile {
 }
 
 model FaceTrackAttendanceRecord {
-  id                        String      @id @default(cuid())
+  id                        String                       @id @default(cuid())
   staffId                   String
-  staff                     StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staff                     StaffMember                  @relation(fields: [staffId], references: [id], onDelete: Cascade)
   workDate                  String
-  branch                    String      @default("")
-  timezone                  String      @default("Asia/Manila")
+  branch                    String                       @default("")
+  timezone                  String                       @default("Asia/Manila")
   scheduledStart            DateTime
   scheduledEnd              DateTime
   originalTimeIn            DateTime?
   originalTimeOut           DateTime?
   timeIn                    DateTime?
   timeOut                   DateTime?
-  workedMinutes             Int         @default(0)
-  lateMinutes               Int         @default(0)
-  calculatedOvertimeMinutes Int         @default(0)
-  approvedOvertimeMinutes   Int         @default(0)
-  overtimeStatus            String      @default("NOT_APPLICABLE")
-  status                    String      @default("OPEN")
-  verificationMethod        String      @default("FACE_RECOGNITION")
+  workedMinutes             Int                          @default(0)
+  lateMinutes               Int                          @default(0)
+  calculatedOvertimeMinutes Int                          @default(0)
+  approvedOvertimeMinutes   Int                          @default(0)
+  overtimeStatus            String                       @default("NOT_APPLICABLE")
+  status                    String                       @default("OPEN")
+  verificationMethod        String                       @default("FACE_RECOGNITION")
   timeInConfidence          Float?
   timeOutConfidence         Float?
   correctionRequests        FaceTrackCorrectionRequest[]
   auditEntries              FaceTrackAuditEntry[]
-  createdAt                 DateTime    @default(now())
-  updatedAt                 DateTime    @updatedAt
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
 
   @@unique([staffId, workDate])
   @@index([workDate])
@@ -206,25 +246,25 @@ model FaceTrackAttendanceRecord {
 }
 
 model FaceTrackCorrectionRequest {
-  id                 String      @id @default(cuid())
+  id                 String                    @id @default(cuid())
   attendanceRecordId String
   attendanceRecord   FaceTrackAttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
   requestedById      String
-  requestedBy        Account     @relation("FaceTrackRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  requestedBy        Account                   @relation("FaceTrackRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
   reviewedById       String?
-  reviewedBy         Account?    @relation("FaceTrackReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedBy         Account?                  @relation("FaceTrackReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   requestedTimeIn    DateTime?
   requestedTimeOut   DateTime?
   originalTimeIn     DateTime?
   originalTimeOut    DateTime?
   reason             String
-  attachmentUrl      String      @default("")
-  status             String      @default("PENDING")
-  adminComment       String      @default("")
+  attachmentUrl      String                    @default("")
+  status             String                    @default("PENDING")
+  adminComment       String                    @default("")
   reviewedAt         DateTime?
   appliedAt          DateTime?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
   @@index([attendanceRecordId])
   @@index([requestedById, status])
@@ -232,34 +272,34 @@ model FaceTrackCorrectionRequest {
 }
 
 model FaceTrackAuditEntry {
-  id                 String      @id @default(cuid())
-  attendanceRecordId String
-  attendanceRecord   FaceTrackAttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  id                  String                    @id @default(cuid())
+  attendanceRecordId  String
+  attendanceRecord    FaceTrackAttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
   correctionRequestId String?
-  actorAccountId     String
-  actorName          String
-  actorRole          String
-  action             String
-  originalValues     String      @default("{}")
-  requestedValues    String      @default("{}")
-  finalValues        String      @default("{}")
-  reason             String      @default("")
-  comment            String      @default("")
-  createdAt          DateTime    @default(now())
+  actorAccountId      String
+  actorName           String
+  actorRole           String
+  action              String
+  originalValues      String                    @default("{}")
+  requestedValues     String                    @default("{}")
+  finalValues         String                    @default("{}")
+  reason              String                    @default("")
+  comment             String                    @default("")
+  createdAt           DateTime                  @default(now())
 
   @@index([attendanceRecordId, createdAt])
   @@index([correctionRequestId])
 }
 
 model FaceTrackChallenge {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   accountId String
-  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   purpose   String
-  nonceHash String   @unique
+  nonceHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([accountId, purpose])
   @@index([expiresAt])
@@ -491,11 +531,14 @@ model GiftCertificate {
   id        String   @id @default(cuid())
   code      String   @unique
   client    String
+  branch    String   @default("All branches")
   balance   Float    @default(0)
   expires   String   @default("")
   status    String   @default("Active")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([branch])
 }
 
 model Lead {
@@ -836,4 +879,19 @@ model SystemSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+model UploadAsset {
+  id           String   @id
+  objectPath   String   @unique
+  category     String
+  branch       String
+  mimeType     String
+  byteSize     Int
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  @@index([branch])
+  @@index([category])
+  @@index([uploadedById])
 }

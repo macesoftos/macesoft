@@ -10,12 +10,7 @@ import {
 import "./facetrack-kiosk.css";
 
 const MODEL_URL = "/facetrack-models";
-const TOKEN_KEY = "mace-facetrack-kiosk-token";
 const ADMIN_ROLES = new Set(["Super Admin", "Owner", "Branch Manager"]);
-
-function storedToken() {
-  try { return window.localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
-}
 
 function displayTime(value) {
   return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(value);
@@ -30,10 +25,9 @@ export default function FaceTrackKiosk({ session }) {
   const streamRef = useRef(null);
   const faceApiRef = useRef(null);
   const resetTimerRef = useRef(0);
-  const [token, setToken] = useState(storedToken);
   const [device, setDevice] = useState(null);
   const [enrolledEmployees, setEnrolledEmployees] = useState(0);
-  const [view, setView] = useState(token ? "loading" : "setup");
+  const [view, setView] = useState("loading");
   const [cameraReady, setCameraReady] = useState(false);
   const [phase, setPhase] = useState("Tap Start camera to begin.");
   const [error, setError] = useState("");
@@ -48,9 +42,8 @@ export default function FaceTrackKiosk({ session }) {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
     let cancelled = false;
-    loadFaceTrackKioskStatus(token)
+    loadFaceTrackKioskStatus()
       .then((payload) => {
         if (cancelled) return;
         setDevice(payload.device);
@@ -59,12 +52,10 @@ export default function FaceTrackKiosk({ session }) {
       })
       .catch(() => {
         if (cancelled) return;
-        window.localStorage.removeItem(TOKEN_KEY);
-        setToken("");
         setView("setup");
       });
     return () => { cancelled = true; };
-  }, [token]);
+  }, []);
 
   useEffect(() => () => {
     window.clearTimeout(resetTimerRef.current);
@@ -124,10 +115,10 @@ export default function FaceTrackKiosk({ session }) {
     setView("scanning");
     setError("");
     try {
-      const challenge = await createFaceTrackKioskChallenge(token);
+      const challenge = await createFaceTrackKioskChallenge();
       const descriptors = await captureSamples();
       setPhase("Recognizing employee and recording attendance...");
-      const payload = await recordFaceTrackKioskAttendance(token, {
+      const payload = await recordFaceTrackKioskAttendance({
         descriptors,
         challengeId: challenge.challengeId,
         idempotencyKey: crypto.randomUUID(),
@@ -154,8 +145,6 @@ export default function FaceTrackKiosk({ session }) {
     setError("");
     try {
       const payload = await createFaceTrackKiosk(setup);
-      window.localStorage.setItem(TOKEN_KEY, payload.token);
-      setToken(payload.token);
       setDevice(payload.device);
       setView("ready");
     } catch (nextError) {
@@ -169,7 +158,7 @@ export default function FaceTrackKiosk({ session }) {
     const pin = window.prompt("Enter the 6-digit administrator PIN to leave kiosk mode.", "");
     if (pin === null) return;
     try {
-      await unlockFaceTrackKiosk(token, pin);
+      await unlockFaceTrackKiosk(pin);
       window.location.assign("/attendance");
     } catch (nextError) {
       setError(nextError.message);

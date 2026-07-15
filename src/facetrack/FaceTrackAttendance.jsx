@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Clock, FilePenLine, RefreshCw, Settings, ShieldCheck, TabletSmartphone, Timer, UserCheck, X } from "lucide-react";
 import {
   createFaceTrackChallenge,
@@ -174,7 +174,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
   const [selectedStaff, setSelectedStaff] = useState("");
   const [policyDraft, setPolicyDraft] = useState(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -187,9 +187,9 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [session.staffId]);
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const profileIds = useMemo(() => new Set(data?.profiles?.map((profile) => profile.staffId) || []), [data]);
   const myEnrolled = profileIds.has(session.staffId);

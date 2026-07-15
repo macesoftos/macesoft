@@ -20,6 +20,10 @@ import {
   users,
 } from "../src/data.js";
 
+if (process.env.NODE_ENV === "production") {
+  throw new Error("Database seeding is disabled in production.");
+}
+
 function asJsonText(value) {
   return JSON.stringify(value ?? []);
 }
@@ -35,13 +39,20 @@ async function clearDatabase() {
   await prisma.faceTrackCorrectionRequest.deleteMany();
   await prisma.faceTrackAttendanceRecord.deleteMany();
   await prisma.faceTrackChallenge.deleteMany();
+  await prisma.faceTrackKioskChallenge.deleteMany();
+  await prisma.faceTrackKioskDevice.deleteMany();
   await prisma.faceTrackProfile.deleteMany();
   await prisma.faceTrackPolicy.deleteMany();
   await prisma.attendanceEvent.deleteMany();
   await prisma.authSession.deleteMany();
+  await prisma.userInvitation.deleteMany();
   await prisma.account.deleteMany();
-  await prisma.auditLog.deleteMany();
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL app.allow_audit_mutation = 'true'");
+    await tx.auditLog.deleteMany();
+  });
   await prisma.systemSetting.deleteMany();
+  await prisma.uploadAsset.deleteMany();
   await prisma.discount.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.marketingCampaign.deleteMany();

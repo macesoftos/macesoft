@@ -1167,6 +1167,20 @@ img { max-width: 100%; }
   gap: 12px;
 }
 
+.payment-row-group {
+  display: grid;
+  gap: 6px;
+}
+
+.payment-tender-select {
+  width: 100%;
+}
+
+.payment-tender-hint {
+  font-size: 12px;
+  color: var(--muted, #8a8f98);
+}
+
 .surface-panel {
   min-width: 0;
   padding: 18px;
@@ -2971,6 +2985,8 @@ img { max-width: 100%; }
 .branch-photo-button { cursor: pointer; }
 .branch-photo-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.invitation-modal { width: min(720px, 100%); }
+.invitation-modal .full-span { grid-column: 1 / -1; }
 
 .report-filters,
 .form-grid {

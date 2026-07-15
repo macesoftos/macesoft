@@ -7,13 +7,18 @@ const verificationAttempts = new Map();
 const kioskVerificationAttempts = new Map();
 
 function apiError(message, status = 400) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
+  return Object.assign(new Error(message), { status });
 }
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function attachmentReference(value) {
+  const reference = clean(value);
+  if (!reference) return "";
+  if (!reference.startsWith("/api/uploads/")) throw apiError("Correction attachments must use secure object storage.");
+  return reference;
 }
 
 function asyncRoute(handler) {
@@ -180,9 +185,9 @@ function calculatedFields(record, policy) {
   const timeOut = record.timeOut ? new Date(record.timeOut) : null;
   const scheduledStart = new Date(record.scheduledStart);
   const scheduledEnd = new Date(record.scheduledEnd);
-  const lateMinutes = timeIn ? Math.max(0, Math.floor((timeIn - scheduledStart) / 60_000) - policy.graceMinutes) : 0;
-  const workedMinutes = timeIn && timeOut ? Math.max(0, Math.floor((timeOut - timeIn) / 60_000)) : 0;
-  const rawOvertime = timeOut ? Math.max(0, Math.floor((timeOut - scheduledEnd) / 60_000)) : 0;
+  const lateMinutes = timeIn ? Math.max(0, Math.floor((timeIn.getTime() - scheduledStart.getTime()) / 60_000) - policy.graceMinutes) : 0;
+  const workedMinutes = timeIn && timeOut ? Math.max(0, Math.floor((timeOut.getTime() - timeIn.getTime()) / 60_000)) : 0;
+  const rawOvertime = timeOut ? Math.max(0, Math.floor((timeOut.getTime() - scheduledEnd.getTime()) / 60_000)) : 0;
   const calculatedOvertimeMinutes = rawOvertime >= policy.overtimeMinimumMinutes ? rawOvertime : 0;
   const overtimeStatus = calculatedOvertimeMinutes
     ? policy.overtimeRequiresApproval ? "PENDING_APPROVAL" : "APPROVED"
@@ -217,7 +222,8 @@ async function consumeChallenge(tx, accountId, challengeId, purpose) {
 }
 
 async function kioskFromRequest(prisma, request) {
-  const token = clean(request.get("X-FaceTrack-Kiosk-Token"));
+  const cookieToken = clean(request.headers.cookie).split(";").map((item) => item.trim()).find((item) => item.startsWith("macesoft_kiosk="))?.slice("macesoft_kiosk=".length);
+  const token = clean(request.get("X-FaceTrack-Kiosk-Token") || (cookieToken ? decodeURIComponent(cookieToken) : ""));
   if (token.length < 32) throw apiError("This iPad is not registered as a FaceTrack kiosk.", 401);
   const device = await prisma.faceTrackKioskDevice.findUnique({ where: { tokenHash: kioskTokenHash(token) } });
   if (!device?.active) throw apiError("This FaceTrack kiosk is inactive. Ask an administrator to set it up again.", 403);
@@ -447,7 +453,13 @@ export function createFaceTrackAttendanceRouter(prisma) {
       },
       select: { id: true, name: true, branch: true, active: true, createdAt: true },
     });
-    response.status(201).json({ device, token });
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    if (request.authSession?.id) await prisma.authSession.delete({ where: { id: request.authSession.id } });
+    response.setHeader("Set-Cookie", [
+      `macesoft_kiosk=${encodeURIComponent(token)}; Path=/api/facetrack-attendance/kiosk; HttpOnly; SameSite=Strict; Max-Age=31536000${secure}`,
+      `macesoft_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
+    ]);
+    response.status(201).json({ device });
   }));
 
   router.delete("/kiosks/:id", asyncRoute(async (request, response) => {
@@ -530,7 +542,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
       employee: {
         id: match.staff.id,
         name: match.staff.name,
-        photo: match.staff.photo,
+        photo: match.staff.photo?.startsWith("/brand/") ? match.staff.photo : "",
         role: match.staff.role,
         branch: match.staff.branch,
       },
@@ -558,7 +570,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const reason = clean(request.body?.reason);
     if (reason.length < 10) throw apiError("Explain the correction in at least 10 characters.");
     const correction = await prisma.$transaction(async (tx) => {
-      const created = await tx.faceTrackCorrectionRequest.create({ data: { attendanceRecordId: record.id, requestedById: account.id, requestedTimeIn, requestedTimeOut, originalTimeIn: record.timeIn, originalTimeOut: record.timeOut, reason, attachmentUrl: clean(request.body?.attachmentUrl) } });
+      const created = await tx.faceTrackCorrectionRequest.create({ data: { attendanceRecordId: record.id, requestedById: account.id, requestedTimeIn, requestedTimeOut, originalTimeIn: record.timeIn, originalTimeOut: record.timeOut, reason, attachmentUrl: attachmentReference(request.body?.attachmentUrl) } });
       await tx.faceTrackAuditEntry.create({ data: { attendanceRecordId: record.id, correctionRequestId: created.id, actorAccountId: account.id, actorName: account.name, actorRole: account.role, action: "CORRECTION_REQUESTED", originalValues: JSON.stringify({ timeIn: record.timeIn, timeOut: record.timeOut }), requestedValues: JSON.stringify({ timeIn: requestedTimeIn, timeOut: requestedTimeOut }), reason } });
       return created;
     });

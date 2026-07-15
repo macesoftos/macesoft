@@ -77,6 +77,8 @@ import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
 import {
   checkApiHealth,
   changeAccountPassword,
+  acceptInvitation,
+  createInvitation,
   createBranchRecord,
   addLeadActivity,
   bookLeadAppointment,
@@ -87,13 +89,19 @@ import {
   loadLeadIntegrations,
   loadLeadWebhookEvents,
   loadMyWorkspace,
+  loadInvitations,
   loginAccount,
   logoutAccount,
   mergeLeadDuplicate,
   postInventoryMovement,
   redeemPackageRecord,
   recordAttendance,
+  requestPasswordReset,
+  resetAccountPassword,
+  resendInvitation,
   restoreAccountSession,
+  revokeInvitation,
+  inspectInvitation,
   scheduleLeadFollowUp,
   saveResourceRecord,
   saveSettingsRecord,
@@ -101,10 +109,17 @@ import {
   setApiSessionContext,
   submitPublicBooking,
   updateLeadStage,
+  uploadImageAsset,
   voidTransactionRecord,
 } from "./lib/api.js";
 
 const storageKey = (key) => `mace-clinicos-${key}`;
+const retiredSensitiveStorageKeys = [
+  "clients", "appointments", "services", "inventory", "transactions", "treatments", "packages",
+  "gift-certificates", "leads", "staff", "expenses", "discounts", "sms-templates", "campaigns",
+  "branch-records", "settings", "lead-integrations", "lead-webhook-events", "audit-logs",
+  "inventory-movements", "selected-client", "pos-cart",
+];
 
 const money = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -180,6 +195,13 @@ const leadLossReasons = [
   "Other",
 ];
 const paymentMethods = ["Cash", "Credit Card", "Debit Card", "GCash", "Maya", "Bank Transfer", "Check", "Gift Certificate", "Account Balance"];
+const posPaymentMethods = ["Cash", "Credit Card", "Debit Card", "GCash", "Maya", "Bank Transfer", "Check", "Gift Certificate", "Package"];
+const posPaymentOptions = [
+  { label: "Cash", method: "Cash", icon: CircleDollarSign },
+  { label: "Card", method: "Credit Card", icon: CreditCard },
+  { label: "Split", method: "Cash", icon: HandCoins, split: true },
+  { label: "Package", method: "Package", icon: Gift },
+];
 const posCatalogPageSize = 14;
 
 function createId(prefix) {
@@ -524,28 +546,28 @@ function App() {
     message: "Checking database connection...",
   });
 
-  const [clients, setClients] = useStoredState("clients", []);
-  const [appointments, setAppointments] = useStoredState("appointments", []);
-  const [services, setServices] = useStoredState("services", []);
-  const [inventory, setInventory] = useStoredState("inventory", []);
-  const [transactions, setTransactions] = useStoredState("transactions", []);
-  const [treatments, setTreatments] = useStoredState("treatments", []);
-  const [packages, setPackages] = useStoredState("packages", []);
-  const [giftCertificates, setGiftCertificates] = useStoredState("gift-certificates", []);
-  const [leads, setLeads] = useStoredState("leads", []);
-  const [staff, setStaff] = useStoredState("staff", []);
-  const [expenses, setExpenses] = useStoredState("expenses", []);
-  const [discounts, setDiscounts] = useStoredState("discounts", []);
-  const [smsTemplates, setSmsTemplates] = useStoredState("sms-templates", []);
-  const [campaigns, setCampaigns] = useStoredState("campaigns", []);
-  const [branchRecords, setBranchRecords] = useStoredState("branch-records", []);
-  const [settings, setSettings] = useStoredState("settings", initialSettings);
-  const [leadIntegrations, setLeadIntegrations] = useStoredState("lead-integrations", []);
-  const [webhookEvents, setWebhookEvents] = useStoredState("lead-webhook-events", []);
-  const [auditLogs, setAuditLogs] = useStoredState("audit-logs", []);
-  const [inventoryMovements, setInventoryMovements] = useStoredState("inventory-movements", []);
-  const [selectedClientId, setSelectedClientId] = useStoredState("selected-client", "");
-  const [cart, setCart] = useStoredState("pos-cart", []);
+  const [clients, setClients] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [services, setServices] = useState([]);
+  const [inventory, setInventory] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [treatments, setTreatments] = useState([]);
+  const [packages, setPackages] = useState([]);
+  const [giftCertificates, setGiftCertificates] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [discounts, setDiscounts] = useState([]);
+  const [smsTemplates, setSmsTemplates] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [branchRecords, setBranchRecords] = useState([]);
+  const [settings, setSettings] = useState(initialSettings);
+  const [leadIntegrations, setLeadIntegrations] = useState([]);
+  const [webhookEvents, setWebhookEvents] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [inventoryMovements, setInventoryMovements] = useState([]);
+  const [selectedClientId, setSelectedClientId] = useState("");
+  const [cart, setCart] = useState([]);
   const [sendingCampaignId, setSendingCampaignId] = useState("");
   const [isPosChromeRevealed, setIsPosChromeRevealed] = useState(false);
   const isPosView = activeModule === "pos";
@@ -554,6 +576,14 @@ function App() {
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
   const posTouchStartRef = useRef(null);
   const posChromeHideTimerRef = useRef(0);
+
+  useEffect(() => {
+    try {
+      retiredSensitiveStorageKeys.forEach((key) => window.localStorage.removeItem(storageKey(key)));
+    } catch {
+      // Storage may be unavailable in private browsing; no workspace data is persisted either way.
+    }
+  }, []);
 
   const clearPosChromeHideTimer = useCallback(() => {
     if (typeof window === "undefined" || !posChromeHideTimerRef.current) return;
@@ -691,6 +721,22 @@ function App() {
     },
     [setActiveModuleState],
   );
+
+  useEffect(() => {
+    if (!session || typeof window === "undefined") return undefined;
+    const canOpenPosShortcut = (roleAccess[session.role] ?? roleAccess.Employee).includes("pos");
+    if (!canOpenPosShortcut) return undefined;
+
+    function openPosFromKeyboard(event) {
+      if (event.altKey && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        setActiveModule(activeModule === "pos" ? "my-workspace" : "pos");
+      }
+    }
+
+    window.addEventListener("keydown", openPosFromKeyboard);
+    return () => window.removeEventListener("keydown", openPosFromKeyboard);
+  }, [activeModule, session, setActiveModule]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -1014,6 +1060,28 @@ function App() {
   async function handleLogout() {
     addAudit("Signed out", `${session?.name ?? "User"} ended the workspace session.`, "Authentication");
     await logoutAccount().catch(() => {});
+    setClients([]);
+    setAppointments([]);
+    setServices([]);
+    setInventory([]);
+    setTransactions([]);
+    setTreatments([]);
+    setPackages([]);
+    setGiftCertificates([]);
+    setLeads([]);
+    setStaff([]);
+    setExpenses([]);
+    setDiscounts([]);
+    setSmsTemplates([]);
+    setCampaigns([]);
+    setBranchRecords([]);
+    setLeadIntegrations([]);
+    setWebhookEvents([]);
+    setAuditLogs([]);
+    setInventoryMovements([]);
+    setSelectedClientId("");
+    setCart([]);
+    setReceiptToPrint(null);
     setSession(null);
     setActiveModule("overview");
   }
@@ -1080,6 +1148,12 @@ function App() {
     }
     if (Array.isArray(result.movements) && result.movements.length) {
       setInventoryMovements((current) => [...result.movements, ...current].slice(0, 100));
+    }
+    for (const certificate of result.giftCertificates ?? []) {
+      upsertById(setGiftCertificates, certificate);
+    }
+    for (const pkg of result.packages ?? []) {
+      upsertById(setPackages, pkg);
     }
     applyAuditLog(result.auditLog);
     setCart([]);
@@ -1524,10 +1598,10 @@ function App() {
 
   async function publicBooking(values) {
     const result = await submitPublicBooking(values);
-    upsertById(setClients, result.client);
-    upsertById(setLeads, result.lead);
-    upsertById(setAppointments, result.appointment);
-    applyAuditLog(result.auditLog);
+    if (result.client) upsertById(setClients, result.client);
+    if (result.lead) upsertById(setLeads, result.lead);
+    if (result.appointment?.client) upsertById(setAppointments, result.appointment);
+    if (result.auditLog) applyAuditLog(result.auditLog);
     markApiConnected("SQLite connected / online booking saved");
     notify("Online booking submitted.");
   }
@@ -1542,9 +1616,21 @@ function App() {
           try {
             const result = await voidTransactionRecord(transaction.id);
             upsertById(setTransactions, result.record);
+            if (Array.isArray(result.inventory)) {
+              setInventory(result.inventory);
+            }
+            if (Array.isArray(result.movements) && result.movements.length) {
+              setInventoryMovements((current) => [...result.movements, ...current].slice(0, 100));
+            }
+            for (const certificate of result.giftCertificates ?? []) {
+              upsertById(setGiftCertificates, certificate);
+            }
+            for (const pkg of result.packages ?? []) {
+              upsertById(setPackages, pkg);
+            }
             applyAuditLog(result.auditLog);
             markApiConnected("SQLite connected / transaction voided");
-            notify("Transaction voided.", "warning");
+            notify("Transaction voided. Stock and prepaid tenders restored.", "warning");
           } catch (error) {
             notify(error.message || "Unable to void transaction.", "error");
           }
@@ -1569,6 +1655,11 @@ function App() {
   }
 
   if (!session) {
+    const publicParams = new URLSearchParams(window.location.search);
+    const invitationToken = publicParams.get("invitation");
+    if (invitationToken) return <AcceptInvitationScreen token={invitationToken} settings={settings} />;
+    const resetToken = publicParams.get("reset");
+    if (resetToken) return <ResetPasswordScreen token={resetToken} />;
     return <LoginScreen onLogin={handleLogin} settings={settings} />;
   }
 
@@ -1903,9 +1994,12 @@ function App() {
           {activeModule === "staff" && (
             <StaffModule
               staff={staff}
+              session={session}
               openModal={openModal}
               toggleAttendance={toggleAttendance}
               globalSearch={globalSearch}
+              applyAuditLog={applyAuditLog}
+              notify={notify}
             />
           )}
           {activeModule === "branches" && (
@@ -1998,6 +2092,8 @@ function App() {
         inventory={inventory}
         settings={settings}
         templates={smsTemplates}
+        packages={packages}
+        giftCertificates={giftCertificates}
       />
 
       {confirm && <ConfirmDialog confirm={confirm} onCancel={() => setConfirm(null)} />}
@@ -2411,11 +2507,12 @@ function AccountMenu({ session, onLogout }) {
 }
 
 function LoginScreen({ onLogin, settings }) {
-  const [email, setEmail] = useState("owner@mace.test");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState("");
 
   async function submit(event) {
     event.preventDefault();
@@ -2425,6 +2522,20 @@ function LoginScreen({ onLogin, settings }) {
       await onLogin(email, password);
     } catch (loginError) {
       setError(loginError.message || "Unable to sign in.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function sendReset() {
+    setError("");
+    setForgotMessage("");
+    setSubmitting(true);
+    try {
+      const result = await requestPasswordReset(email);
+      setForgotMessage(result.message);
+    } catch (resetError) {
+      setError(resetError.message || "Unable to request a password reset.");
     } finally {
       setSubmitting(false);
     }
@@ -2456,15 +2567,38 @@ function LoginScreen({ onLogin, settings }) {
             Forgot password
           </button>
           {forgotOpen && (
-            <div className="inline-state warning">
-              <AlertCircle size={17} aria-hidden="true" />
-              <span>Ask an administrator to reset the password for {email || "your account"}.</span>
-            </div>
+            <div className="inline-state warning"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || submitting} onClick={sendReset}>Send reset link</button></div>
           )}
         </form>
       </section>
     </main>
   );
+}
+
+function ResetPasswordScreen({ token }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (password !== confirmPassword) return setError("Passwords do not match.");
+    setSubmitting(true);
+    setError("");
+    try {
+      await resetAccountPassword(token, password);
+      window.history.replaceState({}, "", window.location.pathname);
+      setDone(true);
+    } catch (resetError) {
+      setError(resetError.message || "Unable to reset the password.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />{done ? <><p className="eyebrow">Password updated</p><h2>Your account is secure</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Secure password reset</p><h2>Create a new password</h2><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p><label><span>New password</span><input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label><span>Confirm password</span><input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}<button className="primary-button full" disabled={submitting || !password || !confirmPassword}>{submitting ? "Updating password..." : "Reset password"}</button></>}</form></section></main>;
 }
 
 function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
@@ -2531,25 +2665,25 @@ function SystemStrip({ apiState, isBooting, settings, stats }) {
     apiState.status === "connected" ? "ready" : apiState.status === "offline" ? "alert" : "loading";
 
   return (
-    <div className="system-strip">
-      <div className={`system-pill ${isBooting ? "loading" : "ready"}`}>
+    <div className="system-strip" aria-label="System status" aria-live="polite">
+      <div className={`system-pill system-pill-workspace ${isBooting ? "loading" : "ready"}`}>
         <Database size={16} aria-hidden="true" />
         <span>{isBooting ? "Preparing workspace records..." : "Workspace ready"}</span>
       </div>
-      <div className={`system-pill ${databaseTone}`}>
+      <div className={`system-pill system-pill-database ${databaseTone}`}>
         <Database size={16} aria-hidden="true" />
         <span>{apiState.message}</span>
       </div>
-      <div className="system-pill">
+      <div className="system-pill system-pill-secondary">
         <ShieldCheck size={16} aria-hidden="true" />
         <span>Role-based access active</span>
       </div>
-      <div className="system-pill">
+      <div className="system-pill system-pill-secondary">
         <CircleDollarSign size={16} aria-hidden="true" />
         <span>{settings.taxMode} / {settings.currency}</span>
       </div>
       {stats.lowStock.length > 0 && (
-        <div className="system-pill alert">
+        <div className="system-pill system-pill-inventory alert">
           <AlertCircle size={16} aria-hidden="true" />
           <span>{stats.lowStock.length} inventory alert{stats.lowStock.length > 1 ? "s" : ""}</span>
         </div>
@@ -3138,14 +3272,14 @@ function POSModule({
   const [catalogPage, setCatalogPage] = useState(1);
   const [checkoutStep, setCheckoutStep] = useState("review");
   const [isSaleContextOpen, setIsSaleContextOpen] = useState(false);
+  const [catalogFocusIndex, setCatalogFocusIndex] = useState(0);
+  const [cartFocusIndex, setCartFocusIndex] = useState(0);
+  const catalogSearchRef = useRef(null);
+  const catalogItemRefs = useRef([]);
+  const cartRowRefs = useRef([]);
+  const saleClientRef = useRef(null);
   const canManagePosCatalog = ["Super Admin", "Owner", "Branch Manager"].includes(sessionRole);
   const posScreens = canManagePosCatalog ? ["Checkout", "Service Prices"] : ["Checkout"];
-  const posPaymentOptions = [
-    { label: "Cash", method: "Cash", icon: CircleDollarSign },
-    { label: "Card", method: "Credit Card", icon: CreditCard },
-    { label: "Split", method: "Cash", icon: HandCoins, split: true },
-    { label: "Package", method: "Gift Certificate", icon: Gift },
-  ];
 
   useEffect(() => {
     if (!canManagePosCatalog && posScreen !== "Checkout") {
@@ -3209,6 +3343,106 @@ function POSModule({
       setCheckoutStep("review");
     }
   }, [cart.length]);
+
+  useEffect(() => {
+    setCatalogFocusIndex(0);
+  }, [catalogPage, catalogQuery, catalogTab, categoryFilter]);
+
+  useEffect(() => {
+    setCartFocusIndex((current) => Math.max(0, Math.min(current, cart.length - 1)));
+    cartRowRefs.current = cartRowRefs.current.slice(0, cart.length);
+  }, [cart.length]);
+
+  useEffect(() => {
+    if (!isSaleContextOpen) return;
+    window.requestAnimationFrame(() => saleClientRef.current?.focus());
+  }, [isSaleContextOpen]);
+
+  useEffect(() => {
+    if (posScreen !== "Checkout") return undefined;
+
+    function handlePosShortcut(event) {
+      if (document.querySelector(".modal-backdrop")) return;
+      const target = event.target;
+      const isEditing = target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName);
+
+      if (event.key === "F2" || (event.key === "/" && !isEditing)) {
+        event.preventDefault();
+        catalogSearchRef.current?.focus();
+        catalogSearchRef.current?.select();
+        return;
+      }
+      if (isEditing) return;
+
+      if (event.key === "F3") {
+        event.preventDefault();
+        setCatalogTab((current) => current === "Services" ? "Products" : "Services");
+        setCategoryFilter("All");
+        setCatalogPage(1);
+        return;
+      }
+      if (event.key === "F4") {
+        event.preventDefault();
+        setIsSaleContextOpen(true);
+        return;
+      }
+      if (event.key === "F6" && cart.length) {
+        event.preventDefault();
+        const nextIndex = Math.min(cartFocusIndex, cart.length - 1);
+        setCartFocusIndex(nextIndex);
+        cartRowRefs.current[nextIndex]?.focus();
+        return;
+      }
+      if (event.key === "F8" || (event.ctrlKey && event.key === "Enter")) {
+        event.preventDefault();
+        if (cart.length) setCheckoutStep("payment");
+        return;
+      }
+      if (checkoutStep === "payment" && /^[1-4]$/.test(event.key)) {
+        const option = posPaymentOptions[Number(event.key) - 1];
+        event.preventDefault();
+        openPayment({
+          clientId,
+          clientName: client?.fullName ?? "Walk-in",
+          branch,
+          staff: staffName,
+          cart,
+          subtotal,
+          discount,
+          discountAmount,
+          total,
+          notes: "",
+          paymentMethod: option.method,
+          paymentLabel: option.label,
+          splitPayment: option.split,
+        });
+        return;
+      }
+      if (event.key === "Escape" && checkoutStep === "payment") {
+        event.preventDefault();
+        setCheckoutStep("review");
+        return;
+      }
+      if (event.key === "[" && catalogPage > 1) {
+        event.preventDefault();
+        setCatalogPage((current) => Math.max(1, current - 1));
+        return;
+      }
+      if (event.key === "]" && catalogPage < catalogPageCount) {
+        event.preventDefault();
+        setCatalogPage((current) => Math.min(catalogPageCount, current + 1));
+        return;
+      }
+      if (event.ctrlKey && event.shiftKey && event.key === "Backspace" && cart.length) {
+        event.preventDefault();
+        setCart([]);
+        setCheckoutStep("review");
+      }
+    }
+
+    window.addEventListener("keydown", handlePosShortcut);
+    return () => window.removeEventListener("keydown", handlePosShortcut);
+  }, [branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, clientId, discount, discountAmount, openPayment, posScreen, setCart, staffName, subtotal, total]);
 
   function createPaymentDraft(patch = {}) {
     return {
@@ -3299,6 +3533,57 @@ function POSModule({
     });
   }
 
+  function focusCatalogItem(index) {
+    const itemCount = catalogTab === "Services" ? pagedServices.length : pagedProducts.length;
+    if (!itemCount) return;
+    const nextIndex = (index + itemCount) % itemCount;
+    setCatalogFocusIndex(nextIndex);
+    catalogItemRefs.current[nextIndex]?.focus();
+  }
+
+  function handleCatalogItemKeyDown(event, index) {
+    if (["ArrowRight", "ArrowDown"].includes(event.key)) {
+      event.preventDefault();
+      focusCatalogItem(index + 1);
+    } else if (["ArrowLeft", "ArrowUp"].includes(event.key)) {
+      event.preventDefault();
+      focusCatalogItem(index - 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      focusCatalogItem(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      const itemCount = catalogTab === "Services" ? pagedServices.length : pagedProducts.length;
+      focusCatalogItem(itemCount - 1);
+    }
+  }
+
+  function focusCartRow(index) {
+    if (!cart.length) return;
+    const nextIndex = (index + cart.length) % cart.length;
+    setCartFocusIndex(nextIndex);
+    cartRowRefs.current[nextIndex]?.focus();
+  }
+
+  function handleCartRowKeyDown(event, item, index) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusCartRow(index + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusCartRow(index - 1);
+    } else if (["+", "="].includes(event.key)) {
+      event.preventDefault();
+      updateCartQty(item.key, Number(item.qty || 1) + 1);
+    } else if (event.key === "-") {
+      event.preventDefault();
+      updateCartQty(item.key, Math.max(1, Number(item.qty || 1) - 1));
+    } else if (["Delete", "Backspace"].includes(event.key)) {
+      event.preventDefault();
+      removeCartItem(item.key);
+    }
+  }
+
   return (
     <section className="module-grid pos-layout">
       <div className="surface-panel wide pos-catalog-panel">
@@ -3334,6 +3619,14 @@ function POSModule({
 
         {posScreen === "Checkout" ? (
           <>
+            <div className="pos-shortcut-bar" aria-label="POS keyboard shortcuts">
+              <span><kbd>F2</kbd> Search</span>
+              <span><kbd>F3</kbd> Catalog</span>
+              <span><kbd>F4</kbd> Customer</span>
+              <span><kbd>F6</kbd> Cart</span>
+              <span><kbd>F8</kbd> Pay</span>
+              <span><kbd>Alt</kbd>+<kbd>P</kbd> POS / workspace</span>
+            </div>
             <div className="pos-catalog-toolbar">
               <div className="segmented-control" role="tablist" aria-label="POS catalog">
                 {["Services", "Products"].map((tab) => (
@@ -3345,10 +3638,22 @@ function POSModule({
               <label className="catalog-search">
                 <Search size={17} aria-hidden="true" />
                 <input
+                  ref={catalogSearchRef}
                   aria-label="Search POS catalog"
+                  aria-keyshortcuts="F2 /"
                   placeholder={`Search ${catalogTab.toLowerCase()}`}
                   value={catalogQuery}
                   onChange={(event) => setCatalogQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      focusCatalogItem(0);
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      setCatalogQuery("");
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
               </label>
               {catalogTab === "Products" && canManagePosCatalog && (
@@ -3374,10 +3679,14 @@ function POSModule({
 
             {catalogTab === "Services" ? (
               <div className="service-grid pos-service-grid">
-                {pagedServices.map((service) => (
+                {pagedServices.map((service, index) => (
                   <button
                     className={`service-card pos-service-card ${cart.some((item) => item.key === `service-${service.id}`) ? "in-cart" : ""}`}
                     key={service.id}
+                    ref={(node) => { catalogItemRefs.current[index] = node; }}
+                    tabIndex={catalogFocusIndex === index ? 0 : -1}
+                    onFocus={() => setCatalogFocusIndex(index)}
+                    onKeyDown={(event) => handleCatalogItemKeyDown(event, index)}
                     onClick={() => addCartItem({ key: `service-${service.id}`, serviceId: service.id, type: "Service", name: service.name, category: service.category, price: service.price })}
                     type="button"
                   >
@@ -3395,10 +3704,14 @@ function POSModule({
               </div>
             ) : (
               <div className="service-grid pos-service-grid">
-                {pagedProducts.map((item) => (
+                {pagedProducts.map((item, index) => (
                   <button
                     className={`service-card pos-service-card pos-product-card ${cart.some((entry) => entry.key === `product-${item.id}`) ? "in-cart" : ""}`}
                     key={item.id}
+                    ref={(node) => { catalogItemRefs.current[index] = node; }}
+                    tabIndex={catalogFocusIndex === index ? 0 : -1}
+                    onFocus={() => setCatalogFocusIndex(index)}
+                    onKeyDown={(event) => handleCatalogItemKeyDown(event, index)}
                     onClick={() => addCartItem({ key: `product-${item.id}`, inventoryId: item.id, type: "Product", name: item.item, category: item.category, price: item.price })}
                     type="button"
                     disabled={item.stock <= 0}
@@ -3477,8 +3790,18 @@ function POSModule({
           </button>
         </div>
         <div className="cart-list">
-          {cart.map((item) => (
-            <article className="cart-row" key={item.key}>
+          {cart.map((item, index) => (
+            <article
+              className={`cart-row ${cartFocusIndex === index ? "keyboard-selected" : ""}`}
+              key={item.key}
+              ref={(node) => { cartRowRefs.current[index] = node; }}
+              role="group"
+              aria-label={`${item.name}, quantity ${Number(item.qty || 1)}`}
+              aria-keyshortcuts="ArrowUp ArrowDown + - Delete"
+              tabIndex={cartFocusIndex === index ? 0 : -1}
+              onFocus={() => setCartFocusIndex(index)}
+              onKeyDown={(event) => handleCartRowKeyDown(event, item, index)}
+            >
               <div>
                 <strong>{item.name}</strong>
                 <span>{item.type} / {item.category}</span>
@@ -3489,6 +3812,7 @@ function POSModule({
                   onClick={() => updateCartQty(item.key, Number(item.qty || 1) - 1)}
                   disabled={Number(item.qty || 1) <= 1}
                   title={`Decrease ${item.name} quantity`}
+                  aria-label={`Decrease ${item.name} quantity`}
                 >
                   <Minus size={14} aria-hidden="true" />
                 </button>
@@ -3497,12 +3821,13 @@ function POSModule({
                   type="button"
                   onClick={() => updateCartQty(item.key, Number(item.qty || 1) + 1)}
                   title={`Increase ${item.name} quantity`}
+                  aria-label={`Increase ${item.name} quantity`}
                 >
                   <Plus size={14} aria-hidden="true" />
                 </button>
               </div>
               <b>{money.format(Number(item.price) * Number(item.qty || 1))}</b>
-              <button type="button" onClick={() => removeCartItem(item.key)} title={`Remove ${item.name}`}>
+              <button type="button" onClick={() => removeCartItem(item.key)} title={`Remove ${item.name}`} aria-label={`Remove ${item.name}`}>
                 <Trash2 size={16} aria-hidden="true" />
               </button>
             </article>
@@ -3538,12 +3863,13 @@ function POSModule({
           {checkoutStep === "payment" ? (
             <>
               <div className="payment-options" aria-label="Select payment method">
-                {posPaymentOptions.map((option) => {
+                {posPaymentOptions.map((option, index) => {
                   const Icon = option.icon;
                   return (
-                    <button type="button" key={option.label} onClick={() => choosePayment(option)}>
+                    <button type="button" key={option.label} onClick={() => choosePayment(option)} aria-keyshortcuts={`${index + 1}`}>
                       <Icon size={16} />
                       {option.label}
+                      <kbd>{index + 1}</kbd>
                     </button>
                   );
                 })}
@@ -3557,11 +3883,12 @@ function POSModule({
               <button className="primary-button full" type="button" onClick={showPaymentStep} disabled={!cart.length}>
                 <Check size={17} aria-hidden="true" />
                 Complete transaction
+                <kbd>F8</kbd>
               </button>
               <button className="ghost-button full" type="button" onClick={() => {
                 setCart([]);
                 setCheckoutStep("review");
-              }}>
+              }} title="Keyboard: Ctrl+Shift+Backspace">
                 Clear cart
               </button>
             </>
@@ -3599,7 +3926,18 @@ function POSModule({
       </div>
 
       {isSaleContextOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select sale details">
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Select sale details"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" || (event.ctrlKey && event.key === "Enter")) {
+              event.preventDefault();
+              setIsSaleContextOpen(false);
+            }
+          }}
+        >
           <div className="modal-card pos-context-modal">
             <button className="modal-close" type="button" onClick={() => setIsSaleContextOpen(false)} aria-label="Close sale details">
               <X size={18} aria-hidden="true" />
@@ -3608,7 +3946,7 @@ function POSModule({
             <div className="pos-context-fields">
               <label className="stacked-field">
                 <span>Select client</span>
-                <select value={clientId} onChange={(event) => setClientId(event.target.value)}>
+                <select ref={saleClientRef} value={clientId} onChange={(event) => setClientId(event.target.value)}>
                   <option value="">Walk-in / Anonymous</option>
                   {clients.map((item) => (
                     <option key={item.id} value={item.id}>{item.fullName}</option>
@@ -3629,6 +3967,7 @@ function POSModule({
               </label>
             </div>
             <div className="modal-actions">
+              <span className="modal-keyboard-hint"><kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> done</span>
               <button className="primary-button" type="button" onClick={() => setIsSaleContextOpen(false)}>
                 <Check size={17} aria-hidden="true" />
                 Done
@@ -5564,7 +5903,7 @@ function LeadsModule({
       setQuickNote("");
       setConversionNotes("");
     }
-  }, [branches, selectedLead?.id, services, staff]);
+  }, [branches, selectedLead?.id, selectedLead?.branch, selectedLead?.interest, selectedLead?.lossReason, selectedLead?.nextAction, selectedLead?.nextFollowUpAt, selectedLead?.nextStep, selectedLead?.owner, selectedLead?.preferredChannel, selectedLead?.preferredDate, selectedLead?.preferredTime, services, staff]);
 
   async function runLeadAction(label, action) {
     setBusyAction(label);
@@ -6306,7 +6645,41 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
+function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
+  const canInvite = ["Owner", "Super Admin", "Admin"].includes(session.role);
+  const [invitations, setInvitations] = useState([]);
+  const [showInvite, setShowInvite] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const roles = Object.keys(roleAccess).filter((role) => session.role === "Owner" || role !== "Owner");
+  const [form, setForm] = useState({ name: "", email: "", role: "Doctor", branch: session.branch || "All branches", department: "", specialty: "", message: "" });
+
+  const refresh = useCallback(async () => {
+    if (!canInvite) return;
+    try { setInvitations((await loadInvitations()).invitations || []); } catch (loadError) { notify(loadError.message, "error"); }
+  }, [canInvite, notify]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function submitInvitation(event) {
+    event.preventDefault(); setSaving(true); setError("");
+    try {
+      const result = await createInvitation(form);
+      setInvitations((current) => [result.invitation, ...current]);
+      applyAuditLog(result.auditLog);
+      setShowInvite(false);
+      setForm({ name: "", email: "", role: "Doctor", branch: session.branch || "All branches", department: "", specialty: "", message: "" });
+      notify(result.invitation.status === "Failed" ? "Invitation saved, but email delivery failed. Configure SMTP and resend." : "Invitation sent.", result.invitation.status === "Failed" ? "warning" : "success");
+    } catch (saveError) { setError(saveError.message); } finally { setSaving(false); }
+  }
+
+  async function runInvitationAction(action, invitation) {
+    try {
+      const result = action === "revoke" ? await revokeInvitation(invitation.id) : await resendInvitation(invitation.id);
+      setInvitations((current) => current.map((item) => item.id === result.invitation.id ? result.invitation : item));
+      applyAuditLog(result.auditLog); notify(action === "revoke" ? "Invitation revoked." : "Invitation resent.");
+    } catch (actionError) { notify(actionError.message, "error"); }
+  }
   return (
     <section className="module-grid staff-management-grid">
       <div className="surface-panel">
@@ -6315,9 +6688,10 @@ function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
           rows={staff}
           globalSearch={globalSearch}
           toolbarActions={(
-            <button className="primary-button small" type="button" onClick={() => openModal("staff")}>
-              <Plus size={16} /> Add staff
-            </button>
+            <div className="inline-actions">
+              {canInvite && <button className="primary-button small" type="button" onClick={() => setShowInvite(true)}><Mail size={16} /> Invite member</button>}
+              <button className="secondary-button small" type="button" onClick={() => openModal("staff")}><Plus size={16} /> Add staff</button>
+            </div>
           )}
           columns={[
             { key: "name", label: "Name", className: "staff-name-column", render: (row) => <div className="staff-name-with-photo"><ClientAvatar client={{ fullName: row.name, photo: row.photo }} size="small" /><strong>{row.name}</strong></div> },
@@ -6341,8 +6715,53 @@ function StaffModule({ staff, openModal, toggleAttendance, globalSearch }) {
           ]}
         />
       </div>
+      {canInvite && <div className="surface-panel">
+        <SectionHeader icon={Mail} title="Member Invitations" action={`${invitations.length} records`} />
+        <SmartTable rows={invitations} columns={[
+          { key: "name", label: "Member", render: (row) => <div><strong>{row.name}</strong><small>{row.email}</small></div> },
+          { key: "role", label: "Role" },
+          { key: "department", label: "Department / specialty", render: (row) => row.department || row.specialty || "—" },
+          { key: "expiresAt", label: "Expires", render: (row) => new Date(row.expiresAt).toLocaleDateString("en-PH") },
+          { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
+          { key: "actions", label: "Actions", render: (row) => <div className="inline-actions">{["Pending", "Expired", "Failed"].includes(row.status) && <button type="button" onClick={() => runInvitationAction("resend", row)}><RefreshCw size={14} /> Resend</button>}{row.status === "Pending" && <button type="button" onClick={() => runInvitationAction("revoke", row)}><X size={14} /> Revoke</button>}</div>, exportValue: () => "" },
+        ]} />
+      </div>}
+      {showInvite && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Invite member"><form className="modal-card invitation-modal" onSubmit={submitInvitation}>
+        <button className="modal-close" type="button" onClick={() => setShowInvite(false)}><X size={18} /></button>
+        <SectionHeader icon={Mail} title="Invite organization member" action="Secure link · 7 days" />
+        <div className="form-grid">
+          <label><span>Name</span><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <label><span>Email</span><input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+          <label><span>Role</span><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+          <label><span>Branch</span><input value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} /></label>
+          <label><span>Department</span><input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
+          <label><span>Specialty</span><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></label>
+          <label className="full-span"><span>Optional message</span><textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} /></label>
+        </div>
+        {error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}
+        <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowInvite(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Sending..." : "Send invitation"}</button></div>
+      </form></div>}
     </section>
   );
+}
+
+function AcceptInvitationScreen({ token }) {
+  const [invitation, setInvitation] = useState(null);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { inspectInvitation(token).then((result) => setInvitation(result.invitation)).catch((e) => setError(e.message)).finally(() => setLoading(false)); }, [token]);
+  async function submit(event) {
+    event.preventDefault(); setError("");
+    if (password !== confirmPassword) return setError("Passwords do not match.");
+    setLoading(true);
+    try { await acceptInvitation(token, password); setDone(true); window.history.replaceState({}, "", window.location.pathname); } catch (e) { setError(e.message); } finally { setLoading(false); }
+  }
+  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+    {done ? <><p className="eyebrow">Invitation accepted</p><h2>Your workspace is ready</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Organization invitation</p><h2>{loading && !invitation ? "Checking invitation..." : `Welcome, ${invitation?.name || "member"}`}</h2>{invitation && <p className="login-helper">Join as {invitation.role} · link expires {new Date(invitation.expiresAt).toLocaleDateString("en-PH")}</p>}<label><span>Create password</span><input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label><span>Confirm password</span><input type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading || !invitation || invitation.status !== "Pending"}>{loading ? "Joining..." : "Accept invitation"}</button></>}
+  </form></section></main>;
 }
 
 function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, onCreateBranch }) {
@@ -6357,8 +6776,14 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     event.preventDefault();
     setSaving(true);
     try {
+      let image = form.image;
+      if (image.startsWith("data:")) {
+        const uploaded = await uploadImageAsset(image, "branch-photo", form.name);
+        image = uploaded.asset.url;
+      }
       await onCreateBranch({
         ...form,
+        image,
         roomCount: Number(form.roomCount) || 0,
         devices: form.devices.split(",").map((item) => item.trim()).filter(Boolean),
       });
@@ -6748,6 +7173,7 @@ function BookingPortal({ services, onSubmit }) {
     email: "",
     concern: "",
     marketingOptIn: true,
+    privacyConsent: false,
   });
   const service = services.find((item) => item.id === form.serviceId);
 
@@ -6809,6 +7235,7 @@ function BookingPortal({ services, onSubmit }) {
             <label><span>Email</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
             <label className="span-2"><span>Concern or goal</span><textarea value={form.concern} onChange={(event) => setForm({ ...form, concern: event.target.value })} placeholder="Tell us what you want to improve or ask about" /></label>
             <label className="checkbox-field"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => setForm({ ...form, marketingOptIn: event.target.checked })} /> <span>I agree to receive appointment reminders and care updates.</span></label>
+            <label className="checkbox-field"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => setForm({ ...form, privacyConsent: event.target.checked })} /> <span>I consent to the collection and use of my information for this booking.</span></label>
             <button className="primary-button" type="button" onClick={() => setStep(4)}>Review</button>
           </div>
         )}
@@ -6817,7 +7244,7 @@ function BookingPortal({ services, onSubmit }) {
             <Sparkles size={24} />
             <h3>{form.fullName ? "Ready to submit" : "Complete your details"}</h3>
             <p>{service?.name} at {form.branch} on {form.date} at {form.time}</p>
-            <button className="primary-button" type="submit" disabled={saving || !form.fullName || !form.mobile}>
+            <button className="primary-button" type="submit" disabled={saving || !form.fullName || !form.mobile || !form.privacyConsent}>
               {saving ? "Submitting..." : "Submit booking request"}
             </button>
           </div>
@@ -6987,6 +7414,8 @@ function ModalHost({
   inventory,
   settings,
   templates,
+  packages,
+  giftCertificates,
 }) {
   if (!modal) return null;
 
@@ -7008,7 +7437,15 @@ function ModalHost({
   const canManageProductPhotos = ["Owner", "Super Admin"].includes(session?.role);
 
   if (modal.type === "payment") {
-    return <PaymentModal draft={modal.payload} onClose={closeModal} onSubmit={(payment) => completeTransaction(modal.payload, payment)} />;
+    return (
+      <PaymentModal
+        draft={modal.payload}
+        packages={packages}
+        giftCertificates={giftCertificates}
+        onClose={closeModal}
+        onSubmit={(payment) => completeTransaction(modal.payload, payment)}
+      />
+    );
   }
 
   if (modal.type === "appointment") {
@@ -7432,7 +7869,7 @@ function ModalHost({
   return <EntityModal config={config} onClose={closeModal} />;
 }
 
-function PaymentModal({ draft, onClose, onSubmit }) {
+function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, onSubmit }) {
   const [payments, setPayments] = useState(() => {
     if (draft.splitPayment) {
       const firstAmount = Math.floor(Number(draft.total || 0) / 2);
@@ -7449,11 +7886,54 @@ function PaymentModal({ draft, onClose, onSubmit }) {
   const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const change = Math.max(0, paid - draft.total);
 
+  const today = todayDate();
+  const branchAccepts = (recordBranch) => !recordBranch || recordBranch === "All branches" || recordBranch === draft.branch;
+  const usableCertificates = giftCertificates.filter((certificate) =>
+    certificate.status === "Active"
+    && Number(certificate.balance || 0) > 0
+    && (!certificate.expires || certificate.expires >= today)
+    && branchAccepts(certificate.branch));
+  const usablePackages = packages.filter((pkg) =>
+    pkg.status === "Active"
+    && Number(pkg.used || 0) < Number(pkg.sessions || 0)
+    && (!pkg.expires || pkg.expires >= today)
+    && (pkg.transferable || branchAccepts(pkg.branch))
+    && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
+  const tenderIncomplete = payments.some((payment) =>
+    (payment.method === "Gift Certificate" && !payment.giftCertificateId)
+    || (payment.method === "Package" && !payment.packageId));
+  const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete;
+
   function updatePayment(index, patch) {
     setPayments((current) => current.map((payment, itemIndex) => (itemIndex === index ? { ...payment, ...patch } : payment)));
   }
 
-  async function submitPayment() {
+  function remainingBesides(index) {
+    const others = payments.reduce((sum, payment, itemIndex) => (itemIndex === index ? sum : sum + Number(payment.amount || 0)), 0);
+    return Math.max(0, Number(draft.total || 0) - others);
+  }
+
+  function changeMethod(index, method) {
+    updatePayment(index, { method, giftCertificateId: undefined, packageId: undefined });
+  }
+
+  function chooseCertificate(index, certificateId) {
+    const certificate = usableCertificates.find((item) => item.id === certificateId);
+    updatePayment(index, {
+      giftCertificateId: certificateId || undefined,
+      ...(certificate ? { amount: Math.min(Number(certificate.balance || 0), remainingBesides(index)) } : {}),
+    });
+  }
+
+  function choosePackage(index, packageId) {
+    updatePayment(index, {
+      packageId: packageId || undefined,
+      ...(packageId ? { amount: remainingBesides(index) } : {}),
+    });
+  }
+
+  const submitPayment = useCallback(async () => {
+    if (saving || !canPost) return;
     setSaving(true);
     setError("");
     try {
@@ -7463,10 +7943,25 @@ function PaymentModal({ draft, onClose, onSubmit }) {
     } finally {
       setSaving(false);
     }
-  }
+  }, [canPost, notes, onSubmit, payments, saving]);
+
+  useEffect(() => {
+    function handlePaymentShortcut(event) {
+      if (event.key === "Escape" && !saving) {
+        event.preventDefault();
+        onClose();
+      } else if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        submitPayment();
+      }
+    }
+
+    window.addEventListener("keydown", handlePaymentShortcut);
+    return () => window.removeEventListener("keydown", handlePaymentShortcut);
+  }, [onClose, saving, submitPayment]);
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Payment form">
       <div className="modal-card payment-modal">
         <button className="modal-close" type="button" onClick={onClose} aria-label="Close payment form"><X size={18} /></button>
         <ModalHeader icon={CreditCard} title="Payment Form" action={draft.clientName} />
@@ -7478,28 +7973,68 @@ function PaymentModal({ draft, onClose, onSubmit }) {
         </div>
         <div className="payment-list">
           {payments.map((payment, index) => (
-            <div className="payment-row" key={index}>
-              <select
-                aria-label={`Payment ${index + 1} method`}
-                value={payment.method}
-                onChange={(event) => updatePayment(index, { method: event.target.value })}
-              >
-                {paymentMethods.map((method) => <option key={method}>{method}</option>)}
-              </select>
-              <input
-                aria-label={`Payment ${index + 1} amount`}
-                type="number"
-                value={payment.amount}
-                onChange={(event) => updatePayment(index, { amount: Number(event.target.value) })}
-              />
-              {payments.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => setPayments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                  aria-label={`Remove payment ${index + 1}`}
+            <div className="payment-row-group" key={index}>
+              <div className="payment-row">
+                <select
+                  aria-label={`Payment ${index + 1} method`}
+                  value={payment.method}
+                  onChange={(event) => changeMethod(index, event.target.value)}
                 >
-                  <X size={16} />
-                </button>
+                  {posPaymentMethods.map((method) => <option key={method}>{method}</option>)}
+                </select>
+                <input
+                  aria-label={`Payment ${index + 1} amount`}
+                  type="number"
+                  autoFocus={index === 0}
+                  value={payment.amount}
+                  onChange={(event) => updatePayment(index, { amount: Number(event.target.value) })}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                {payments.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setPayments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                    aria-label={`Remove payment ${index + 1}`}
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+              {payment.method === "Gift Certificate" && (
+                <select
+                  className="payment-tender-select"
+                  aria-label={`Payment ${index + 1} gift certificate`}
+                  value={payment.giftCertificateId || ""}
+                  onChange={(event) => chooseCertificate(index, event.target.value)}
+                >
+                  <option value="">Select gift certificate...</option>
+                  {usableCertificates.map((certificate) => (
+                    <option key={certificate.id} value={certificate.id}>
+                      {certificate.code} - {money.format(certificate.balance)} available
+                    </option>
+                  ))}
+                </select>
+              )}
+              {payment.method === "Package" && (
+                <select
+                  className="payment-tender-select"
+                  aria-label={`Payment ${index + 1} package`}
+                  value={payment.packageId || ""}
+                  onChange={(event) => choosePackage(index, event.target.value)}
+                >
+                  <option value="">Select client package (1 session)...</option>
+                  {usablePackages.map((pkg) => (
+                    <option key={pkg.id} value={pkg.id}>
+                      {pkg.name} - {Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left
+                    </option>
+                  ))}
+                </select>
+              )}
+              {payment.method === "Gift Certificate" && !usableCertificates.length && (
+                <span className="payment-tender-hint">No active gift certificates for this branch.</span>
+              )}
+              {payment.method === "Package" && !usablePackages.length && (
+                <span className="payment-tender-hint">No active packages for this client at this branch.</span>
               )}
             </div>
           ))}
@@ -7517,8 +8052,9 @@ function PaymentModal({ draft, onClose, onSubmit }) {
           <div><span>Status</span><strong>{paid >= draft.total ? "Paid" : "Partial"}</strong></div>
         </div>
         <div className="modal-actions">
+          <span className="modal-keyboard-hint"><kbd>Esc</kbd> cancel · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> post</span>
           <button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="primary-button" type="button" onClick={submitPayment} disabled={saving || !payments.some((payment) => Number(payment.amount) > 0)}>
+          <button className="primary-button" type="button" onClick={submitPayment} disabled={saving || !canPost} aria-keyshortcuts="Control+Enter">
             <Check size={17} /> {saving ? "Posting..." : "Post payment"}
           </button>
         </div>
@@ -7711,6 +8247,20 @@ function FormField({ field: item, form, required = false, value, onChange }) {
     if (!file || !file.type.startsWith("image/")) return;
     const isProductPhoto = item.name === "image";
 
+    const storeImage = async (dataUrl) => {
+      try {
+        const category = item.name === "image"
+          ? "inventory-photo"
+          : form.role
+            ? "staff-photo"
+            : "client-photo";
+        const uploaded = await uploadImageAsset(dataUrl, category, form.branch || "All branches");
+        onChange(uploaded.asset.url);
+      } catch (error) {
+        window.alert(error.message || "The image could not be uploaded securely.");
+      }
+    };
+
     const reader = new FileReader();
     reader.onload = () => {
       const image = new window.Image();
@@ -7728,13 +8278,13 @@ function FormField({ field: item, form, required = false, value, onChange }) {
         canvas.height = targetHeight;
         const context = canvas.getContext("2d");
         if (!context) {
-          onChange(String(reader.result ?? ""));
+          void storeImage(String(reader.result ?? ""));
           return;
         }
         context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, targetWidth, targetHeight);
-        onChange(canvas.toDataURL("image/jpeg", 0.84));
+        void storeImage(canvas.toDataURL("image/jpeg", 0.84));
       };
-      image.onerror = () => onChange(String(reader.result ?? ""));
+      image.onerror = () => { void storeImage(String(reader.result ?? "")); };
       image.src = String(reader.result ?? "");
     };
     reader.readAsDataURL(file);

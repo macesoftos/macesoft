@@ -1,33 +1,13 @@
 const apiBase = "";
-let apiSessionContext = null;
 
-export function setApiSessionContext(session) {
-  apiSessionContext = session
-    ? {
-        id: session.id,
-        name: session.name,
-        role: session.role,
-        branch: session.branch,
-      }
-    : null;
-}
-
-function sessionHeaders() {
-  if (!apiSessionContext) return {};
-  return {
-    "X-Mace-User-Id": apiSessionContext.id ?? "",
-    "X-Mace-User-Name": apiSessionContext.name ?? "",
-    "X-Mace-Role": apiSessionContext.role ?? "",
-    "X-Mace-Branch": apiSessionContext.branch ?? "All branches",
-  };
-}
+export function setApiSessionContext() {}
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${apiBase}${path}`, {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...sessionHeaders(),
+      "X-Mace-Request": "app",
       ...(options.headers ?? {}),
     },
     ...options,
@@ -59,6 +39,14 @@ export function loginAccount(email, password) {
   });
 }
 
+export function requestPasswordReset(email) {
+  return requestJson("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export function resetAccountPassword(token, newPassword) {
+  return requestJson("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ token, newPassword }) });
+}
+
 export function restoreAccountSession() {
   return requestJson("/api/auth/session");
 }
@@ -74,6 +62,30 @@ export function changeAccountPassword(currentPassword, newPassword) {
   });
 }
 
+export function loadInvitations() {
+  return requestJson("/api/invitations");
+}
+
+export function createInvitation(payload) {
+  return requestJson("/api/invitations", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function resendInvitation(id) {
+  return requestJson(`/api/invitations/${encodeURIComponent(id)}/resend`, { method: "POST" });
+}
+
+export function revokeInvitation(id) {
+  return requestJson(`/api/invitations/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+}
+
+export function inspectInvitation(token) {
+  return requestJson(`/api/invitations/accept/${encodeURIComponent(token)}`);
+}
+
+export function acceptInvitation(token, password) {
+  return requestJson(`/api/invitations/accept/${encodeURIComponent(token)}`, { method: "POST", body: JSON.stringify({ password }) });
+}
+
 export function loadMyWorkspace() {
   return requestJson("/api/me/workspace");
 }
@@ -82,6 +94,13 @@ export function createBranchRecord(values) {
   return requestJson("/api/branches", {
     method: "POST",
     body: JSON.stringify(values),
+  });
+}
+
+export function uploadImageAsset(dataUrl, category, branch) {
+  return requestJson("/api/uploads", {
+    method: "POST",
+    body: JSON.stringify({ dataUrl, category, branch }),
   });
 }
 
@@ -124,34 +143,27 @@ export function createFaceTrackKiosk(payload) {
   });
 }
 
-function kioskHeaders(token) {
-  return { "Content-Type": "application/json", "X-FaceTrack-Kiosk-Token": token };
+export function loadFaceTrackKioskStatus() {
+  return requestJson("/api/facetrack-attendance/kiosk/status");
 }
 
-export function loadFaceTrackKioskStatus(token) {
-  return requestJson("/api/facetrack-attendance/kiosk/status", { headers: kioskHeaders(token) });
-}
-
-export function createFaceTrackKioskChallenge(token) {
+export function createFaceTrackKioskChallenge() {
   return requestJson("/api/facetrack-attendance/kiosk/challenge", {
     method: "POST",
-    headers: kioskHeaders(token),
     body: JSON.stringify({ purpose: "KIOSK_CLOCK" }),
   });
 }
 
-export function recordFaceTrackKioskAttendance(token, payload) {
+export function recordFaceTrackKioskAttendance(payload) {
   return requestJson("/api/facetrack-attendance/kiosk/clock", {
     method: "POST",
-    headers: kioskHeaders(token),
     body: JSON.stringify(payload),
   });
 }
 
-export function unlockFaceTrackKiosk(token, pin) {
+export function unlockFaceTrackKiosk(pin) {
   return requestJson("/api/facetrack-attendance/kiosk/unlock", {
     method: "POST",
-    headers: kioskHeaders(token),
     body: JSON.stringify({ pin }),
   });
 }

@@ -8,6 +8,7 @@ const ownerHeaders = {
   "X-Mace-User-Name": "Dr. Mace",
   "X-Mace-Role": "Owner",
   "X-Mace-Branch": "All branches",
+  "X-Mace-Request": "app",
 };
 
 function delay(ms) {
@@ -58,7 +59,7 @@ async function jsonRequest(path, body, options = {}) {
 
 const server = spawn(process.execPath, ["server/index.js"], {
   cwd: process.cwd(),
-  env: { ...process.env, API_PORT: String(port), LEADS_API_KEY: "smoke-leads-key", API_ALLOW_TRUSTED_HEADERS: "true" },
+  env: { ...process.env, NODE_ENV: "test", API_PORT: String(port), LEADS_API_KEY: "smoke-leads-key", API_ALLOW_TRUSTED_HEADERS: "true" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 
@@ -76,7 +77,10 @@ try {
   const health = await request("/api/health");
   assert(health.response.ok && health.payload.ok, "health endpoint failed");
 
-  const bootstrap = await request("/api/bootstrap");
+  const unauthenticatedBootstrap = await request("/api/bootstrap");
+  assert(unauthenticatedBootstrap.response.status === 401, "unauthenticated bootstrap was not blocked");
+
+  const bootstrap = await request("/api/bootstrap", { headers: ownerHeaders });
   assert(bootstrap.response.ok, "bootstrap endpoint failed");
   assert(Array.isArray(bootstrap.payload.clients), "bootstrap clients missing");
   assert(Array.isArray(bootstrap.payload.appointments), "bootstrap appointments missing");
@@ -251,6 +255,110 @@ try {
     },
   });
   assert(impossibleCheckout.response.status === 409, "POS insufficient-stock validation failed");
+
+  const certificateCreate = await jsonRequest("/api/resources/giftCertificates", {
+    code: `GC-SMOKE-${suffix}`,
+    client: "Automated Smoke Client Updated",
+    branch: "Mace BGC",
+    balance: 800,
+    expires: "",
+    status: "Active",
+  });
+  assert(certificateCreate.response.status === 201, "gift certificate create failed");
+  const certificateId = certificateCreate.payload.record.id;
+
+  const packageCreate = await jsonRequest("/api/resources/packages", {
+    name: `Smoke Package ${suffix}`,
+    clientId,
+    client: "Automated Smoke Client Updated",
+    sessions: 2,
+    used: 0,
+    expires: "",
+    branch: "Mace BGC",
+    status: "Active",
+    price: 0,
+  });
+  assert(packageCreate.response.status === 201, "package create failed");
+  const packageId = packageCreate.payload.record.id;
+
+  const stockBefore = Number(
+    bootstrap.payload.inventory.find((item) => item.id === "inv-cleanser-kit")?.stock ?? NaN,
+  );
+  assert(Number.isFinite(stockBefore), "seeded cleanser kit stock missing");
+
+  const tenderCart = {
+    clientId,
+    clientName: "Automated Smoke Client Updated",
+    branch: "Mace BGC",
+    staff: "Dr. Mace",
+    invoicePrefix: "MACE",
+    cart: [
+      {
+        key: "product-inv-cleanser-kit",
+        inventoryId: "inv-cleanser-kit",
+        type: "Product",
+        name: "Cleanser Travel Kit",
+        qty: 1,
+      },
+    ],
+  };
+
+  const overdrawnCertificate = await jsonRequest("/api/pos/checkout", {
+    draft: tenderCart,
+    payment: {
+      payments: [{ method: "Gift Certificate", amount: 999999, giftCertificateId: certificateId }],
+    },
+  });
+  assert(overdrawnCertificate.response.status === 409, "gift certificate overdraw was not blocked");
+
+  const missingCertificate = await jsonRequest("/api/pos/checkout", {
+    draft: tenderCart,
+    payment: { payments: [{ method: "Gift Certificate", amount: 100 }] },
+  });
+  assert(missingCertificate.response.status === 400, "gift certificate payment without certificate was not blocked");
+
+  const tenderCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: tenderCart,
+    payment: {
+      payments: [
+        { method: "Gift Certificate", amount: 500, giftCertificateId: certificateId },
+        { method: "Package", amount: 500, packageId },
+        { method: "Cash", amount: 500 },
+      ],
+      notes: "Tender smoke test",
+    },
+  });
+  assert(tenderCheckout.response.status === 201, "tender checkout failed");
+  assert(tenderCheckout.payload.giftCertificates?.[0]?.balance === 300, "gift certificate balance was not reduced");
+  assert(tenderCheckout.payload.packages?.[0]?.used === 1, "package session was not redeemed");
+  const stockAfterSale = Number(
+    tenderCheckout.payload.inventory.find((item) => item.id === "inv-cleanser-kit")?.stock ?? NaN,
+  );
+  assert(stockAfterSale === stockBefore - 1, "sale did not deduct inventory");
+  const tenderSaleId = tenderCheckout.payload.sale.id;
+
+  const voided = await jsonRequest(`/api/transactions/${tenderSaleId}/void`, {});
+  assert(voided.response.ok && voided.payload.record.status === "Void", "void failed");
+  assert(voided.payload.giftCertificates?.[0]?.balance === 800, "void did not restore the gift certificate balance");
+  assert(voided.payload.packages?.[0]?.used === 0, "void did not restore the package session");
+  assert(Array.isArray(voided.payload.movements) && voided.payload.movements.length >= 1, "void did not write reversal movements");
+  const stockAfterVoid = Number(
+    voided.payload.inventory?.find((item) => item.id === "inv-cleanser-kit")?.stock ?? NaN,
+  );
+  assert(stockAfterVoid === stockBefore, "void did not restore inventory stock");
+
+  await request(`/api/resources/transactions/${tenderSaleId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  await request(`/api/resources/giftCertificates/${certificateId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  await request(`/api/resources/packages/${packageId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
 
   await request(`/api/resources/appointments/${appointmentId}`, {
     method: "DELETE",

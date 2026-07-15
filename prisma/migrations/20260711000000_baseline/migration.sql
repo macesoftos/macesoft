@@ -1,7 +1,3 @@
--- LEGACY SNAPSHOT ONLY. Production deployments must use `prisma migrate deploy`
--- with the versioned migrations in prisma/migrations. Do not apply this file to
--- an existing or new production database.
-
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
@@ -74,7 +70,6 @@ CREATE TABLE "Room" (
 CREATE TABLE "StaffMember" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "photo" TEXT NOT NULL DEFAULT '',
     "role" TEXT NOT NULL,
     "branch" TEXT NOT NULL DEFAULT '',
     "schedule" TEXT NOT NULL DEFAULT '',

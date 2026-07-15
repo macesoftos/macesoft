@@ -3,12 +3,29 @@ import cors from "cors";
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import nodemailer from "nodemailer";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess, users } from "../src/data.js";
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
+import { assertProductionEnvironment } from "./productionConfig.js";
+import {
+  branchWhere,
+  canAccessBranch,
+  filterServiceBranches,
+  isAllBranches,
+  isPublicApiRequest,
+  moduleAllowed,
+} from "./accessControl.js";
+import {
+  assertGiftCertificateUsable,
+  assertPackageRedeemable,
+  giftCertificateAfterPayment,
+  packageAfterRedemption,
+  packageAfterVoid,
+} from "./posTenders.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -18,14 +35,96 @@ const allowedOrigins = clean(process.env.APP_ORIGIN)
   .filter(Boolean);
 
 app.set("trust proxy", 1);
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : true, credentials: true }));
+app.disable("x-powered-by");
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", "data:"],
+      frameAncestors: ["'none'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      objectSrc: ["'none'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+    },
+  },
+  crossOriginResourcePolicy: { policy: "same-origin" },
+  referrerPolicy: { policy: "no-referrer" },
+}));
+app.use(cors({
+  credentials: true,
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (process.env.NODE_ENV !== "production" && /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+}));
 app.use(express.json({
-  limit: "12mb",
+  limit: process.env.MAX_JSON_BODY || "2mb",
   verify: (request, _response, buffer) => {
     request.rawBody = buffer.toString("utf8");
   },
 }));
+
+app.use((request, response, next) => {
+  const requestId = clean(request.get("x-request-id")) || randomBytes(12).toString("hex");
+  const startedAt = process.hrtime.bigint();
+  request.requestId = requestId;
+  response.setHeader("X-Request-Id", requestId);
+  response.on("finish", () => {
+    if (request.path.startsWith("/api/health/live") && response.statusCode < 400) return;
+    const path = request.path.replace(/(\/api\/invitations\/accept\/)[^/]+/, "$1[redacted]");
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level: response.statusCode >= 500 ? "error" : response.statusCode >= 400 ? "warn" : "info",
+      event: "http_request",
+      requestId,
+      method: request.method,
+      path,
+      status: response.statusCode,
+      durationMs: Number(durationMs.toFixed(1)),
+      actorId: request.authAccount?.id || "anonymous",
+    };
+    console.log(JSON.stringify(entry));
+  });
+  next();
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.API_RATE_LIMIT || 1500),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many API requests. Please try again shortly." },
+});
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.LOGIN_RATE_LIMIT || 10),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many sign-in attempts. Please wait 15 minutes." },
+});
+const publicWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: Number(process.env.PUBLIC_WRITE_RATE_LIMIT || 20),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please wait one minute." },
+});
+
+app.use("/api", apiLimiter);
+app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth/forgot-password", loginLimiter);
+app.use("/api/auth/reset-password", loginLimiter);
+app.use("/api/public-bookings", publicWriteLimiter);
+app.use("/api/invitations/accept", publicWriteLimiter);
+app.use("/api/leads/webhooks", publicWriteLimiter);
 
 const clientStringFields = [
   "photo",
@@ -91,10 +190,66 @@ function envFlag(value) {
   return ["1", "true", "yes", "on"].includes(clean(value).toLowerCase());
 }
 
+function assetReference(value, label = "Image") {
+  const reference = clean(value);
+  if (!reference) return "";
+  if (/^data:/i.test(reference)) {
+    throw apiError(`${label} must be uploaded to secure object storage before saving.`, 400);
+  }
+  if (!reference.startsWith("/api/uploads/") && !reference.startsWith("/brand/")) {
+    throw apiError(`${label} uses an unsupported storage location.`, 400);
+  }
+  return reference;
+}
+
+const uploadCategories = {
+  "client-photo": { readModule: "clients", writeModule: "clients" },
+  "staff-photo": { readModule: "staff", writeModule: "staff" },
+  "inventory-photo": { readModule: "inventory", writeModule: "inventory" },
+  "branch-photo": { readModule: null, writeModule: "branches" },
+  "expense-receipt": { readModule: "expenses", writeModule: "expenses" },
+  "treatment-photo": { readModule: "treatments", writeModule: "treatments" },
+};
+
+function storageConfig() {
+  const baseUrl = clean(process.env.STORAGE_BASE_URL).replace(/\/$/, "");
+  const bucket = clean(process.env.STORAGE_BUCKET);
+  const serviceKey = clean(process.env.STORAGE_SERVICE_KEY);
+  if (!baseUrl || !bucket || !serviceKey) throw apiError("Secure object storage is not configured.", 503);
+  return { baseUrl, bucket, serviceKey };
+}
+
+function decodeImageDataUrl(value) {
+  const match = clean(value).match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) throw apiError("Upload a JPEG, PNG, or WebP image.", 415);
+  const mimeType = match[1].toLowerCase();
+  const buffer = Buffer.from(match[2].replace(/\s/g, ""), "base64");
+  const maximum = Number(process.env.MAX_UPLOAD_BYTES || 3 * 1024 * 1024);
+  if (!buffer.length || buffer.length > maximum) throw apiError("Image must be 3 MB or smaller.", 413);
+  const validSignature = mimeType === "image/jpeg"
+    ? buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+    : mimeType === "image/png"
+      ? buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      : buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
+  if (!validSignature) throw apiError("Image content does not match its declared file type.", 415);
+  return { buffer, mimeType, extension: mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1] };
+}
+
+async function storageRequest(objectPath, options = {}) {
+  const { baseUrl, bucket, serviceKey } = storageConfig();
+  const encodedPath = objectPath.split("/").map(encodeURIComponent).join("/");
+  return fetch(`${baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${encodedPath}`, {
+    ...options,
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      ...(options.headers || {}),
+    },
+  });
+}
+
 function apiError(message, status = 400) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
+  return Object.assign(new Error(message), { status });
 }
 
 function requireText(value, label) {
@@ -434,7 +589,7 @@ function stripMeta(data) {
 
 function actorFromRequest(request) {
   if (request.authActor) return request.authActor;
-  if (envFlag(process.env.API_ALLOW_TRUSTED_HEADERS)) {
+  if (process.env.NODE_ENV === "test" && envFlag(process.env.API_ALLOW_TRUSTED_HEADERS)) {
     return {
       id: clean(request.get("x-mace-user-id")),
       name: clean(request.get("x-mace-user-name")) || "System",
@@ -451,22 +606,24 @@ function assertMutationAllowed(request, moduleId, branch = "") {
     throw apiError("Authentication is required for this action.", 401);
   }
 
-  const allowedModules = roleAccess[actor.role] ?? [];
-  if (!allowedModules.includes(moduleId)) {
+  if (!moduleAllowed(actor, moduleId, roleAccess)) {
     throw apiError(`Your role does not allow changes in ${moduleId}.`, 403);
   }
 
   const targetBranch = clean(branch);
-  if (
-    actor.branch &&
-    actor.branch !== "All branches" &&
-    targetBranch &&
-    targetBranch !== "All branches" &&
-    targetBranch !== actor.branch
-  ) {
+  if (targetBranch && !canAccessBranch(actor, targetBranch)) {
     throw apiError(`You do not have access to ${targetBranch}.`, 403);
   }
 
+  return actor;
+}
+
+function assertReadAllowed(request, moduleId) {
+  const actor = actorFromRequest(request);
+  if (!actor.role) throw apiError("Authentication is required.", 401);
+  if (!moduleAllowed(actor, moduleId, roleAccess)) {
+    throw apiError(`Your role does not allow access to ${moduleId}.`, 403);
+  }
   return actor;
 }
 
@@ -504,6 +661,7 @@ function normalizeClientPayload(payload, existingId = "") {
   clientStringFields.forEach((field) => {
     data[field] = String(payload[field] ?? "");
   });
+  data.photo = assetReference(data.photo, "Client photo");
 
   if (!data.source) data.source = "Walk-in";
   if (!data.consentStatus) data.consentStatus = "Pending";
@@ -541,6 +699,12 @@ async function normalizeAppointmentPayload(payload, existingId = "") {
     notes: clean(payload.notes),
     internalNotes: clean(payload.internalNotes),
   };
+  if (service) {
+    const offeredBranches = parseJsonList(service.branches);
+    if (offeredBranches.length && !offeredBranches.includes(data.branch) && !offeredBranches.includes("All branches")) {
+      throw apiError("Selected service is not offered at this branch.", 409);
+    }
+  }
 
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -588,7 +752,7 @@ function normalizeInventoryPayload(payload, existingId = "") {
     supplier: clean(payload.supplier),
     cost: numberValue(payload.cost, "Cost", { min: 0 }),
     price: numberValue(payload.price, "Retail price", { min: 0 }),
-    image: clean(payload.image),
+    image: assetReference(payload.image, "Inventory image"),
   };
 
   if (payload.id && !existingId) data.id = String(payload.id);
@@ -596,8 +760,9 @@ function normalizeInventoryPayload(payload, existingId = "") {
 }
 
 async function normalizeTreatmentPayload(payload, existingId = "") {
-  const clientId = cleanOptional(payload.clientId);
+  const clientId = requireText(payload.clientId, "Client");
   const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
+  if (!client) throw apiError("Selected client was not found.", 404);
   const data = {
     clientId,
     client: clean(client?.fullName) || requireText(payload.client, "Client"),
@@ -723,7 +888,7 @@ function normalizeLeadPayload(payload, existingId = "") {
 function normalizeStaffPayload(payload, existingId = "") {
   const data = {
     name: requireText(payload.name, "Employee name"),
-    photo: clean(payload.photo),
+    photo: assetReference(payload.photo, "Employee photo"),
     role: requireText(payload.role, "Employee role"),
     branch: requireText(payload.branch, "Branch"),
     schedule: clean(payload.schedule),
@@ -770,6 +935,7 @@ function normalizeGiftCertificatePayload(payload, existingId = "") {
   const data = {
     code: requireText(payload.code, "Gift certificate code"),
     client: requireText(payload.client, "Client"),
+    branch: clean(payload.branch) || "All branches",
     balance: numberValue(payload.balance, "Gift certificate balance", { min: 0 }),
     expires: clean(payload.expires),
     status: clean(payload.status) || "Active",
@@ -1036,6 +1202,7 @@ const resourceConfigs = {
     label: (record) => record.fullName,
     orderBy: [{ updatedAt: "desc" }, { fullName: "asc" }],
     normalize: normalizeClientPayload,
+    branchField: "branch",
   },
   appointments: {
     delegate: "appointment",
@@ -1045,6 +1212,8 @@ const resourceConfigs = {
     orderBy: [{ date: "desc" }, { time: "asc" }],
     normalize: normalizeAppointmentPayload,
     beforeWrite: assertAppointmentSlotAvailable,
+    branchField: "branch",
+    relatedClient: true,
   },
   services: {
     delegate: "service",
@@ -1054,6 +1223,7 @@ const resourceConfigs = {
     orderBy: [{ name: "asc" }],
     normalize: normalizeServicePayload,
     serialize: serializeService,
+    serviceBranches: true,
   },
   inventory: {
     delegate: "inventoryItem",
@@ -1062,6 +1232,7 @@ const resourceConfigs = {
     label: (record) => record.item,
     orderBy: [{ item: "asc" }],
     normalize: normalizeInventoryPayload,
+    branchField: "branch",
   },
   treatments: {
     delegate: "treatment",
@@ -1070,6 +1241,8 @@ const resourceConfigs = {
     label: (record) => `${record.client} - ${record.service}`,
     orderBy: [{ date: "desc" }],
     normalize: normalizeTreatmentPayload,
+    clientBranch: true,
+    relatedClient: true,
   },
   packages: {
     delegate: "clinicPackage",
@@ -1078,6 +1251,8 @@ const resourceConfigs = {
     label: (record) => `${record.name} for ${record.client}`,
     orderBy: [{ updatedAt: "desc" }],
     normalize: normalizePackagePayload,
+    branchField: "branch",
+    relatedClient: true,
   },
   giftCertificates: {
     delegate: "giftCertificate",
@@ -1086,6 +1261,7 @@ const resourceConfigs = {
     label: (record) => record.code,
     orderBy: [{ expires: "asc" }],
     normalize: normalizeGiftCertificatePayload,
+    branchField: "branch",
   },
   leads: {
     delegate: "lead",
@@ -1106,6 +1282,7 @@ const resourceConfigs = {
     beforeWrite: validateLeadWrite,
     afterWrite: writeLeadSideRecords,
     serialize: serializeLead,
+    branchField: "branch",
   },
   staff: {
     delegate: "staffMember",
@@ -1114,6 +1291,7 @@ const resourceConfigs = {
     label: (record) => record.name,
     orderBy: [{ name: "asc" }],
     normalize: normalizeStaffPayload,
+    branchField: "branch",
   },
   expenses: {
     delegate: "expense",
@@ -1122,6 +1300,7 @@ const resourceConfigs = {
     label: (record) => record.name,
     orderBy: [{ date: "desc" }],
     normalize: normalizeExpensePayload,
+    branchField: "branch",
   },
   discounts: {
     delegate: "discount",
@@ -1156,6 +1335,7 @@ const resourceConfigs = {
     include: { items: true },
     readOnly: true,
     serialize: serializeSale,
+    branchField: "branch",
   },
   auditLogs: {
     delegate: "auditLog",
@@ -1164,6 +1344,7 @@ const resourceConfigs = {
     label: (record) => record.action,
     orderBy: [{ createdAt: "desc" }],
     normalize: normalizeAuditPayload,
+    readOnly: true,
   },
   inventoryMovements: {
     delegate: "inventoryMovement",
@@ -1172,6 +1353,7 @@ const resourceConfigs = {
     label: (record) => record.item,
     orderBy: [{ createdAt: "desc" }],
     readOnly: true,
+    branchField: "branch",
   },
 };
 
@@ -1183,14 +1365,54 @@ function configForResource(resource) {
   return config;
 }
 
-async function listResource(resource) {
+async function listResource(resource, actor = null) {
   const config = configForResource(resource);
+  if (actor && !moduleAllowed(actor, config.module, roleAccess)) return [];
+  let where = {};
+  if (actor && !isAllBranches(actor.branch)) {
+    if (config.branchField) where = branchWhere(actor, config.branchField);
+    if (config.clientBranch) {
+      where = { clientRecord: { is: branchWhere(actor) } };
+    }
+  }
   const rows = await prisma[config.delegate].findMany({
+    where,
     orderBy: config.orderBy,
     include: config.include,
   });
 
-  return config.serialize ? rows.map(config.serialize) : rows;
+  const scopedRows = actor && config.serviceBranches ? filterServiceBranches(rows, actor) : rows;
+  return config.serialize ? scopedRows.map(config.serialize) : scopedRows;
+}
+
+async function resourceBranch(config, record) {
+  if (!record) return "";
+  if (config.branchField) return clean(record[config.branchField]);
+  if (config.clientBranch && record.clientId) {
+    const client = await prisma.client.findUnique({ where: { id: record.clientId }, select: { branch: true } });
+    return clean(client?.branch);
+  }
+  return "";
+}
+
+function assertServiceBranchChangeAllowed(actor, config, data) {
+  if (!config.serviceBranches || isAllBranches(actor.branch)) return;
+  const branches = parseJsonList(data.branches);
+  if (branches.some((branch) => branch !== actor.branch)) {
+    throw apiError("You can only manage services assigned exclusively to your branch.", 403);
+  }
+}
+
+async function assertResourceMutationAllowed(request, config, record) {
+  const branch = await resourceBranch(config, record);
+  const actor = assertMutationAllowed(request, config.module, branch);
+  if (config.relatedClient && record.clientId) {
+    const client = await prisma.client.findUnique({ where: { id: record.clientId }, select: { branch: true } });
+    if (!client) throw apiError("Related client was not found.", 404);
+    if (!canAccessBranch(actor, client.branch)) throw apiError("You do not have access to the related client.", 403);
+  }
+  assertServiceBranchChangeAllowed(actor, config, record);
+  return actor;
 }
 
 async function getPersistedSettings() {
@@ -2029,7 +2251,7 @@ async function sendSmtpEmail({ transporter, to, subject, text }) {
   return result.messageId;
 }
 
-async function buildBootstrapPayload() {
+async function buildBootstrapPayload(actor) {
   const [
     clients,
     appointments,
@@ -2052,26 +2274,36 @@ async function buildBootstrapPayload() {
     leadIntegrations,
     webhookEvents,
   ] = await Promise.all([
-    listResource("clients"),
-    listResource("appointments"),
-    listResource("services"),
-    listResource("inventory"),
-    listResource("transactions"),
-    listResource("treatments"),
-    listResource("packages"),
-    listResource("giftCertificates"),
-    listResource("leads"),
-    listResource("staff"),
-    listResource("expenses"),
-    listResource("discounts"),
-    listResource("smsTemplates"),
-    listResource("campaigns"),
-    listResource("auditLogs"),
-    listResource("inventoryMovements"),
-    prisma.branch.findMany({ orderBy: [{ name: "asc" }], include: { rooms: true } }),
+    listResource("clients", actor),
+    listResource("appointments", actor),
+    listResource("services", actor),
+    listResource("inventory", actor),
+    listResource("transactions", actor),
+    listResource("treatments", actor),
+    listResource("packages", actor),
+    listResource("giftCertificates", actor),
+    listResource("leads", actor),
+    listResource("staff", actor),
+    listResource("expenses", actor),
+    listResource("discounts", actor),
+    listResource("smsTemplates", actor),
+    listResource("campaigns", actor),
+    listResource("auditLogs", actor),
+    listResource("inventoryMovements", actor),
+    prisma.branch.findMany({
+      where: isAllBranches(actor.branch) ? {} : { name: actor.branch },
+      orderBy: [{ name: "asc" }],
+      include: { rooms: true },
+    }),
     getPersistedSettings(),
-    listLeadIntegrations(),
-    prisma.webhookEvent.findMany({ orderBy: [{ receivedAt: "desc" }], take: 50 }),
+    moduleAllowed(actor, "leads", roleAccess) ? listLeadIntegrations() : [],
+    moduleAllowed(actor, "leads", roleAccess)
+      ? prisma.webhookEvent.findMany({
+        where: isAllBranches(actor.branch) ? {} : { lead: { is: { branch: actor.branch } } },
+        orderBy: [{ receivedAt: "desc" }],
+        take: 50,
+      })
+      : [],
   ]);
 
   return {
@@ -2293,7 +2525,7 @@ function publicAccount(account) {
     name: account.name,
     email: account.email,
     role: account.role,
-    branch: account.branch || "All branches",
+    branch: account.branch || "",
     status: account.status,
     mustChangePassword: account.mustChangePassword,
   };
@@ -2308,9 +2540,10 @@ function setSessionCookie(response, token, expiresAt) {
 }
 
 function clearSessionCookie(response) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   response.setHeader(
     "Set-Cookie",
-    `${authCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+    `${authCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
   );
 }
 
@@ -2321,7 +2554,7 @@ async function accountFromSession(request) {
     where: { tokenHash: sessionTokenHash(token) },
     include: { account: true },
   });
-  if (!session || session.expiresAt <= new Date() || session.account.status !== "Active") {
+  if (!session || session.expiresAt <= new Date() || session.account.status !== "Active" || !clean(session.account.branch)) {
     if (session) await prisma.authSession.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
@@ -2331,6 +2564,62 @@ async function accountFromSession(request) {
 function requireAuthenticatedAccount(request) {
   if (!request.authAccount) throw apiError("Authentication is required.", 401);
   return request.authAccount;
+}
+
+const invitationStatuses = ["Pending", "Accepted", "Expired", "Revoked", "Failed"];
+const invitationManagerRoles = ["Owner", "Super Admin"];
+const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1000;
+
+function requireInvitationManager(request) {
+  const account = requireAuthenticatedAccount(request);
+  if (!invitationManagerRoles.includes(account.role)) {
+    throw apiError("Only an Owner or Admin can manage invitations.", 403);
+  }
+  return account;
+}
+
+function invitationRole(value, actor) {
+  const role = requireText(value, "Role");
+  if (!Object.keys(roleAccess).includes(role)) {
+    throw apiError("Choose a configured organization role.");
+  }
+  if (role === "Owner" && actor.role !== "Owner") {
+    throw apiError("Only an Owner can invite another Owner.", 403);
+  }
+  return role;
+}
+
+function publicInvitation(invitation) {
+  const effectiveStatus = invitation.status === "Pending" && invitation.expiresAt <= new Date()
+    ? "Expired"
+    : invitation.status;
+  return { ...invitation, status: effectiveStatus, tokenHash: undefined };
+}
+
+function invitationUrl(token) {
+  const origin = clean(process.env.APP_ORIGIN).split(",")[0] || `http://localhost:${port}`;
+  return `${origin.replace(/\/$/, "")}/?invitation=${encodeURIComponent(token)}`;
+}
+
+function invitationEmailText(invitation, token, inviter) {
+  return [
+    `Hello ${invitation.name},`,
+    "",
+    `${inviter.name} invited you to join MACE ClinicOS as ${invitation.role}.`,
+    invitation.department ? `Department: ${invitation.department}` : "",
+    invitation.specialty ? `Specialty: ${invitation.specialty}` : "",
+    invitation.message ? `Message: ${invitation.message}` : "",
+    "",
+    `Accept invitation: ${invitationUrl(token)}`,
+    `This secure, single-use link expires ${invitation.expiresAt.toLocaleString("en-PH")}.`,
+  ].filter((line, index, lines) => line || lines[index - 1] !== "").join("\n");
+}
+
+async function expireInvitations() {
+  await prisma.userInvitation.updateMany({
+    where: { status: "Pending", expiresAt: { lte: new Date() } },
+    data: { status: "Expired" },
+  });
 }
 
 app.use("/api", asyncRoute(async (request, _response, next) => {
@@ -2343,6 +2632,22 @@ app.use("/api", asyncRoute(async (request, _response, next) => {
   next();
 }));
 
+app.use("/api", (request, _response, next) => {
+  if (isPublicApiRequest(request.method, request.originalUrl)) return next();
+  if (process.env.NODE_ENV === "test" && envFlag(process.env.API_ALLOW_TRUSTED_HEADERS)) {
+    const actor = actorFromRequest(request);
+    if (actor.role) {
+      request.authAccount = actor;
+      request.authActor = actor;
+    }
+  }
+  if (!request.authAccount) return next(apiError("Authentication is required.", 401));
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.get("x-mace-request") !== "app") {
+    return next(apiError("This request did not pass the CSRF check.", 403));
+  }
+  return next();
+});
+
 app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
 
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
@@ -2350,6 +2655,10 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const password = requireText(request.body?.password, "Password");
   const account = await prisma.account.findUnique({ where: { email } });
   const now = new Date();
+
+  if (account?.status === "Active" && !clean(account.branch)) {
+    throw apiError("This account does not have a branch assignment. Contact an administrator.", 403);
+  }
 
   if (!account || account.status !== "Active" || (account.lockedUntil && account.lockedUntil > now) || !verifyPassword(password, account.passwordHash)) {
     if (account) {
@@ -2376,6 +2685,57 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
   response.json({ account: publicAccount(account), expiresAt });
 }));
 
+app.post("/api/auth/forgot-password", asyncRoute(async (request, response) => {
+  const email = requireText(request.body?.email, "Email").toLowerCase();
+  const account = /^\S+@\S+\.\S+$/.test(email)
+    ? await prisma.account.findUnique({ where: { email } })
+    : null;
+  if (account?.status === "Active") {
+    const token = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await prisma.$transaction([
+      prisma.passwordResetToken.deleteMany({ where: { accountId: account.id, usedAt: null } }),
+      prisma.passwordResetToken.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } }),
+    ]);
+    const origin = clean(process.env.APP_ORIGIN).split(",")[0] || `http://localhost:${port}`;
+    const resetUrl = `${origin.replace(/\/$/, "")}/?reset=${encodeURIComponent(token)}`;
+    try {
+      await sendSmtpEmail({
+        transporter: createEmailTransport(),
+        to: account.email,
+        subject: "Reset your MACE ClinicOS password",
+        text: `Use this single-use link within 30 minutes to reset your password:\n\n${resetUrl}\n\nIf you did not request this, you can ignore this email.`,
+      });
+    } catch (error) {
+      console.error(JSON.stringify({ event: "password_reset_delivery_failed", accountId: account.id, error: clean(error.message) }));
+    }
+  }
+  response.status(202).json({ message: "If the account exists, a password-reset email has been sent." });
+}));
+
+app.post("/api/auth/reset-password", asyncRoute(async (request, response) => {
+  const tokenHash = sessionTokenHash(requireText(request.body?.token, "Reset token"));
+  const newPassword = requireText(request.body?.newPassword, "New password");
+  if (newPassword.length < 12 || !/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/\d/.test(newPassword) || !/[^A-Za-z0-9]/.test(newPassword)) {
+    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.", 400);
+  }
+  const reset = await prisma.passwordResetToken.findUnique({ where: { tokenHash } });
+  if (!reset || reset.usedAt || reset.expiresAt <= new Date()) throw apiError("This password-reset link is invalid or expired.", 410);
+  await prisma.$transaction(async (tx) => {
+    const consumed = await tx.passwordResetToken.updateMany({
+      where: { id: reset.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw apiError("This password-reset link has already been used.", 409);
+    await tx.account.update({
+      where: { id: reset.accountId },
+      data: { passwordHash: hashPassword(newPassword), mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+    });
+    await tx.authSession.deleteMany({ where: { accountId: reset.accountId } });
+  });
+  response.json({ message: "Password updated. Sign in with your new password." });
+}));
+
 app.get("/api/auth/session", asyncRoute(async (request, response) => {
   const account = requireAuthenticatedAccount(request);
   response.json({ account: publicAccount(account), expiresAt: request.authSession.expiresAt });
@@ -2396,11 +2756,119 @@ app.post("/api/auth/change-password", asyncRoute(async (request, response) => {
     throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.", 400);
   }
   if (verifyPassword(newPassword, account.passwordHash)) throw apiError("Choose a different password.", 400);
-  const updated = await prisma.account.update({
-    where: { id: account.id },
-    data: { passwordHash: hashPassword(newPassword), mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+  const updated = await prisma.$transaction(async (tx) => {
+    const saved = await tx.account.update({
+      where: { id: account.id },
+      data: { passwordHash: hashPassword(newPassword), mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+    });
+    await tx.authSession.deleteMany({ where: { accountId: account.id, id: { not: request.authSession.id } } });
+    await writeAudit(tx, request, { area: "Authentication", action: "Password changed", details: "Account password changed and other sessions revoked." });
+    return saved;
   });
   response.json({ account: publicAccount(updated) });
+}));
+
+app.get("/api/invitations", asyncRoute(async (request, response) => {
+  requireInvitationManager(request);
+  await expireInvitations();
+  const invitations = await prisma.userInvitation.findMany({ orderBy: { createdAt: "desc" } });
+  response.json({ invitations: invitations.map(publicInvitation), statuses: invitationStatuses });
+}));
+
+app.post("/api/invitations", asyncRoute(async (request, response) => {
+  const actor = requireInvitationManager(request);
+  const email = requireText(request.body?.email, "Email").toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.");
+  const name = requireText(request.body?.name, "Name");
+  const role = invitationRole(request.body?.role, actor);
+  await expireInvitations();
+  if (await prisma.account.findUnique({ where: { email } })) throw apiError("This user already belongs to the organization.", 409);
+  if (await prisma.userInvitation.findFirst({ where: { email, status: "Pending", expiresAt: { gt: new Date() } } })) {
+    throw apiError("A pending invitation already exists for this email address.", 409);
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const invitation = await prisma.userInvitation.create({ data: {
+    email,
+    name,
+    role,
+    branch: clean(request.body?.branch) || actor.branch || "All branches",
+    department: clean(request.body?.department),
+    specialty: clean(request.body?.specialty),
+    message: clean(request.body?.message),
+    tokenHash: sessionTokenHash(token),
+    expiresAt: new Date(Date.now() + invitationLifetimeMs),
+    invitedById: actor.id,
+  } });
+
+  let saved = invitation;
+  try {
+    await sendSmtpEmail({ transporter: createEmailTransport(), to: email, subject: `You're invited to MACE ClinicOS`, text: invitationEmailText(invitation, token, actor) });
+  } catch (error) {
+    saved = await prisma.userInvitation.update({ where: { id: invitation.id }, data: { status: "Failed", failedReason: clean(error.message).slice(0, 500) } });
+  }
+  const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: saved.status === "Failed" ? "Invitation delivery failed" : "Invitation created", details: `${email} invited as ${role}.` }) });
+  response.status(201).json({ invitation: publicInvitation(saved), auditLog });
+}));
+
+app.post("/api/invitations/:id/resend", asyncRoute(async (request, response) => {
+  const actor = requireInvitationManager(request);
+  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
+  if (!current || !["Pending", "Expired", "Failed"].includes(current.status)) throw apiError("This invitation cannot be resent.", 409);
+  if (current.role === "Owner" && actor.role !== "Owner") throw apiError("Only an Owner can resend an Owner invitation.", 403);
+  const token = randomBytes(32).toString("base64url");
+  let invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { tokenHash: sessionTokenHash(token), status: "Pending", expiresAt: new Date(Date.now() + invitationLifetimeMs), failedReason: "", revokedAt: null } });
+  try {
+    await sendSmtpEmail({ transporter: createEmailTransport(), to: invitation.email, subject: `Reminder: your MACE ClinicOS invitation`, text: invitationEmailText(invitation, token, actor) });
+  } catch (error) {
+    invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { status: "Failed", failedReason: clean(error.message).slice(0, 500) } });
+  }
+  const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: invitation.status === "Failed" ? "Invitation delivery failed" : "Invitation resent", details: `${invitation.email} invitation resent.` }) });
+  response.json({ invitation: publicInvitation(invitation), auditLog });
+}));
+
+app.post("/api/invitations/:id/revoke", asyncRoute(async (request, response) => {
+  const actor = requireInvitationManager(request);
+  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
+  if (!current || current.status !== "Pending") throw apiError("Only a pending invitation can be revoked.", 409);
+  if (current.role === "Owner" && actor.role !== "Owner") throw apiError("Only an Owner can revoke an Owner invitation.", 403);
+  const invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { status: "Revoked", revokedAt: new Date() } });
+  const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: "Invitation revoked", details: `${invitation.email} invitation revoked.` }) });
+  response.json({ invitation: publicInvitation(invitation), auditLog });
+}));
+
+app.get("/api/invitations/accept/:token", asyncRoute(async (request, response) => {
+  const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash: sessionTokenHash(request.params.token) } });
+  if (!invitation) throw apiError("This invitation link is invalid.", 404);
+  response.json({ invitation: publicInvitation(invitation) });
+}));
+
+app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) => {
+  const tokenHash = sessionTokenHash(request.params.token);
+  const password = requireText(request.body?.password, "Password");
+  if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.");
+  }
+  const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash } });
+  if (!invitation || invitation.status !== "Pending") throw apiError("This invitation is no longer available.", 409);
+  if (invitation.expiresAt <= new Date()) {
+    await prisma.userInvitation.update({ where: { id: invitation.id }, data: { status: "Expired" } });
+    throw apiError("This invitation has expired.", 410);
+  }
+  const result = await prisma.$transaction(async (tx) => {
+    let account = await tx.account.findUnique({ where: { email: invitation.email } });
+    if (account && !verifyPassword(password, account.passwordHash)) throw apiError("Use the password for the existing account.", 401);
+    if (!account) {
+      const staff = await tx.staffMember.create({ data: { name: invitation.name, role: invitation.role, branch: invitation.branch, status: "Available" } });
+      account = await tx.account.create({ data: { staffId: staff.id, name: invitation.name, email: invitation.email, passwordHash: hashPassword(password), role: invitation.role, branch: invitation.branch, status: "Active", mustChangePassword: false } });
+    } else {
+      account = await tx.account.update({ where: { id: account.id }, data: { role: invitation.role, branch: invitation.branch, status: "Active" } });
+    }
+    const accepted = await tx.userInvitation.update({ where: { id: invitation.id }, data: { status: "Accepted", acceptedAt: new Date() } });
+    await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: invitation.name, role: invitation.role, area: "Access", action: "Invitation accepted", details: `${invitation.email} joined the organization.` } });
+    return { account, invitation: accepted };
+  });
+  response.json({ account: publicAccount(result.account), invitation: publicInvitation(result.invitation) });
 }));
 
 function attendanceState(events) {
@@ -2455,7 +2923,7 @@ app.post("/api/branches", asyncRoute(async (request, response) => {
       phone: clean(request.body?.phone),
       hours: clean(request.body?.hours),
       devices: jsonText(request.body?.devices || [], []),
-      image: clean(request.body?.image),
+      image: assetReference(request.body?.image, "Branch image"),
       rooms: roomCount ? { create: Array.from({ length: roomCount }, (_value, index) => ({ name: `Room ${index + 1}` })) } : undefined,
     },
     include: { rooms: true },
@@ -2463,10 +2931,75 @@ app.post("/api/branches", asyncRoute(async (request, response) => {
   response.status(201).json({ branch: serializeBranch(branch) });
 }));
 
-app.get("/api/health", asyncRoute(async (_request, response) => {
-  let clientCount;
+app.post("/api/uploads", asyncRoute(async (request, response) => {
+  const category = requireText(request.body?.category, "Upload category");
+  const categoryAccess = uploadCategories[category];
+  if (!categoryAccess) throw apiError("Unsupported upload category.", 400);
+  const branch = requireText(request.body?.branch, "Upload branch");
+  const actor = assertMutationAllowed(request, categoryAccess.writeModule, branch);
+  const { buffer, mimeType, extension } = decodeImageDataUrl(request.body?.dataUrl);
+  const id = randomBytes(18).toString("base64url");
+  const objectPath = `${category}/${id}.${extension}`;
+  const uploaded = await storageRequest(objectPath, {
+    method: "POST",
+    headers: { "Content-Type": mimeType, "x-upsert": "false" },
+    body: buffer,
+  });
+  if (!uploaded.ok) throw apiError("Object storage rejected the upload.", 502);
   try {
-    clientCount = await prisma.client.count();
+    const asset = await prisma.uploadAsset.create({
+      data: { id, objectPath, category, branch, mimeType, byteSize: buffer.length, uploadedById: actor.id },
+    });
+    response.status(201).json({ asset: { ...asset, url: `/api/uploads/${asset.id}` } });
+  } catch (error) {
+    await storageRequest(objectPath, { method: "DELETE" }).catch(() => {});
+    throw error;
+  }
+}));
+
+app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
+  const asset = await prisma.uploadAsset.findUnique({ where: { id: clean(request.params.id) } });
+  if (!asset) throw apiError("Uploaded asset was not found.", 404);
+  const categoryAccess = uploadCategories[asset.category];
+  if (!categoryAccess) throw apiError("Uploaded asset category is invalid.", 500);
+  const actor = categoryAccess.readModule
+    ? assertReadAllowed(request, categoryAccess.readModule)
+    : requireAuthenticatedAccount(request);
+  if (!canAccessBranch(actor, asset.branch)) throw apiError("You do not have access to this uploaded asset.", 403);
+  const stored = await storageRequest(asset.objectPath);
+  if (!stored.ok) throw apiError("Uploaded asset is unavailable.", stored.status === 404 ? 404 : 502);
+  const buffer = Buffer.from(await stored.arrayBuffer());
+  response.set({
+    "Cache-Control": "private, max-age=300",
+    "Content-Disposition": "inline",
+    "Content-Length": String(buffer.length),
+    "Content-Type": asset.mimeType,
+  });
+  response.send(buffer);
+}));
+
+app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
+  const asset = await prisma.uploadAsset.findUnique({ where: { id: clean(request.params.id) } });
+  if (!asset) throw apiError("Uploaded asset was not found.", 404);
+  const categoryAccess = uploadCategories[asset.category];
+  if (!categoryAccess) throw apiError("Uploaded asset category is invalid.", 500);
+  const actor = assertMutationAllowed(request, categoryAccess.writeModule, asset.branch);
+  if (actor.id !== asset.uploadedById && !["Owner", "Super Admin"].includes(actor.role)) {
+    throw apiError("Only the uploader or an organization administrator can remove this asset.", 403);
+  }
+  const deleted = await storageRequest(asset.objectPath, { method: "DELETE" });
+  if (!deleted.ok && deleted.status !== 404) throw apiError("Object storage could not remove the asset.", 502);
+  await prisma.uploadAsset.delete({ where: { id: asset.id } });
+  response.status(204).end();
+}));
+
+app.get("/api/health/live", (_request, response) => {
+  response.json({ ok: true, status: "live", checkedAt: new Date().toISOString() });
+});
+
+async function readinessResponse(response) {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
   } catch (error) {
     console.error("Supabase health check failed.", error);
     return response.status(503).json({
@@ -2479,23 +3012,27 @@ app.get("/api/health", asyncRoute(async (_request, response) => {
   }
   response.json({
     ok: true,
+    status: "ready",
     database: "supabase-postgres",
-    clientCount,
     modules: sidebarModules.length,
     mvpModules,
     checkedAt: new Date().toISOString(),
   });
-}));
+}
 
-app.get("/api/bootstrap", asyncRoute(async (_request, response) => {
-  response.json(await buildBootstrapPayload());
+app.get("/api/health", asyncRoute(async (_request, response) => readinessResponse(response)));
+app.get("/api/health/ready", asyncRoute(async (_request, response) => readinessResponse(response)));
+
+app.get("/api/bootstrap", asyncRoute(async (request, response) => {
+  response.json(await buildBootstrapPayload(requireAuthenticatedAccount(request)));
 }));
 
 app.get("/api/modules", (_request, response) => {
   response.json({ modules: sidebarModules, mvpModules });
 });
 
-app.get("/api/marketing/config", (_request, response) => {
+app.get("/api/marketing/config", (request, response) => {
+  assertReadAllowed(request, "sms");
   response.json({
     smsReady: smsReady(),
     emailReady: emailReady(),
@@ -2520,12 +3057,18 @@ app.put("/api/settings", asyncRoute(async (request, response) => {
   response.json({ settings, auditLog });
 }));
 
-app.get("/api/leads/integrations", asyncRoute(async (_request, response) => {
+app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
+  assertReadAllowed(request, "leads");
   response.json({ integrations: await listLeadIntegrations() });
 }));
 
-app.get("/api/leads/webhook-events", asyncRoute(async (_request, response) => {
-  const events = await prisma.webhookEvent.findMany({ orderBy: [{ receivedAt: "desc" }], take: 100 });
+app.get("/api/leads/webhook-events", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "leads");
+  const events = await prisma.webhookEvent.findMany({
+    where: isAllBranches(actor.branch) ? {} : { lead: { is: { branch: actor.branch } } },
+    orderBy: [{ receivedAt: "desc" }],
+    take: 100,
+  });
   response.json({ events });
 }));
 
@@ -2558,6 +3101,7 @@ app.post("/api/leads/:id/stage", asyncRoute(async (request, response) => {
     status: request.body?.status,
     lossReason: request.body?.lossReason ?? existing.lossReason,
   }, id);
+  assertMutationAllowed(request, "leads", data.branch);
   validateLeadRules(data, existing);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -2642,14 +3186,21 @@ app.post("/api/leads/:id/appointments", asyncRoute(async (request, response) => 
   const id = String(request.params.id);
   const lead = await prisma.lead.findUnique({ where: { id } });
   if (!lead) throw apiError("Lead not found.", 404);
+  assertMutationAllowed(request, "leads", lead.branch);
   assertMutationAllowed(request, "appointments", request.body?.branch || lead.branch);
 
   const serviceId = cleanOptional(request.body?.serviceId);
   const service = serviceId ? await prisma.service.findUnique({ where: { id: serviceId } }) : null;
+  const appointmentClientId = cleanOptional(request.body?.clientId || lead.linkedClientId);
+  if (appointmentClientId) {
+    const appointmentClient = await prisma.client.findUnique({ where: { id: appointmentClientId }, select: { branch: true } });
+    if (!appointmentClient) throw apiError("Selected client was not found.", 404);
+    assertMutationAllowed(request, "clients", appointmentClient.branch);
+  }
   const appointmentData = {
     date: requireText(request.body?.date || lead.preferredDate, "Appointment date"),
     time: requireText(request.body?.time || lead.preferredTime, "Appointment time"),
-    clientId: cleanOptional(request.body?.clientId || lead.linkedClientId),
+    clientId: appointmentClientId,
     client: clean(request.body?.client || lead.name),
     serviceId,
     service: clean(service?.name) || clean(request.body?.service || lead.interest) || "Consultation",
@@ -2662,6 +3213,12 @@ app.post("/api/leads/:id/appointments", asyncRoute(async (request, response) => 
     notes: clean(request.body?.notes || lead.concern || lead.message),
     internalNotes: "Booked from Leads module.",
   };
+  if (service) {
+    const offeredBranches = parseJsonList(service.branches);
+    if (offeredBranches.length && !offeredBranches.includes(appointmentData.branch) && !offeredBranches.includes("All branches")) {
+      throw apiError("Selected service is not offered at this branch.", 409);
+    }
+  }
   await assertAppointmentSlotAvailable(appointmentData);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -2710,15 +3267,19 @@ app.post("/api/leads/:id/convert", asyncRoute(async (request, response) => {
     if (requestedClientId) {
       client = await tx.client.findUnique({ where: { id: requestedClientId } });
       if (!client) throw apiError("Selected client was not found.", 404);
+      assertMutationAllowed(request, "clients", client.branch);
     } else {
       const normalizedPhone = normalizePhone(lead.mobile);
       const email = clean(lead.email).toLowerCase();
       const matches = await tx.client.findMany({
         where: {
-          OR: [
-            clean(lead.mobile) ? { mobile: lead.mobile } : undefined,
-            email ? { email } : undefined,
-          ].filter(Boolean),
+          AND: [
+            { branch: lead.branch },
+            { OR: [
+              clean(lead.mobile) ? { mobile: lead.mobile } : undefined,
+              email ? { email } : undefined,
+            ].filter(Boolean) },
+          ],
         },
         take: 10,
       });
@@ -2798,6 +3359,7 @@ app.post("/api/leads/:id/merge", asyncRoute(async (request, response) => {
   ]);
   if (!primary || !duplicate) throw apiError("Lead to merge was not found.", 404);
   assertMutationAllowed(request, "leads", primary.branch);
+  assertMutationAllowed(request, "leads", duplicate.branch);
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.leadActivity.updateMany({ where: { leadId: duplicateId }, data: { leadId: id } });
@@ -2831,34 +3393,42 @@ app.post("/api/leads/:id/merge", asyncRoute(async (request, response) => {
   response.json({ lead: await loadLead(id), auditLog: result.auditLog });
 }));
 
-app.get("/api/clients", asyncRoute(async (_request, response) => {
-  response.json(await listResource("clients"));
+app.get("/api/clients", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "clients");
+  response.json(await listResource("clients", actor));
 }));
 
 app.post("/api/clients", asyncRoute(async (request, response) => {
-  assertMutationAllowed(request, "clients", request.body?.branch);
   const data = normalizeClientPayload(request.body);
+  assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.create({ data });
   response.status(201).json(client);
 }));
 
 app.put("/api/clients/:id", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
-  assertMutationAllowed(request, "clients", request.body?.branch);
+  const existing = await prisma.client.findUnique({ where: { id } });
+  if (!existing) throw apiError("Client not found.", 404);
+  assertMutationAllowed(request, "clients", existing.branch);
   const data = normalizeClientPayload(request.body, id);
+  assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.update({ where: { id }, data });
   response.json(client);
 }));
 
 app.delete("/api/clients/:id", asyncRoute(async (request, response) => {
-  assertMutationAllowed(request, "clients");
   const id = String(request.params.id);
+  const existing = await prisma.client.findUnique({ where: { id } });
+  if (!existing) throw apiError("Client not found.", 404);
+  assertMutationAllowed(request, "clients", existing.branch);
   await prisma.client.delete({ where: { id } });
   response.status(204).end();
 }));
 
 app.get("/api/resources/:resource", asyncRoute(async (request, response) => {
-  response.json(await listResource(request.params.resource));
+  const config = configForResource(request.params.resource);
+  const actor = assertReadAllowed(request, config.module);
+  response.json(await listResource(request.params.resource, actor));
 }));
 
 app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
@@ -2868,7 +3438,7 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
   }
 
   const data = await config.normalize(request.body);
-  assertMutationAllowed(request, config.module, data.branch);
+  await assertResourceMutationAllowed(request, config, data);
   if (config.beforeWrite) await config.beforeWrite(data);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -2895,12 +3465,15 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
   }
 
   const id = String(request.params.id);
+  const existing = await prisma[config.delegate].findUnique({ where: { id } });
+  if (!existing) throw apiError(`${config.area} record not found.`, 404);
+  await assertResourceMutationAllowed(request, config, existing);
   const data = await config.normalize(request.body, id);
-  assertMutationAllowed(request, config.module, data.branch);
+  await assertResourceMutationAllowed(request, config, data);
   if (config.beforeWrite) await config.beforeWrite(data, id);
 
   const result = await prisma.$transaction(async (tx) => {
-    const previous = config.afterWrite ? await tx[config.delegate].findUnique({ where: { id } }) : null;
+    const previous = config.afterWrite ? existing : null;
     const record = await tx[config.delegate].update({ where: { id }, data: stripMeta(data) });
     if (config.afterWrite) await config.afterWrite(tx, request, record, data, previous);
     const auditLog = await writeAudit(tx, request, {
@@ -2923,8 +3496,10 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
     throw apiError(`${request.params.resource} cannot be deleted through the generic API.`, 405);
   }
 
-  assertMutationAllowed(request, config.module);
   const id = String(request.params.id);
+  const existing = await prisma[config.delegate].findUnique({ where: { id } });
+  if (!existing) throw apiError(`${config.area} record not found.`, 404);
+  await assertResourceMutationAllowed(request, config, existing);
   await prisma.$transaction(async (tx) => {
     const record = await tx[config.delegate].delete({ where: { id } });
     await writeAudit(tx, request, {
@@ -2941,20 +3516,35 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   const serviceId = requireText(values.serviceId, "Service");
   const mobile = requireText(values.mobile, "Mobile number");
   const fullName = requireText(values.fullName, "Full name");
+  const bookingBranch = requireText(values.branch, "Branch");
+  if (values.privacyConsent !== true) throw apiError("Privacy consent is required before booking.", 400);
+  const requestedDate = requireText(values.date, "Appointment date");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || requestedDate < new Date().toISOString().slice(0, 10)) {
+    throw apiError("Choose a valid current or future appointment date.", 400);
+  }
+  if (!/^\d{2}:\d{2}$/.test(requireText(values.time, "Appointment time"))) {
+    throw apiError("Choose a valid appointment time.", 400);
+  }
   const service = await prisma.service.findUnique({ where: { id: serviceId } });
   if (!service || !service.active) {
     throw apiError("Selected service is unavailable.", 404);
   }
+  const branch = await prisma.branch.findUnique({ where: { name: bookingBranch } });
+  if (!branch) throw apiError("Selected branch is unavailable.", 404);
+  const serviceBranches = parseJsonList(service.branches);
+  if (serviceBranches.length && !serviceBranches.includes(bookingBranch) && !serviceBranches.includes("All branches")) {
+    throw apiError("Selected service is not offered at this branch.", 409);
+  }
 
   const result = await prisma.$transaction(async (tx) => {
-    let client = await tx.client.findFirst({ where: { mobile } });
+    let client = await tx.client.findFirst({ where: { mobile, branch: bookingBranch } });
     if (!client) {
       client = await tx.client.create({
         data: normalizeClientPayload({
           fullName,
           mobile,
           email: values.email,
-          branch: values.branch,
+          branch: bookingBranch,
           source: "Online Booking",
           referral: "Public portal",
           skinConcerns: values.concern,
@@ -2969,13 +3559,13 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     }
 
     const appointmentData = {
-      date: requireText(values.date, "Appointment date"),
+      date: requestedDate,
       time: requireText(values.time, "Appointment time"),
       clientId: client.id,
       client: client.fullName,
       serviceId,
       service: service.name,
-      branch: requireText(values.branch, "Branch"),
+      branch: bookingBranch,
       room: "To assign",
       staff: clean(values.staff) || "Any available",
       status: "Pending Confirmation",
@@ -3036,7 +3626,17 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     return { client, lead: linkedLead, appointment, auditLog };
   });
 
-  response.status(201).json(result);
+  response.status(201).json({
+    bookingReference: result.appointment.id,
+    appointment: {
+      id: result.appointment.id,
+      date: result.appointment.date,
+      time: result.appointment.time,
+      service: result.appointment.service,
+      branch: result.appointment.branch,
+      status: result.appointment.status,
+    },
+  });
 }));
 
 app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) => {
@@ -3089,18 +3689,12 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
   }
 
   assertMutationAllowed(request, "packages", pkg.branch);
-  if (Number(pkg.used) >= Number(pkg.sessions)) {
-    throw apiError("This package has no remaining sessions.", 409);
-  }
+  assertPackageRedeemable(pkg);
 
   const result = await prisma.$transaction(async (tx) => {
-    const nextUsed = Number(pkg.used) + 1;
     const record = await tx.clinicPackage.update({
       where: { id },
-      data: {
-        used: nextUsed,
-        status: nextUsed >= Number(pkg.sessions) ? "Completed" : pkg.status,
-      },
+      data: packageAfterRedemption(pkg),
     });
     const auditLog = await writeAudit(tx, request, {
       area: "Packages",
@@ -3126,14 +3720,88 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     return;
   }
 
+  const actor = actorFromRequest(request);
   const result = await prisma.$transaction(async (tx) => {
     const record = await tx.sale.update({ where: { id }, data: { status: "Void" }, include: { items: true } });
+
+    const saleMovements = await tx.inventoryMovement.findMany({ where: { reason: `Sold on ${sale.invoice}` } });
+    const reversalMovements = [];
+    for (const movement of saleMovements) {
+      if (!movement.itemId) continue;
+      const item = await tx.inventoryItem.findUnique({ where: { id: movement.itemId } });
+      if (!item) continue;
+      await tx.inventoryItem.update({
+        where: { id: movement.itemId },
+        data: { stock: { increment: -movement.qty } },
+      });
+      reversalMovements.push(await tx.inventoryMovement.create({
+        data: {
+          date: new Date().toISOString().slice(0, 10),
+          itemId: movement.itemId,
+          item: movement.item,
+          branch: movement.branch,
+          qty: -movement.qty,
+          reason: `Void of ${sale.invoice}`,
+          user: actor.name,
+        },
+      }));
+    }
+
+    const salePayments = parseJsonList(sale.payments);
+    const restoredCertificates = [];
+    const certificateRefunds = new Map();
+    const packageRestores = new Map();
+    for (const payment of salePayments) {
+      const certificateId = clean(payment?.giftCertificateId);
+      const packageId = clean(payment?.packageId);
+      const amount = Number(payment?.amount || 0);
+      if (certificateId && amount > 0) {
+        certificateRefunds.set(certificateId, (certificateRefunds.get(certificateId) || 0) + amount);
+      }
+      if (packageId) {
+        packageRestores.set(packageId, (packageRestores.get(packageId) || 0) + 1);
+      }
+    }
+    for (const [certificateId, amount] of certificateRefunds) {
+      const certificate = await tx.giftCertificate.findUnique({ where: { id: certificateId } });
+      if (!certificate) continue;
+      restoredCertificates.push(await tx.giftCertificate.update({
+        where: { id: certificateId },
+        data: {
+          balance: Number(certificate.balance || 0) + amount,
+          status: certificate.status === "Used" ? "Active" : certificate.status,
+        },
+      }));
+    }
+    const restoredPackages = [];
+    for (const [packageId, sessions] of packageRestores) {
+      const pkg = await tx.clinicPackage.findUnique({ where: { id: packageId } });
+      if (!pkg) continue;
+      restoredPackages.push(await tx.clinicPackage.update({
+        where: { id: packageId },
+        data: packageAfterVoid(pkg, sessions),
+      }));
+    }
+
+    const reversalNotes = [
+      ...(reversalMovements.length ? [`${reversalMovements.length} stock movement(s) reversed`] : []),
+      ...restoredCertificates.map((certificate) => `GC ${certificate.code} restored to ${certificate.balance}`),
+      ...restoredPackages.map((pkg) => `${pkg.name} back to ${pkg.used}/${pkg.sessions} sessions`),
+    ];
     const auditLog = await writeAudit(tx, request, {
       area: "POS",
       action: "Transaction voided",
-      details: `${sale.invoice} marked void.`,
+      details: `${sale.invoice} marked void.${reversalNotes.length ? ` ${reversalNotes.join("; ")}.` : ""}`,
     });
-    return { record: serializeSale(record), auditLog };
+
+    return {
+      record: serializeSale(record),
+      movements: reversalMovements,
+      inventory: reversalMovements.length ? await tx.inventoryItem.findMany({ orderBy: [{ item: "asc" }] }) : null,
+      giftCertificates: restoredCertificates,
+      packages: restoredPackages,
+      auditLog,
+    };
   });
 
   response.json(result);
@@ -3149,9 +3817,19 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   const normalizedPayments = payments.map((payment) => ({
     method: requireText(payment.method, "Payment method"),
     amount: numberValue(payment.amount, "Payment amount", { min: 0 }),
+    ...(clean(payment.giftCertificateId) ? { giftCertificateId: clean(payment.giftCertificateId) } : {}),
+    ...(clean(payment.packageId) ? { packageId: clean(payment.packageId) } : {}),
   })).filter((payment) => payment.amount > 0);
   if (!normalizedPayments.length) {
     throw apiError("At least one payment amount is required.");
+  }
+  for (const payment of normalizedPayments) {
+    if (payment.method === "Gift Certificate" && !payment.giftCertificateId) {
+      throw apiError("Select the gift certificate used for this payment.");
+    }
+    if (payment.method === "Package" && !payment.packageId) {
+      throw apiError("Select the client package used for this payment.");
+    }
   }
 
   const checkout = await calculateCheckout(draft);
@@ -3168,6 +3846,39 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       if (Number(item.stock || 0) < deduction.qty) {
         throw apiError(`Inventory is insufficient for ${item.item}.`, 409);
       }
+    }
+
+    const settledCertificates = [];
+    const certificateCharges = new Map();
+    for (const payment of normalizedPayments) {
+      if (!payment.giftCertificateId) continue;
+      certificateCharges.set(payment.giftCertificateId, (certificateCharges.get(payment.giftCertificateId) || 0) + payment.amount);
+    }
+    for (const [certificateId, amount] of certificateCharges) {
+      const certificate = await tx.giftCertificate.findUnique({ where: { id: certificateId } });
+      assertGiftCertificateUsable(certificate, { branch, amount });
+      settledCertificates.push(await tx.giftCertificate.update({
+        where: { id: certificateId },
+        data: giftCertificateAfterPayment(certificate, amount),
+      }));
+    }
+
+    const settledPackages = [];
+    const packageRedemptions = new Map();
+    for (const payment of normalizedPayments) {
+      if (!payment.packageId) continue;
+      packageRedemptions.set(payment.packageId, (packageRedemptions.get(payment.packageId) || 0) + 1);
+    }
+    for (const [packageId, sessions] of packageRedemptions) {
+      const pkg = await tx.clinicPackage.findUnique({ where: { id: packageId } });
+      assertPackageRedeemable(pkg, { branch });
+      if (Number(pkg.used || 0) + sessions > Number(pkg.sessions || 0)) {
+        throw apiError(`Package ${pkg.name} only has ${Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left.`, 409);
+      }
+      settledPackages.push(await tx.clinicPackage.update({
+        where: { id: packageId },
+        data: packageAfterRedemption(pkg, sessions),
+      }));
     }
 
     const saleCount = await tx.sale.count();
@@ -3218,16 +3929,22 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       movements.push(movement);
     }
 
+    const tenderNotes = [
+      ...settledCertificates.map((certificate) => `GC ${certificate.code} balance ${certificate.balance}`),
+      ...settledPackages.map((pkg) => `${pkg.name} ${pkg.used}/${pkg.sessions} sessions`),
+    ];
     const auditLog = await writeAudit(tx, request, {
       area: "POS",
       action: "POS transaction completed",
-      details: `${sale.invoice} posted for ${checkout.total}.`,
+      details: `${sale.invoice} posted for ${checkout.total}.${tenderNotes.length ? ` ${tenderNotes.join("; ")}.` : ""}`,
     });
 
     return {
       sale: serializeSale(sale),
       inventory: await tx.inventoryItem.findMany({ orderBy: [{ item: "asc" }] }),
       movements,
+      giftCertificates: settledCertificates,
+      packages: settledPackages,
       auditLog,
     };
   });
@@ -3236,16 +3953,12 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/marketing/send", asyncRoute(async (request, response) => {
-  assertMutationAllowed(request, "sms");
+  const actor = assertMutationAllowed(request, "sms");
   const campaign = request.body?.campaign ?? {};
-  const settings = request.body?.settings ?? {};
+  const settings = await getPersistedSettings();
   const channel = marketingChannel(campaign);
-  const clients = Array.isArray(request.body?.clients) && request.body.clients.length
-    ? request.body.clients
-    : await prisma.client.findMany();
-  const templates = Array.isArray(request.body?.templates) && request.body.templates.length
-    ? request.body.templates
-    : await prisma.smsTemplate.findMany({ where: { active: true } });
+  const clients = await listResource("clients", actor);
+  const templates = await prisma.smsTemplate.findMany({ where: { active: true } });
   const template = pickTemplate({ campaign, templates, channel });
   const baseMessage = clean(campaign.message) || clean(template.text);
   const subject = clean(campaign.subject) || clean(campaign.name) || "A note from MACE";
@@ -3357,6 +4070,8 @@ app.use((error, _request, response, _next) => {
   }
   response.status(status).json({ error: message });
 });
+
+assertProductionEnvironment();
 
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`MACE ClinicOS listening on port ${port}`);

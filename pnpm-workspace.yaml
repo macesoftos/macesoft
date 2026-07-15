@@ -3,3 +3,6 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   prisma: true
+overrides:
+  'node-fetch@<2.6.7': 2.7.0
+  '@hono/node-server@<1.19.13': 1.19.13
