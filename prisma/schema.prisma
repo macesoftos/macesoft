@@ -128,13 +128,13 @@ model Account {
 }
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
   accountId String
-  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([accountId, createdAt])
   @@index([expiresAt])
@@ -320,32 +320,32 @@ model FaceTrackPolicy {
 }
 
 model FaceTrackKioskDevice {
-  id            String                     @id @default(cuid())
+  id            String                    @id @default(cuid())
   name          String
   branch        String
-  tokenHash     String                     @unique
+  tokenHash     String                    @unique
   pinHash       String
-  active        Boolean                    @default(true)
+  active        Boolean                   @default(true)
   lastSeenAt    DateTime?
   createdById   String
   createdByName String
   challenges    FaceTrackKioskChallenge[]
-  createdAt     DateTime                   @default(now())
-  updatedAt     DateTime                   @updatedAt
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
 
   @@index([branch, active])
   @@index([createdById])
 }
 
 model FaceTrackKioskChallenge {
-  id        String                @id @default(cuid())
+  id        String               @id @default(cuid())
   deviceId  String
   device    FaceTrackKioskDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  purpose   String                @default("KIOSK_CLOCK")
-  nonceHash String                @unique
+  purpose   String               @default("KIOSK_CLOCK")
+  nonceHash String               @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime              @default(now())
+  createdAt DateTime             @default(now())
 
   @@index([deviceId, purpose])
   @@index([expiresAt])
@@ -376,25 +376,33 @@ model Service {
 }
 
 model Appointment {
-  id            String   @id @default(cuid())
-  date          String
-  time          String
-  clientId      String?
-  clientRecord  Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  client        String
-  serviceId     String?
-  serviceRecord Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  service       String
-  branch        String
-  room          String   @default("")
-  staff         String   @default("")
-  status        String   @default("Pending")
-  deposit       Float    @default(0)
-  leadId        String   @default("")
-  notes         String   @default("")
-  internalNotes String   @default("")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(cuid())
+  date            String
+  time            String
+  clientId        String?
+  clientRecord    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client          String
+  serviceId       String?
+  serviceRecord   Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  service         String
+  branch          String
+  room            String   @default("")
+  staff           String   @default("")
+  duration        Int      @default(0)
+  appointmentType String   @default("Treatment")
+  insurance       String   @default("")
+  tags            String   @default("")
+  packageName     String   @default("")
+  timezone        String   @default("Asia/Manila")
+  recurrence      String   @default("None")
+  recurrenceUntil String   @default("")
+  status          String   @default("Pending")
+  deposit         Float    @default(0)
+  leadId          String   @default("")
+  notes           String   @default("")
+  internalNotes   String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([date])
   @@index([branch])

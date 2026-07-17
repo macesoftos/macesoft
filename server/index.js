@@ -375,7 +375,7 @@ const integrationDefaults = [
 ];
 const webhookRateLimit = new Map();
 const scheduleStartMinutes = 8 * 60;
-const scheduleEndMinutes = 18 * 60;
+const scheduleEndMinutes = 20 * 60;
 const lunchStartMinutes = 12 * 60;
 const lunchEndMinutes = 13 * 60;
 
@@ -693,6 +693,14 @@ async function normalizeAppointmentPayload(payload, existingId = "") {
     branch: requireText(payload.branch, "Branch"),
     room: clean(payload.room) || "To assign",
     staff: clean(payload.staff) || "Any available",
+    duration: numberValue(payload.duration || service?.duration || 60, "Duration", { min: 15, integer: true }),
+    appointmentType: clean(payload.appointmentType) || "Treatment",
+    insurance: clean(payload.insurance),
+    tags: clean(payload.tags),
+    packageName: clean(payload.packageName),
+    timezone: clean(payload.timezone) || "Asia/Manila",
+    recurrence: clean(payload.recurrence) || "None",
+    recurrenceUntil: clean(payload.recurrenceUntil),
     status,
     deposit: numberValue(payload.deposit, "Deposit", { min: 0 }),
     leadId: clean(payload.leadId),
@@ -1979,6 +1987,7 @@ async function processLeadWebhook(provider, request) {
 }
 
 async function appointmentDurationFor(data) {
+  if (Number(data.duration) >= 15) return Number(data.duration);
   let service = null;
   if (data.serviceId) {
     service = await prisma.service.findUnique({ where: { id: data.serviceId } });
@@ -2012,7 +2021,7 @@ async function assertAppointmentSlotAvailable(data, existingId = "") {
   const start = parseTimeToMinutes(data.time);
   const end = start + duration;
   if (start < scheduleStartMinutes || end > scheduleEndMinutes) {
-    throw apiError("Appointment must fit inside clinic hours, 8:00 AM to 6:00 PM.", 409);
+    throw apiError("Appointment must fit inside clinic hours, 8:00 AM to 8:00 PM.", 409);
   }
   if (rangesOverlap(start, end, lunchStartMinutes, lunchEndMinutes)) {
     throw apiError("Appointment overlaps the clinic lunch break from 12:00 PM to 1:00 PM.", 409);

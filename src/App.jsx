@@ -21,6 +21,7 @@ import {
   Database,
   Download,
   Edit3,
+  EllipsisVertical,
   Eye,
   FileText,
   Filter,
@@ -172,6 +173,14 @@ const leadStatuses = [
   "Lost",
   "Invalid or Spam",
 ];
+const leadDirectoryTabs = [
+  { id: "all", label: "All Leads", statuses: null },
+  { id: "new", label: "New", statuses: ["New Inquiry"] },
+  { id: "contacted", label: "Contacted", statuses: ["Contact Attempted", "Connected"] },
+  { id: "qualified", label: "Qualified", statuses: ["Qualified"] },
+  { id: "converted", label: "Converted", statuses: ["Converted"] },
+  { id: "lost", label: "Lost", statuses: ["Lost"] },
+];
 const legacyLeadStatusMap = {
   New: "New Inquiry",
   Contacted: "Connected",
@@ -209,7 +218,7 @@ function createId(prefix) {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return isoDate(new Date());
 }
 
 function normalize(value) {
@@ -245,7 +254,7 @@ function canonicalLeadStatus(status) {
 }
 
 const scheduleStartMinutes = 8 * 60;
-const scheduleEndMinutes = 18 * 60;
+const scheduleEndMinutes = 20 * 60;
 const scheduleHours = Array.from(
   { length: (scheduleEndMinutes - scheduleStartMinutes) / 60 + 1 },
   (_, index) => scheduleStartMinutes + index * 60,
@@ -271,11 +280,17 @@ function formatScheduleTime(minutes) {
   return `${hour12}:${String(mins).padStart(2, "0")} ${period}`;
 }
 
+function formatTimeInput(minutes) {
+  const bounded = Math.max(0, Math.min(23 * 60 + 59, Math.round(Number(minutes) || 0)));
+  return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
+}
+
 function serviceForAppointment(appointment, services) {
   return services.find((item) => item.id === appointment.serviceId || item.name === appointment.service);
 }
 
 function appointmentDurationMinutes(appointment, services) {
+  if (Number(appointment.duration) >= 15) return Number(appointment.duration);
   const service = serviceForAppointment(appointment, services);
   return Math.max(30, Number(service?.duration || 60));
 }
@@ -291,7 +306,14 @@ function addDays(date, days) {
 }
 
 function isoDate(date) {
-  return date.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function startOfWeek(date) {
@@ -305,8 +327,8 @@ function endOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }
 
-function dateRangeForPreset(preset, today = new Date()) {
-  const start = new Date(today);
+function dateRangeForPreset(preset, today = null) {
+  const start = today ? new Date(today) : new Date(`${todayDate()}T12:00:00`);
   const todayIso = isoDate(start);
   if (preset === "Today") return { from: todayIso, to: todayIso };
   if (preset === "Tomorrow") {
@@ -445,6 +467,40 @@ function formatDateTime(value) {
   }).format(parsed);
 }
 
+function leadFollowUpDisplay(value) {
+  if (!value) return { date: "Not scheduled", time: "", relative: "No follow-up", tone: "none" };
+  const dueAt = new Date(value);
+  if (Number.isNaN(dueAt.getTime())) return { date: String(value), time: "", relative: "Scheduled", tone: "upcoming" };
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(dueAt.getFullYear(), dueAt.getMonth(), dueAt.getDate());
+  const dayDifference = Math.round((dueDay.getTime() - today.getTime()) / 86_400_000);
+  let relative = "";
+  let tone = "upcoming";
+
+  if (dayDifference < 0) {
+    const days = Math.abs(dayDifference);
+    relative = `${days} day${days === 1 ? "" : "s"} overdue`;
+    tone = "overdue";
+  } else if (dayDifference === 0) {
+    relative = "Today";
+    tone = dueAt.getTime() < now.getTime() ? "overdue" : "today";
+  } else if (dayDifference === 1) {
+    relative = "Tomorrow";
+    tone = "tomorrow";
+  } else {
+    relative = `${dayDifference} days remaining`;
+  }
+
+  return {
+    date: dueAt.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" }),
+    time: dueAt.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
+    relative,
+    tone,
+  };
+}
+
 function useStoredState(key, initialValue) {
   const [value, setValue] = useState(() => {
     try {
@@ -522,6 +578,41 @@ function downloadCsv(filename, rows, columns) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  const source = String(text ?? "").replace(/^\uFEFF/, "");
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (character === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (character === '"') {
+      quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += character;
+    }
+  }
+
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
 }
 
 function App() {
@@ -1176,6 +1267,14 @@ function App() {
       branch: values.branch,
       room: values.room,
       staff: values.staff,
+      duration: Number(values.duration || service?.duration || 60),
+      appointmentType: values.appointmentType || "Treatment",
+      insurance: values.insurance || "",
+      tags: values.tags || "",
+      packageName: values.packageName || "",
+      timezone: values.timezone || "Asia/Manila",
+      recurrence: values.recurrence || "None",
+      recurrenceUntil: values.recurrenceUntil || "",
       status: canonicalAppointmentStatus(values.status),
       deposit: Number(values.deposit || 0),
       notes: values.notes || "",
@@ -1223,6 +1322,38 @@ function App() {
     closeModal();
     markApiConnected("SQLite connected / client saved");
     notify(isExisting ? "Client updated." : "Client added.");
+  }
+
+  async function importClients(records) {
+    let saved = 0;
+    let failed = 0;
+
+    for (const values of records) {
+      const isExisting = Boolean(values.id && clients.some((client) => client.id === values.id));
+      const record = {
+        ...values,
+        id: values.id || createId("cl"),
+        balance: Number(values.balance || 0),
+        giftBalance: Number(values.giftBalance || 0),
+        marketingOptIn: Boolean(values.marketingOptIn),
+      };
+
+      try {
+        const result = await saveResourceRecord("clients", record, { existing: isExisting });
+        upsertById(setClients, result.record);
+        applyAuditLog(result.auditLog);
+        saved += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    if (saved > 0) markApiConnected("SQLite connected / clients imported");
+    if (failed > 0) {
+      notify(`${saved} client${saved === 1 ? "" : "s"} imported, ${failed} failed.`, "warning");
+    } else {
+      notify(`${saved} client${saved === 1 ? "" : "s"} imported.`);
+    }
   }
 
   function deleteClient(client) {
@@ -1328,6 +1459,61 @@ function App() {
     closeModal();
     markApiConnected("SQLite connected / lead saved");
     notify(values.id ? "Lead updated." : "Lead added.");
+  }
+
+  async function importLeads(records) {
+    let saved = 0;
+    let failed = 0;
+
+    for (const values of records) {
+      const isExisting = Boolean(values.id && leads.some((lead) => lead.id === values.id));
+      const record = {
+        ...values,
+        id: values.id || createId("lead"),
+        status: canonicalLeadStatus(values.status),
+        created: values.created || todayDate(),
+        firstTouchSource: values.firstTouchSource || values.source,
+        latestTouchSource: values.latestTouchSource || values.source,
+        nextAction: values.nextAction || values.nextStep,
+      };
+
+      try {
+        const result = await saveResourceRecord("leads", record, { existing: isExisting });
+        upsertById(setLeads, result.record);
+        applyAuditLog(result.auditLog);
+        saved += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    if (saved > 0) markApiConnected("SQLite connected / leads imported");
+    if (failed > 0) {
+      notify(`${saved} lead${saved === 1 ? "" : "s"} imported, ${failed} failed.`, "warning");
+    } else {
+      notify(`${saved} lead${saved === 1 ? "" : "s"} imported.`);
+    }
+  }
+
+  function deleteLead(lead) {
+    askConfirm({
+      title: "Delete lead?",
+      copy: `${lead.name} and the lead's activity history will be permanently removed.`,
+      actionLabel: "Delete lead",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await deleteResourceRecord("leads", lead.id);
+            removeById(setLeads, lead.id);
+            markApiConnected("SQLite connected / lead deleted");
+            addAudit("Lead deleted", `${lead.name} removed from lead records.`, "Leads");
+            notify("Lead deleted.");
+          } catch (error) {
+            notify(error.message || "Delete could not reach the API.", "error");
+          }
+        })();
+      },
+    });
   }
 
   async function updateLeadStatus(id, status, extra = {}) {
@@ -1757,6 +1943,7 @@ function App() {
               <PageHeader
                 eyebrow="MACE ClinicOS"
                 title={activeLabel}
+                subtitle={activeModule === "leads" ? "Manage and track your clinic leads." : undefined}
                 leading={showBackButton ? (
                   <button
                     className="topbar-back-button"
@@ -1775,7 +1962,7 @@ function App() {
                 <Search size={17} aria-hidden="true" />
                 <input
                   aria-label="Search records"
-                  placeholder="Search clients, bookings, reports..."
+                  placeholder={activeModule === "leads" ? "Search by name, phone, service, campaign..." : "Search clients, bookings, reports..."}
                   value={globalSearch}
                   onChange={(event) => setGlobalSearch(event.target.value)}
                 />
@@ -1811,7 +1998,7 @@ function App() {
           </div>
 
         <section className="content-area">
-          {!isPosView && !isApplicationsView && !isFaceTrackView && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
+          {!isPosView && !isApplicationsView && !isFaceTrackView && activeModule !== "appointments" && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
           {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
@@ -1898,8 +2085,11 @@ function App() {
               staff={staff}
               transactions={scopedTransactions}
               auditLogs={auditLogs}
+              treatments={treatments}
+              packages={packages}
               openModal={openModal}
               updateStatus={updateAppointmentStatus}
+              onUpdateAppointment={saveAppointment}
               openPayment={(draft) => openModal("payment", draft)}
               onPrintReceipt={printReceipt}
               globalSearch={globalSearch}
@@ -1920,9 +2110,11 @@ function App() {
               transactions={transactions}
               packages={packages}
               openModal={openModal}
+              importClients={importClients}
               deleteClient={deleteClient}
               sensitiveAllowed={sensitiveAllowed}
               globalSearch={globalSearch}
+              notify={notify}
             />
           )}
           {activeModule === "treatments" && (
@@ -1970,6 +2162,8 @@ function App() {
               integrations={leadIntegrations}
               webhookEvents={webhookEvents}
               openModal={openModal}
+              importLeads={importLeads}
+              deleteLead={deleteLead}
               updateStatus={updateLeadStatus}
               addActivity={saveLeadActivity}
               scheduleFollowUp={saveLeadFollowUp}
@@ -1978,6 +2172,8 @@ function App() {
               mergeLead={mergeLead}
               refreshOperations={refreshLeadOperations}
               globalSearch={globalSearch}
+              isBooting={isBooting}
+              notify={notify}
             />
           )}
           {activeModule === "sms" && (
@@ -2094,6 +2290,7 @@ function App() {
         templates={smsTemplates}
         packages={packages}
         giftCertificates={giftCertificates}
+        appointments={appointments}
       />
 
       {confirm && <ConfirmDialog confirm={confirm} onCancel={() => setConfirm(null)} />}
@@ -2185,7 +2382,7 @@ function PrintableReceipt({ receipt, settings }) {
   );
 }
 
-function PageHeader({ eyebrow, title, leading = null }) {
+function PageHeader({ eyebrow, title, subtitle, leading = null }) {
   return (
     <div className="page-header topbar-title-block">
       <p className="eyebrow">{eyebrow}</p>
@@ -2193,6 +2390,7 @@ function PageHeader({ eyebrow, title, leading = null }) {
         {leading}
         <h1>{title}</h1>
       </div>
+      {subtitle && <span className="topbar-subtitle">{subtitle}</span>}
     </div>
   );
 }
@@ -2227,6 +2425,19 @@ function SidebarNavigation({
   sections,
   session,
 }) {
+  const [menuQuery, setMenuQuery] = useState("");
+  const filteredSections = useMemo(() => {
+    const query = menuQuery.trim().toLowerCase();
+    if (!query) return sections;
+
+    return sections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => item.label.toLowerCase().includes(query)),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [menuQuery, sections]);
+
   return (
     <>
       <aside
@@ -2249,8 +2460,20 @@ function SidebarNavigation({
           </button>
         </div>
 
+        <label className="sidebar-menu-search">
+          <Search size={16} aria-hidden="true" />
+          <span className="sr-only">Find a module</span>
+          <input
+            type="search"
+            value={menuQuery}
+            onChange={(event) => setMenuQuery(event.target.value)}
+            placeholder="Find..."
+            autoComplete="off"
+          />
+        </label>
+
         <nav className="sidebar-scroll" aria-label="Primary modules">
-          {sections.map((section) => (
+          {filteredSections.map((section) => (
             <SidebarSection
               activeModule={activeModule}
               collapsed={collapsed}
@@ -2259,6 +2482,9 @@ function SidebarNavigation({
               section={section}
             />
           ))}
+          {filteredSections.length === 0 && (
+            <p className="sidebar-menu-empty">No modules found.</p>
+          )}
         </nav>
 
         <div className="sidebar-account" title={collapsed ? `${session.name} / ${session.role}` : undefined}>
@@ -4427,7 +4653,7 @@ function AvailabilityTimeline({ resourceLabel, resources, appointments, services
   );
 }
 
-function AppointmentsModule({
+function LegacyAppointmentsModule({
   appointments,
   clients,
   services,
@@ -5088,18 +5314,489 @@ function AppointmentsModule({
   );
 }
 
+void LegacyAppointmentsModule;
+
+const appointmentGridHourHeight = 72;
+
+function AppointmentScheduleGrid({
+  resources,
+  appointments,
+  services,
+  getResource,
+  selectedDate,
+  selectedId,
+  onSelect,
+  onContext,
+  onChangeAppointment,
+}) {
+  const resizeSession = useRef(null);
+  const [resizePreview, setResizePreview] = useState(null);
+  const gridMinutes = scheduleEndMinutes - scheduleStartMinutes;
+  const boardHeight = (gridMinutes / 60) * appointmentGridHourHeight;
+  const pixelPerMinute = appointmentGridHourHeight / 60;
+  const isToday = selectedDate === todayDate();
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const showNow = isToday && nowMinutes >= scheduleStartMinutes && nowMinutes <= scheduleEndMinutes;
+
+  useEffect(() => {
+    function resizeAt(event) {
+      const session = resizeSession.current;
+      if (!session) return;
+      const deltaMinutes = Math.round(((event.clientY - session.startY) / pixelPerMinute) / 15) * 15;
+      const duration = Math.max(15, Math.min(240, session.duration + deltaMinutes));
+      setResizePreview({ id: session.appointment.id, duration });
+    }
+
+    function finishResize() {
+      const session = resizeSession.current;
+      const preview = resizePreview;
+      resizeSession.current = null;
+      setResizePreview(null);
+      if (!session || !preview || preview.duration === session.duration) return;
+      void onChangeAppointment(session.appointment, { duration: preview.duration });
+    }
+
+    document.addEventListener("pointermove", resizeAt);
+    document.addEventListener("pointerup", finishResize);
+    return () => {
+      document.removeEventListener("pointermove", resizeAt);
+      document.removeEventListener("pointerup", finishResize);
+    };
+  }, [onChangeAppointment, pixelPerMinute, resizePreview]);
+
+  function dropAppointment(event, resource) {
+    event.preventDefault();
+    const appointmentId = event.dataTransfer.getData("text/appointment-id");
+    const appointment = appointments.find((item) => item.id === appointmentId);
+    if (!appointment) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const rawMinutes = scheduleStartMinutes + ((event.clientY - rect.top) / pixelPerMinute);
+    const start = Math.max(scheduleStartMinutes, Math.min(scheduleEndMinutes - 15, Math.round(rawMinutes / 15) * 15));
+    void onChangeAppointment(appointment, {
+      time: formatTimeInput(start),
+      ...resource.assignment,
+    });
+  }
+
+  return (
+    <div className="appointment-resource-grid-shell">
+      <div className="appointment-resource-grid" style={{ "--appointment-resource-count": Math.max(1, resources.length) }}>
+        <div className="appointment-grid-corner"><span>GMT+8</span><small>Manila</small></div>
+        {resources.map((resource) => (
+          <div className="appointment-resource-heading" key={resource.key}>
+            <span><strong>{resource.label}</strong><small>{resource.subtitle || "Available"}</small></span>
+          </div>
+        ))}
+        <div className="appointment-time-axis" style={{ height: `${boardHeight}px` }}>
+          {scheduleHours.slice(0, -1).map((minutes) => (
+            <span key={minutes} style={{ top: `${(minutes - scheduleStartMinutes) * pixelPerMinute}px` }}>{formatScheduleTime(minutes).replace(":00", "")}</span>
+          ))}
+          <span style={{ top: `${boardHeight - 16}px` }}>{formatScheduleTime(scheduleEndMinutes).replace(":00", "")}</span>
+        </div>
+        {resources.map((resource) => (
+          <div
+            className="appointment-resource-column"
+            key={resource.key}
+            style={{ height: `${boardHeight}px` }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => dropAppointment(event, resource)}
+          >
+            <span className="appointment-lunch-band" style={{ top: `${(12 * 60 - scheduleStartMinutes) * pixelPerMinute}px`, height: `${appointmentGridHourHeight}px` }}>Lunch / protected time</span>
+            {showNow && <span className="appointment-current-time-line" style={{ top: `${(nowMinutes - scheduleStartMinutes) * pixelPerMinute}px` }}><i /></span>}
+            {appointments.filter((appointment) => getResource(appointment) === resource.key).map((appointment) => {
+              const start = parseTimeToMinutes(appointment.time);
+              const duration = resizePreview?.id === appointment.id ? resizePreview.duration : appointmentDurationMinutes(appointment, services);
+              return (
+                <article
+                  className={`appointment-grid-card ${statusClass(appointment.status)} ${selectedId === appointment.id ? "selected" : ""}`}
+                  key={appointment.id}
+                  draggable={!resizePreview}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/appointment-id", appointment.id);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onContext(event, appointment);
+                  }}
+                  style={{
+                    top: `${Math.max(0, start - scheduleStartMinutes) * pixelPerMinute + 4}px`,
+                    height: `${Math.max(42, duration * pixelPerMinute - 8)}px`,
+                  }}
+                >
+                  <button type="button" onClick={() => onSelect(appointment.id)} aria-label={`Open ${appointment.client} appointment`}>
+                    <span className="appointment-grid-card-heading"><strong>{appointment.service}</strong></span>
+                    <span className="appointment-grid-card-time">{formatScheduleTime(start)} – {formatScheduleTime(start + duration)}</span>
+                    <small className="appointment-grid-card-client">{appointment.client}</small>
+                  </button>
+                  <button
+                    className="appointment-resize-handle"
+                    type="button"
+                    aria-label={`Resize ${appointment.client} appointment`}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      resizeSession.current = { appointment, startY: event.clientY, duration };
+                      setResizePreview({ id: appointment.id, duration });
+                    }}
+                  />
+                </article>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      {!resources.length && <EmptyState title="No scheduling resources" copy="Add staff or rooms to this branch before creating a booking." />}
+      {resources.length > 0 && !appointments.length && <div className="appointment-grid-empty"><CalendarDays size={20} /><span>No appointments match these filters. Drag-free time is available for booking.</span></div>}
+    </div>
+  );
+}
+
+function AppointmentsModule({
+  appointments,
+  clients,
+  services,
+  staff = [],
+  transactions = [],
+  auditLogs = [],
+  treatments = [],
+  packages = [],
+  openModal,
+  updateStatus,
+  onUpdateAppointment,
+  openPayment,
+  onPrintReceipt,
+  globalSearch,
+}) {
+  const defaultFilters = {
+    status: "All",
+    doctor: "All",
+    room: "All",
+    service: "All",
+    branch: "All",
+    datePreset: "Today",
+    from: "",
+    to: "",
+    payment: "All",
+    deposit: "All",
+    clientType: "All",
+    appointmentType: "All",
+    insurance: "All",
+    tags: "",
+    query: "",
+  };
+  const [view, setView] = useStoredState("appointment-scheduler-view", "Schedule");
+  const [filters, setFilters] = useState(defaultFilters);
+  const [showDataTable, setShowDataTable] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
+  const [selectedId, setSelectedId] = useState("");
+  const [draggedAppointmentId, setDraggedAppointmentId] = useState("");
+  const [dragOverStatus, setDragOverStatus] = useState("");
+  const [contextMenu, setContextMenu] = useState(null);
+  const [scheduleFeedback, setScheduleFeedback] = useState(null);
+
+  const normalizedFilters = { ...defaultFilters, ...filters };
+  const range = normalizedFilters.datePreset === "Custom"
+    ? { from: normalizedFilters.from, to: normalizedFilters.to || normalizedFilters.from }
+    : dateRangeForPreset(normalizedFilters.datePreset);
+  const selectedDate = range.from && range.from === range.to ? range.from : todayDate();
+  const calendarYear = calendarMonth.getFullYear();
+  const calendarMonthIndex = calendarMonth.getMonth();
+  const firstWeekday = (new Date(calendarYear, calendarMonthIndex, 1).getDay() + 6) % 7;
+  const calendarDays = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(calendarYear, calendarMonthIndex, 1 - firstWeekday + index);
+    return {
+      date,
+      value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+      inMonth: date.getMonth() === calendarMonthIndex,
+    };
+  });
+  const calendarMonthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonth);
+  const roomOptions = [...new Set(uniqueRoomsFromBranches().concat(appointments.map((item) => item.room)).filter(Boolean))];
+  const clientAppointmentCounts = appointments.reduce((counts, appointment) => {
+    const key = appointment.clientId || normalize(appointment.client);
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const combinedQuery = normalize(`${globalSearch} ${normalizedFilters.query}`.trim());
+
+  const filteredRows = appointments
+    .filter((item) => normalizedFilters.status === "All" || canonicalAppointmentStatus(item.status) === normalizedFilters.status)
+    .filter((item) => normalizedFilters.doctor === "All" || item.staff === normalizedFilters.doctor)
+    .filter((item) => normalizedFilters.room === "All" || item.room === normalizedFilters.room)
+    .filter((item) => normalizedFilters.service === "All" || item.service === normalizedFilters.service)
+    .filter((item) => normalizedFilters.branch === "All" || item.branch === normalizedFilters.branch)
+    .filter((item) => normalizedFilters.appointmentType === "All" || item.appointmentType === normalizedFilters.appointmentType)
+    .filter((item) => normalizedFilters.insurance === "All" || item.insurance === normalizedFilters.insurance)
+    .filter((item) => appointmentDateInRange(item, range))
+    .filter((item) => {
+      const payment = appointmentPaymentSummary(item, services, transactions);
+      const hasDeposit = Number(item.deposit || 0) > 0;
+      const clientKey = item.clientId || normalize(item.client);
+      const returning = (clientAppointmentCounts[clientKey] || 0) > 1;
+      const client = clients.find((person) => person.id === item.clientId || person.fullName === item.client);
+      const searchable = `${item.id} ${item.client} ${client?.mobile ?? ""} ${item.service} ${item.staff} ${item.room} ${item.branch} ${item.status} ${item.appointmentType} ${item.insurance} ${item.tags}`;
+      const paymentMatch = normalizedFilters.payment === "All" || payment.status === normalizedFilters.payment;
+      const depositMatch = normalizedFilters.deposit === "All" || (normalizedFilters.deposit === "With Deposit" ? hasDeposit : !hasDeposit);
+      const clientTypeMatch = normalizedFilters.clientType === "All" || (normalizedFilters.clientType === "New Client" ? !returning : returning);
+      const tagMatch = !normalizedFilters.tags || normalize(item.tags).includes(normalize(normalizedFilters.tags));
+      return paymentMatch && depositMatch && clientTypeMatch && tagMatch && (!combinedQuery || normalize(searchable).includes(combinedQuery));
+    })
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
+  const dayRows = filteredRows.filter((item) => item.date === selectedDate);
+  const selectedAppointment = appointments.find((item) => item.id === selectedId) ?? null;
+  const selectedBranch = normalizedFilters.branch === "All" ? null : normalizedFilters.branch;
+  const scopedStaff = staff
+    .filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""))
+    .filter((person) => !selectedBranch || person.branch === selectedBranch || person.branch === "All branches");
+  const practitionerNames = [...new Set(scopedStaff.map((person) => person.name).concat(dayRows.map((item) => item.staff)).filter(Boolean))];
+  const practitionerResources = practitionerNames
+    .filter((name) => normalizedFilters.doctor === "All" || name === normalizedFilters.doctor)
+    .map((name) => {
+      const person = staff.find((item) => item.name === name);
+      const room = dayRows.find((item) => item.staff === name)?.room;
+      return { key: name, label: name, subtitle: room || person?.role || "Practitioner", photo: person?.photo, assignment: { staff: name } };
+    });
+  const roomResources = roomOptions
+    .filter((room) => normalizedFilters.room === "All" || room === normalizedFilters.room)
+    .map((room) => ({ key: room, label: room, subtitle: dayRows.some((item) => item.room === room) ? "Scheduled" : "Available", assignment: { room } }));
+  const today = todayDate();
+  const todaysAppointments = appointments.filter((item) => item.date === today);
+  const todayWaiting = todaysAppointments.filter((item) => ["Arrived", "Checked In"].includes(canonicalAppointmentStatus(item.status)));
+  const todayInTreatment = todaysAppointments.filter((item) => canonicalAppointmentStatus(item.status) === "In Treatment");
+  const todayCompleted = todaysAppointments.filter((item) => canonicalAppointmentStatus(item.status) === "Completed");
+  const todayRevenue = transactions.filter((item) => item.date === today && item.status !== "Void").reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const todayNeedsPayment = todaysAppointments.filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
+  const roomsOccupied = roomOptions.filter((room) => todaysAppointments.some((item) => item.room === room && isActiveAppointmentStatus(item.status))).length;
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const waitValues = todayWaiting.map((item) => Math.max(0, nowMinutes - parseTimeToMinutes(item.time)));
+  const averageWait = waitValues.length ? Math.round(waitValues.reduce((sum, value) => sum + value, 0) / waitValues.length) : 0;
+
+  useEffect(() => {
+    const parsed = new Date(`${selectedDate}T12:00:00`);
+    if (!Number.isNaN(parsed.getTime())) setCalendarMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+  }, [selectedDate]);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = () => setContextMenu(null);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [contextMenu]);
+
+  function setFilter(name, value) {
+    setFilters((current) => ({ ...defaultFilters, ...current, [name]: value }));
+  }
+
+  function selectDate(date) {
+    setFilters((current) => ({ ...defaultFilters, ...current, datePreset: "Custom", from: date, to: date }));
+  }
+
+  function moveDay(offset) {
+    const next = new Date(`${selectedDate}T12:00:00`);
+    next.setDate(next.getDate() + offset);
+    selectDate(next.toISOString().slice(0, 10));
+  }
+
+  async function changeAppointment(appointment, changes) {
+    setScheduleFeedback({ type: "loading", message: "Checking availability…" });
+    try {
+      await Promise.resolve(onUpdateAppointment({ ...appointment, ...changes }));
+      setScheduleFeedback({ type: "success", message: `${appointment.client} moved to ${changes.time ? formatScheduleTime(parseTimeToMinutes(changes.time)) : `${changes.duration} minutes`}.` });
+    } catch (error) {
+      setScheduleFeedback({ type: "error", message: error?.message || "That time is not available." });
+    }
+  }
+
+  function paymentDraftForAppointment(appointment) {
+    const service = serviceForAppointment(appointment, services);
+    const price = appointmentServicePrice(appointment, services);
+    const depositCredit = Math.min(Number(appointment.deposit || 0), price);
+    return {
+      clientId: appointment.clientId,
+      clientName: appointment.client,
+      branch: appointment.branch,
+      staff: appointment.staff,
+      cart: [{ key: `appointment-${appointment.id}`, type: "Service", serviceId: service?.id || appointment.serviceId, name: service?.name || appointment.service, qty: 1, price }],
+      subtotal: price,
+      discount: null,
+      discountAmount: depositCredit,
+      depositCredit,
+      total: Math.max(0, price - depositCredit),
+      notes: `Payment for appointment ${appointment.id}. Recorded deposit credit: ${money.format(depositCredit)}.`,
+    };
+  }
+
+  function receiptForAppointment(appointment) {
+    const payment = appointmentPaymentSummary(appointment, services, transactions);
+    return {
+      id: appointment.id,
+      invoice: `Appointment ${appointment.id}`,
+      date: appointment.date,
+      time: appointment.time,
+      client: appointment.client,
+      branch: appointment.branch,
+      staff: appointment.staff,
+      items: [{ name: appointment.service, type: "Service", qty: 1, price: payment.price }],
+      subtotal: payment.price,
+      discount: payment.deposit,
+      total: payment.due,
+      payments: appointmentPayments(appointment, transactions).flatMap((transaction) => transaction.payments ?? []),
+      status: payment.status,
+      notes: appointment.notes,
+    };
+  }
+
+  function prepareReminder(appointment, channel = "SMS") {
+    openModal("campaign", {
+      name: `${channel} reminder - ${appointment.client}`,
+      segment: "Service category",
+      channel,
+      subject: "Your MACE appointment reminder",
+      message: `Hi ${appointment.client}, this is your reminder for ${appointment.service} at MACE on ${formatDate(appointment.date)} at ${formatScheduleTime(parseTimeToMinutes(appointment.time))}. Reply YES to confirm.`,
+      status: "Draft",
+    });
+  }
+
+  const kanbanDefinitions = [
+    { label: "Waiting", target: "Arrived", matches: (item) => ["Draft", "Pending Confirmation", "Arrived"].includes(canonicalAppointmentStatus(item.status)) },
+    { label: "Confirmed", target: "Confirmed", matches: (item) => canonicalAppointmentStatus(item.status) === "Confirmed" },
+    { label: "Checked In", target: "Checked In", matches: (item) => canonicalAppointmentStatus(item.status) === "Checked In" },
+    { label: "In Treatment", target: "In Treatment", matches: (item) => canonicalAppointmentStatus(item.status) === "In Treatment" },
+    { label: "Needs Payment", target: "Completed", matches: (item) => canonicalAppointmentStatus(item.status) === "Completed" && appointmentPaymentSummary(item, services, transactions).due > 0 },
+    { label: "Completed", target: "Completed", matches: (item) => canonicalAppointmentStatus(item.status) === "Completed" && appointmentPaymentSummary(item, services, transactions).due <= 0 },
+    { label: "Cancelled", target: "Cancelled", matches: (item) => ["Cancelled", "No Show"].includes(canonicalAppointmentStatus(item.status)) },
+  ];
+
+  function dropKanban(event, definition) {
+    event.preventDefault();
+    const id = draggedAppointmentId || event.dataTransfer.getData("text/plain");
+    const appointment = dayRows.find((item) => item.id === id);
+    setDraggedAppointmentId("");
+    setDragOverStatus("");
+    if (!appointment || definition.matches(appointment)) return;
+    updateStatus(appointment.id, definition.target);
+  }
+
+  return (
+    <section className="appointments-workspace appointment-scheduler-redesign">
+      <div className="surface-panel appointment-command-panel">
+        <div className="appointment-command-header">
+          <div><h2>Manage the clinic schedule</h2><span>Find patients, move visits forward, and resolve issues quickly.</span></div>
+          <div className="appointment-command-actions">
+            <button className="secondary-button" type="button" onClick={() => openModal("client")}><Users size={17} /> New client</button>
+            <button className="primary-button" type="button" onClick={() => openModal("appointment", { status: "Draft", date: selectedDate })}><Plus size={17} /> New appointment</button>
+          </div>
+        </div>
+        <div className="appointment-metrics-strip" aria-label="Live appointment metrics">
+          <button type="button" onClick={() => selectDate(today)}><span>Today</span><strong>{todaysAppointments.length}</strong><small>{todayCompleted.length} completed</small></button>
+          <button type="button" onClick={() => { selectDate(today); setView("Kanban"); }}><span>Waiting</span><strong>{todayWaiting.length}</strong><small>{averageWait ? `${averageWait} min average` : "No wait"}</small></button>
+          <button type="button" onClick={() => { selectDate(today); setView("Kanban"); }}><span>In treatment</span><strong>{todayInTreatment.length}</strong><small>active now</small></button>
+          <button type="button" onClick={() => { selectDate(today); setView("Kanban"); }}><span>Needs payment</span><strong>{todayNeedsPayment.length}</strong><small>{money.format(todayNeedsPayment.reduce((sum, item) => sum + appointmentPaymentSummary(item, services, transactions).due, 0))} due</small></button>
+          <div><span>Revenue today</span><strong>{money.format(todayRevenue)}</strong><small>posted payments</small></div>
+          <div><span>Capacity</span><strong>{Math.max(0, practitionerResources.length - todayInTreatment.length)} doctors</strong><small>{roomsOccupied}/{roomOptions.length} rooms occupied</small></div>
+        </div>
+      </div>
+
+      <div className="appointment-scheduler-layout">
+        <aside className="surface-panel appointment-scheduler-sidebar">
+          <div className="appointment-sidebar-title"><strong>Appointment Calendar</strong><CalendarDays size={17} /></div>
+          <div className="appointment-month-calendar">
+            <header><button type="button" onClick={() => setCalendarMonth(new Date(calendarYear, calendarMonthIndex - 1, 1))} aria-label="Previous month"><ChevronLeft size={16} /></button><strong>{calendarMonthLabel}</strong><button type="button" onClick={() => setCalendarMonth(new Date(calendarYear, calendarMonthIndex + 1, 1))} aria-label="Next month"><ChevronRight size={16} /></button><button type="button" onClick={() => selectDate(today)}>Today</button></header>
+            <div className="appointment-calendar-weekdays">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div>
+            <div className="appointment-calendar-days">
+              {calendarDays.map((day) => {
+                const count = appointments.filter((item) => item.date === day.value).length;
+                return <button className={`${day.inMonth ? "" : "outside-month"} ${day.value === today ? "today" : ""} ${day.value === selectedDate ? "selected" : ""}`.trim()} type="button" key={day.value} onClick={() => selectDate(day.value)} aria-label={`${formatDate(day.value)}${count ? `, ${count} appointments` : ""}`}><span>{day.date.getDate()}</span>{count > 0 && <i />}</button>;
+              })}
+            </div>
+          </div>
+          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{dayRows.length} visits</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
+          <div className="appointment-doctor-list">
+            {practitionerNames.map((name) => {
+              const person = staff.find((item) => item.name === name);
+              const doctorRows = dayRows.filter((item) => item.staff === name);
+              const next = doctorRows[0];
+              return (
+                <button className={normalizedFilters.doctor === name ? "selected" : ""} type="button" key={name} onClick={() => setFilter("doctor", normalizedFilters.doctor === name ? "All" : name)}>
+                  {person?.photo ? <img src={person.photo} alt="" /> : <span className="doctor-initials">{initialsFor(name)}</span>}
+                  <span><strong>{name}</strong><small>{person?.role || doctorRows[0]?.service || "Practitioner"}</small><em>{person?.status || "Available"}</em></span>
+                  <span><strong>{next ? formatScheduleTime(parseTimeToMinutes(next.time)) : "Open"}</strong><small>{doctorRows.length} booking{doctorRows.length === 1 ? "" : "s"}</small></span>
+                </button>
+              );
+            })}
+            {!practitionerNames.length && <EmptyState title="No practitioners" copy="Add staff to show appointment availability." />}
+          </div>
+          <button className="appointment-see-doctors" type="button" onClick={() => setFilter("doctor", "All")}>See all doctors</button>
+        </aside>
+
+        <div className="surface-panel appointment-calendar-panel">
+          <div className="appointment-scheduler-toolbar">
+            <div className="appointment-date-navigator">
+              <button type="button" onClick={() => moveDay(-1)} aria-label="Previous day"><ChevronLeft size={18} /></button>
+              <div><strong>{formatDate(selectedDate)}</strong><span>{new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(new Date(`${selectedDate}T12:00:00`))} · GMT+8</span></div>
+              <button type="button" onClick={() => moveDay(1)} aria-label="Next day"><ChevronRight size={18} /></button>
+            </div>
+            <div className="segmented-control appointment-view-tabs" role="tablist" aria-label="Appointment view">
+              {["Schedule", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={view === item} className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
+            </div>
+          </div>
+          {scheduleFeedback && <div className={`appointment-schedule-feedback ${scheduleFeedback.type}`}><span>{scheduleFeedback.message}</span><button type="button" onClick={() => setScheduleFeedback(null)} aria-label="Dismiss message"><X size={14} /></button></div>}
+          {view === "Schedule" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={(item) => item.staff} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {view === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {view === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
+          {view === "Kanban" && (
+            <div className="appointment-kanban-board appointment-workflow-board" aria-label="Appointment workflow">
+              {kanbanDefinitions.map((definition) => {
+                const items = dayRows.filter(definition.matches);
+                return (
+                  <section className={`appointment-kanban-column ${dragOverStatus === definition.label ? "is-drag-over" : ""}`} key={definition.label} onDragOver={(event) => event.preventDefault()} onDragEnter={() => setDragOverStatus(definition.label)} onDrop={(event) => dropKanban(event, definition)}>
+                    <header><span>{definition.label}</span><strong>{items.length}</strong></header>
+                    <div>{items.map((appointment) => {
+                      const payment = appointmentPaymentSummary(appointment, services, transactions);
+                      return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => setSelectedId(appointment.id)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {formatScheduleTime(parseTimeToMinutes(appointment.time))} · {appointment.staff}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
+                    })}{!items.length && <span className="appointment-kanban-empty">No appointments</span>}</div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {contextMenu && <div className="appointment-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} role="menu"><button type="button" onClick={() => { setSelectedId(contextMenu.appointment.id); setContextMenu(null); }}><Eye size={15} /> View details</button><button type="button" onClick={() => openModal("appointment", contextMenu.appointment)}><Edit3 size={15} /> Edit appointment</button><button type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Checked In")}><UserCheck size={15} /> Check in</button><button type="button" onClick={() => openPayment(paymentDraftForAppointment(contextMenu.appointment))}><CreditCard size={15} /> Collect payment</button><button className="danger" type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button></div>}
+
+      <AppointmentDetailsDrawer appointment={selectedAppointment} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
+
+      <div className="appointment-data-toggle"><button className="secondary-button" type="button" onClick={() => setShowDataTable((value) => !value)}><FileText size={16} /> {showDataTable ? "Hide data table" : "Show data table"}</button></div>
+      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${filteredRows.length} records`} /><SmartTable rows={filteredRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff" }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
+    </section>
+  );
+}
+
 function AppointmentDetailsDrawer({
   appointment,
   client,
   services,
   transactions,
   auditLogs,
+  treatments = [],
+  packages = [],
   onClose,
   onEdit,
   onStatus,
   onPayment,
   onPrint,
   onReminder,
+  onEmail,
 }) {
   if (!appointment) return null;
   const service = serviceForAppointment(appointment, services);
@@ -5111,6 +5808,14 @@ function AppointmentDetailsDrawer({
     .filter((log) => ["Appointments", "Online Booking"].includes(log.area))
     .filter((log) => normalize(`${log.details} ${log.action}`).includes(normalize(appointment.client)) || normalize(`${log.details} ${log.action}`).includes(normalize(appointment.service)))
     .slice(0, 8);
+  const matchingTreatments = treatments
+    .filter((item) => item.clientId === appointment.clientId || item.client === appointment.client)
+    .filter((item) => !item.date || item.date === appointment.date)
+    .slice(0, 4);
+  const matchingPackages = packages
+    .filter((item) => item.clientId === appointment.clientId || item.client === appointment.client)
+    .filter((item) => !appointment.packageName || item.name === appointment.packageName)
+    .slice(0, 4);
   const timeline = [
     { title: "Booking created", time: appointment.createdAt, actor: "System", detail: `${appointment.service} at ${appointment.branch}` },
     { title: `Status: ${status}`, time: appointment.updatedAt, actor: "Clinic team", detail: appointment.internalNotes || "Latest appointment state." },
@@ -5129,6 +5834,8 @@ function AppointmentDetailsDrawer({
   ].filter((item) => item.title);
 
   return (
+    <>
+    <button className="appointment-drawer-backdrop" type="button" onClick={onClose} aria-label="Close appointment details" />
     <aside className="surface-panel appointment-details-drawer" aria-label="Appointment details">
       <div className="appointment-details-hero">
         <div className="appointment-patient-heading">
@@ -5170,6 +5877,7 @@ function AppointmentDetailsDrawer({
         </button>
         <button className="secondary-button" type="button" onClick={() => onEdit(appointment)}><Edit3 size={16} /> Edit appointment</button>
         <button className="secondary-button" type="button" onClick={() => onReminder(appointment)}><Send size={16} /> Send reminder</button>
+        <button className="secondary-button" type="button" onClick={() => onEmail(appointment)}><Mail size={16} /> Email</button>
         <button className="secondary-button icon-only-action" type="button" onClick={() => onPrint(appointment)} aria-label="Print appointment"><Printer size={16} /></button>
       </div>
 
@@ -5196,10 +5904,16 @@ function AppointmentDetailsDrawer({
         <div className="drawer-section-grid appointment-facts-grid">
           <RecordItem label="Mobile" value={client?.mobile || "Not recorded"} />
           <RecordItem label="Email" value={client?.email || "Not recorded"} />
+          <RecordItem label="Birthday" value={client?.birthday || client?.dob || "Not recorded"} />
+          <RecordItem label="Patient type" value={appointment.appointmentType || "Treatment"} />
           <RecordItem label="Branch" value={appointment.branch} />
           <RecordItem label="Room" value={appointment.room} />
           <RecordItem label="Doctor / Staff" value={appointment.staff} />
           <RecordItem label="Duration" value={`${appointmentDurationMinutes(appointment, services)} minutes`} />
+          <RecordItem label="Timezone" value={appointment.timezone || "Asia/Manila"} />
+          <RecordItem label="Insurance" value={appointment.insurance || "None recorded"} />
+          <RecordItem label="Tags" value={appointment.tags || client?.tag || "None"} />
+          <RecordItem label="Package" value={appointment.packageName || "Pay per visit"} />
           <RecordItem label="Service price" value={money.format(payment.price)} />
           <RecordItem label="Deposit" value={money.format(payment.deposit)} />
         </div>
@@ -5217,6 +5931,10 @@ function AppointmentDetailsDrawer({
           <MiniPanel icon={FileText} title="Service Protocol" rows={[service?.description, service?.contraindications, service?.aftercare].filter(Boolean)} empty="No service protocol notes." />
           <MiniPanel icon={MessageSquareText} title="Internal Notes" rows={[appointment.notes, appointment.internalNotes].filter(Boolean)} empty="No notes on this booking." />
           <MiniPanel icon={WalletCards} title="Payment History" rows={matchingPayments.map((transaction) => `${transaction.invoice} - ${money.format(transaction.total)} - ${transaction.status}`)} empty="No posted payment for this appointment." />
+          <MiniPanel icon={ClipboardCheck} title="SOAP / Treatment Notes" rows={matchingTreatments.flatMap((item) => [item.preNotes, item.postNotes, item.deviceSettings]).filter(Boolean)} empty="No treatment notes linked to this visit." />
+          <MiniPanel icon={ReceiptText} title="Prescription & Aftercare" rows={matchingTreatments.flatMap((item) => [item.prescription, item.aftercare, item.consumables]).filter(Boolean)} empty="No prescription or aftercare record." />
+          <MiniPanel icon={Image} title="Attachments" rows={matchingTreatments.flatMap((item) => splitList(item.photos)).filter(Boolean)} empty="No treatment attachments." />
+          <MiniPanel icon={Gift} title="Packages" rows={matchingPackages.map((item) => `${item.name} · ${item.remaining ?? item.balance ?? 0} remaining · ${item.status}`)} empty="No package linked to this patient." />
         </div>
       </section>
 
@@ -5238,12 +5956,12 @@ function AppointmentDetailsDrawer({
         </div>
       </section>
     </aside>
+    </>
   );
 }
 
 function ClientsModule({
   clients,
-  selectedClient,
   selectedClientId,
   setSelectedClientId,
   treatments,
@@ -5251,14 +5969,20 @@ function ClientsModule({
   transactions,
   packages,
   openModal,
+  importClients,
   deleteClient,
   sensitiveAllowed,
   globalSearch,
+  notify,
 }) {
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryBranch, setDirectoryBranch] = useState("All branches");
   const [directoryView, setDirectoryView] = useStoredState("client-directory-view", "list");
+  const [directorySort, setDirectorySort] = useState("recent");
+  const [directoryPage, setDirectoryPage] = useState(1);
+  const [selectedClientIds, setSelectedClientIds] = useState(() => new Set());
   const [profileClientId, setProfileClientId] = useState(null);
+  const importInputRef = useRef(null);
   const profileClient = clients.find((client) => client.id === profileClientId);
   const profileTreatments = treatments.filter((item) => item.clientId === profileClient?.id);
   const profileAppointments = appointments.filter((item) => item.clientId === profileClient?.id);
@@ -5270,7 +5994,7 @@ function ClientsModule({
     () => ["All branches", ...new Set(clients.map((client) => client.branch).filter(Boolean))],
     [clients],
   );
-  const visibleClients = useMemo(() => {
+  const filteredClients = useMemo(() => {
     const relatedText = new Map();
 
     function addRelatedText(key, value) {
@@ -5292,7 +6016,7 @@ function ClientsModule({
     });
 
     const query = normalize(activeDirectoryQuery);
-    return clients.filter((client) => {
+    const matches = clients.filter((client) => {
       const branchMatches = directoryBranch === "All branches" || client.branch === directoryBranch;
       if (!branchMatches) return false;
       if (!query) return true;
@@ -5316,25 +6040,181 @@ function ClientsModule({
 
       return normalize(searchable).includes(query);
     });
-  }, [activeDirectoryQuery, appointments, clients, directoryBranch, packages]);
+
+    return [...matches].sort((left, right) => {
+      if (directorySort === "name") return String(left.fullName).localeCompare(String(right.fullName));
+      if (directorySort === "branch") {
+        return String(left.branch).localeCompare(String(right.branch)) || String(left.fullName).localeCompare(String(right.fullName));
+      }
+      return String(right.lastVisit || "").localeCompare(String(left.lastVisit || ""));
+    });
+  }, [activeDirectoryQuery, appointments, clients, directoryBranch, directorySort, packages]);
   const activeDirectoryFilters = Number(Boolean(directoryQuery.trim())) + Number(directoryBranch !== "All branches");
+  const pageSize = safeDirectoryView === "cards" ? 8 : 10;
+  const pageCount = Math.max(1, Math.ceil(filteredClients.length / pageSize));
+  const visibleClients = filteredClients.slice((directoryPage - 1) * pageSize, directoryPage * pageSize);
+  const visibleStart = filteredClients.length ? (directoryPage - 1) * pageSize + 1 : 0;
+  const visibleEnd = Math.min(directoryPage * pageSize, filteredClients.length);
+  const visibleIds = visibleClients.map((client) => client.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedClientIds.has(id));
+  const selectedClients = filteredClients.filter((client) => selectedClientIds.has(client.id));
+  const paginationItems = pageCount <= 5
+    ? Array.from({ length: pageCount }, (_, index) => index + 1)
+    : [...new Set([1, directoryPage - 1, directoryPage, directoryPage + 1, pageCount])]
+      .filter((page) => page >= 1 && page <= pageCount)
+      .sort((left, right) => left - right);
+  const activeClients = clients.filter((client) => normalize(client.retention) !== "at risk").length;
+  const newClients = clients.filter((client) => normalize(client.retention) === "new").length;
+  const returningClients = clients.filter((client) => normalize(client.retention) === "returning").length;
+  const vipClients = clients.filter((client) => normalize(client.tag) === "vip").length;
+  const exportColumns = [
+    { key: "id", label: "Client ID" },
+    { key: "fullName", label: "Name" },
+    { key: "mobile", label: "Mobile", exportValue: (client) => sensitiveAllowed ? client.mobile : maskMobile(client.mobile) },
+    { key: "email", label: "Email", exportValue: (client) => sensitiveAllowed ? client.email : "Restricted" },
+    { key: "branch", label: "Branch" },
+    { key: "tag", label: "Type", exportValue: (client) => client.tag || client.retention },
+    { key: "lastVisit", label: "Last Visit" },
+    { key: "nextVisit", label: "Next Visit" },
+    { key: "balance", label: "Balance" },
+    { key: "packageBalance", label: "Package" },
+  ];
+
+  useEffect(() => {
+    setDirectoryPage(1);
+  }, [activeDirectoryQuery, directoryBranch, directorySort, safeDirectoryView]);
+
+  useEffect(() => {
+    if (directoryPage > pageCount) setDirectoryPage(pageCount);
+  }, [directoryPage, pageCount]);
+
+  useEffect(() => {
+    setSelectedClientIds((current) => new Set([...current].filter((id) => clients.some((client) => client.id === id))));
+  }, [clients]);
 
   function openClientProfile(client) {
     setSelectedClientId(client.id);
     setProfileClientId(client.id);
   }
 
+  function toggleVisibleSelection() {
+    setSelectedClientIds((current) => {
+      const next = new Set(current);
+      visibleIds.forEach((id) => {
+        if (allVisibleSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  }
+
+  function toggleClientSelection(clientId) {
+    setSelectedClientIds((current) => {
+      const next = new Set(current);
+      if (next.has(clientId)) next.delete(clientId);
+      else next.add(clientId);
+      return next;
+    });
+  }
+
+  async function handleClientImport(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const rows = parseCsvRows(await file.text());
+      if (rows.length < 2) {
+        notify("The CSV does not contain any client rows.", "warning");
+        return;
+      }
+
+      const headerKeys = rows[0].map((heading) => normalize(heading).replace(/[^a-z0-9]+/g, ""));
+      const records = rows.slice(1).map((row) => {
+        const values = Object.fromEntries(headerKeys.map((key, index) => [key, row[index] ?? ""]));
+        const fullName = values.name || values.fullname || values.client;
+        if (!fullName) return null;
+        return {
+          id: values.clientid || values.id || "",
+          fullName,
+          mobile: values.mobile || values.phone || "",
+          email: values.email || "",
+          branch: values.branch || directoryBranches[1] || "All branches",
+          tag: values.type || values.tag || "New",
+          retention: values.retention || (normalize(values.type) === "new" ? "New" : "Returning"),
+          lastVisit: values.lastvisit || "",
+          nextVisit: values.nextvisit || "",
+          balance: Number(String(values.balance || "0").replace(/[^0-9.-]+/g, "")) || 0,
+          packageBalance: values.package || values.packagebalance || "None",
+          consentStatus: values.consentstatus || "Pending",
+          source: values.source || "Import",
+          marketingOptIn: false,
+          giftBalance: 0,
+        };
+      }).filter(Boolean);
+
+      if (!records.length) {
+        notify("No valid clients were found. Include a Name or Full Name column.", "warning");
+        return;
+      }
+      await importClients(records);
+    } catch (error) {
+      notify(error.message || "Unable to import that CSV file.", "error");
+    }
+  }
+
   return (
-    <section className="module-grid client-layout">
-      <div className="surface-panel client-database-panel full-span">
-        <div className="client-database-title-row">
-          <SectionHeader icon={Users} title="Client Directory" action={`${visibleClients.length} of ${clients.length} records`} />
-          <button className="primary-button small" type="button" onClick={() => openModal("client")}>
-            <Plus size={16} /> Add client
-          </button>
+    <section className="clients-directory-page">
+      <div className="client-insights" aria-label="Client directory summary">
+        {[
+          { icon: Users, label: "Total clients", value: clients.length, copy: "All clinic records", tone: "total" },
+          { icon: UserCheck, label: "Active clients", value: activeClients, copy: "Currently engaged", tone: "active" },
+          { icon: Sparkles, label: "New clients", value: newClients, copy: "First-time profiles", tone: "new" },
+          { icon: RefreshCw, label: "Returning", value: returningClients, copy: "Ongoing relationships", tone: "returning" },
+          { icon: Star, label: "VIP clients", value: vipClients, copy: "Priority experience", tone: "vip" },
+        ].map(({ icon: Icon, label, value, copy, tone }) => (
+          <article className={`client-insight-card ${tone}`} key={label}>
+            <span className="client-insight-icon"><Icon size={18} aria-hidden="true" /></span>
+            <span><small>{label}</small><strong>{value.toLocaleString()}</strong><em>{copy}</em></span>
+          </article>
+        ))}
+      </div>
+
+      <div className="surface-panel clients-workspace-panel">
+        <div className="clients-workspace-heading">
+          <div>
+            <p className="eyebrow">Client database</p>
+            <h2>Client directory</h2>
+            <span>Search, review, and manage every clinic relationship.</span>
+          </div>
+          <div className="clients-workspace-actions">
+            <input
+              ref={importInputRef}
+              className="client-import-input"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleClientImport}
+              tabIndex={-1}
+            />
+            <button className="secondary-button" type="button" onClick={() => importInputRef.current?.click()}>
+              <Upload size={16} aria-hidden="true" /> Import clients
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={!filteredClients.length}
+              onClick={() => downloadCsv("mace-clients.csv", selectedClients.length ? selectedClients : filteredClients, exportColumns)}
+            >
+              <Download size={16} aria-hidden="true" /> {selectedClients.length ? "Export selected" : "Export"}
+            </button>
+            <button className="primary-button" type="button" onClick={() => openModal("client")}>
+              <Plus size={16} aria-hidden="true" /> New client
+            </button>
+          </div>
         </div>
-        <div className="client-directory-toolbar">
-          <label className="search-box compact client-directory-search">
+
+        <div className="clients-filter-bar">
+          <label className="search-box clients-directory-search">
             <Search size={16} aria-hidden="true" />
             <input
               aria-label="Search clients"
@@ -5343,113 +6223,127 @@ function ClientsModule({
               placeholder="Name, mobile, email, ID, package..."
             />
           </label>
-          <div className="client-directory-controls">
-            <label className="client-directory-filter">
-              <Filter size={15} aria-hidden="true" />
-              <select
-                aria-label="Filter clients by branch"
-                value={directoryBranch}
-                onChange={(event) => setDirectoryBranch(event.target.value)}
-              >
-                {directoryBranches.map((branch) => (
-                  <option key={branch} value={branch}>{branch}</option>
-                ))}
-              </select>
-            </label>
-            <div className="segmented-control client-directory-view-toggle" aria-label="Client directory view">
-              <button
-                className={safeDirectoryView === "list" ? "active" : ""}
-                type="button"
-                onClick={() => setDirectoryView("list")}
-              >
-                List
-              </button>
-              <button
-                className={safeDirectoryView === "cards" ? "active" : ""}
-                type="button"
-                onClick={() => setDirectoryView("cards")}
-              >
-                Grid
-              </button>
-            </div>
-            {activeDirectoryFilters > 0 && (
-              <button
-                className="ghost-button small"
-                type="button"
-                onClick={() => {
-                  setDirectoryQuery("");
-                  setDirectoryBranch("All branches");
-                }}
-              >
-                Clear
-              </button>
-            )}
+          <label className="clients-select-control">
+            <Filter size={15} aria-hidden="true" />
+            <select aria-label="Filter clients by branch" value={directoryBranch} onChange={(event) => setDirectoryBranch(event.target.value)}>
+              {directoryBranches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
+            </select>
+          </label>
+          <label className="clients-select-control sort-control">
+            <span>Sort</span>
+            <select aria-label="Sort clients" value={directorySort} onChange={(event) => setDirectorySort(event.target.value)}>
+              <option value="recent">Recent visit</option>
+              <option value="name">Name A–Z</option>
+              <option value="branch">Branch</option>
+            </select>
+          </label>
+          <div className="segmented-control clients-view-toggle" aria-label="Client directory view">
+            <button className={safeDirectoryView === "list" ? "active" : ""} type="button" onClick={() => setDirectoryView("list")}>
+              <List size={16} aria-hidden="true" /> List
+            </button>
+            <button className={safeDirectoryView === "cards" ? "active" : ""} type="button" onClick={() => setDirectoryView("cards")}>
+              <LayoutGrid size={16} aria-hidden="true" /> Grid
+            </button>
           </div>
-        </div>
-        <div className={`client-list client-directory-list ${safeDirectoryView}`}>
-          {visibleClients.map((client) =>
-            safeDirectoryView === "cards" ? (
-              <button
-                className={`client-row client-directory-card ${selectedClientId === client.id ? "selected" : ""}`}
-                key={client.id}
-                onClick={() => openClientProfile(client)}
-                type="button"
-              >
-                <ClientAvatar client={client} size="large" />
-                <span className="client-card-copy">
-                  <strong>{client.fullName}</strong>
-                  <span>{sensitiveAllowed ? client.mobile : maskMobile(client.mobile)}</span>
-                  <span>{client.branch} / {client.tag || client.retention}</span>
-                </span>
-              </button>
-            ) : (
-              <button
-                className={`client-row client-directory-row ${selectedClientId === client.id ? "selected" : ""}`}
-                key={client.id}
-                onClick={() => openClientProfile(client)}
-                type="button"
-              >
-                <ClientAvatar client={client} size="small" />
-                <span className="client-row-main">
-                  <span className="client-name-line">
-                    <strong>{client.fullName}</strong>
-                    <StatusBadge status={client.tag || client.retention || "Client"} />
-                  </span>
-                  <span className="client-row-meta">
-                    <span>{sensitiveAllowed ? client.mobile : maskMobile(client.mobile)}</span>
-                    <span>{client.branch}</span>
-                  </span>
-                </span>
-                <span className="client-row-stats">
-                  <span>
-                    <small>Last Visit</small>
-                    <strong>{formatDate(client.lastVisit)}</strong>
-                  </span>
-                  <span>
-                    <small>Follow-up</small>
-                    <strong>{formatDate(client.nextVisit)}</strong>
-                  </span>
-                  <span>
-                    <small>Package</small>
-                    <strong>{client.packageBalance || "None"}</strong>
-                  </span>
-                  <span>
-                    <small>Balance</small>
-                    <strong>{money.format(client.balance || 0)}</strong>
-                  </span>
-                </span>
-                <ChevronRight className="client-row-open" size={17} aria-hidden="true" />
-              </button>
-            ),
+          {activeDirectoryFilters > 0 && (
+            <button className="ghost-button clients-clear-filter" type="button" onClick={() => { setDirectoryQuery(""); setDirectoryBranch("All branches"); }}>
+              <X size={15} aria-hidden="true" /> Clear
+            </button>
           )}
-          {!visibleClients.length && (
+        </div>
+
+        {safeDirectoryView === "list" ? (
+          <div className="clients-table-wrap">
+            <table className="clients-directory-table">
+              <thead>
+                <tr>
+                  <th className="clients-check-column">
+                    <input type="checkbox" aria-label="Select visible clients" checked={allVisibleSelected} onChange={toggleVisibleSelection} />
+                  </th>
+                  <th>Client</th>
+                  <th>Client ID</th>
+                  <th>Contact</th>
+                  <th>Client type</th>
+                  <th>Last visit</th>
+                  <th>Status</th>
+                  <th className="clients-actions-column">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleClients.map((client) => {
+                  const isActive = normalize(client.retention) !== "at risk";
+                  return (
+                    <tr className={selectedClientId === client.id ? "is-current" : ""} key={client.id}>
+                      <td className="clients-check-column" data-label="Select">
+                        <input type="checkbox" aria-label={`Select ${client.fullName}`} checked={selectedClientIds.has(client.id)} onChange={() => toggleClientSelection(client.id)} />
+                      </td>
+                      <td data-label="Client">
+                        <button className="clients-table-person" type="button" onClick={() => openClientProfile(client)}>
+                          <ClientAvatar client={client} size="tiny" />
+                          <span><strong>{client.fullName}</strong><small>{client.gender || "Client"} · {client.branch}</small></span>
+                        </button>
+                      </td>
+                      <td data-label="Client ID"><span className="client-id-label">{client.id}</span></td>
+                      <td data-label="Contact"><span className="client-contact-cell"><strong>{sensitiveAllowed ? client.mobile : maskMobile(client.mobile)}</strong><small>{sensitiveAllowed ? client.email : "Restricted"}</small></span></td>
+                      <td data-label="Client type"><StatusBadge status={client.tag || client.retention || "Client"} /></td>
+                      <td data-label="Last visit"><span className="client-visit-cell"><strong>{formatDate(client.lastVisit)}</strong><small>Next: {formatDate(client.nextVisit)}</small></span></td>
+                      <td data-label="Status"><StatusBadge status={isActive ? "Active" : "Inactive"} /></td>
+                      <td className="clients-actions-column" data-label="Actions">
+                        <div className="clients-row-actions">
+                          <button className="icon-button" type="button" title="View client" aria-label={`View ${client.fullName}`} onClick={() => openClientProfile(client)}><Eye size={16} /></button>
+                          <button className="icon-button" type="button" title="Edit client" aria-label={`Edit ${client.fullName}`} onClick={() => openModal("client", client)}><Edit3 size={16} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="clients-card-grid">
+            {visibleClients.map((client) => (
+              <article className={`clients-directory-card ${selectedClientId === client.id ? "is-current" : ""}`} key={client.id}>
+                <button className="clients-card-edit" type="button" aria-label={`Edit ${client.fullName}`} title="Edit client" onClick={() => openModal("client", client)}>
+                  <Edit3 size={16} aria-hidden="true" />
+                </button>
+                <button className="clients-card-open" type="button" onClick={() => openClientProfile(client)}>
+                  <span className="clients-card-portrait"><ClientAvatar client={client} size="large" /></span>
+                  <span className="clients-card-details">
+                    <span className="clients-card-name-line"><strong>{client.fullName}</strong><StatusBadge status={client.tag || client.retention || "Client"} /></span>
+                    <span className="clients-card-contact">{sensitiveAllowed ? client.mobile : maskMobile(client.mobile)}</span>
+                    <span className="clients-card-meta"><b>{client.branch}</b><i />{client.gender || "Client"}</span>
+                    <span className="clients-card-footer"><small>Last visit</small><strong>{formatDate(client.lastVisit)}</strong><ChevronRight size={16} aria-hidden="true" /></span>
+                  </span>
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {!visibleClients.length && (
+          <div className="clients-empty-state">
             <EmptyState
               title="No clients found"
               copy="Adjust the search or branch filter, or add a new client record."
               actionLabel="Add client"
               onAction={() => openModal("client")}
             />
-          )}
+          </div>
+        )}
+
+        <div className="clients-directory-footer">
+          <span>Showing {visibleStart} to {visibleEnd} of {filteredClients.length.toLocaleString()} clients</span>
+          <nav className="clients-pagination" aria-label="Client directory pages">
+            <button type="button" aria-label="Previous page" disabled={directoryPage === 1} onClick={() => setDirectoryPage((page) => Math.max(1, page - 1))}><ChevronLeft size={16} /></button>
+            {paginationItems.map((page, index) => (
+              <React.Fragment key={page}>
+                {index > 0 && page - paginationItems[index - 1] > 1 && <span aria-hidden="true">…</span>}
+                <button className={page === directoryPage ? "active" : ""} type="button" aria-current={page === directoryPage ? "page" : undefined} onClick={() => setDirectoryPage(page)}>{page}</button>
+              </React.Fragment>
+            ))}
+            <button type="button" aria-label="Next page" disabled={directoryPage === pageCount} onClick={() => setDirectoryPage((page) => Math.min(pageCount, page + 1))}><ChevronRight size={16} /></button>
+          </nav>
         </div>
       </div>
 
@@ -5822,30 +6716,42 @@ function LeadsModule({
   services,
   staff,
   branches,
-  integrations,
-  webhookEvents,
   openModal,
+  importLeads,
+  deleteLead,
   updateStatus,
   addActivity,
   scheduleFollowUp,
   bookAppointment,
   convertLead,
   mergeLead,
-  refreshOperations,
   globalSearch,
+  isBooting,
+  notify,
 }) {
-  const [view, setView] = useStoredState("leads-view", "List");
+  const [storedTab, setStoredTab] = useStoredState("leads-directory-tab", "all");
+  const [leadQuery, setLeadQuery] = useState("");
+  const [filters, setFilters] = useState({ source: "All", branch: "All", owner: "All", priority: "All", followUp: "All" });
+  const [showFilters, setShowFilters] = useState(false);
+  const [sort, setSort] = useState({ key: "created", direction: "desc" });
+  const [page, setPage] = useState(1);
   const [selectedLeadId, setSelectedLeadId] = useStoredState("selected-lead", leads[0]?.id ?? "");
-  const [showFilters, setShowFilters] = useStoredState("leads-filters-open", false);
-  const [filters, setFilters] = useState({ stage: "All", source: "All", branch: "All", owner: "All", priority: "All", sla: "All" });
-  const [dragLeadId, setDragLeadId] = useState("");
-  const [dragOverLeadStage, setDragOverLeadStage] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [actionMenu, setActionMenu] = useState(null);
+  const [quickAction, setQuickAction] = useState(null);
+  const [quickActionValue, setQuickActionValue] = useState("");
+  const [quickActionOwner, setQuickActionOwner] = useState("Unassigned");
+  const [isImporting, setIsImporting] = useState(false);
   const [lossReason, setLossReason] = useState("No response");
   const [quickNote, setQuickNote] = useState("");
   const [followUpDraft, setFollowUpDraft] = useState({ dueAt: "", channel: "Phone", purpose: "Follow up lead", notes: "" });
   const [bookingDraft, setBookingDraft] = useState({ serviceId: services[0]?.id ?? "", date: todayDate(), time: "10:00", branch: branches[0]?.name ?? "", staff: staff[0]?.name ?? "", room: "To assign", deposit: 0 });
   const [conversionNotes, setConversionNotes] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const importInputRef = useRef(null);
+  const activeTab = leadDirectoryTabs.some((tab) => tab.id === storedTab) ? storedTab : "all";
+  const activeTabConfig = leadDirectoryTabs.find((tab) => tab.id === activeTab) ?? leadDirectoryTabs[0];
+  const pageSize = 20;
 
   const normalizedLeads = useMemo(
     () => leads.map((lead) => ({ ...lead, status: canonicalLeadStatus(lead.status), slaState: lead.slaState || leadSlaState(lead) })),
@@ -5856,32 +6762,70 @@ function LeadsModule({
   const ownerOptions = useMemo(() => ["All", "Unassigned", ...new Set([...staff.map((person) => person.name), ...normalizedLeads.map((lead) => lead.owner)].filter(Boolean))], [normalizedLeads, staff]);
 
   const filteredLeads = useMemo(() => {
-    const query = normalize(globalSearch);
-    return normalizedLeads.filter((lead) => {
-      if (filters.stage !== "All" && lead.status !== filters.stage) return false;
+    const query = normalize(`${leadQuery} ${globalSearch}`.trim());
+    const matches = normalizedLeads.filter((lead) => {
+      if (activeTabConfig.statuses && !activeTabConfig.statuses.includes(lead.status)) return false;
       if (filters.source !== "All" && lead.source !== filters.source) return false;
       if (filters.branch !== "All" && lead.branch !== filters.branch) return false;
       if (filters.owner === "Unassigned" && lead.owner) return false;
       if (filters.owner !== "All" && filters.owner !== "Unassigned" && lead.owner !== filters.owner) return false;
       if (filters.priority !== "All" && lead.priority !== filters.priority) return false;
-      if (filters.sla !== "All" && leadSlaState(lead) !== filters.sla) return false;
+      if (filters.followUp !== "All" && leadFollowUpState(lead) !== filters.followUp) return false;
       if (!query) return true;
-      return [lead.name, lead.mobile, lead.email, lead.externalLeadId, lead.campaign, lead.interest, lead.owner, lead.source]
+      return [lead.name, lead.mobile, lead.email, lead.externalLeadId, lead.campaign, lead.utmCampaign, lead.interest, lead.interestedTreatment, lead.interestedPackage, lead.owner, lead.source, lead.branch]
         .some((value) => normalize(value).includes(query));
     });
-  }, [filters, globalSearch, normalizedLeads]);
+
+    function sortValue(lead) {
+      if (sort.key === "service") return lead.interest || lead.interestedTreatment || lead.interestedPackage || "";
+      if (sort.key === "followUp") return lead.nextFollowUpAt || "9999";
+      if (sort.key === "owner") return lead.owner || "Unassigned";
+      if (sort.key === "source") return `${lead.source || ""} ${lead.campaign || lead.utmCampaign || ""}`;
+      if (sort.key === "contact") return `${lead.mobile || ""} ${lead.email || ""}`;
+      return lead[sort.key] || "";
+    }
+
+    return [...matches].sort((left, right) => {
+      const leftValue = normalize(sortValue(left));
+      const rightValue = normalize(sortValue(right));
+      const comparison = leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: "base" });
+      return sort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [activeTabConfig.statuses, filters, globalSearch, leadQuery, normalizedLeads, sort]);
 
   const selectedLead = normalizedLeads.find((lead) => lead.id === selectedLeadId) ?? filteredLeads[0] ?? normalizedLeads[0];
-  const metrics = useMemo(() => {
-    const today = todayDate();
-    const open = normalizedLeads.filter((lead) => !closedLeadStatuses.includes(lead.status));
-    return [
-      { label: "Open Leads", value: open.length },
-      { label: "New Today", value: normalizedLeads.filter((lead) => String(lead.created || lead.createdAt || "").startsWith(today)).length },
-      { label: "Unassigned", value: normalizedLeads.filter((lead) => !lead.owner).length },
-      { label: "Overdue Follow-Ups", value: normalizedLeads.filter((lead) => leadFollowUpState(lead) === "Overdue").length },
-    ];
-  }, [normalizedLeads]);
+  const menuLead = actionMenu ? normalizedLeads.find((lead) => lead.id === actionMenu.leadId) : null;
+  const quickActionLead = quickAction ? normalizedLeads.find((lead) => lead.id === quickAction.leadId) : null;
+  const pageCount = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
+  const visibleLeads = filteredLeads.slice((page - 1) * pageSize, page * pageSize);
+  const visibleStart = filteredLeads.length ? (page - 1) * pageSize + 1 : 0;
+  const visibleEnd = Math.min(page * pageSize, filteredLeads.length);
+  const paginationItems = pageCount <= 5
+    ? Array.from({ length: pageCount }, (_, index) => index + 1)
+    : [...new Set([1, page - 1, page, page + 1, pageCount])]
+      .filter((item) => item >= 1 && item <= pageCount)
+      .sort((left, right) => left - right);
+  const activeFilterCount = Object.values(filters).filter((value) => value !== "All").length;
+  const exportColumns = [
+    { key: "name", label: "Lead" },
+    { key: "mobile", label: "Phone" },
+    { key: "email", label: "Email" },
+    { key: "interest", label: "Interested Service", exportValue: (lead) => lead.interest || lead.interestedTreatment || lead.interestedPackage || "" },
+    { key: "source", label: "Source" },
+    { key: "campaign", label: "Campaign", exportValue: (lead) => lead.campaign || lead.utmCampaign || "" },
+    { key: "status", label: "Status" },
+    { key: "nextFollowUpAt", label: "Next Follow-up" },
+    { key: "owner", label: "Owner" },
+    { key: "branch", label: "Branch" },
+  ];
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, filters, globalSearch, leadQuery]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
 
   useEffect(() => {
     if (selectedLead?.id) {
@@ -5905,6 +6849,27 @@ function LeadsModule({
     }
   }, [branches, selectedLead?.id, selectedLead?.branch, selectedLead?.interest, selectedLead?.lossReason, selectedLead?.nextAction, selectedLead?.nextFollowUpAt, selectedLead?.nextStep, selectedLead?.owner, selectedLead?.preferredChannel, selectedLead?.preferredDate, selectedLead?.preferredTime, services, staff]);
 
+  useEffect(() => {
+    if (!actionMenu) return undefined;
+    const closeMenu = (event) => {
+      if (!event.target.closest?.(".lead-action-menu")) setActionMenu(null);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setActionMenu(null);
+    };
+    const closeOnViewportChange = () => setActionMenu(null);
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [actionMenu]);
+
   async function runLeadAction(label, action) {
     setBusyAction(label);
     try {
@@ -5921,179 +6886,403 @@ function LeadsModule({
     setSelectedLeadId(lead.id);
   }
 
-  function dropLeadOnStage(event, stage) {
-    event.preventDefault();
-    const leadId = dragLeadId || event.dataTransfer.getData("text/plain");
-    const lead = normalizedLeads.find((item) => item.id === leadId);
-    setDragLeadId("");
-    setDragOverLeadStage("");
-    if (!lead || lead.status === stage) return;
-    runLeadAction("stage", () => changeStage(lead, stage));
+  function resetLeadFilters() {
+    setFilters({ source: "All", branch: "All", owner: "All", priority: "All", followUp: "All" });
   }
 
-  const pipelineStages = leadStatuses.filter((stage) => stage !== "Converted" || filteredLeads.some((lead) => lead.status === "Converted"));
-  const activeFilterCount = Object.values(filters).filter((value) => value !== "All").length;
-  const resetLeadFilters = () => setFilters({ stage: "All", source: "All", branch: "All", owner: "All", priority: "All", sla: "All" });
+  function toggleSort(key) {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
+
+  function openLeadDetails(lead) {
+    setSelectedLeadId(lead.id);
+    setDetailsOpen(true);
+    setActionMenu(null);
+  }
+
+  function openLeadActionMenu(event, lead) {
+    event.stopPropagation();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const width = 204;
+    setActionMenu((current) => current?.leadId === lead.id ? null : {
+      leadId: lead.id,
+      top: Math.min(bounds.bottom + 7, window.innerHeight - 302),
+      left: Math.max(10, Math.min(bounds.right - width, window.innerWidth - width - 10)),
+    });
+  }
+
+  function openQuickAction(type, lead) {
+    setSelectedLeadId(lead.id);
+    setQuickAction({ type, leadId: lead.id });
+    setQuickActionValue("");
+    setQuickActionOwner(lead.owner || "Unassigned");
+    setActionMenu(null);
+  }
+
+  async function submitQuickAction(event) {
+    event.preventDefault();
+    if (!quickActionLead || !quickAction) return;
+
+    try {
+      if (quickAction.type === "assign") {
+        const owner = quickActionOwner === "Unassigned" ? "" : quickActionOwner;
+        const assignedStaffId = staff.find((person) => person.name === owner)?.id || "";
+        await runLeadAction("assign", () => updateStatus(quickActionLead.id, quickActionLead.status, { owner, assignedStaffId }));
+      } else if (quickAction.type === "note") {
+        if (!quickActionValue.trim()) return;
+        await runLeadAction("note", () => addActivity(quickActionLead.id, { type: "Note", title: "Internal note", note: quickActionValue.trim() }));
+      } else if (quickAction.type === "convert") {
+        await runLeadAction("convert", () => convertLead(quickActionLead.id, { notes: quickActionValue.trim() }));
+      }
+      setQuickAction(null);
+    } catch {
+      // The API action already reports a user-facing error.
+    }
+  }
+
+  async function handleLeadImport(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setIsImporting(true);
+    try {
+      let rows;
+      if (file.name.toLowerCase().endsWith(".xlsx")) {
+        const { default: readXlsxFile } = await import("read-excel-file/browser");
+        rows = await readXlsxFile(file);
+      } else {
+        rows = parseCsvRows(await file.text());
+      }
+
+      if (!Array.isArray(rows) || rows.length < 2) {
+        notify("The file does not contain any lead rows.", "warning");
+        return;
+      }
+
+      const headerKeys = rows[0].map((heading) => normalize(heading).replace(/[^a-z0-9]+/g, ""));
+      const records = rows.slice(1).map((row) => {
+        const values = Object.fromEntries(headerKeys.map((key, index) => {
+          const cell = row[index];
+          return [key, cell instanceof Date ? cell.toISOString() : String(cell ?? "").trim()];
+        }));
+        const name = values.name || values.lead || values.fullname;
+        if (!name) return null;
+        const permissionValue = normalize(values.permissiontocontact || values.contactpermission || "yes");
+        return {
+          id: values.leadid || values.id || "",
+          name,
+          mobile: values.mobile || values.phone || values.contactnumber || "",
+          email: values.email || "",
+          interest: values.interestedservice || values.service || values.interest || "",
+          source: values.source || "Import",
+          campaign: values.campaign || values.utmcampaign || "",
+          status: canonicalLeadStatus(values.status || values.stage || "New Inquiry"),
+          nextFollowUpAt: values.nextfollowup || values.followupdate || values.nextfollowupat || "",
+          owner: values.owner || values.assignedto || "",
+          branch: values.branch || branchOptions[1] || "",
+          priority: values.priority || "Normal",
+          created: values.created || values.createddate || todayDate(),
+          nextStep: values.notes || values.nextstep || "",
+          permissionToContact: !["no", "false", "0"].includes(permissionValue),
+        };
+      }).filter(Boolean);
+
+      if (!records.length) {
+        notify("No valid leads were found. Include a Name, Lead, or Full Name column.", "warning");
+        return;
+      }
+      await importLeads(records);
+    } catch (error) {
+      notify(error.message || "Unable to import that lead file.", "error");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  function sortButton(key, label) {
+    const isActive = sort.key === key;
+    return (
+      <button type="button" onClick={() => toggleSort(key)}>
+        {label}
+        <ChevronDown className={`lead-sort-icon ${isActive ? sort.direction : ""}`} size={13} aria-hidden="true" />
+      </button>
+    );
+  }
 
   return (
-    <section className="leads-workspace">
-      <div className="surface-panel leads-main-panel">
-        <SectionHeader icon={Inbox} title="Leads CRM" action={`${filteredLeads.length} visible`} />
-        <div className="lead-summary-bar">
-          {metrics.map((metric) => (
-            <RecordPill key={metric.label} label={metric.label} value={metric.value} />
+    <section className="leads-directory-page">
+      <div className="leads-directory-navigation">
+        <div className="lead-status-tabs" role="tablist" aria-label="Lead status">
+          {leadDirectoryTabs.map((tab) => (
+            <button
+              className={activeTab === tab.id ? "active" : ""}
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => setStoredTab(tab.id)}
+            >
+              {tab.label}
+            </button>
           ))}
         </div>
+        <div className="leads-header-actions">
+          <input
+            ref={importInputRef}
+            className="client-import-input"
+            type="file"
+            accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={handleLeadImport}
+            tabIndex={-1}
+          />
+          <button className="secondary-button" type="button" disabled={isImporting} onClick={() => importInputRef.current?.click()}>
+            <Upload size={16} aria-hidden="true" /> {isImporting ? "Importing..." : "Import"}
+          </button>
+          <button className="secondary-button" type="button" disabled={!filteredLeads.length} onClick={() => downloadCsv("mace-leads.csv", filteredLeads, exportColumns)}>
+            <Download size={16} aria-hidden="true" /> Export
+          </button>
+          <button className="primary-button" type="button" onClick={() => openModal("lead")}>
+            <Plus size={16} aria-hidden="true" /> Add Lead
+          </button>
+        </div>
+      </div>
 
-        <div className="leads-toolbar">
-          <div className="segmented-control" role="tablist" aria-label="Lead view">
-            {["List", "Pipeline", "Integrations"].map((item) => (
-              <button className={view === item ? "active" : ""} key={item} onClick={() => setView(item)} type="button">
-                {item}
-              </button>
-            ))}
+      <div className="surface-panel leads-directory-panel">
+        <div className="leads-directory-toolbar">
+          <strong aria-live="polite">{filteredLeads.length.toLocaleString()} {filteredLeads.length === 1 ? "Lead" : "Leads"}</strong>
+          <div className="leads-toolbar-controls">
+            <label className="search-box leads-directory-search">
+              <Search size={16} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Search leads"
+                placeholder="Search name, mobile, service, campaign..."
+                value={leadQuery}
+                onChange={(event) => setLeadQuery(event.target.value)}
+              />
+            </label>
+            <button
+              className={`secondary-button lead-filter-button ${showFilters ? "active" : ""}`}
+              type="button"
+              aria-expanded={showFilters}
+              onClick={() => setShowFilters((current) => !current)}
+            >
+              <Filter size={16} aria-hidden="true" /> Filter{activeFilterCount ? ` (${activeFilterCount})` : ""}
+            </button>
           </div>
-          <button
-            className={`secondary-button small lead-filter-toggle ${showFilters ? "active" : ""}`}
-            type="button"
-            aria-expanded={showFilters}
-            onClick={() => setShowFilters((current) => !current)}
-          >
-            <Filter size={16} /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
-          </button>
-          <button className="primary-button small" type="button" onClick={() => openModal("lead")}>
-            <Plus size={16} /> Add lead
-          </button>
         </div>
 
         {showFilters && (
-          <div className="lead-filter-grid">
-            <LeadFilter label="Stage" value={filters.stage} options={["All", ...leadStatuses]} onChange={(stage) => setFilters((current) => ({ ...current, stage }))} />
+          <div className="leads-directory-filters">
             <LeadFilter label="Source" value={filters.source} options={sourceOptions} onChange={(source) => setFilters((current) => ({ ...current, source }))} />
             <LeadFilter label="Branch" value={filters.branch} options={branchOptions} onChange={(branch) => setFilters((current) => ({ ...current, branch }))} />
             <LeadFilter label="Owner" value={filters.owner} options={ownerOptions} onChange={(owner) => setFilters((current) => ({ ...current, owner }))} />
             <LeadFilter label="Priority" value={filters.priority} options={["All", "Low", "Normal", "High", "Urgent"]} onChange={(priority) => setFilters((current) => ({ ...current, priority }))} />
-            <LeadFilter label="SLA" value={filters.sla} options={["All", "On time", "Approaching deadline", "Overdue", "Responded", "Closed"]} onChange={(sla) => setFilters((current) => ({ ...current, sla }))} />
-            <button className="secondary-button small" type="button" onClick={resetLeadFilters} disabled={!activeFilterCount}>
-              <RefreshCw size={16} /> Reset
+            <LeadFilter label="Follow-up" value={filters.followUp} options={["All", "Overdue", "Due Today", "Upcoming", "None"]} onChange={(followUp) => setFilters((current) => ({ ...current, followUp }))} />
+            <button className="ghost-button leads-reset-filters" type="button" onClick={resetLeadFilters} disabled={!activeFilterCount}>
+              <X size={15} aria-hidden="true" /> Clear
             </button>
           </div>
         )}
 
-        {view === "Pipeline" && (
-          <div className="lead-pipeline" aria-label="Lead pipeline">
-            {pipelineStages.map((stage) => {
-              const columnLeads = filteredLeads.filter((lead) => lead.status === stage);
-              return (
-                <section
-                  className={`lead-stage-column ${dragOverLeadStage === stage ? "is-drag-over" : ""}`}
-                  key={stage}
-                  onDragEnter={(event) => {
-                    event.preventDefault();
-                    if (dragLeadId) setDragOverLeadStage(stage);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDragLeave={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget)) setDragOverLeadStage("");
-                  }}
-                  onDrop={(event) => dropLeadOnStage(event, stage)}
-                >
-                  <header>
-                    <span><StatusBadge status={stage} /></span>
-                    <b>{columnLeads.length}</b>
-                  </header>
-                  <div className="lead-card-list">
-                    {columnLeads.map((lead) => (
-                      <article
-                        className={`lead-card ${selectedLead?.id === lead.id ? "selected" : ""} ${dragLeadId === lead.id ? "is-dragging" : ""}`}
-                        draggable
-                        key={lead.id}
-                        onClick={() => setSelectedLeadId(lead.id)}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", lead.id);
-                          setDragLeadId(lead.id);
-                        }}
-                        onDragEnd={() => {
-                          setDragLeadId("");
-                          setDragOverLeadStage("");
-                        }}
-                        aria-grabbed={dragLeadId === lead.id}
-                        title="Drag this lead to another pipeline stage"
-                      >
-                        <div className="lead-card-heading">
-                          <span className="lead-card-avatar" aria-hidden="true">{initialsFor(lead.name)}</span>
-                          <span className="lead-card-title">
-                            <strong>{lead.name}</strong>
-                            <small>{lead.interest || lead.concern || "General inquiry"}</small>
-                          </span>
-                        </div>
-                        <dl>
-                          <div><dt><Globe2 size={13} /> Source</dt><dd>{lead.source || "-"}</dd></div>
-                          <div><dt><UserCheck size={13} /> Owner</dt><dd>{lead.owner || "Unassigned"}</dd></div>
-                          <div><dt><Clock size={13} /> Next</dt><dd>{compactDate(lead.nextFollowUpAt) || lead.nextAction || "-"}</dd></div>
-                        </dl>
-                        <div className="lead-card-footer">
-                          <StatusBadge status={leadSlaState(lead)} />
-                          <select
-                            aria-label={`Move ${lead.name}`}
-                            value={lead.status}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) => runLeadAction("stage", () => changeStage(lead, event.target.value))}
-                          >
-                            {leadStatuses.map((item) => <option key={item}>{item}</option>)}
-                          </select>
-                        </div>
-                      </article>
-                    ))}
-                    {!columnLeads.length && <p className="lead-column-empty">No leads</p>}
-                  </div>
-                </section>
-              );
-            })}
+        <div className="leads-table-wrap">
+          <table className="leads-directory-table">
+            <thead>
+              <tr>
+                <th aria-sort={sort.key === "name" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("name", "Lead")}</th>
+                <th aria-sort={sort.key === "contact" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("contact", "Contact")}</th>
+                <th aria-sort={sort.key === "service" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("service", "Interested Service")}</th>
+                <th aria-sort={sort.key === "source" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("source", "Source")}</th>
+                <th aria-sort={sort.key === "status" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("status", "Status")}</th>
+                <th aria-sort={sort.key === "followUp" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("followUp", "Next Follow-up")}</th>
+                <th aria-sort={sort.key === "owner" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("owner", "Owner")}</th>
+                <th className="leads-actions-column">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(isBooting || isImporting) && Array.from({ length: 5 }, (_, rowIndex) => (
+                <tr className="lead-skeleton-row" key={`lead-skeleton-${rowIndex}`} aria-hidden="true">
+                  {Array.from({ length: 8 }, (_, cellIndex) => <td key={cellIndex}><span className="lead-skeleton-line" /></td>)}
+                </tr>
+              ))}
+              {!isBooting && !isImporting && visibleLeads.map((lead) => {
+                const followUp = leadFollowUpDisplay(lead.nextFollowUpAt);
+                const service = lead.interest || lead.interestedTreatment || lead.interestedPackage || "General inquiry";
+                const campaign = lead.campaign || lead.utmCampaign || "No campaign";
+                return (
+                  <tr
+                    className={selectedLeadId === lead.id ? "is-current" : ""}
+                    key={lead.id}
+                    tabIndex={0}
+                    aria-label={`View ${lead.name}`}
+                    onClick={() => openLeadDetails(lead)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openLeadDetails(lead);
+                      }
+                    }}
+                  >
+                    <td data-label="Lead">
+                      <div className="lead-person-cell">
+                        <span className="lead-directory-avatar" aria-hidden="true">{initialsFor(lead.name)}</span>
+                        <span><strong>{lead.name}</strong><small>{lead.branch || "Branch not assigned"}</small></span>
+                      </div>
+                    </td>
+                    <td data-label="Contact">
+                      <span className="lead-contact-cell">
+                        <span><PhoneCall size={13} aria-hidden="true" /> {lead.mobile || "No phone"}</span>
+                        <span><Mail size={13} aria-hidden="true" /> {lead.email || "No email"}</span>
+                      </span>
+                    </td>
+                    <td data-label="Interested Service"><span className="lead-service-cell">{service}</span></td>
+                    <td data-label="Source">
+                      <span className="lead-source-cell"><strong>{lead.source || "Unknown"}</strong><small>{campaign}</small></span>
+                    </td>
+                    <td data-label="Status" onClick={(event) => event.stopPropagation()}>
+                      <label className={`lead-status-select ${statusClass(lead.status)}`}>
+                        <span className="sr-only">Update {lead.name} status</span>
+                        <select
+                          value={lead.status}
+                          disabled={busyAction === `stage-${lead.id}`}
+                          onChange={(event) => runLeadAction(`stage-${lead.id}`, () => changeStage(lead, event.target.value))}
+                        >
+                          {leadStatuses.map((status) => <option key={status}>{status}</option>)}
+                        </select>
+                        <ChevronDown size={12} aria-hidden="true" />
+                      </label>
+                    </td>
+                    <td data-label="Next Follow-up">
+                      <span className="lead-follow-up-cell">
+                        <span><CalendarDays size={14} aria-hidden="true" /><strong>{followUp.date}</strong>{followUp.time && <b>{followUp.time}</b>}</span>
+                        <small className={followUp.tone}>{followUp.relative}</small>
+                      </span>
+                    </td>
+                    <td data-label="Owner">
+                      <span className="lead-owner-cell">
+                        <span className="lead-owner-avatar" aria-hidden="true">{initialsFor(lead.owner || "Unassigned")}</span>
+                        <strong>{lead.owner || "Unassigned"}</strong>
+                      </span>
+                    </td>
+                    <td className="leads-actions-column" data-label="Actions" onClick={(event) => event.stopPropagation()}>
+                      <button className="lead-menu-trigger" type="button" aria-label={`Actions for ${lead.name}`} aria-expanded={actionMenu?.leadId === lead.id} onClick={(event) => openLeadActionMenu(event, lead)}>
+                        <EllipsisVertical size={18} aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {!isBooting && !isImporting && !visibleLeads.length && (
+          <div className="leads-empty-state">
+            <EmptyState
+              title="No leads found."
+              copy="Adjust the search or filters, or add a new lead to get started."
+              actionLabel="Add Lead"
+              onAction={() => openModal("lead")}
+            />
           </div>
         )}
 
-        {view === "List" && (
-          <SmartTable
-            rows={filteredLeads}
-            globalSearch=""
-            showSearch={false}
-            pageSize={8}
-            emptyTitle="No leads match these filters"
-            columns={[
-              { key: "name", label: "Name" },
-              { key: "mobile", label: "Mobile" },
-              { key: "interest", label: "Interested service", render: (row) => row.interest || row.interestedTreatment || row.interestedPackage || "-" },
-              { key: "source", label: "Source" },
-              { key: "campaign", label: "Campaign", render: (row) => row.campaign || row.utmCampaign || "-" },
-              { key: "branch", label: "Branch" },
-              { key: "status", label: "Stage", render: (row) => <StatusBadge status={row.status} /> },
-              { key: "owner", label: "Owner", render: (row) => row.owner || "Unassigned" },
-              { key: "nextFollowUpAt", label: "Next follow-up", render: (row) => compactDate(row.nextFollowUpAt) || "-" },
-              { key: "slaState", label: "SLA", render: (row) => <StatusBadge status={leadSlaState(row)} /> },
-              {
-                key: "actions",
-                label: "Actions",
-                render: (row) => (
-                  <div className="inline-actions">
-                    <button type="button" onClick={() => openModal("lead", row)}><Edit3 size={15} /> Edit</button>
-                  </div>
-                ),
-                exportValue: () => "",
-              },
-            ]}
-          />
-        )}
-
-        {view === "Integrations" && (
-          <LeadIntegrationsPanel integrations={integrations} webhookEvents={webhookEvents} refreshOperations={refreshOperations} />
-        )}
+        <div className="leads-directory-footer">
+          <span>Showing {visibleStart}–{visibleEnd} of {filteredLeads.length.toLocaleString()} leads</span>
+          <nav className="clients-pagination" aria-label="Lead directory pages">
+            <button type="button" aria-label="Previous page" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button>
+            {paginationItems.map((item, index) => (
+              <React.Fragment key={item}>
+                {index > 0 && item - paginationItems[index - 1] > 1 && <span aria-hidden="true">…</span>}
+                <button className={item === page ? "active" : ""} type="button" aria-current={item === page ? "page" : undefined} onClick={() => setPage(item)}>{item}</button>
+              </React.Fragment>
+            ))}
+            <button type="button" aria-label="Next page" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button>
+          </nav>
+        </div>
       </div>
 
+      {menuLead && actionMenu && (
+        <div className="lead-action-menu" role="menu" style={{ top: actionMenu.top, left: actionMenu.left }}>
+          <button type="button" role="menuitem" onClick={() => openLeadDetails(menuLead)}><Eye size={15} /> View</button>
+          <button type="button" role="menuitem" onClick={() => { setActionMenu(null); openModal("lead", menuLead); }}><Edit3 size={15} /> Edit</button>
+          <button type="button" role="menuitem" onClick={() => openQuickAction("assign", menuLead)}><UserCheck size={15} /> Assign Owner</button>
+          <button type="button" role="menuitem" onClick={() => openQuickAction("note", menuLead)}><FileText size={15} /> Add Note</button>
+          <button type="button" role="menuitem" disabled={menuLead.status === "Converted"} onClick={() => openQuickAction("convert", menuLead)}><Check size={15} /> Convert</button>
+          <span className="lead-menu-divider" />
+          <button className="danger" type="button" role="menuitem" onClick={() => { setActionMenu(null); deleteLead(menuLead); }}><Trash2 size={15} /> Delete</button>
+        </div>
+      )}
+
+      {quickActionLead && quickAction && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${quickAction.type} ${quickActionLead.name}`}>
+          <form className="lead-quick-action-dialog" onSubmit={submitQuickAction}>
+            <button className="modal-close" type="button" aria-label="Close" onClick={() => setQuickAction(null)}><X size={18} /></button>
+            <span className="lead-quick-action-icon"><UserCheck size={20} aria-hidden="true" /></span>
+            <h2>{quickAction.type === "assign" ? "Assign owner" : quickAction.type === "note" ? "Add note" : "Convert lead"}</h2>
+            <p>{quickAction.type === "convert" ? `Create a client profile for ${quickActionLead.name}.` : quickActionLead.name}</p>
+            {quickAction.type === "assign" ? (
+              <label>
+                <span>Owner</span>
+                <select value={quickActionOwner} onChange={(event) => setQuickActionOwner(event.target.value)}>
+                  {ownerOptions.filter((owner) => owner !== "All").map((owner) => <option key={owner}>{owner}</option>)}
+                </select>
+              </label>
+            ) : (
+              <label>
+                <span>{quickAction.type === "note" ? "Note" : "Conversion note (optional)"}</span>
+                <textarea rows={4} autoFocus value={quickActionValue} onChange={(event) => setQuickActionValue(event.target.value)} placeholder={quickAction.type === "note" ? "Add context for the team..." : "Add conversion details..."} />
+              </label>
+            )}
+            <div className="lead-dialog-actions">
+              <button className="secondary-button" type="button" onClick={() => setQuickAction(null)}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={busyAction || (quickAction.type === "note" && !quickActionValue.trim())}>
+                {busyAction ? "Saving..." : quickAction.type === "assign" ? "Assign" : quickAction.type === "note" ? "Save Note" : "Convert Lead"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {detailsOpen && selectedLead && (
+        <div className="modal-backdrop lead-detail-modal" role="dialog" aria-modal="true" aria-label={`${selectedLead.name} lead details`} onMouseDown={() => setDetailsOpen(false)}>
+          <div className="lead-detail-dialog-shell" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" aria-label="Close lead details" onClick={() => setDetailsOpen(false)}><X size={18} /></button>
+            <LeadDetailPanel
+              lead={selectedLead}
+              clients={clients}
+              appointments={appointments}
+              services={services}
+              staff={staff}
+              branches={branches}
+              lossReason={lossReason}
+              setLossReason={setLossReason}
+              quickNote={quickNote}
+              setQuickNote={setQuickNote}
+              followUpDraft={followUpDraft}
+              setFollowUpDraft={setFollowUpDraft}
+              bookingDraft={bookingDraft}
+              setBookingDraft={setBookingDraft}
+              conversionNotes={conversionNotes}
+              setConversionNotes={setConversionNotes}
+              busyAction={busyAction}
+              runLeadAction={runLeadAction}
+              changeStage={changeStage}
+              addActivity={addActivity}
+              scheduleFollowUp={scheduleFollowUp}
+              bookAppointment={bookAppointment}
+              convertLead={convertLead}
+              mergeLead={mergeLead}
+              openModal={openModal}
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -7416,6 +8605,7 @@ function ModalHost({
   templates,
   packages,
   giftCertificates,
+  appointments,
 }) {
   if (!modal) return null;
 
@@ -7456,6 +8646,8 @@ function ModalHost({
         services={services}
         branches={branches}
         staff={staff}
+        appointments={appointments}
+        packages={packages}
         onClose={closeModal}
         onSubmit={saveAppointment}
       />
@@ -8067,7 +9259,7 @@ function field(name, label, type = "text", options = null, className = "", requi
   return { name, label, type, options, className, required };
 }
 
-function AppointmentModal({ payload, clients, services, branches, staff, onClose, onSubmit }) {
+function AppointmentModal({ payload, clients, services, branches, staff, appointments = [], packages = [], onClose, onSubmit }) {
   const [form, setForm] = useState({
     date: todayDate(),
     time: "",
@@ -8076,6 +9268,14 @@ function AppointmentModal({ payload, clients, services, branches, staff, onClose
     branch: branches[0]?.name || "",
     room: "",
     staff: "",
+    duration: 60,
+    appointmentType: "Treatment",
+    insurance: "",
+    tags: "",
+    packageName: "",
+    timezone: "Asia/Manila",
+    recurrence: "None",
+    recurrenceUntil: "",
     status: "Pending Confirmation",
     deposit: 0,
     notes: "",
@@ -8088,12 +9288,34 @@ function AppointmentModal({ payload, clients, services, branches, staff, onClose
   const selectedBranch = branches.find((item) => item.name === form.branch);
   const availableRooms = selectedBranch?.rooms || uniqueRoomsFromBranches();
   const availableStaff = staff.filter((person) => person.branch === form.branch || person.branch === "All branches" || !person.branch);
+  const patient = clients.find((client) => client.id === form.clientId);
+  const patientPackages = packages.filter((item) => item.clientId === form.clientId || item.client === patient?.fullName);
+  const duration = Math.max(15, Number(form.duration || selectedService?.duration || 60));
+  const availableSlots = useMemo(() => {
+    if (!form.date) return [];
+    const slots = [];
+    for (let start = scheduleStartMinutes; start + duration <= scheduleEndMinutes; start += 15) {
+      const end = start + duration;
+      if (start < 13 * 60 && end > 12 * 60) continue;
+      const conflicts = appointments.some((appointment) => {
+        if (appointment.id === form.id || appointment.date !== form.date || !isActiveAppointmentStatus(appointment.status)) return false;
+        const resourceConflict = (form.staff && appointment.staff === form.staff) || (form.room && appointment.room === form.room);
+        if (!resourceConflict) return false;
+        const appointmentStart = parseTimeToMinutes(appointment.time);
+        const appointmentEnd = appointmentStart + appointmentDurationMinutes(appointment, services);
+        return start < appointmentEnd && end > appointmentStart;
+      });
+      if (!conflicts) slots.push(formatTimeInput(start));
+    }
+    return slots;
+  }, [appointments, duration, form.date, form.id, form.room, form.staff, services]);
 
   function update(name, value) {
     setForm((current) => ({
       ...current,
       [name]: value,
       ...(name === "branch" ? { room: "", staff: "" } : {}),
+      ...(name === "serviceId" ? { duration: Number(services.find((item) => item.id === value)?.duration || current.duration || 60) } : {}),
     }));
   }
 
@@ -8119,20 +9341,26 @@ function AppointmentModal({ payload, clients, services, branches, staff, onClose
           {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
           <section className="booking-form-section"><div className="booking-step">1</div><div className="booking-section-content"><h3>Client and service</h3>
             <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">Search or select a client</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
-            <label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">Select a service</option>{services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
+            <div className="booking-two-column"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">Select a service</option>{services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
+            <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
             {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{money.format(selectedService.price || 0)}</strong></div>}
+            {patientPackages.length > 0 && <label className="stacked-field"><span>Package / membership</span><select value={form.packageName} onChange={(event) => update("packageName", event.target.value)}><option value="">Pay per visit</option>{patientPackages.map((item) => <option value={item.name} key={item.id}>{item.name} · {item.remaining ?? item.balance ?? 0} remaining</option>)}</select></label>}
           </div></section>
           <section className="booking-form-section"><div className="booking-step">2</div><div className="booking-section-content"><h3>Date and location</h3><div className="booking-two-column">
             <label className="stacked-field"><span>Date <RequiredMark /></span><input aria-label="Date, required" type="date" value={form.date} onChange={(event) => update("date", event.target.value)} /></label>
-            <label className="stacked-field"><span>Time <RequiredMark /></span><input aria-label="Time, required" type="time" value={form.time} onChange={(event) => update("time", event.target.value)} /></label>
+            <label className="stacked-field"><span>Time <RequiredMark /></span><input aria-label="Time, required" type="time" step="900" value={form.time} onChange={(event) => update("time", event.target.value)} /></label>
+            <label className="stacked-field"><span>Duration</span><select value={form.duration} onChange={(event) => update("duration", Number(event.target.value))}>{[15, 30, 45, 60, 75, 90, 120, 180].map((minutes) => <option value={minutes} key={minutes}>{minutes} minutes</option>)}</select></label>
+            <label className="stacked-field"><span>Timezone</span><select value={form.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Manila">Asia/Manila (GMT+8)</option><option value="Asia/Singapore">Asia/Singapore (GMT+8)</option></select></label>
             <label className="stacked-field"><span>Branch <RequiredMark /></span><select aria-label="Branch, required" value={form.branch} onChange={(event) => update("branch", event.target.value)}>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select></label>
           </div></div></section>
           <section className="booking-form-section"><div className="booking-step">3</div><div className="booking-section-content"><h3>Staff and room</h3><div className="booking-two-column">
             <label className="stacked-field"><span>Staff <RequiredMark /></span><select aria-label="Staff, required" value={form.staff} onChange={(event) => update("staff", event.target.value)}><option value="">Select available staff</option>{availableStaff.map((person) => <option key={person.id || person.name}>{person.name}</option>)}</select></label>
             <label className="stacked-field"><span>Room <RequiredMark /></span><select aria-label="Room, required" value={form.room} onChange={(event) => update("room", event.target.value)}><option value="">Select a room</option>{availableRooms.map((room) => <option key={room}>{room}</option>)}</select></label>
-          </div>{form.staff && form.room && <div className="availability-note"><Check size={16} /> Resources selected. Availability will be verified when saved.</div>}</div></section>
+          </div>{form.staff && form.room && <><div className="availability-note"><Check size={16} /> Available times account for doctor, room, lunch, and existing appointments.</div><div className="appointment-slot-picker" aria-label="Available appointment times">{availableSlots.slice(0, 20).map((slot) => <button className={form.time === slot ? "selected" : ""} type="button" key={slot} onClick={() => update("time", slot)}>{formatScheduleTime(parseTimeToMinutes(slot))}</button>)}{!availableSlots.length && <span>No conflict-free slots for these resources.</span>}</div></>}</div></section>
           <section className="booking-form-section"><div className="booking-step">4</div><div className="booking-section-content"><h3>Payment and notes</h3>
-            <label className="stacked-field"><span>Deposit (optional)</span><input type="number" min="0" value={form.deposit} onChange={(event) => update("deposit", event.target.value)} /></label>
+            <div className="booking-two-column"><label className="stacked-field"><span>Deposit (optional)</span><input type="number" min="0" value={form.deposit} onChange={(event) => update("deposit", event.target.value)} /></label><label className="stacked-field"><span>Insurance</span><input value={form.insurance} onChange={(event) => update("insurance", event.target.value)} placeholder="Provider or coverage note" /></label>
+            <label className="stacked-field"><span>Recurrence</span><select value={form.recurrence} onChange={(event) => update("recurrence", event.target.value)}>{["None", "Weekly", "Every 2 weeks", "Monthly"].map((item) => <option key={item}>{item}</option>)}</select></label>{form.recurrence !== "None" && <label className="stacked-field"><span>Repeat until</span><input type="date" min={form.date} value={form.recurrenceUntil} onChange={(event) => update("recurrenceUntil", event.target.value)} /></label>}</div>
+            <label className="stacked-field"><span>Tags</span><input value={form.tags} onChange={(event) => update("tags", event.target.value)} placeholder="VIP, first visit, follow-up" /></label>
             <label className="stacked-field"><span>Client notes</span><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Preferences or information visible to the client" /></label>
             <label className="stacked-field"><span>Internal notes</span><textarea value={form.internalNotes} onChange={(event) => update("internalNotes", event.target.value)} placeholder="Private notes for the clinic team" /></label>
           </div></section>
