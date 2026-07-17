@@ -5365,6 +5365,17 @@ function AppointmentScheduleGrid({
     };
   }, [onChangeAppointment, pixelPerMinute, resizePreview]);
 
+  if (!resources.length) {
+    return (
+      <div className="appointment-resource-grid-shell appointment-resource-grid-shell-empty">
+        <EmptyState
+          title="No scheduling resources"
+          copy="Add a practitioner or room to this branch to show appointment availability."
+        />
+      </div>
+    );
+  }
+
   function dropAppointment(event, resource) {
     event.preventDefault();
     const appointmentId = event.dataTransfer.getData("text/appointment-id");
@@ -5450,8 +5461,7 @@ function AppointmentScheduleGrid({
           </div>
         ))}
       </div>
-      {!resources.length && <EmptyState title="No scheduling resources" copy="Add staff or rooms to this branch before creating a booking." />}
-      {resources.length > 0 && !appointments.length && <div className="appointment-grid-empty"><CalendarDays size={20} /><span>No appointments match these filters. Drag-free time is available for booking.</span></div>}
+      {!appointments.length && <div className="appointment-grid-empty"><CalendarDays size={20} /><span>No appointments match these filters. Drag-free time is available for booking.</span></div>}
     </div>
   );
 }

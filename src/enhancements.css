@@ -1806,6 +1806,9 @@ td {
 .appointment-scheduler-redesign .appointment-calendar-panel {
   position: relative;
   grid-column: auto;
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   padding: 0;
   overflow: hidden;
@@ -1879,6 +1882,20 @@ td {
   max-height: 680px;
   overflow: auto;
   background: #fffefa;
+}
+
+.appointment-resource-grid-shell-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 420px;
+  max-height: none;
+  padding: 28px;
+  overflow: hidden;
+}
+
+.appointment-resource-grid-shell-empty .empty-state {
+  width: min(440px, 100%);
 }
 
 .appointment-resource-grid {
