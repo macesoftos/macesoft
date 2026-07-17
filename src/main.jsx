@@ -5,6 +5,7 @@ import "./styles.css";
 import "./pos-quantity.css";
 import "./enhancements.css";
 import "./responsive-app.css";
+import "./vercel-typography.css";
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {

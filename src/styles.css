@@ -1,14 +1,30 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Italic-Variable.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
 
 :root {
-  --font-family-primary: "Inter", Arial, sans-serif;
+  --font-sans: "Geist", Arial, sans-serif;
+  --font-sans-fallback: Arial, sans-serif;
+  --font-family-primary: var(--font-sans, var(--font-sans-fallback));
   --font-size-xs: 12px;
   --font-size-sm: 13px;
   --font-size-base: 14px;
-  --font-size-md: 16px;
-  --font-size-lg: 18px;
-  --font-size-xl: 24px;
-  --font-size-2xl: 30px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
   --line-height-tight: 1.25;
   --line-height-normal: 1.5;
   --line-height-relaxed: 1.65;
@@ -38,8 +54,8 @@
   --shadow: 0 16px 42px rgba(63, 51, 41, 0.1);
   --soft-shadow: 0 10px 24px rgba(63, 51, 41, 0.065);
   --sticky-content-top: 112px;
-  --sidebar-width: 276px;
-  --sidebar-collapsed-width: 84px;
+  --sidebar-width: 256px;
+  --sidebar-collapsed-width: 64px;
   --receipt-paper-width: 80mm;
   --receipt-paper-height: 200mm;
   --receipt-content-width: 72mm;
@@ -47,6 +63,8 @@
   font-family: var(--font-family-primary);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * { box-sizing: border-box; }
@@ -3345,7 +3363,7 @@ img { max-width: 100%; }
   margin: 0 auto;
   background: #fff;
   color: #111;
-  font-family: Arial, sans-serif;
+  font-family: var(--font-family-primary);
 }
 
 .print-receipt-header {

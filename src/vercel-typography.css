@@ -1,0 +1,328 @@
+/*
+ * Compact Vercel-style typography for every application surface.
+ * This layer intentionally contains no color tokens or color overrides.
+ */
+
+:root {
+  --font-sans: "Geist", Arial, sans-serif;
+  --font-sans-fallback: Arial, sans-serif;
+  --font-family-primary: var(--font-sans, var(--font-sans-fallback));
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 600;
+}
+
+html,
+body,
+#root,
+button,
+input,
+select,
+textarea,
+optgroup {
+  font-family: var(--font-family-primary) !important;
+}
+
+html,
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-normal);
+  letter-spacing: -0.005em;
+}
+
+button,
+input,
+select,
+textarea {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-regular);
+  line-height: 20px;
+  letter-spacing: normal;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-family-primary) !important;
+  font-weight: var(--font-weight-semibold) !important;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--font-size-2xl) !important;
+  line-height: 32px !important;
+  letter-spacing: -0.035em !important;
+}
+
+h2 {
+  font-size: var(--font-size-xl) !important;
+  line-height: 28px !important;
+  letter-spacing: -0.025em !important;
+}
+
+h3 {
+  font-size: var(--font-size-lg) !important;
+  line-height: 24px !important;
+  letter-spacing: -0.015em !important;
+}
+
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-base) !important;
+  line-height: 20px !important;
+  letter-spacing: normal !important;
+}
+
+strong,
+b {
+  font-weight: var(--font-weight-semibold) !important;
+}
+
+small {
+  font-size: var(--font-size-xs);
+  line-height: 16px;
+}
+
+.page-header h1,
+.topbar h1,
+.applications-heading h2,
+.clinic-copy h2,
+.login-brand h1,
+.booking-hero h2,
+.role-hero h2,
+.overview-dashboard .role-hero h2,
+.my-workspace-hero h2,
+.branches-hero h2,
+.support-hero-panel h2,
+.appointment-command-header h2,
+.appointment-booking-header h2,
+.profile-header h2,
+.facetrack-workspace-header h1,
+.facetrack-hero h2,
+.kiosk-setup-card h1,
+.kiosk-action-panel h1,
+.kiosk-success h2,
+.pos-page-shell .topbar h1,
+.pos-header h2,
+.invoice-header h2 {
+  font-size: var(--font-size-xl) !important;
+  font-weight: var(--font-weight-semibold) !important;
+  line-height: 28px !important;
+  letter-spacing: -0.025em !important;
+}
+
+.section-title,
+.section-header h2,
+.surface-panel > h2,
+.booking-card h2,
+.login-card h2,
+.appointment-patient-heading h3,
+.facetrack-dashboard-grid h3,
+.facetrack-section-intro h2,
+.facetrack-enrollment-panel h2,
+.facetrack-table-panel h2,
+.facetrack-policy h2 {
+  font-size: var(--font-size-lg) !important;
+  font-weight: var(--font-weight-semibold) !important;
+  line-height: 24px !important;
+  letter-spacing: -0.015em !important;
+}
+
+.eyebrow,
+.sidebar-section-label,
+.system-pill,
+.status-badge,
+.workflow-chips span,
+.form-label,
+.form-grid label > span,
+.stacked-field > span,
+.report-filters label > span,
+.appointment-filter-field > span,
+.facetrack-kicker,
+.facetrack-form-grid label > span,
+.kiosk-kicker {
+  font-size: var(--font-size-xs) !important;
+  font-weight: var(--font-weight-medium) !important;
+  line-height: 16px !important;
+  letter-spacing: 0.02em !important;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.inline-actions button,
+.status-actions button,
+.status-transition-button,
+.table-toolbar button,
+.pagination button,
+.segmented-control button,
+.role-grid button,
+.topbar-pos-button,
+.nav-item,
+.account-dropdown button,
+.facetrack-primary,
+.facetrack-secondary,
+.facetrack-exit,
+.facetrack-module-sidebar nav button,
+.kiosk-header > button,
+.kiosk-scan-button {
+  font-size: var(--font-size-base) !important;
+  font-weight: var(--font-weight-medium) !important;
+  line-height: 20px !important;
+  letter-spacing: normal !important;
+}
+
+.smart-table,
+.smart-table td,
+.smart-table button,
+.facetrack-table-panel td,
+.facetrack-request-grid dd,
+.record-item,
+.record-pill,
+.mini-panel,
+.appointment-card,
+.appointment-kanban-card,
+.client-row,
+.service-card,
+.package-card,
+.message-item,
+.support-item,
+.action-item {
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+}
+
+.appointment-kanban-column > header {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 16px;
+  letter-spacing: 0.02em;
+}
+
+.appointment-kanban-column > header strong,
+.appointment-client-initials {
+  font-weight: var(--font-weight-semibold) !important;
+}
+
+.appointment-kanban-card-heading strong {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold) !important;
+  line-height: 18px;
+}
+
+.appointment-kanban-card-heading small,
+.appointment-kanban-meta,
+.appointment-kanban-payment {
+  font-size: var(--font-size-xs);
+  line-height: 16px;
+}
+
+.appointment-kanban-card-heading small,
+.appointment-kanban-meta {
+  font-weight: var(--font-weight-regular);
+}
+
+.appointment-kanban-payment {
+  font-weight: var(--font-weight-medium);
+}
+
+th,
+.smart-table th,
+.facetrack-table-panel th,
+.smart-table td::before {
+  font-size: var(--font-size-xs) !important;
+  font-weight: var(--font-weight-medium) !important;
+  line-height: 16px !important;
+  letter-spacing: 0.04em !important;
+}
+
+.metric-card strong,
+.operational-summary button strong,
+.appointment-metrics-strip strong,
+.card-view-kpi-metrics strong,
+.mini-metrics strong,
+.lead-summary-bar strong,
+.branch-summary-grid strong,
+.facetrack-stats strong,
+.facetrack-dashboard-grid strong,
+.checkout-summary-card strong,
+.payment-modal .receipt-preview strong {
+  font-size: var(--font-size-xl) !important;
+  font-weight: var(--font-weight-semibold) !important;
+  line-height: 28px !important;
+  letter-spacing: -0.025em !important;
+}
+
+.checkout-summary-card .due-row strong,
+.pos-total strong,
+.payment-total strong {
+  font-size: var(--font-size-2xl) !important;
+  line-height: 32px !important;
+}
+
+.pos-service-card strong,
+.pos-product-card strong,
+.pos-checkout-panel .cart-row strong,
+.quantity-stepper span,
+.catalog-search,
+.catalog-search input,
+.pos-page-shell .search-box input {
+  font-size: var(--font-size-base) !important;
+  line-height: 20px !important;
+}
+
+.client-profile-image-pane .client-avatar.large,
+.client-profile-image-pane.missing-photo .client-avatar.large,
+.kiosk-result-avatar {
+  font-size: var(--font-size-2xl) !important;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+@media (max-width: 640px) {
+  h1,
+  .page-header h1,
+  .topbar h1 {
+    font-size: var(--font-size-xl) !important;
+    line-height: 28px !important;
+  }
+
+  h2,
+  .role-hero h2,
+  .overview-dashboard .role-hero h2,
+  .my-workspace-hero h2,
+  .booking-hero h2,
+  .support-hero-panel h2 {
+    font-size: 18px !important;
+    line-height: 24px !important;
+  }
+}

@@ -6,10 +6,20 @@
     <meta name="theme-color" content="#713044" />
     <title>MaceSoft Offline</title>
     <style>
+      @font-face {
+        font-family: "Geist";
+        src: url("/fonts/Geist-Variable.woff2") format("woff2");
+        font-style: normal;
+        font-weight: 100 900;
+        font-display: swap;
+      }
       :root {
         color: #1f1a1d;
         background: #f7f5f3;
-        font-family: Inter, Arial, sans-serif;
+        font-family: "Geist", Arial, sans-serif;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
       body {
         min-height: 100vh;

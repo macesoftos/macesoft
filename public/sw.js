@@ -1,10 +1,12 @@
-const CACHE_NAME = "macesoft-shell-v1";
+const CACHE_NAME = "macesoft-shell-v2";
 const OFFLINE_URL = "/offline.html";
 const APP_SHELL_ASSETS = [
   "/",
   "/index.html",
   "/offline.html",
   "/manifest.webmanifest",
+  "/fonts/Geist-Variable.woff2",
+  "/fonts/Geist-Italic-Variable.woff2",
   "/brand/favicon.png",
   "/brand/mace-logo.png"
 ];

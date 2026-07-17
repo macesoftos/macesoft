@@ -192,7 +192,7 @@
   background: #fff;
   color: var(--wine);
   padding: 1px 6px;
-  font: 800 11px/1 system-ui, sans-serif;
+  font: 600 11px/1 var(--font-family-primary);
   box-shadow: 0 1px 0 rgba(67, 40, 48, 0.08);
 }
 
