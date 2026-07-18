@@ -6215,7 +6215,6 @@ function ClientsModule({
       <div className="surface-panel clients-workspace-panel">
         <div className="clients-workspace-heading">
           <div>
-            <p className="eyebrow">Client database</p>
             <h2>Client directory</h2>
             <span>Search, review, and manage every clinic relationship.</span>
           </div>
