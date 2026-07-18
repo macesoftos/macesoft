@@ -86,6 +86,7 @@ import {
   completePosCheckout,
   convertLeadToClient,
   deleteResourceRecord,
+  listResourceRecords,
   loadBootstrap,
   loadLeadIntegrations,
   loadLeadWebhookEvents,
@@ -934,6 +935,27 @@ function App() {
           message: `Supabase connected / ${connectedClientCount} clients / ${bootstrap.appointments?.length ?? 0} bookings`,
         });
       } catch {
+        try {
+          const apiClients = await listResourceRecords("clients");
+          if (cancelled) return;
+
+          if (Array.isArray(apiClients)) {
+            setClients(apiClients);
+            if (apiClients.length) {
+              setSelectedClientId((current) =>
+                apiClients.some((client) => client.id === current) ? current : apiClients[0].id,
+              );
+            }
+            setApiState({
+              status: "offline",
+              message: `Partial sync / ${apiClients.length} clients restored / other modules unavailable`,
+            });
+            return;
+          }
+        } catch {
+          // The dedicated client fallback is best-effort; retain the full offline state below.
+        }
+
         if (!cancelled) {
           setApiState({
             status: "offline",

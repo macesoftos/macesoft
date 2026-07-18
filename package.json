@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "start": "node server/index.js",
+    "start": "prisma migrate deploy && node server/index.js",
     "start:production": "prisma migrate deploy && node server/index.js",
     "postinstall": "prisma generate",
     "preview": "vite preview --host 127.0.0.1",

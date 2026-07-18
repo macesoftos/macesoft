@@ -233,6 +233,10 @@ export function loadModuleRegistry() {
   return requestJson("/api/modules");
 }
 
+export function listResourceRecords(resource) {
+  return requestJson(`/api/resources/${resource}`);
+}
+
 export function saveResourceRecord(resource, record, { existing = false } = {}) {
   const id = encodeURIComponent(record.id);
   return requestJson(existing ? `/api/resources/${resource}/${id}` : `/api/resources/${resource}`, {
