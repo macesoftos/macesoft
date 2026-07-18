@@ -8632,6 +8632,10 @@ function ModalHost({
   ].filter((value, index, values) => value && values.indexOf(value) === index);
   const staffOptions = staff.map((person) => person.name);
   const inventoryOptions = inventory.map((item) => item.item);
+  const consumableSuggestions = [
+    ...inventoryOptions,
+    ...services.flatMap((service) => (Array.isArray(service.consumables) ? service.consumables : splitList(service.consumables))),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
   const templateOptions = [{ value: "", label: "Custom message" }, ...(templates ?? []).map((template) => ({ value: template.id, label: template.name }))];
   const defaultMarketingTemplate = (templates ?? []).find((template) => template.category === "Marketing") ?? templates?.[0];
   const canManageProductPhotos = ["Owner", "Super Admin"].includes(session?.role);
@@ -8776,7 +8780,7 @@ function ModalHost({
         field("duration", "Duration minutes", "number"),
         field("price", "Price", "number"),
         field("commission", "Commission rule"),
-        field("consumables", "Consumables", "select", ["", ...inventoryOptions]),
+        field("consumables", "Consumables", "suggest", consumableSuggestions),
         field("branches", "Branch availability"),
         field("staff", "Staff allowed"),
         field("room", "Room / device required"),
