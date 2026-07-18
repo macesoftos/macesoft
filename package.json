@@ -10,7 +10,7 @@
     "dev": "concurrently -k -n API,VITE -c blue,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:web": "vite --host 127.0.0.1",
     "dev:api": "node server/index.js",
-    "build": "vite build",
+    "build": "prisma migrate deploy && vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
