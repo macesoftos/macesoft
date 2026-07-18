@@ -5,6 +5,7 @@ export function setApiSessionContext() {}
 async function requestJson(path, options = {}) {
   const response = await fetch(`${apiBase}${path}`, {
     credentials: "include",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       "X-Mace-Request": "app",

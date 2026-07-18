@@ -71,6 +71,11 @@ app.use(express.json({
   },
 }));
 
+app.use("/api", (_request, response, next) => {
+  response.setHeader("Cache-Control", "private, no-store");
+  next();
+});
+
 app.use((request, response, next) => {
   const requestId = clean(request.get("x-request-id")) || randomBytes(12).toString("hex");
   const startedAt = process.hrtime.bigint();

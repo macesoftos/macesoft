@@ -1,4 +1,4 @@
-const CACHE_NAME = "macesoft-shell-v2";
+const CACHE_NAME = "macesoft-shell-v3";
 const OFFLINE_URL = "/offline.html";
 const APP_SHELL_ASSETS = [
   "/",
@@ -30,6 +30,9 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(

@@ -39,6 +39,7 @@ test("real API denies private data reads before touching the database", async ()
   try {
     const bootstrap = await waitForServer(api);
     assert.equal(bootstrap.status, 401);
+    assert.match(bootstrap.headers.get("cache-control") || "", /no-store/);
     assert.deepEqual(await bootstrap.json(), { error: "Authentication is required." });
 
     const clients = await fetch(`${baseUrl}/api/clients`);
