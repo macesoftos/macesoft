@@ -2128,6 +2128,7 @@ function App() {
             <CardViewModule
               appointments={scopedAppointments}
               services={services}
+              transactions={scopedTransactions}
               staff={staff}
               updateStatus={updateAppointmentStatus}
               openModal={openModal}
@@ -4545,10 +4546,11 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
   );
 }
 
-function CardViewModule({ appointments, services, staff, updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView }) {
+function CardViewModule({ appointments, services, transactions, staff, updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView }) {
   const [date, setDate] = useState("");
   const [staffFilter, setStaffFilter] = useState("All staff");
   const [roomFilter, setRoomFilter] = useState("All rooms");
+  const [viewMode, setViewMode] = useStoredState("card-view-mode", "list");
   const rooms = uniqueRoomsFromBranches();
   const staffOptions = [...new Set(staff.map((person) => person.name))].sort((a, b) => a.localeCompare(b));
 
@@ -4562,6 +4564,10 @@ function CardViewModule({ appointments, services, staff, updateStatus, openModal
   const inTreatmentCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "In Treatment").length;
   const completedCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "Completed").length;
   const completionRate = cards.length ? Math.round((completedCards / cards.length) * 100) : 0;
+
+  function transactionFor(appointment) {
+    return transactions.find((transaction) => transaction.date === appointment.date && transaction.client === appointment.client);
+  }
 
   return (
     <section className="module-grid card-view-page">
@@ -4614,6 +4620,14 @@ function CardViewModule({ appointments, services, staff, updateStatus, openModal
               {rooms.map((room) => <option key={room}>{room}</option>)}
             </select>
           </label>
+          <div className="card-view-view-toggle" role="tablist" aria-label="Card View layout">
+            <button type="button" role="tab" aria-selected={viewMode !== "grid"} className={viewMode !== "grid" ? "active" : ""} onClick={() => setViewMode("list")}>
+              <List size={16} aria-hidden="true" /> List
+            </button>
+            <button type="button" role="tab" aria-selected={viewMode === "grid"} className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")}>
+              <LayoutGrid size={16} aria-hidden="true" /> Grid
+            </button>
+          </div>
           {canManageAppointments ? (
             <button className="primary-button card-view-add-button" type="button" onClick={() => openModal("appointment")}>
               <Plus size={18} aria-hidden="true" /> New Card
@@ -4626,7 +4640,45 @@ function CardViewModule({ appointments, services, staff, updateStatus, openModal
         </div>
       </section>
 
-      <section className="surface-panel full-span card-view-list-shell" aria-label={`${cards.length} service cards`}>
+      {viewMode === "grid" ? (
+        <section className="full-span card-view-grid" aria-label={`${cards.length} service cards in grid view`}>
+          {cards.map((appointment) => {
+            const transaction = transactionFor(appointment);
+            const start = parseTimeToMinutes(appointment.time);
+            const duration = appointmentDurationMinutes(appointment, services);
+            const end = start + duration;
+            const status = canonicalAppointmentStatus(appointment.status);
+            return (
+              <article className={`service-flow-card ${statusClass(status)}`} key={appointment.id}>
+                <header className="service-card-heading">
+                  <span className="service-card-avatar" aria-hidden="true">{initialsFor(appointment.client)}</span>
+                  <span className="service-card-client"><strong>{appointment.client}</strong><small>{appointment.service}</small></span>
+                  <time dateTime={`${appointment.date}T${appointment.time}`}>{formatScheduleTime(start)} – {formatScheduleTime(end)}</time>
+                </header>
+                <dl className="service-card-facts">
+                  <div><dt>Staff</dt><dd>{appointment.staff || "Unassigned"}</dd></div>
+                  <div><dt>Room</dt><dd>{appointment.room || "Unassigned"}</dd></div>
+                  <div><dt>Paid</dt><dd>{transaction ? money.format(transaction.total) : money.format(appointment.deposit)}</dd></div>
+                </dl>
+                <footer className="service-card-footer">
+                  <StatusBadge status={status} />
+                  {canManageAppointments ? (
+                    <div className="card-actions">
+                      <button type="button" onClick={() => openModal("appointment", appointment)} title={`View ${appointment.client}'s card`}><Eye size={15} aria-hidden="true" /> View</button>
+                      <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`}><UserCheck size={15} aria-hidden="true" /> Arrive</button>
+                      <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`}><Check size={15} aria-hidden="true" /> Done</button>
+                    </div>
+                  ) : (
+                    <span className="card-view-read-only compact"><LockKeyhole size={14} aria-hidden="true" /> View only</span>
+                  )}
+                </footer>
+              </article>
+            );
+          })}
+          {!cards.length && <div className="surface-panel card-view-empty"><EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." /></div>}
+        </section>
+      ) : (
+      <section className="surface-panel full-span card-view-list-shell" aria-label={`${cards.length} service cards in list view`}>
         <table className="card-view-list-table">
           <thead>
             <tr>
@@ -4689,9 +4741,10 @@ function CardViewModule({ appointments, services, staff, updateStatus, openModal
           </tbody>
         </table>
       </section>
+      )}
 
       <footer className="surface-panel full-span card-view-note">
-        <span><AlertCircle size={19} aria-hidden="true" /> Cards represent {date ? "the selected date's" : "today's"} scheduled services. Use the filters above to view by staff, room, or date.</span>
+        <span><AlertCircle size={19} aria-hidden="true" /> Cards represent {date ? "the selected date's" : "today's"} scheduled services. Switch between list and grid, or filter by staff, room, or date.</span>
         <button className="ghost-button" type="button" onClick={onOpenRoomView}><LayoutGrid size={16} aria-hidden="true" /> View Room View</button>
       </footer>
     </section>

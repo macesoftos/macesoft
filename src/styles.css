@@ -5446,7 +5446,7 @@ td .inline-actions { flex-wrap: nowrap; }
 
 .card-view-filters {
   display: grid;
-  grid-template-columns: minmax(180px, 0.95fr) minmax(200px, 1.05fr) minmax(200px, 1.05fr) auto;
+  grid-template-columns: minmax(170px, 0.95fr) minmax(180px, 1.05fr) minmax(180px, 1.05fr) auto auto;
   align-items: end;
   gap: clamp(14px, 2.2vw, 36px);
   margin: 0;
@@ -5480,6 +5480,37 @@ td .inline-actions { flex-wrap: nowrap; }
 .card-view-filters select:focus {
   border-color: #24755b;
   box-shadow: 0 0 0 3px rgba(36, 117, 91, 0.12);
+}
+
+.card-view-view-toggle {
+  height: 45px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border: 1px solid #dfe4e5;
+  border-radius: 8px;
+  background: #f4f7f6;
+}
+
+.card-view-view-toggle button {
+  height: 35px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #68736f;
+  font-size: 0.73rem;
+  font-weight: 650;
+}
+
+.card-view-view-toggle button.active {
+  background: #fff;
+  color: #17664c;
+  box-shadow: 0 1px 4px rgba(24, 65, 52, 0.12);
 }
 
 .card-view-add-button {
@@ -5922,8 +5953,13 @@ td .inline-actions { flex-wrap: nowrap; }
   }
 
   .card-view-add-button,
-  .card-view-read-only:not(.compact) {
+  .card-view-read-only:not(.compact),
+  .card-view-view-toggle {
     width: 100%;
+  }
+
+  .card-view-view-toggle button {
+    flex: 1;
   }
 }
 
