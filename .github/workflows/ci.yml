@@ -40,6 +40,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma validate
+      - name: Prepare Supabase-compatible database roles
+        run: |
+          psql "$DATABASE_URL" --set ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          SQL
       - run: pnpm exec prisma migrate deploy
       - run: pnpm db:seed
       - run: pnpm lint
