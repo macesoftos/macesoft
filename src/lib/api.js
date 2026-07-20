@@ -105,10 +105,10 @@ export function updateBranchRecord(id, values) {
   });
 }
 
-export function deleteBranchRecord(id, confirmationName) {
+export function deleteBranchRecord(id, confirmationName, reassignTo = "") {
   return requestJson(`/api/branches/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    body: JSON.stringify({ confirmationName }),
+    body: JSON.stringify({ confirmationName, reassignTo }),
   });
 }
 

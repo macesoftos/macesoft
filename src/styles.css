@@ -3019,6 +3019,10 @@ img { max-width: 100%; }
 .branch-delete-heading h2 { margin: 3px 0 0; }
 .branch-delete-icon { display: grid; flex: 0 0 auto; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: var(--danger-soft); color: var(--danger); }
 .branch-delete-modal > p { margin: 18px 0; color: var(--muted); line-height: 1.6; }
+.branch-delete-reassignment { display: grid; gap: 8px; margin-bottom: 12px; }
+.branch-delete-reassignment > span { color: var(--ink); font-size: 0.82rem; font-weight: 750; }
+.branch-delete-reassignment select { width: 100%; }
+.branch-delete-reassignment small { color: var(--muted); line-height: 1.45; }
 .branch-delete-confirmation { display: grid; gap: 8px; padding: 14px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--danger-soft) 45%, white); }
 .branch-delete-confirmation span { color: var(--ink); font-size: 0.82rem; }
 .branch-delete-confirmation input { width: 100%; }

@@ -3105,15 +3105,25 @@ app.delete("/api/branches/:id", asyncRoute(async (request, response) => {
   if (clean(request.body?.confirmationName) !== branch.name) {
     throw apiError(`Type ${branch.name} exactly to confirm deletion.`, 400);
   }
+  const requestedDestination = clean(request.body?.reassignTo);
 
   const imageAssetId = clean(branch.image).match(/^\/api\/uploads\/([^/?#]+)$/)?.[1] || "";
   const imageAsset = imageAssetId ? await prisma.uploadAsset.findUnique({ where: { id: imageAssetId } }) : null;
   const result = await prisma.$transaction(async (tx) => {
     if (await tx.branch.count() <= 1) throw apiError("The organization must keep at least one branch.", 409);
+    let reassignedTo = "";
+    if (requestedDestination) {
+      const destination = await tx.branch.findUnique({ where: { name: requestedDestination } });
+      if (!destination || destination.id === branch.id) {
+        throw apiError("Choose another active branch for linked records.", 400);
+      }
+      await renameBranchReferences(tx, branch.name, destination.name);
+      reassignedTo = destination.name;
+    }
     const blockers = await branchDeletionBlockers(tx, branch.name);
     if (blockers.length) {
       const summary = blockers.map(([label, count]) => `${count} ${label}`).join(", ");
-      throw apiError(`Reassign or remove branch data before deleting ${branch.name}: ${summary}.`, 409);
+      throw apiError(`Reassign linked branch data before deleting ${branch.name}: ${summary}.`, 409);
     }
 
     await tx.branch.delete({ where: { id: branch.id } });
@@ -3121,15 +3131,17 @@ app.delete("/api/branches/:id", asyncRoute(async (request, response) => {
     const auditLog = await writeAudit(tx, request, {
       area: "Branches",
       action: "Branch deleted",
-      details: `${branch.name} was permanently deleted after exact-name confirmation.`,
+      details: reassignedTo
+        ? `${branch.name} was permanently deleted after linked records were reassigned to ${reassignedTo}.`
+        : `${branch.name} was permanently deleted after exact-name confirmation.`,
     });
-    return { auditLog };
+    return { auditLog, reassignedTo };
   });
 
   if (imageAsset?.objectPath) {
     storageRequest(imageAsset.objectPath, { method: "DELETE" }).catch(() => {});
   }
-  response.json({ id: branch.id, name: branch.name, auditLog: result.auditLog });
+  response.json({ id: branch.id, name: branch.name, reassignedTo: result.reassignedTo, auditLog: result.auditLog });
 }));
 
 app.post("/api/uploads", asyncRoute(async (request, response) => {

@@ -1252,30 +1252,35 @@ function App() {
     return result.branch;
   }
 
+  function reassignLocalBranchRecords(previousName, nextName) {
+    if (!previousName || !nextName || previousName === nextName) return;
+    const rename = (item) => item.branch === previousName ? { ...item, branch: nextName } : item;
+    setClients((current) => current.map(rename));
+    setAppointments((current) => current.map(rename));
+    setInventory((current) => current.map(rename));
+    setTransactions((current) => current.map(rename));
+    setPackages((current) => current.map(rename));
+    setGiftCertificates((current) => current.map(rename));
+    setStaff((current) => current.map(rename));
+    setExpenses((current) => current.map(rename));
+    setInventoryMovements((current) => current.map(rename));
+    setLeads((current) => current.map((item) => ({
+      ...rename(item),
+      assignedBranch: item.assignedBranch === previousName ? nextName : item.assignedBranch,
+    })));
+    setServices((current) => current.map((service) => ({
+      ...service,
+      branches: Array.isArray(service.branches)
+        ? [...new Set(service.branches.map((name) => name === previousName ? nextName : name))]
+        : service.branches,
+    })));
+  }
+
   async function updateBranch(branch, values) {
     const result = await updateBranchRecord(branch.id, values);
     setBranchRecords((current) => [...current.filter((item) => item.id !== result.branch.id), result.branch].sort((a, b) => a.name.localeCompare(b.name)));
     if (result.previousName && result.previousName !== result.branch.name) {
-      const rename = (item) => item.branch === result.previousName ? { ...item, branch: result.branch.name } : item;
-      setClients((current) => current.map(rename));
-      setAppointments((current) => current.map(rename));
-      setInventory((current) => current.map(rename));
-      setTransactions((current) => current.map(rename));
-      setPackages((current) => current.map(rename));
-      setGiftCertificates((current) => current.map(rename));
-      setStaff((current) => current.map(rename));
-      setExpenses((current) => current.map(rename));
-      setInventoryMovements((current) => current.map(rename));
-      setLeads((current) => current.map((item) => ({
-        ...rename(item),
-        assignedBranch: item.assignedBranch === result.previousName ? result.branch.name : item.assignedBranch,
-      })));
-      setServices((current) => current.map((service) => ({
-        ...service,
-        branches: Array.isArray(service.branches)
-          ? [...new Set(service.branches.map((name) => name === result.previousName ? result.branch.name : name))]
-          : service.branches,
-      })));
+      reassignLocalBranchRecords(result.previousName, result.branch.name);
       if (branchScope === result.previousName) setBranchScope(result.branch.name);
     }
     applyAuditLog(result.auditLog);
@@ -1283,12 +1288,13 @@ function App() {
     return result.branch;
   }
 
-  async function deleteBranch(branch, confirmationName) {
-    const result = await deleteBranchRecord(branch.id, confirmationName);
+  async function deleteBranch(branch, confirmationName, reassignTo = "") {
+    const result = await deleteBranchRecord(branch.id, confirmationName, reassignTo);
+    if (result.reassignedTo) reassignLocalBranchRecords(branch.name, result.reassignedTo);
     removeById(setBranchRecords, result.id);
-    if (branchScope === branch.name) setBranchScope("All branches");
+    if (branchScope === branch.name) setBranchScope(result.reassignedTo || "All branches");
     applyAuditLog(result.auditLog);
-    notify(`${branch.name} deleted.`);
+    notify(result.reassignedTo ? `${branch.name} deleted; linked records moved to ${result.reassignedTo}.` : `${branch.name} deleted.`);
   }
 
   function openModal(type, payload = {}) {
@@ -8375,6 +8381,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   const [saveError, setSaveError] = useState("");
   const [branchToDelete, setBranchToDelete] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteDestination, setDeleteDestination] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
@@ -8460,6 +8467,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   function openDelete(branch) {
     setBranchToDelete(branch);
     setDeleteConfirmation("");
+    setDeleteDestination("");
     setDeleteError("");
   }
 
@@ -8467,6 +8475,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     if (deleting) return;
     setBranchToDelete(null);
     setDeleteConfirmation("");
+    setDeleteDestination("");
     setDeleteError("");
   }
 
@@ -8476,9 +8485,10 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     setDeleting(true);
     setDeleteError("");
     try {
-      await onDeleteBranch(branchToDelete, deleteConfirmation);
+      await onDeleteBranch(branchToDelete, deleteConfirmation, deleteDestination);
       setBranchToDelete(null);
       setDeleteConfirmation("");
+      setDeleteDestination("");
       setDeleteError("");
     } catch (error) {
       setDeleteError(error?.message || "Unable to delete this branch.");
@@ -8588,7 +8598,15 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
           <form className="modal-card branch-delete-modal" onSubmit={submitDelete}>
             <button className="modal-close" type="button" aria-label="Close" onClick={closeDelete} disabled={deleting}><X size={18} /></button>
             <div className="branch-delete-heading"><div className="branch-delete-icon"><Trash2 size={20} /></div><div><p className="eyebrow">Danger zone</p><h2>Delete {branchToDelete.name}</h2></div></div>
-            <p>This permanently removes the branch and its rooms. Any employees, appointments, inventory, services, sales, or other branch data must be reassigned first.</p>
+            <p>This permanently removes the branch and its rooms. Choose another branch below to preserve and move all linked records in the same audited transaction.</p>
+            <label className="branch-delete-reassignment">
+              <span>Move linked records to</span>
+              <select value={deleteDestination} onChange={(event) => setDeleteDestination(event.target.value)}>
+                <option value="">Do not reassign — delete empty branch only</option>
+                {branchRecords.filter((branch) => branch.id !== branchToDelete.id).map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}
+              </select>
+              {deleteDestination && <small>Employees, accounts, appointments, inventory, sales, leads, expenses, uploads, and service assignments will move to {deleteDestination}.</small>}
+            </label>
             <div className="branch-delete-confirmation">
               <span>Type <strong>{branchToDelete.name}</strong> to confirm.</span>
               <input autoFocus value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} aria-label="Branch name confirmation" autoComplete="off" />
