@@ -9,7 +9,8 @@ import nodemailer from "nodemailer";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess, users } from "../src/data.js";
-import { canManageOrganization, isBusinessOwner } from "../src/organizationRoles.js";
+import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
+import { nextRoomNames, renameBranchReferences } from "./organizationBranches.js";
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
 import { assertProductionEnvironment } from "./productionConfig.js";
 import {
@@ -2992,20 +2993,143 @@ app.post("/api/branches", asyncRoute(async (request, response) => {
   if (!canManageOrganization(account.role)) throw apiError("Only an Admin or Business Owner can create branches.", 403);
   const name = requireText(request.body?.name, "Branch name");
   const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
-  const branch = await prisma.branch.create({
-    data: {
-      name,
-      city: clean(request.body?.city),
-      address: clean(request.body?.address),
-      phone: clean(request.body?.phone),
-      hours: clean(request.body?.hours),
-      devices: jsonText(request.body?.devices || [], []),
-      image: assetReference(request.body?.image, "Branch image"),
-      rooms: roomCount ? { create: Array.from({ length: roomCount }, (_value, index) => ({ name: `Room ${index + 1}` })) } : undefined,
-    },
-    include: { rooms: true },
+  const result = await prisma.$transaction(async (tx) => {
+    const branch = await tx.branch.create({
+      data: {
+        name,
+        city: clean(request.body?.city),
+        address: clean(request.body?.address),
+        phone: clean(request.body?.phone),
+        hours: clean(request.body?.hours),
+        devices: jsonText(request.body?.devices || [], []),
+        image: assetReference(request.body?.image, "Branch image"),
+        rooms: roomCount ? { create: Array.from({ length: roomCount }, (_value, index) => ({ name: `Room ${index + 1}` })) } : undefined,
+      },
+      include: { rooms: true },
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Branches",
+      action: "Branch created",
+      details: `${branch.name} was added with ${branch.rooms.length} rooms.`,
+    });
+    return { branch, auditLog };
   });
-  response.status(201).json({ branch: serializeBranch(branch) });
+  response.status(201).json({ branch: serializeBranch(result.branch), auditLog: result.auditLog });
+}));
+
+app.put("/api/branches/:id", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  if (!canManageOrganization(account.role)) throw apiError("Only an Admin or Business Owner can edit branches.", 403);
+
+  const id = clean(request.params.id);
+  const existing = await prisma.branch.findUnique({ where: { id }, include: { rooms: { orderBy: { createdAt: "asc" } } } });
+  if (!existing) throw apiError("Branch not found.", 404);
+  const name = requireText(request.body?.name, "Branch name");
+  if (name !== existing.name && await prisma.branch.findUnique({ where: { name } })) {
+    throw apiError(`A branch named ${name} already exists.`, 409);
+  }
+  const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
+  const result = await prisma.$transaction(async (tx) => {
+    await renameBranchReferences(tx, existing.name, name);
+
+    if (roomCount > existing.rooms.length) {
+      const names = nextRoomNames(existing.rooms, roomCount - existing.rooms.length);
+      await tx.room.createMany({ data: names.map((roomName) => ({ name: roomName, branchId: existing.id })) });
+    } else if (roomCount < existing.rooms.length) {
+      const roomIds = existing.rooms.slice(roomCount).map((room) => room.id);
+      if (roomIds.length) await tx.room.deleteMany({ where: { id: { in: roomIds } } });
+    }
+
+    const branch = await tx.branch.update({
+      where: { id: existing.id },
+      data: {
+        name,
+        city: clean(request.body?.city),
+        address: clean(request.body?.address),
+        phone: clean(request.body?.phone),
+        hours: clean(request.body?.hours),
+        devices: jsonText(request.body?.devices || [], []),
+        image: assetReference(request.body?.image, "Branch image"),
+      },
+      include: { rooms: { orderBy: { createdAt: "asc" } } },
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Branches",
+      action: "Branch updated",
+      details: existing.name === branch.name
+        ? `${branch.name} profile and room setup were updated.`
+        : `${existing.name} was renamed to ${branch.name}; linked branch assignments were migrated.`,
+    });
+    return { branch, auditLog };
+  });
+
+  response.json({ branch: serializeBranch(result.branch), previousName: existing.name, auditLog: result.auditLog });
+}));
+
+async function branchDeletionBlockers(database, branchName) {
+  const checks = [
+    ["clients", database.client.count({ where: { branch: branchName } })],
+    ["employees", database.staffMember.count({ where: { branch: branchName } })],
+    ["user accounts", database.account.count({ where: { branch: branchName } })],
+    ["invitations", database.userInvitation.count({ where: { branch: branchName } })],
+    ["attendance events", database.attendanceEvent.count({ where: { branch: branchName } })],
+    ["FaceTrack attendance records", database.faceTrackAttendanceRecord.count({ where: { branch: branchName } })],
+    ["FaceTrack kiosks", database.faceTrackKioskDevice.count({ where: { branch: branchName } })],
+    ["appointments", database.appointment.count({ where: { branch: branchName } })],
+    ["inventory items", database.inventoryItem.count({ where: { branch: branchName } })],
+    ["inventory movements", database.inventoryMovement.count({ where: { branch: branchName } })],
+    ["sales", database.sale.count({ where: { branch: branchName } })],
+    ["packages", database.clinicPackage.count({ where: { branch: branchName } })],
+    ["gift certificates", database.giftCertificate.count({ where: { branch: branchName } })],
+    ["leads", database.lead.count({ where: { OR: [{ branch: branchName }, { assignedBranch: branchName }] } })],
+    ["expenses", database.expense.count({ where: { branch: branchName } })],
+    ["uploaded assets", database.uploadAsset.count({ where: { branch: branchName, category: { not: "branch-photo" } } })],
+  ];
+  const [counts, services] = await Promise.all([
+    Promise.all(checks.map(async ([label, countPromise]) => [label, await countPromise])),
+    database.service.findMany({ select: { branches: true } }),
+  ]);
+  const serviceCount = services.filter((service) => parseJsonList(service.branches).includes(branchName)).length;
+  return [
+    ...counts.filter(([_label, count]) => count > 0),
+    ...(serviceCount ? [["services", serviceCount]] : []),
+  ];
+}
+
+app.delete("/api/branches/:id", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  if (!isAdmin(account.role)) throw apiError("Only a Super Admin or Admin can delete branches.", 403);
+
+  const branch = await prisma.branch.findUnique({ where: { id: clean(request.params.id) } });
+  if (!branch) throw apiError("Branch not found.", 404);
+  if (clean(request.body?.confirmationName) !== branch.name) {
+    throw apiError(`Type ${branch.name} exactly to confirm deletion.`, 400);
+  }
+
+  const imageAssetId = clean(branch.image).match(/^\/api\/uploads\/([^/?#]+)$/)?.[1] || "";
+  const imageAsset = imageAssetId ? await prisma.uploadAsset.findUnique({ where: { id: imageAssetId } }) : null;
+  const result = await prisma.$transaction(async (tx) => {
+    if (await tx.branch.count() <= 1) throw apiError("The organization must keep at least one branch.", 409);
+    const blockers = await branchDeletionBlockers(tx, branch.name);
+    if (blockers.length) {
+      const summary = blockers.map(([label, count]) => `${count} ${label}`).join(", ");
+      throw apiError(`Reassign or remove branch data before deleting ${branch.name}: ${summary}.`, 409);
+    }
+
+    await tx.branch.delete({ where: { id: branch.id } });
+    if (imageAssetId) await tx.uploadAsset.deleteMany({ where: { id: imageAssetId, category: "branch-photo" } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Branches",
+      action: "Branch deleted",
+      details: `${branch.name} was permanently deleted after exact-name confirmation.`,
+    });
+    return { auditLog };
+  });
+
+  if (imageAsset?.objectPath) {
+    storageRequest(imageAsset.objectPath, { method: "DELETE" }).catch(() => {});
+  }
+  response.json({ id: branch.id, name: branch.name, auditLog: result.auditLog });
 }));
 
 app.post("/api/uploads", asyncRoute(async (request, response) => {
@@ -3128,6 +3252,10 @@ app.get("/api/settings", asyncRoute(async (request, response) => {
 }));
 
 app.put("/api/settings", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  if (!canManageOrganization(account.role)) {
+    throw apiError("Only a Super Admin, Admin, or Business Owner can edit the company profile.", 403);
+  }
   assertMutationAllowed(request, "settings");
   const settings = await savePersistedSettings(request.body ?? {});
   const auditLog = await prisma.auditLog.create({

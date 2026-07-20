@@ -2996,6 +2996,12 @@ img { max-width: 100%; }
 .branch-card dd { margin: 2px 0 0; font-weight: 800; }
 .branch-meta-row { display: flex; align-items: center; gap: 7px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); }
 .branch-meta-row span { color: var(--muted); }
+.branch-card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.branch-edit-trigger,
+.branch-delete-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid transparent; background: transparent; color: var(--danger); font-size: 0.72rem; font-weight: 750; }
+.branch-edit-trigger { color: var(--wine); }
+.branch-edit-trigger:hover { border-color: color-mix(in srgb, var(--wine) 28%, var(--line)); background: var(--rose-soft); }
+.branch-delete-trigger:hover { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); background: var(--danger-soft); }
 .branch-create-modal { width: min(720px, 100%); }
 .branch-create-modal .full-span { grid-column: 1 / -1; }
 .branch-photo-field { display: grid; gap: 10px; margin: 16px 0; }
@@ -3008,6 +3014,16 @@ img { max-width: 100%; }
 .branch-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .branch-photo-button { cursor: pointer; }
 .branch-photo-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.branch-delete-modal { width: min(560px, 100%); }
+.branch-delete-heading { display: flex; align-items: center; gap: 12px; padding-right: 38px; }
+.branch-delete-heading h2 { margin: 3px 0 0; }
+.branch-delete-icon { display: grid; flex: 0 0 auto; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: var(--danger-soft); color: var(--danger); }
+.branch-delete-modal > p { margin: 18px 0; color: var(--muted); line-height: 1.6; }
+.branch-delete-confirmation { display: grid; gap: 8px; padding: 14px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--danger-soft) 45%, white); }
+.branch-delete-confirmation span { color: var(--ink); font-size: 0.82rem; }
+.branch-delete-confirmation input { width: 100%; }
+.branch-delete-button { padding: 9px 13px; border-color: var(--danger); background: var(--danger); color: #fff; font-weight: 800; }
+.branch-delete-button:hover:not(:disabled) { filter: brightness(0.92); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .invitation-modal { width: min(720px, 100%); }
 .invitation-modal .full-span { grid-column: 1 / -1; }

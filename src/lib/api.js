@@ -98,6 +98,20 @@ export function createBranchRecord(values) {
   });
 }
 
+export function updateBranchRecord(id, values) {
+  return requestJson(`/api/branches/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(values),
+  });
+}
+
+export function deleteBranchRecord(id, confirmationName) {
+  return requestJson(`/api/branches/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirmationName }),
+  });
+}
+
 export function uploadImageAsset(dataUrl, category, branch) {
   return requestJson("/api/uploads", {
     method: "POST",

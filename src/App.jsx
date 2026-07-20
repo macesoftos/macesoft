@@ -72,7 +72,7 @@ import {
   serviceCategories,
   users,
 } from "./data";
-import { canManageOrganization, isBusinessOwner } from "./organizationRoles.js";
+import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
@@ -82,6 +82,8 @@ import {
   acceptInvitation,
   createInvitation,
   createBranchRecord,
+  deleteBranchRecord,
+  updateBranchRecord,
   addLeadActivity,
   bookLeadAppointment,
   completePosCheckout,
@@ -1245,8 +1247,48 @@ function App() {
   async function createBranch(values) {
     const result = await createBranchRecord(values);
     setBranchRecords((current) => [...current.filter((item) => item.id !== result.branch.id), result.branch].sort((a, b) => a.name.localeCompare(b.name)));
+    applyAuditLog(result.auditLog);
     notify(`${result.branch.name} created.`);
     return result.branch;
+  }
+
+  async function updateBranch(branch, values) {
+    const result = await updateBranchRecord(branch.id, values);
+    setBranchRecords((current) => [...current.filter((item) => item.id !== result.branch.id), result.branch].sort((a, b) => a.name.localeCompare(b.name)));
+    if (result.previousName && result.previousName !== result.branch.name) {
+      const rename = (item) => item.branch === result.previousName ? { ...item, branch: result.branch.name } : item;
+      setClients((current) => current.map(rename));
+      setAppointments((current) => current.map(rename));
+      setInventory((current) => current.map(rename));
+      setTransactions((current) => current.map(rename));
+      setPackages((current) => current.map(rename));
+      setGiftCertificates((current) => current.map(rename));
+      setStaff((current) => current.map(rename));
+      setExpenses((current) => current.map(rename));
+      setInventoryMovements((current) => current.map(rename));
+      setLeads((current) => current.map((item) => ({
+        ...rename(item),
+        assignedBranch: item.assignedBranch === result.previousName ? result.branch.name : item.assignedBranch,
+      })));
+      setServices((current) => current.map((service) => ({
+        ...service,
+        branches: Array.isArray(service.branches)
+          ? [...new Set(service.branches.map((name) => name === result.previousName ? result.branch.name : name))]
+          : service.branches,
+      })));
+      if (branchScope === result.previousName) setBranchScope(result.branch.name);
+    }
+    applyAuditLog(result.auditLog);
+    notify(`${result.branch.name} updated.`);
+    return result.branch;
+  }
+
+  async function deleteBranch(branch, confirmationName) {
+    const result = await deleteBranchRecord(branch.id, confirmationName);
+    removeById(setBranchRecords, result.id);
+    if (branchScope === branch.name) setBranchScope("All branches");
+    applyAuditLog(result.auditLog);
+    notify(`${branch.name} deleted.`);
   }
 
   function openModal(type, payload = {}) {
@@ -2307,7 +2349,10 @@ function App() {
               transactions={transactions}
               appointments={appointments}
               canManage={canManageOrganization(session.role)}
+              canDelete={isAdmin(session.role)}
               onCreateBranch={createBranch}
+              onUpdateBranch={updateBranch}
+              onDeleteBranch={deleteBranch}
               onManageCompany={() => openModal("settings", settings)}
             />
           )}
@@ -8323,32 +8368,71 @@ function AcceptInvitationScreen({ token }) {
   </form></section></main>;
 }
 
-function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, onCreateBranch, onManageCompany }) {
+function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, canDelete, onCreateBranch, onUpdateBranch, onDeleteBranch, onManageCompany }) {
   const [showCreate, setShowCreate] = useState(false);
+  const [branchToEdit, setBranchToEdit] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [branchToDelete, setBranchToDelete] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
   const [photoError, setPhotoError] = useState("");
   const today = new Date().toISOString().slice(0, 10);
   const totalSales = transactions.reduce((sum, item) => sum + Number(item.total || 0), 0);
 
+  function resetEditor() {
+    setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+    setPhotoError("");
+    setSaveError("");
+    setBranchToEdit(null);
+    setShowCreate(false);
+  }
+
+  function openCreate() {
+    resetEditor();
+    setShowCreate(true);
+  }
+
+  function openEdit(branch) {
+    setForm({
+      name: branch.name || "",
+      city: branch.city || "",
+      address: branch.address || "",
+      phone: branch.phone || "",
+      hours: branch.hours || "",
+      roomCount: branch.rooms?.length ?? 0,
+      devices: Array.isArray(branch.devices) ? branch.devices.join(", ") : "",
+      image: branch.image || "",
+    });
+    setPhotoError("");
+    setSaveError("");
+    setBranchToEdit(branch);
+    setShowCreate(false);
+  }
+
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
+    setSaveError("");
     try {
       let image = form.image;
       if (image.startsWith("data:")) {
         const uploaded = await uploadImageAsset(image, "branch-photo", form.name);
         image = uploaded.asset.url;
       }
-      await onCreateBranch({
+      const values = {
         ...form,
         image,
         roomCount: Number(form.roomCount) || 0,
         devices: form.devices.split(",").map((item) => item.trim()).filter(Boolean),
-      });
-      setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
-      setPhotoError("");
-      setShowCreate(false);
+      };
+      if (branchToEdit) await onUpdateBranch(branchToEdit, values);
+      else await onCreateBranch(values);
+      resetEditor();
+    } catch (error) {
+      setSaveError(error?.message || `Unable to ${branchToEdit ? "update" : "create"} this branch.`);
     } finally {
       setSaving(false);
     }
@@ -8373,6 +8457,36 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     reader.readAsDataURL(file);
   }
 
+  function openDelete(branch) {
+    setBranchToDelete(branch);
+    setDeleteConfirmation("");
+    setDeleteError("");
+  }
+
+  function closeDelete() {
+    if (deleting) return;
+    setBranchToDelete(null);
+    setDeleteConfirmation("");
+    setDeleteError("");
+  }
+
+  async function submitDelete(event) {
+    event.preventDefault();
+    if (!branchToDelete || deleteConfirmation !== branchToDelete.name) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await onDeleteBranch(branchToDelete, deleteConfirmation);
+      setBranchToDelete(null);
+      setDeleteConfirmation("");
+      setDeleteError("");
+    } catch (error) {
+      setDeleteError(error?.message || "Unable to delete this branch.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <section className="branches-workspace">
       <div className="branches-hero surface-panel">
@@ -8384,7 +8498,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
         {canManage && (
           <div className="branch-organization-actions">
             <button className="ghost-button" type="button" onClick={onManageCompany}><Settings size={17} /> Add / edit company</button>
-            <button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={17} /> Add branch</button>
+            <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add branch</button>
           </div>
         )}
       </div>
@@ -8406,7 +8520,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             <span><b>2</b> Assign rooms and staff</span>
             <span><b>3</b> Start branch operations</span>
           </div>
-          {canManage && <button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={17} /> Add first branch</button>}
+          {canManage && <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add first branch</button>}
         </div>
       ) : (
         <div className="branch-grid">
@@ -8429,17 +8543,21 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
                 </dl>
                 <div className="branch-meta-row"><Clock size={15} /><span>{item.hours || "Operating hours not set"}</span></div>
                 <div className="workflow-chips">{(item.devices || []).map((device) => <span key={device}>{device}</span>)}</div>
+                {(canManage || canDelete) && <div className="branch-card-actions">
+                  {canManage && <button className="branch-edit-trigger" type="button" onClick={() => openEdit(item)}><Edit3 size={15} /> Edit branch</button>}
+                  {canDelete && <button className="branch-delete-trigger" type="button" onClick={() => openDelete(item)}><Trash2 size={15} /> Delete branch</button>}
+                </div>}
               </article>
             );
           })}
         </div>
       )}
 
-      {showCreate && (
-        <div className="modal-backdrop">
+      {(showCreate || branchToEdit) && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={branchToEdit ? `Edit ${branchToEdit.name}` : "Add a clinic branch"}>
           <form className="modal-card branch-create-modal" onSubmit={submit}>
-            <button className="modal-close" type="button" aria-label="Close" onClick={() => setShowCreate(false)}><X size={18} /></button>
-            <div className="section-title"><div className="section-icon"><Store size={18} /></div><div><p className="eyebrow">New location</p><h2>Add a clinic branch</h2></div></div>
+            <button className="modal-close" type="button" aria-label="Close" onClick={resetEditor} disabled={saving}><X size={18} /></button>
+            <div className="section-title"><div className="section-icon"><Store size={18} /></div><div><p className="eyebrow">{branchToEdit ? "Branch management" : "New location"}</p><h2>{branchToEdit ? `Edit ${branchToEdit.name}` : "Add a clinic branch"}</h2></div></div>
             <div className="branch-photo-field">
               <div className={`branch-photo-preview ${form.image ? "has-photo" : ""}`}>
                 {form.image ? <img src={form.image} alt="Clinic preview" /> : <><Camera size={25} /><strong>Add clinic cover photo</strong><span>JPG, PNG, or WebP · Maximum 3 MB</span></>}
@@ -8459,7 +8577,24 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
               <label><span>Number of rooms</span><input min="0" max="50" type="number" value={form.roomCount} onChange={(event) => setForm({ ...form, roomCount: event.target.value })} /></label>
               <label><span>Devices</span><input value={form.devices} onChange={(event) => setForm({ ...form, devices: event.target.value })} placeholder="Comma-separated" /></label>
             </div>
-            <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Creating..." : "Create branch"}</button></div>
+            {saveError && <div className="inline-state danger"><AlertCircle size={16} /><span>{saveError}</span></div>}
+            <div className="modal-actions"><button className="ghost-button" type="button" onClick={resetEditor} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving..." : branchToEdit ? "Save branch changes" : "Create branch"}</button></div>
+          </form>
+        </div>
+      )}
+
+      {branchToDelete && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Delete ${branchToDelete.name}`}>
+          <form className="modal-card branch-delete-modal" onSubmit={submitDelete}>
+            <button className="modal-close" type="button" aria-label="Close" onClick={closeDelete} disabled={deleting}><X size={18} /></button>
+            <div className="branch-delete-heading"><div className="branch-delete-icon"><Trash2 size={20} /></div><div><p className="eyebrow">Danger zone</p><h2>Delete {branchToDelete.name}</h2></div></div>
+            <p>This permanently removes the branch and its rooms. Any employees, appointments, inventory, services, sales, or other branch data must be reassigned first.</p>
+            <div className="branch-delete-confirmation">
+              <span>Type <strong>{branchToDelete.name}</strong> to confirm.</span>
+              <input autoFocus value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} aria-label="Branch name confirmation" autoComplete="off" />
+            </div>
+            {deleteError && <div className="inline-state danger"><AlertCircle size={16} /><span>{deleteError}</span></div>}
+            <div className="modal-actions"><button className="ghost-button" type="button" onClick={closeDelete} disabled={deleting}>Cancel</button><button className="branch-delete-button" type="submit" disabled={deleting || deleteConfirmation !== branchToDelete.name}>{deleting ? "Deleting..." : "Delete branch permanently"}</button></div>
           </form>
         </div>
       )}
