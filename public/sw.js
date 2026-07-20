@@ -1,9 +1,10 @@
-const CACHE_NAME = "macesoft-shell-v3";
+const CACHE_NAME = "macesoft-shell-v4";
 const OFFLINE_URL = "/offline.html";
 const APP_SHELL_ASSETS = [
   "/",
   "/index.html",
   "/offline.html",
+  "/offline-reconnect.js",
   "/manifest.webmanifest",
   "/fonts/Geist-Variable.woff2",
   "/fonts/Geist-Italic-Variable.woff2",

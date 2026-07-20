@@ -46,12 +46,42 @@
         color: #696268;
         line-height: 1.55;
       }
+      .offline-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 20px;
+      }
+      #connection-status {
+        font-size: 14px;
+      }
+      button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 8px;
+        background: #17664c;
+        color: #fff;
+        padding: 0 18px;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.7;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>MaceSoft is offline</h1>
       <p>Reconnect to continue live clinic workflows. Previously loaded app assets may still open when the installed app cache is available.</p>
+      <div class="offline-actions">
+        <p id="connection-status" role="status">Waiting for a connection…</p>
+        <button id="retry-connection" type="button">Retry</button>
+      </div>
     </main>
+    <script src="/offline-reconnect.js" defer></script>
   </body>
 </html>
