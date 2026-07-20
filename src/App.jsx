@@ -6083,16 +6083,16 @@ function AppointmentsModule({
             <div className="appointment-calendar-weekdays">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div>
             <div className="appointment-calendar-days">
               {calendarDays.map((day) => {
-                const count = appointments.filter((item) => item.date === day.value).length;
+                const count = matchingRows.filter((item) => item.date === day.value).length;
                 return <button className={`${day.inMonth ? "" : "outside-month"} ${day.value === today ? "today" : ""} ${day.value === selectedDate ? "selected" : ""}`.trim()} type="button" key={day.value} onClick={() => selectDate(day.value)} aria-label={`${formatDate(day.value)}${count ? `, ${count} appointments` : ""}`}><span>{day.date.getDate()}</span>{count > 0 && <i />}</button>;
               })}
             </div>
           </div>
-          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{dayRows.length} visits</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
+          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{periodRows.length} visits in this {activeView.toLowerCase()}</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
           <div className="appointment-doctor-list">
             {practitionerNames.map((name) => {
               const person = staff.find((item) => item.name === name);
-              const doctorRows = dayRows.filter((item) => item.staff === name);
+              const doctorRows = periodRows.filter((item) => item.staff === name);
               const next = doctorRows[0];
               return (
                 <button className={normalizedFilters.doctor === name ? "selected" : ""} type="button" key={name} onClick={() => setFilter("doctor", normalizedFilters.doctor === name ? "All" : name)}>
@@ -6110,19 +6110,21 @@ function AppointmentsModule({
         <div className="surface-panel appointment-calendar-panel">
           <div className="appointment-scheduler-toolbar">
             <div className="appointment-date-navigator">
-              <button type="button" onClick={() => moveDay(-1)} aria-label="Previous day"><ChevronLeft size={18} /></button>
-              <div><strong>{formatDate(selectedDate)}</strong><span>{new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(new Date(`${selectedDate}T12:00:00`))} · GMT+8</span></div>
-              <button type="button" onClick={() => moveDay(1)} aria-label="Next day"><ChevronRight size={18} /></button>
+              <button type="button" onClick={() => activeView === "Day" ? moveDay(-1) : selectDate(moveAppointmentFocus(selectedDate, activeView, -1))} aria-label={`Previous ${activeView.toLowerCase()}`}><ChevronLeft size={18} /></button>
+              <div><strong>{periodTitle}</strong><span>{periodSubtitle}</span></div>
+              <button type="button" onClick={() => activeView === "Day" ? moveDay(1) : selectDate(moveAppointmentFocus(selectedDate, activeView, 1))} aria-label={`Next ${activeView.toLowerCase()}`}><ChevronRight size={18} /></button>
             </div>
             <div className="segmented-control appointment-view-tabs" role="tablist" aria-label="Appointment view">
-              {["Schedule", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={view === item} className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
+              {["Day", "Week", "Month", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={activeView === item} className={activeView === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
             </div>
           </div>
           {scheduleFeedback && <div className={`appointment-schedule-feedback ${scheduleFeedback.type}`}><span>{scheduleFeedback.message}</span><button type="button" onClick={() => setScheduleFeedback(null)} aria-label="Dismiss message"><X size={14} /></button></div>}
-          {view === "Schedule" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={(item) => item.staff} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
-          {view === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
-          {view === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
-          {view === "Kanban" && (
+          {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={(item) => item.staff} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Week" && <AppointmentWeekView appointments={weekRows} services={services} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
+          {activeView === "Month" && <AppointmentMonthView appointments={monthRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
+          {activeView === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
+          {activeView === "Kanban" && (
             <div className="appointment-kanban-board appointment-workflow-board" aria-label="Appointment workflow">
               {kanbanDefinitions.map((definition) => {
                 const items = dayRows.filter(definition.matches);
@@ -6146,7 +6148,7 @@ function AppointmentsModule({
       <AppointmentDetailsDrawer appointment={selectedAppointment} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
 
       <div className="appointment-data-toggle"><button className="secondary-button" type="button" onClick={() => setShowDataTable((value) => !value)}><FileText size={16} /> {showDataTable ? "Hide data table" : "Show data table"}</button></div>
-      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${filteredRows.length} records`} /><SmartTable rows={filteredRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff" }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
+      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${displayedRows.length} records`} /><SmartTable rows={displayedRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff" }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
     </section>
   );
 }
