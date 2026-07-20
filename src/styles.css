@@ -2065,7 +2065,6 @@ img { max-width: 100%; }
 .appointment-kanban-card {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-top: 3px solid var(--muted);
   border-radius: 10px;
   background: #fff;
   box-shadow: var(--soft-shadow);
@@ -2086,12 +2085,6 @@ img { max-width: 100%; }
   opacity: 0.42;
   transform: rotate(1deg) scale(0.98);
 }
-
-.appointment-kanban-card.confirmed,
-.appointment-kanban-card.completed { border-top-color: var(--green); }
-.appointment-kanban-card.arrived,
-.appointment-kanban-card.in-treatment { border-top-color: var(--gold); }
-.appointment-kanban-card.pending-confirmation { border-top-color: var(--blue); }
 
 .appointment-kanban-select {
   width: 100%;
