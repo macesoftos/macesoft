@@ -1965,7 +1965,13 @@ function App() {
               <PageHeader
                 eyebrow="MACE ClinicOS"
                 title={activeLabel}
-                subtitle={activeModule === "leads" ? "Manage and track your clinic leads." : undefined}
+                subtitle={
+                  activeModule === "leads"
+                    ? "Manage and track your clinic leads."
+                    : activeModule === "card-view"
+                      ? "Manage today's scheduled services"
+                      : undefined
+                }
                 leading={showBackButton ? (
                   <button
                     className="topbar-back-button"
@@ -4491,16 +4497,17 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
   const [staffFilter, setStaffFilter] = useState("All staff");
   const [roomFilter, setRoomFilter] = useState("All rooms");
   const rooms = uniqueRoomsFromBranches();
-  const staffOptions = staff.map((person) => person.name);
+  const staffOptions = [...new Set(staff.map((person) => person.name))].sort((a, b) => a.localeCompare(b));
 
   const cards = appointments
     .filter((appointment) => !date || appointment.date === date)
     .filter((appointment) => staffFilter === "All staff" || appointment.staff === staffFilter)
     .filter((appointment) => roomFilter === "All rooms" || appointment.room === roomFilter)
-    .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.staff} ${appointment.room}`).includes(normalize(globalSearch)));
-  const arrivedCards = cards.filter((item) => item.status === "Arrived").length;
+    .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.staff} ${appointment.room}`).includes(normalize(globalSearch)))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
+  const arrivedCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "Arrived").length;
   const inTreatmentCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "In Treatment").length;
-  const completedCards = cards.filter((item) => item.status === "Completed").length;
+  const completedCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "Completed").length;
   const completionRate = cards.length ? Math.round((completedCards / cards.length) * 100) : 0;
 
   function transactionFor(appointment) {
@@ -4508,62 +4515,116 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
   }
 
   return (
-    <section className="module-grid">
-      <div className="surface-panel wide full-span">
-        <SectionHeader icon={ClipboardCheck} title="Card View" action={`${cards.length} service cards`} />
-        <article className="card-view-kpi-card" aria-label={date ? `Daily KPI for ${date}` : "KPI for all dates"}>
-          <div className="card-view-kpi-heading">
-            <div className="metric-icon green"><Activity size={20} aria-hidden="true" /></div>
-            <div>
-              <span>{date ? "Daily KPI" : "All dates KPI"}</span>
-              <strong>{completionRate}% completion rate</strong>
-            </div>
-          </div>
-          <div className="card-view-kpi-metrics">
-            <div><span>Total cards</span><strong>{cards.length}</strong></div>
-            <div><span>Arrived</span><strong>{arrivedCards}</strong></div>
-            <div><span>In treatment</span><strong>{inTreatmentCards}</strong></div>
-            <div><span>Completed</span><strong>{completedCards}</strong></div>
+    <section className="module-grid card-view-page">
+      <section className="surface-panel full-span card-view-kpi-card" aria-label={date ? `Daily KPI for ${date}` : "KPI for all dates"}>
+        <article className="card-view-kpi-heading">
+          <div className="card-view-kpi-icon primary"><Activity size={27} aria-hidden="true" /></div>
+          <div className="card-view-kpi-copy">
+            <span>Completion rate</span>
+            <strong>{completionRate}%</strong>
+            <small>{date ? "Selected date KPI" : "All dates KPI"}</small>
           </div>
         </article>
-        <div className="report-filters card-view-filters">
-          <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>Filter by staff</span><select value={staffFilter} onChange={(event) => setStaffFilter(event.target.value)}><option>All staff</option>{staffOptions.map((person) => <option key={person}>{person}</option>)}</select></label>
-          <label><span>Filter by room</span><select value={roomFilter} onChange={(event) => setRoomFilter(event.target.value)}><option>All rooms</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
-          <button className="primary-button small" type="button" onClick={() => openModal("appointment")}>
-            <Plus size={16} /> New card
+        <div className="card-view-kpi-metrics">
+          <article>
+            <div className="card-view-kpi-icon"><CreditCard size={23} aria-hidden="true" /></div>
+            <div><span>Total Cards</span><strong>{cards.length}</strong></div>
+          </article>
+          <article>
+            <div className="card-view-kpi-icon"><UserCheck size={25} aria-hidden="true" /></div>
+            <div><span>Arrived</span><strong>{arrivedCards}</strong></div>
+          </article>
+          <article>
+            <div className="card-view-kpi-icon"><Clock size={25} aria-hidden="true" /></div>
+            <div><span>In Treatment</span><strong>{inTreatmentCards}</strong></div>
+          </article>
+          <article>
+            <div className="card-view-kpi-icon"><Check size={25} aria-hidden="true" /></div>
+            <div><span>Completed</span><strong>{completedCards}</strong></div>
+          </article>
+        </div>
+      </section>
+
+      <section className="surface-panel full-span card-view-filter-panel" aria-label="Card filters">
+        <div className="card-view-filters">
+          <label>
+            <span>Date</span>
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
+          <label>
+            <span>Staff</span>
+            <select value={staffFilter} onChange={(event) => setStaffFilter(event.target.value)}>
+              <option>All staff</option>
+              {staffOptions.map((person) => <option key={person}>{person}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Room</span>
+            <select value={roomFilter} onChange={(event) => setRoomFilter(event.target.value)}>
+              <option>All rooms</option>
+              {rooms.map((room) => <option key={room}>{room}</option>)}
+            </select>
+          </label>
+          <button className="primary-button card-view-add-button" type="button" onClick={() => openModal("appointment")}>
+            <Plus size={18} aria-hidden="true" /> New Card
           </button>
         </div>
-        <div className="card-view-grid">
-          {cards.map((appointment) => {
-            const transaction = transactionFor(appointment);
-            const duration = appointmentDurationMinutes(appointment, services);
-            const end = formatScheduleTime(parseTimeToMinutes(appointment.time) + duration);
-            return (
-              <article className={`service-flow-card ${statusClass(appointment.status)}`} key={appointment.id}>
-                <div className="service-card-ribbon">
+      </section>
+
+      <section className="full-span card-view-grid" aria-label={`${cards.length} service cards`}>
+        {cards.map((appointment) => {
+          const transaction = transactionFor(appointment);
+          const start = parseTimeToMinutes(appointment.time);
+          const duration = appointmentDurationMinutes(appointment, services);
+          const end = start + duration;
+          const status = canonicalAppointmentStatus(appointment.status);
+          return (
+            <article className={`service-flow-card ${statusClass(status)}`} key={appointment.id}>
+              <header className="service-card-heading">
+                <span className="service-card-avatar" aria-hidden="true">{initialsFor(appointment.client)}</span>
+                <span className="service-card-client">
                   <strong>{appointment.client}</strong>
-                  <span>{transaction?.invoice ?? "No invoice yet"}</span>
-                </div>
-                <div className="service-flow-body">
-                  <RecordPill label="Service" value={appointment.service} />
-                  <RecordPill label="Time" value={`${appointment.time} - ${end}`} />
-                  <RecordPill label="Staff" value={appointment.staff} />
-                  <RecordPill label="Room" value={appointment.room} />
-                  <RecordPill label="Paid" value={transaction ? money.format(transaction.total) : money.format(appointment.deposit)} />
-                  <RecordPill label="Status" value={appointment.status} />
-                </div>
+                  <small>{appointment.service}</small>
+                </span>
+                <time dateTime={`${appointment.date}T${appointment.time}`}>
+                  {formatScheduleTime(start)} – {formatScheduleTime(end)}
+                </time>
+              </header>
+
+              <dl className="service-card-facts">
+                <div><dt>Staff</dt><dd>{appointment.staff || "Unassigned"}</dd></div>
+                <div><dt>Room</dt><dd>{appointment.room || "Unassigned"}</dd></div>
+                <div><dt>Paid</dt><dd>{transaction ? money.format(transaction.total) : money.format(appointment.deposit)}</dd></div>
+              </dl>
+
+              <footer className="service-card-footer">
+                <StatusBadge status={status} />
                 <div className="card-actions">
-                  <button type="button" onClick={() => openModal("appointment", appointment)}><Eye size={15} /> View</button>
-                  <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")}><UserCheck size={15} /> Arrive</button>
-                  <button type="button" onClick={() => updateStatus(appointment.id, "Completed")}><Check size={15} /> Done</button>
+                  <button type="button" onClick={() => openModal("appointment", appointment)} title={`View ${appointment.client}'s card`}>
+                    <Eye size={15} aria-hidden="true" /> View
+                  </button>
+                  <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`}>
+                    <UserCheck size={15} aria-hidden="true" /> Arrive
+                  </button>
+                  <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`}>
+                    <Check size={15} aria-hidden="true" /> Done
+                  </button>
                 </div>
-              </article>
-            );
-          })}
-          {!cards.length && <EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." />}
-        </div>
-      </div>
+              </footer>
+            </article>
+          );
+        })}
+        {!cards.length && (
+          <div className="surface-panel card-view-empty">
+            <EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." />
+          </div>
+        )}
+      </section>
+
+      <footer className="surface-panel full-span card-view-note">
+        <AlertCircle size={19} aria-hidden="true" />
+        <span>Cards represent {date ? "the selected date's" : "today's"} scheduled services. Use the filters above to view by staff, room, or date.</span>
+      </footer>
     </section>
   );
 }
