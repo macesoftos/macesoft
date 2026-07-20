@@ -2137,6 +2137,7 @@ td {
   gap: 5px;
   min-height: 24px;
   padding: 3px 5px;
+  border: 0;
   border-radius: 5px;
 }
 
@@ -2334,8 +2335,7 @@ td {
   z-index: 3;
   min-height: 42px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--card-accent) 68%, white);
-  border-left-width: 1px;
+  border: 0;
   border-radius: 8px;
   background: color-mix(in srgb, var(--card-fill) 88%, white);
   box-shadow: 0 1px 3px rgba(63, 51, 41, 0.08);
@@ -2357,11 +2357,6 @@ td {
   z-index: 5;
   box-shadow: 0 8px 18px rgba(63, 51, 41, 0.16);
   transform: translateY(-1px);
-}
-
-.appointment-grid-card.selected {
-  outline: 2px solid color-mix(in srgb, var(--wine) 38%, transparent);
-  outline-offset: 1px;
 }
 
 .appointment-grid-card > button:first-child {
