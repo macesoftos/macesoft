@@ -72,6 +72,7 @@ import {
   serviceCategories,
   users,
 } from "./data";
+import { canManageOrganization, isBusinessOwner } from "./organizationRoles.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
@@ -293,7 +294,7 @@ function serviceForAppointment(appointment, services) {
 function appointmentDurationMinutes(appointment, services) {
   if (Number(appointment.duration) >= 15) return Number(appointment.duration);
   const service = serviceForAppointment(appointment, services);
-  return Math.max(30, Number(service?.duration || 60));
+  return Math.max(15, Number(service?.duration || 60));
 }
 
 function appointmentServicePrice(appointment, services) {
@@ -322,6 +323,24 @@ function startOfWeek(date) {
   const day = next.getDay();
   next.setDate(next.getDate() - day);
   return next;
+}
+
+function startOfMondayWeek(date) {
+  const next = new Date(date);
+  const dayOffset = (next.getDay() + 6) % 7;
+  next.setDate(next.getDate() - dayOffset);
+  return next;
+}
+
+function moveAppointmentFocus(dateValue, view, direction) {
+  const next = new Date(`${dateValue}T12:00:00`);
+  if (view === "Month") {
+    next.setDate(1);
+    next.setMonth(next.getMonth() + direction);
+  } else {
+    next.setDate(next.getDate() + direction * (view === "Week" ? 7 : 1));
+  }
+  return isoDate(next);
 }
 
 function endOfMonth(date) {
@@ -474,9 +493,9 @@ function leadFollowUpDisplay(value) {
   if (Number.isNaN(dueAt.getTime())) return { date: String(value), time: "", relative: "Scheduled", tone: "upcoming" };
 
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDay = new Date(dueAt.getFullYear(), dueAt.getMonth(), dueAt.getDate());
-  const dayDifference = Math.round((dueDay.getTime() - today.getTime()) / 86_400_000);
+  const dayDifference = Math.round(
+    (Date.parse(`${isoDate(dueAt)}T00:00:00Z`) - Date.parse(`${todayDate()}T00:00:00Z`)) / 86_400_000,
+  );
   let relative = "";
   let tone = "upcoming";
 
@@ -495,8 +514,8 @@ function leadFollowUpDisplay(value) {
   }
 
   return {
-    date: dueAt.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" }),
-    time: dueAt.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
+    date: dueAt.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", year: "numeric" }),
+    time: dueAt.toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit" }),
     relative,
     tone,
   };
@@ -1293,7 +1312,7 @@ function App() {
     notify(`Transaction ${result.sale.invoice} completed.`);
   }
 
-  async function saveAppointment(values) {
+  async function saveAppointment(values, { silent = false } = {}) {
     const client = clients.find((item) => item.id === values.clientId);
     const service = services.find((item) => item.id === values.serviceId);
     const record = {
@@ -1324,9 +1343,16 @@ function App() {
     const result = await saveResourceRecord("appointments", record, { existing: Boolean(values.id) });
     upsertById(setAppointments, result.record);
     applyAuditLog(result.auditLog);
-    closeModal();
     markApiConnected("SQLite connected / appointment saved");
-    notify(values.id ? "Appointment updated." : "Appointment booked.");
+    if (!silent) {
+      closeModal();
+      const recurring = !values.id && record.recurrence !== "None" && record.recurrenceUntil;
+      notify(values.id ? "Appointment updated." : recurring ? "Recurring appointment series booked." : "Appointment booked.");
+    }
+    if (!values.id && record.recurrence !== "None" && record.recurrenceUntil) {
+      const refreshed = await listResourceRecords("appointments");
+      if (Array.isArray(refreshed)) setAppointments(refreshed);
+    }
   }
 
   async function updateAppointmentStatus(id, status) {
@@ -1912,7 +1938,7 @@ function App() {
     activeModule === "overview"
       ? `${session.role} Workspace`
       : navItems.find((item) => item.id === activeModule)?.label ?? "Overview";
-  const sensitiveAllowed = ["Super Admin", "Owner", "Branch Manager", "Doctor"].includes(session.role);
+  const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
   const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = sessionModules.includes("pos");
@@ -2280,8 +2306,9 @@ function App() {
               staff={staff}
               transactions={transactions}
               appointments={appointments}
-              canManage={["Owner", "Super Admin"].includes(session.role)}
+              canManage={canManageOrganization(session.role)}
               onCreateBranch={createBranch}
+              onManageCompany={() => openModal("settings", settings)}
             />
           )}
           {activeModule === "expenses" && (
@@ -3520,7 +3547,12 @@ function buildRoleWorkspace({
     },
   };
 
-  return { ...defaults, ...(configs[session.role] ?? {}) };
+  const dashboardRole = isBusinessOwner(session.role)
+    ? "Owner"
+    : canManageOrganization(session.role)
+      ? "Super Admin"
+      : session.role;
+  return { ...defaults, ...(configs[dashboardRole] ?? {}) };
 }
 
 function RolePanel({ panel }) {
@@ -3586,7 +3618,7 @@ function POSModule({
   const catalogItemRefs = useRef([]);
   const cartRowRefs = useRef([]);
   const saleClientRef = useRef(null);
-  const canManagePosCatalog = ["Super Admin", "Owner", "Branch Manager"].includes(sessionRole);
+  const canManagePosCatalog = canManageOrganization(sessionRole) || sessionRole === "Branch Manager";
   const posScreens = canManagePosCatalog ? ["Checkout", "Service Prices"] : ["Checkout"];
 
   useEffect(() => {
@@ -4337,6 +4369,7 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
   const [editingId, setEditingId] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function emptyForm() {
     return {
@@ -4394,8 +4427,9 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
     });
   }
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
+    if (saving) return;
     const name = form.name.trim();
     const price = Number(form.price);
     if (!name) {
@@ -4407,25 +4441,33 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
       return;
     }
 
-    saveService({
-      ...form,
-      id: editingId || undefined,
-      name,
-      duration: Number(form.duration || 0),
-      price,
-      commission: form.commission || "Standard POS service",
-      consumables: form.consumables || "",
-      branches: form.branches || branch,
-      staff: form.staff || staffRoleList,
-      room: form.room || "Treatment Room",
-      active: Boolean(form.active),
-      pos: Boolean(form.pos),
-      description: form.description || `${name} added from POS service prices.`,
-      contraindications: form.contraindications || "",
-      aftercare: form.aftercare || "",
-    });
-    setQuery(name);
-    resetForm();
+    setSaving(true);
+    setError("");
+    try {
+      await saveService({
+        ...form,
+        id: editingId || undefined,
+        name,
+        duration: Number(form.duration || 0),
+        price,
+        commission: form.commission || "Standard POS service",
+        consumables: form.consumables || "",
+        branches: form.branches || branch,
+        staff: form.staff || staffRoleList,
+        room: form.room || "Treatment Room",
+        active: Boolean(form.active),
+        pos: Boolean(form.pos),
+        description: form.description || `${name} added from POS service prices.`,
+        contraindications: form.contraindications || "",
+        aftercare: form.aftercare || "",
+      });
+      setQuery(name);
+      resetForm();
+    } catch (saveError) {
+      setError(saveError?.message || "Unable to save this service.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -4440,7 +4482,7 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
             </div>
           </div>
           {editingId && (
-            <button className="secondary-button small" type="button" onClick={resetForm}>
+            <button className="secondary-button small" type="button" onClick={resetForm} disabled={saving}>
               <X size={15} aria-hidden="true" />
               Cancel edit
             </button>
@@ -4502,11 +4544,11 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
         </div>
 
         <div className="service-setup-actions">
-          <button className="primary-button" type="submit">
+          <button className="primary-button" type="submit" disabled={saving}>
             <Check size={17} aria-hidden="true" />
-            {editingId ? "Update service price" : "Add to POS"}
+            {saving ? "Saving..." : editingId ? "Update service price" : "Add to POS"}
           </button>
-          <button className="ghost-button" type="button" onClick={resetForm}>
+          <button className="ghost-button" type="button" onClick={resetForm} disabled={saving}>
             Clear form
           </button>
         </div>
@@ -5671,6 +5713,98 @@ function AppointmentScheduleGrid({
   );
 }
 
+function AppointmentWeekView({ appointments, services, selectedDate, selectedId, onSelect, onOpenDay }) {
+  const focusDate = new Date(`${selectedDate}T12:00:00`);
+  const weekStart = startOfMondayWeek(focusDate);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = addDays(weekStart, index);
+    const value = isoDate(date);
+    return {
+      date,
+      value,
+      appointments: appointments.filter((appointment) => appointment.date === value),
+    };
+  });
+  const weekdayFormat = new Intl.DateTimeFormat("en-PH", { weekday: "short" });
+
+  return (
+    <div className="appointment-period-scroll">
+      <div className="appointment-week-view" role="grid" aria-label="Weekly appointments">
+        {days.map((day) => (
+          <section className={`appointment-week-day ${day.value === todayDate() ? "today" : ""} ${day.value === selectedDate ? "selected" : ""}`.trim()} role="gridcell" key={day.value}>
+            <button className="appointment-period-day-heading" type="button" onClick={() => onOpenDay(day.value)} aria-label={`Open ${formatDate(day.value)}`}>
+              <span>{weekdayFormat.format(day.date)}</span>
+              <strong>{day.date.getDate()}</strong>
+              <small>{day.appointments.length} booking{day.appointments.length === 1 ? "" : "s"}</small>
+            </button>
+            <div className="appointment-period-entries">
+              {day.appointments.map((appointment) => {
+                const start = parseTimeToMinutes(appointment.time);
+                return (
+                  <button className={`appointment-period-entry ${statusClass(appointment.status)} ${selectedId === appointment.id ? "selected" : ""}`.trim()} type="button" key={appointment.id} onClick={() => onSelect(appointment.id)}>
+                    <time>{formatScheduleTime(start)}</time>
+                    <strong>{appointment.client}</strong>
+                    <span>{appointment.service}</span>
+                    <small>{appointment.staff || "Unassigned"}{appointment.room ? ` · ${appointment.room}` : ""}</small>
+                    <em>{canonicalAppointmentStatus(appointment.status)}</em>
+                  </button>
+                );
+              })}
+              {!day.appointments.length && <span className="appointment-period-empty">No appointments</span>}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AppointmentMonthView({ appointments, selectedDate, selectedId, onSelect, onOpenDay }) {
+  const focusDate = new Date(`${selectedDate}T12:00:00`);
+  const year = focusDate.getFullYear();
+  const monthIndex = focusDate.getMonth();
+  const firstWeekday = (new Date(year, monthIndex, 1).getDay() + 6) % 7;
+  const days = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(year, monthIndex, 1 - firstWeekday + index);
+    const value = isoDate(date);
+    return {
+      date,
+      value,
+      inMonth: date.getMonth() === monthIndex,
+      appointments: appointments.filter((appointment) => appointment.date === value),
+    };
+  });
+
+  return (
+    <div className="appointment-period-scroll">
+      <div className="appointment-month-overview" role="grid" aria-label="Monthly appointments">
+        <div className="appointment-month-weekdays" role="row">
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span role="columnheader" key={day}>{day}</span>)}
+        </div>
+        <div className="appointment-month-days">
+          {days.map((day) => (
+            <section className={`${day.inMonth ? "" : "outside-month"} ${day.value === todayDate() ? "today" : ""} ${day.value === selectedDate ? "selected" : ""}`.trim()} role="gridcell" key={day.value}>
+              <button className="appointment-month-day-heading" type="button" onClick={() => onOpenDay(day.value)} aria-label={`Open ${formatDate(day.value)}`}>
+                <strong>{day.date.getDate()}</strong>
+                {day.appointments.length > 0 && <span>{day.appointments.length}</span>}
+              </button>
+              <div className="appointment-month-entries">
+                {day.appointments.slice(0, 3).map((appointment) => (
+                  <button className={`appointment-month-entry ${statusClass(appointment.status)} ${selectedId === appointment.id ? "selected" : ""}`.trim()} type="button" key={appointment.id} onClick={() => onSelect(appointment.id)} title={`${appointment.time} · ${appointment.client} · ${appointment.service}`}>
+                    <time>{formatScheduleTime(parseTimeToMinutes(appointment.time))}</time>
+                    <strong>{appointment.client}</strong>
+                  </button>
+                ))}
+                {day.appointments.length > 3 && <button className="appointment-month-more" type="button" onClick={() => onOpenDay(day.value)}>+{day.appointments.length - 3} more</button>}
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppointmentsModule({
   appointments,
   clients,
@@ -5705,6 +5839,7 @@ function AppointmentsModule({
     query: "",
   };
   const [view, setView] = useStoredState("appointment-scheduler-view", "Schedule");
+  const activeView = view === "Schedule" ? "Day" : view;
   const [filters, setFilters] = useState(defaultFilters);
   const [showDataTable, setShowDataTable] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
@@ -5739,7 +5874,7 @@ function AppointmentsModule({
   }, {});
   const combinedQuery = normalize(`${globalSearch} ${normalizedFilters.query}`.trim());
 
-  const filteredRows = appointments
+  const matchingRows = appointments
     .filter((item) => normalizedFilters.status === "All" || canonicalAppointmentStatus(item.status) === normalizedFilters.status)
     .filter((item) => normalizedFilters.doctor === "All" || item.staff === normalizedFilters.doctor)
     .filter((item) => normalizedFilters.room === "All" || item.room === normalizedFilters.room)
@@ -5747,7 +5882,6 @@ function AppointmentsModule({
     .filter((item) => normalizedFilters.branch === "All" || item.branch === normalizedFilters.branch)
     .filter((item) => normalizedFilters.appointmentType === "All" || item.appointmentType === normalizedFilters.appointmentType)
     .filter((item) => normalizedFilters.insurance === "All" || item.insurance === normalizedFilters.insurance)
-    .filter((item) => appointmentDateInRange(item, range))
     .filter((item) => {
       const payment = appointmentPaymentSummary(item, services, transactions);
       const hasDeposit = Number(item.deposit || 0) > 0;
@@ -5762,13 +5896,33 @@ function AppointmentsModule({
       return paymentMatch && depositMatch && clientTypeMatch && tagMatch && (!combinedQuery || normalize(searchable).includes(combinedQuery));
     })
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
+  const filteredRows = matchingRows.filter((item) => appointmentDateInRange(item, range));
   const dayRows = filteredRows.filter((item) => item.date === selectedDate);
+  const selectedDateObject = new Date(`${selectedDate}T12:00:00`);
+  const selectedWeekStart = startOfMondayWeek(selectedDateObject);
+  const selectedWeekRange = { from: isoDate(selectedWeekStart), to: isoDate(addDays(selectedWeekStart, 6)) };
+  const weekRows = matchingRows.filter((item) => appointmentDateInRange(item, selectedWeekRange));
+  const selectedMonthPrefix = `${selectedDateObject.getFullYear()}-${String(selectedDateObject.getMonth() + 1).padStart(2, "0")}`;
+  const monthRows = matchingRows.filter((item) => String(item.date).startsWith(selectedMonthPrefix));
+  const periodRows = activeView === "Week" ? weekRows : activeView === "Month" ? monthRows : dayRows;
+  const displayedRows = activeView === "Week" ? weekRows : activeView === "Month" ? monthRows : filteredRows;
+  const weekEnd = addDays(selectedWeekStart, 6);
+  const periodTitle = activeView === "Week"
+    ? `${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(selectedWeekStart)} – ${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(weekEnd)}`
+    : activeView === "Month"
+      ? new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(selectedDateObject)
+      : formatDate(selectedDate);
+  const periodSubtitle = activeView === "Week"
+    ? `${weekRows.length} appointments · GMT+8`
+    : activeView === "Month"
+      ? `${monthRows.length} appointments · GMT+8`
+      : `${new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(selectedDateObject)} · GMT+8`;
   const selectedAppointment = appointments.find((item) => item.id === selectedId) ?? null;
   const selectedBranch = normalizedFilters.branch === "All" ? null : normalizedFilters.branch;
   const scopedStaff = staff
     .filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""))
     .filter((person) => !selectedBranch || person.branch === selectedBranch || person.branch === "All branches");
-  const practitionerNames = [...new Set(scopedStaff.map((person) => person.name).concat(dayRows.map((item) => item.staff)).filter(Boolean))];
+  const practitionerNames = [...new Set(scopedStaff.map((person) => person.name).concat(periodRows.map((item) => item.staff)).filter(Boolean))];
   const practitionerResources = practitionerNames
     .filter((name) => normalizedFilters.doctor === "All" || name === normalizedFilters.doctor)
     .map((name) => {
@@ -5824,7 +5978,7 @@ function AppointmentsModule({
   async function changeAppointment(appointment, changes) {
     setScheduleFeedback({ type: "loading", message: "Checking availability…" });
     try {
-      await Promise.resolve(onUpdateAppointment({ ...appointment, ...changes }));
+      await Promise.resolve(onUpdateAppointment({ ...appointment, ...changes }, { silent: true }));
       setScheduleFeedback({ type: "success", message: `${appointment.client} moved to ${changes.time ? formatScheduleTime(parseTimeToMinutes(changes.time)) : `${changes.duration} minutes`}.` });
     } catch (error) {
       setScheduleFeedback({ type: "error", message: error?.message || "That time is not available." });
@@ -5929,16 +6083,16 @@ function AppointmentsModule({
             <div className="appointment-calendar-weekdays">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div>
             <div className="appointment-calendar-days">
               {calendarDays.map((day) => {
-                const count = appointments.filter((item) => item.date === day.value).length;
+                const count = matchingRows.filter((item) => item.date === day.value).length;
                 return <button className={`${day.inMonth ? "" : "outside-month"} ${day.value === today ? "today" : ""} ${day.value === selectedDate ? "selected" : ""}`.trim()} type="button" key={day.value} onClick={() => selectDate(day.value)} aria-label={`${formatDate(day.value)}${count ? `, ${count} appointments` : ""}`}><span>{day.date.getDate()}</span>{count > 0 && <i />}</button>;
               })}
             </div>
           </div>
-          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{dayRows.length} visits</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
+          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{periodRows.length} visits in this {activeView.toLowerCase()}</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
           <div className="appointment-doctor-list">
             {practitionerNames.map((name) => {
               const person = staff.find((item) => item.name === name);
-              const doctorRows = dayRows.filter((item) => item.staff === name);
+              const doctorRows = periodRows.filter((item) => item.staff === name);
               const next = doctorRows[0];
               return (
                 <button className={normalizedFilters.doctor === name ? "selected" : ""} type="button" key={name} onClick={() => setFilter("doctor", normalizedFilters.doctor === name ? "All" : name)}>
@@ -5956,19 +6110,21 @@ function AppointmentsModule({
         <div className="surface-panel appointment-calendar-panel">
           <div className="appointment-scheduler-toolbar">
             <div className="appointment-date-navigator">
-              <button type="button" onClick={() => moveDay(-1)} aria-label="Previous day"><ChevronLeft size={18} /></button>
-              <div><strong>{formatDate(selectedDate)}</strong><span>{new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(new Date(`${selectedDate}T12:00:00`))} · GMT+8</span></div>
-              <button type="button" onClick={() => moveDay(1)} aria-label="Next day"><ChevronRight size={18} /></button>
+              <button type="button" onClick={() => activeView === "Day" ? moveDay(-1) : selectDate(moveAppointmentFocus(selectedDate, activeView, -1))} aria-label={`Previous ${activeView.toLowerCase()}`}><ChevronLeft size={18} /></button>
+              <div><strong>{periodTitle}</strong><span>{periodSubtitle}</span></div>
+              <button type="button" onClick={() => activeView === "Day" ? moveDay(1) : selectDate(moveAppointmentFocus(selectedDate, activeView, 1))} aria-label={`Next ${activeView.toLowerCase()}`}><ChevronRight size={18} /></button>
             </div>
             <div className="segmented-control appointment-view-tabs" role="tablist" aria-label="Appointment view">
-              {["Schedule", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={view === item} className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
+              {["Day", "Week", "Month", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={activeView === item} className={activeView === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
             </div>
           </div>
           {scheduleFeedback && <div className={`appointment-schedule-feedback ${scheduleFeedback.type}`}><span>{scheduleFeedback.message}</span><button type="button" onClick={() => setScheduleFeedback(null)} aria-label="Dismiss message"><X size={14} /></button></div>}
-          {view === "Schedule" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={(item) => item.staff} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
-          {view === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
-          {view === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
-          {view === "Kanban" && (
+          {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={(item) => item.staff} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Week" && <AppointmentWeekView appointments={weekRows} services={services} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
+          {activeView === "Month" && <AppointmentMonthView appointments={monthRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
+          {activeView === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
+          {activeView === "Kanban" && (
             <div className="appointment-kanban-board appointment-workflow-board" aria-label="Appointment workflow">
               {kanbanDefinitions.map((definition) => {
                 const items = dayRows.filter(definition.matches);
@@ -5992,7 +6148,7 @@ function AppointmentsModule({
       <AppointmentDetailsDrawer appointment={selectedAppointment} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
 
       <div className="appointment-data-toggle"><button className="secondary-button" type="button" onClick={() => setShowDataTable((value) => !value)}><FileText size={16} /> {showDataTable ? "Hide data table" : "Show data table"}</button></div>
-      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${filteredRows.length} records`} /><SmartTable rows={filteredRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff" }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
+      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${displayedRows.length} records`} /><SmartTable rows={displayedRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff" }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
     </section>
   );
 }
@@ -7859,7 +8015,7 @@ function leadFollowUpState(lead) {
   const dueAt = new Date(lead.nextFollowUpAt || "");
   if (Number.isNaN(dueAt.getTime())) return "None";
   if (dueAt.getTime() < Date.now()) return "Overdue";
-  if (dueAt.toISOString().slice(0, 10) === todayDate()) return "Due Today";
+  if (isoDate(dueAt) === todayDate()) return "Due Today";
   return "Upcoming";
 }
 
@@ -8049,12 +8205,12 @@ function MyWorkspaceModule({ session, notify }) {
 }
 
 function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
-  const canInvite = ["Owner", "Super Admin", "Admin"].includes(session.role);
+  const canInvite = canManageOrganization(session.role);
   const [invitations, setInvitations] = useState([]);
   const [showInvite, setShowInvite] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const roles = Object.keys(roleAccess).filter((role) => session.role === "Owner" || role !== "Owner");
+  const roles = Object.keys(roleAccess).filter((role) => isBusinessOwner(session.role) || !isBusinessOwner(role));
   const [form, setForm] = useState({ name: "", email: "", role: "Doctor", branch: session.branch || "All branches", department: "", specialty: "", message: "" });
 
   const refresh = useCallback(async () => {
@@ -8167,7 +8323,7 @@ function AcceptInvitationScreen({ token }) {
   </form></section></main>;
 }
 
-function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, onCreateBranch }) {
+function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, onCreateBranch, onManageCompany }) {
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
@@ -8225,7 +8381,12 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
           <h2>Branches</h2>
           <p>Manage locations, operating details, rooms, and employee assignments from one place.</p>
         </div>
-        {canManage && <button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={17} /> Add branch</button>}
+        {canManage && (
+          <div className="branch-organization-actions">
+            <button className="ghost-button" type="button" onClick={onManageCompany}><Settings size={17} /> Add / edit company</button>
+            <button className="primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={17} /> Add branch</button>
+          </div>
+        )}
       </div>
 
       <div className="branch-summary-grid">
@@ -8661,7 +8822,7 @@ function SettingsModule({ settings, users, auditLogs, discounts, openModal, glob
   return (
     <section className="module-grid two">
       <div className="surface-panel wide">
-        <SectionHeader icon={Settings} title="Settings" action="Owner controls" />
+        <SectionHeader icon={Settings} title="Settings" action="Admin & owner controls" />
         <div className="record-grid">
           <RecordItem label="Company" value={settings.company} />
           <RecordItem label="Receipt footer" value={settings.receiptFooter} />
@@ -8842,7 +9003,7 @@ function ModalHost({
   ].filter((value, index, values) => value && values.indexOf(value) === index);
   const templateOptions = [{ value: "", label: "Custom message" }, ...(templates ?? []).map((template) => ({ value: template.id, label: template.name }))];
   const defaultMarketingTemplate = (templates ?? []).find((template) => template.category === "Marketing") ?? templates?.[0];
-  const canManageProductPhotos = ["Owner", "Super Admin"].includes(session?.role);
+  const canManageProductPhotos = canManageOrganization(session?.role);
 
   if (modal.type === "payment") {
     return (
@@ -9517,6 +9678,7 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
       if (start < 13 * 60 && end > 12 * 60) continue;
       const conflicts = appointments.some((appointment) => {
         if (appointment.id === form.id || appointment.date !== form.date || !isActiveAppointmentStatus(appointment.status)) return false;
+        if (form.branch && appointment.branch !== form.branch) return false;
         const resourceConflict = (form.staff && appointment.staff === form.staff) || (form.room && appointment.room === form.room);
         if (!resourceConflict) return false;
         const appointmentStart = parseTimeToMinutes(appointment.time);
@@ -9526,7 +9688,7 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
       if (!conflicts) slots.push(formatTimeInput(start));
     }
     return slots;
-  }, [appointments, duration, form.date, form.id, form.room, form.staff, services]);
+  }, [appointments, duration, form.branch, form.date, form.id, form.room, form.staff, services]);
 
   function update(name, value) {
     setForm((current) => ({

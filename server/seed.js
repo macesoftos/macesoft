@@ -11,7 +11,6 @@ import {
   initialInventory,
   initialLeads,
   initialPackages,
-  initialServices,
   initialSettings,
   initialSmsTemplates,
   initialStaff,
@@ -130,21 +129,6 @@ async function seedClients() {
       balance: Number(client.balance || 0),
       giftBalance: Number(client.giftBalance || 0),
       marketingOptIn: Boolean(client.marketingOptIn),
-    })),
-  });
-}
-
-async function seedServices() {
-  await prisma.service.createMany({
-    data: initialServices.map((service) => ({
-      ...service,
-      duration: Number(service.duration || 0),
-      price: Number(service.price || 0),
-      consumables: asJsonText(service.consumables),
-      branches: asJsonText(service.branches),
-      staff: asJsonText(service.staff),
-      active: service.active !== false,
-      pos: service.pos !== false,
     })),
   });
 }
@@ -308,7 +292,6 @@ async function main() {
   await clearDatabase();
   await seedBranches();
   await seedClients();
-  await seedServices();
   await seedOperationalRecords();
   await seedAccounts();
   await seedInventoryMovements();
