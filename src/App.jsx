@@ -5891,6 +5891,11 @@ function AppointmentsModule({
   };
   const [view, setView] = useStoredState("appointment-scheduler-view", "Schedule");
   const activeView = view === "Schedule" ? "Day" : view;
+  const [kanbanScope, setKanbanScope] = useStoredState("appointment-kanban-scope", "Day");
+  const [kanbanCustomRange, setKanbanCustomRange] = useState(() => {
+    const today = todayDate();
+    return { from: today, to: today };
+  });
   const [filters, setFilters] = useState(defaultFilters);
   const [showDataTable, setShowDataTable] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
@@ -5955,18 +5960,41 @@ function AppointmentsModule({
   const weekRows = matchingRows.filter((item) => appointmentDateInRange(item, selectedWeekRange));
   const selectedMonthPrefix = `${selectedDateObject.getFullYear()}-${String(selectedDateObject.getMonth() + 1).padStart(2, "0")}`;
   const monthRows = matchingRows.filter((item) => String(item.date).startsWith(selectedMonthPrefix));
-  const periodRows = activeView === "Week" ? weekRows : activeView === "Month" ? monthRows : dayRows;
-  const displayedRows = activeView === "Week" ? weekRows : activeView === "Month" ? monthRows : filteredRows;
+  const resolvedKanbanScope = ["Day", "Week", "Month", "Custom"].includes(kanbanScope) ? kanbanScope : "Day";
+  const customKanbanRows = matchingRows.filter((item) => appointmentDateInRange(item, kanbanCustomRange));
+  const kanbanRows = resolvedKanbanScope === "Week"
+    ? weekRows
+    : resolvedKanbanScope === "Month"
+      ? monthRows
+      : resolvedKanbanScope === "Custom"
+        ? customKanbanRows
+        : dayRows;
+  const periodMode = activeView === "Kanban" ? resolvedKanbanScope : activeView;
+  const periodRows = periodMode === "Week"
+    ? weekRows
+    : periodMode === "Month"
+      ? monthRows
+      : periodMode === "Custom"
+        ? customKanbanRows
+        : dayRows;
+  const displayedRows = activeView === "Kanban" ? kanbanRows : activeView === "Week" ? weekRows : activeView === "Month" ? monthRows : filteredRows;
   const weekEnd = addDays(selectedWeekStart, 6);
-  const periodTitle = activeView === "Week"
+  const customRangeTitle = kanbanCustomRange.from === kanbanCustomRange.to
+    ? formatDate(kanbanCustomRange.from)
+    : `${formatDate(kanbanCustomRange.from)} – ${formatDate(kanbanCustomRange.to)}`;
+  const periodTitle = periodMode === "Week"
     ? `${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(selectedWeekStart)} – ${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(weekEnd)}`
-    : activeView === "Month"
+    : periodMode === "Month"
       ? new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(selectedDateObject)
-      : formatDate(selectedDate);
-  const periodSubtitle = activeView === "Week"
+      : periodMode === "Custom"
+        ? customRangeTitle
+        : formatDate(selectedDate);
+  const periodSubtitle = periodMode === "Week"
     ? `${weekRows.length} appointments · GMT+8`
-    : activeView === "Month"
+    : periodMode === "Month"
       ? `${monthRows.length} appointments · GMT+8`
+      : periodMode === "Custom"
+        ? `${customKanbanRows.length} appointments · GMT+8`
       : `${new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(selectedDateObject)} · GMT+8`;
   const selectedAppointment = appointments.find((item) => item.id === selectedId) ?? null;
   const selectedBranch = normalizedFilters.branch === "All" ? null : normalizedFilters.branch;
@@ -6024,6 +6052,23 @@ function AppointmentsModule({
     const next = new Date(`${selectedDate}T12:00:00`);
     next.setDate(next.getDate() + offset);
     selectDate(next.toISOString().slice(0, 10));
+  }
+
+  function updateKanbanCustomRange(field, value) {
+    if (!value) return;
+    setKanbanCustomRange((current) => {
+      const next = { ...current, [field]: value };
+      if (field === "from" && next.to < value) next.to = value;
+      if (field === "to" && next.from > value) next.from = value;
+      return next;
+    });
+  }
+
+  function moveKanbanCustomRange(direction) {
+    const from = new Date(`${kanbanCustomRange.from}T12:00:00`);
+    const to = new Date(`${kanbanCustomRange.to}T12:00:00`);
+    const span = Math.max(1, Math.round((to - from) / 86400000) + 1);
+    setKanbanCustomRange({ from: isoDate(addDays(from, direction * span)), to: isoDate(addDays(to, direction * span)) });
   }
 
   async function changeAppointment(appointment, changes) {
@@ -6099,7 +6144,7 @@ function AppointmentsModule({
   function dropKanban(event, definition) {
     event.preventDefault();
     const id = draggedAppointmentId || event.dataTransfer.getData("text/plain");
-    const appointment = dayRows.find((item) => item.id === id);
+    const appointment = kanbanRows.find((item) => item.id === id);
     setDraggedAppointmentId("");
     setDragOverStatus("");
     if (!appointment || definition.matches(appointment)) return;
@@ -6161,9 +6206,9 @@ function AppointmentsModule({
         <div className="surface-panel appointment-calendar-panel">
           <div className="appointment-scheduler-toolbar">
             <div className="appointment-date-navigator">
-              <button type="button" onClick={() => activeView === "Day" ? moveDay(-1) : selectDate(moveAppointmentFocus(selectedDate, activeView, -1))} aria-label={`Previous ${activeView.toLowerCase()}`}><ChevronLeft size={18} /></button>
+              <button type="button" onClick={() => periodMode === "Custom" ? moveKanbanCustomRange(-1) : periodMode === "Day" ? moveDay(-1) : selectDate(moveAppointmentFocus(selectedDate, periodMode, -1))} aria-label={`Previous ${periodMode === "Custom" ? "date range" : periodMode.toLowerCase()}`}><ChevronLeft size={18} /></button>
               <div><strong>{periodTitle}</strong><span>{periodSubtitle}</span></div>
-              <button type="button" onClick={() => activeView === "Day" ? moveDay(1) : selectDate(moveAppointmentFocus(selectedDate, activeView, 1))} aria-label={`Next ${activeView.toLowerCase()}`}><ChevronRight size={18} /></button>
+              <button type="button" onClick={() => periodMode === "Custom" ? moveKanbanCustomRange(1) : periodMode === "Day" ? moveDay(1) : selectDate(moveAppointmentFocus(selectedDate, periodMode, 1))} aria-label={`Next ${periodMode === "Custom" ? "date range" : periodMode.toLowerCase()}`}><ChevronRight size={18} /></button>
             </div>
             <div className="segmented-control appointment-view-tabs" role="tablist" aria-label="Appointment view">
               {["Day", "Week", "Month", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={activeView === item} className={activeView === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
@@ -6176,19 +6221,38 @@ function AppointmentsModule({
           {activeView === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
           {activeView === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
           {activeView === "Kanban" && (
-            <div className="appointment-kanban-board appointment-workflow-board" aria-label="Appointment workflow">
-              {kanbanDefinitions.map((definition) => {
-                const items = dayRows.filter(definition.matches);
-                return (
-                  <section className={`appointment-kanban-column ${dragOverStatus === definition.label ? "is-drag-over" : ""}`} key={definition.label} onDragOver={(event) => event.preventDefault()} onDragEnter={() => setDragOverStatus(definition.label)} onDrop={(event) => dropKanban(event, definition)}>
-                    <header><span>{definition.label}</span><strong>{items.length}</strong></header>
-                    <div>{items.map((appointment) => {
-                      const payment = appointmentPaymentSummary(appointment, services, transactions);
-                      return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => setSelectedId(appointment.id)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {formatScheduleTime(parseTimeToMinutes(appointment.time))} · {appointment.staff}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
-                    })}{!items.length && <span className="appointment-kanban-empty">No appointments</span>}</div>
-                  </section>
-                );
-              })}
+            <div className="appointment-kanban-workspace">
+              <div className="appointment-kanban-scope-toolbar">
+                <div><strong>Kanban period</strong><span>Choose how much of the schedule to show.</span></div>
+                <div className="appointment-kanban-scope-options" role="radiogroup" aria-label="Kanban period">
+                  {[{ value: "Day", label: "Daily" }, { value: "Week", label: "Whole week" }, { value: "Month", label: "Whole month" }, { value: "Custom", label: "Custom range" }].map((option) => (
+                    <button type="button" role="radio" aria-checked={resolvedKanbanScope === option.value} className={resolvedKanbanScope === option.value ? "active" : ""} onClick={() => setKanbanScope(option.value)} key={option.value}>{option.label}</button>
+                  ))}
+                </div>
+                {resolvedKanbanScope === "Custom" && (
+                  <div className="appointment-kanban-custom-range" aria-label="Custom Kanban date range">
+                    <label><span>From</span><input type="date" value={kanbanCustomRange.from} onChange={(event) => updateKanbanCustomRange("from", event.target.value)} /></label>
+                    <label><span>To</span><input type="date" value={kanbanCustomRange.to} onChange={(event) => updateKanbanCustomRange("to", event.target.value)} /></label>
+                  </div>
+                )}
+              </div>
+              <div className="appointment-kanban-board appointment-workflow-board" aria-label={`Appointment workflow for ${periodTitle}`}>
+                {kanbanDefinitions.map((definition) => {
+                  const items = kanbanRows.filter(definition.matches);
+                  return (
+                    <section className={`appointment-kanban-column ${dragOverStatus === definition.label ? "is-drag-over" : ""}`} key={definition.label} onDragOver={(event) => event.preventDefault()} onDragEnter={() => setDragOverStatus(definition.label)} onDrop={(event) => dropKanban(event, definition)}>
+                      <header><span>{definition.label}</span><strong>{items.length}</strong></header>
+                      <div>{items.map((appointment) => {
+                        const payment = appointmentPaymentSummary(appointment, services, transactions);
+                        const scheduleLabel = resolvedKanbanScope === "Day"
+                          ? formatScheduleTime(parseTimeToMinutes(appointment.time))
+                          : `${formatDate(appointment.date)} · ${formatScheduleTime(parseTimeToMinutes(appointment.time))}`;
+                        return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => setSelectedId(appointment.id)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {scheduleLabel} · {appointment.staff}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
+                      })}{!items.length && <span className="appointment-kanban-empty">No appointments</span>}</div>
+                    </section>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
