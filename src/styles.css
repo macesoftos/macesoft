@@ -2963,6 +2963,7 @@ img { max-width: 100%; }
 }
 .branches-hero h2 { margin: 3px 0 7px; font-size: 1.55rem; }
 .branches-hero p:last-child { max-width: 660px; margin: 0; color: var(--muted); line-height: 1.55; }
+.branch-organization-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
 
 .branch-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .branch-summary-grid article { display: flex; align-items: center; gap: 12px; min-height: 86px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
@@ -6336,6 +6337,8 @@ td .inline-actions { flex-wrap: nowrap; }
 
 @media (max-width: 720px) {
   .branches-hero { align-items: stretch; flex-direction: column; }
+  .branch-organization-actions { align-items: stretch; flex-direction: column; }
+  .branch-organization-actions .ghost-button { width: 100%; }
   .branches-hero .primary-button { width: 100%; }
   .branch-summary-grid, .branch-grid { grid-template-columns: 1fr; }
   .branch-onboarding-steps { align-items: stretch; flex-direction: column; width: 100%; }

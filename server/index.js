@@ -9,6 +9,7 @@ import nodemailer from "nodemailer";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess, users } from "../src/data.js";
+import { canManageOrganization, isBusinessOwner } from "../src/organizationRoles.js";
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
 import { assertProductionEnvironment } from "./productionConfig.js";
 import {
@@ -700,7 +701,7 @@ async function normalizeAppointmentPayload(payload, existingId = "") {
     branch: requireText(payload.branch, "Branch"),
     room: clean(payload.room) || "To assign",
     staff: clean(payload.staff) || "Any available",
-    duration: numberValue(payload.duration || service?.duration || 60, "Duration", { min: 15, integer: true }),
+    duration: Math.max(15, numberValue(payload.duration || service?.duration || 60, "Duration", { min: 1, integer: true })),
     appointmentType: clean(payload.appointmentType) || "Treatment",
     insurance: clean(payload.insurance),
     tags: clean(payload.tags),
@@ -1227,6 +1228,7 @@ const resourceConfigs = {
     orderBy: [{ date: "desc" }, { time: "asc" }],
     normalize: normalizeAppointmentPayload,
     beforeWrite: assertAppointmentSlotAvailable,
+    afterWrite: expandAppointmentRecurrence,
     branchField: "branch",
     relatedClient: true,
   },
@@ -2005,6 +2007,56 @@ async function appointmentDurationFor(data) {
   return Math.max(15, Number(service?.duration || 60));
 }
 
+const appointmentRecurrenceSteps = {
+  Weekly: { days: 7 },
+  "Every 2 weeks": { days: 14 },
+  Monthly: { months: 1 },
+};
+const maxRecurrenceOccurrences = 26;
+
+function shiftIsoDate(iso, { days = 0, months = 0 }) {
+  const [year, month, day] = String(iso).split("-").map(Number);
+  if (!year || !month || !day) return "";
+  if (months) {
+    const target = new Date(Date.UTC(year, month - 1 + months, 1));
+    const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+    target.setUTCDate(Math.min(day, lastDay));
+    return target.toISOString().slice(0, 10);
+  }
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+async function expandAppointmentRecurrence(tx, request, record, data, previous) {
+  if (previous) return;
+  const step = appointmentRecurrenceSteps[data.recurrence];
+  const until = clean(data.recurrenceUntil);
+  if (!step || !/^\d{4}-\d{2}-\d{2}$/.test(until) || until <= data.date) return;
+
+  let created = 0;
+  const skipped = [];
+  for (let index = 1; created < maxRecurrenceOccurrences; index += 1) {
+    const date = shiftIsoDate(data.date, { days: (step.days || 0) * index, months: (step.months || 0) * index });
+    if (!date || date > until) break;
+    const occurrence = { ...stripMeta(data), date };
+    delete occurrence.id;
+    try {
+      await assertAppointmentSlotAvailable(occurrence);
+    } catch {
+      skipped.push(date);
+      continue;
+    }
+    await tx.appointment.create({ data: occurrence });
+    created += 1;
+  }
+  if (created || skipped.length) {
+    await writeAudit(tx, request, {
+      area: "Appointments",
+      action: "Recurring series created",
+      details: `${record.client} for ${record.service}: ${created} recurring appointment${created === 1 ? "" : "s"} created${skipped.length ? `, skipped ${skipped.join(", ")} for conflicts` : ""}.`,
+    });
+  }
+}
+
 async function assertAppointmentStatusTransition(data, existingId = "") {
   if (!existingId) return;
   const existing = await prisma.appointment.findUnique({ where: { id: existingId } });
@@ -2589,13 +2641,12 @@ function requireAuthenticatedAccount(request) {
 }
 
 const invitationStatuses = ["Pending", "Accepted", "Expired", "Revoked", "Failed"];
-const invitationManagerRoles = ["Owner", "Super Admin"];
 const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 
 function requireInvitationManager(request) {
   const account = requireAuthenticatedAccount(request);
-  if (!invitationManagerRoles.includes(account.role)) {
-    throw apiError("Only an Owner or Admin can manage invitations.", 403);
+  if (!canManageOrganization(account.role)) {
+    throw apiError("Only an Admin or Business Owner can manage invitations.", 403);
   }
   return account;
 }
@@ -2605,8 +2656,8 @@ function invitationRole(value, actor) {
   if (!Object.keys(roleAccess).includes(role)) {
     throw apiError("Choose a configured organization role.");
   }
-  if (role === "Owner" && actor.role !== "Owner") {
-    throw apiError("Only an Owner can invite another Owner.", 403);
+  if (isBusinessOwner(role) && !isBusinessOwner(actor.role)) {
+    throw apiError("Only a Business Owner can invite another Business Owner.", 403);
   }
   return role;
 }
@@ -2841,7 +2892,7 @@ app.post("/api/invitations/:id/resend", asyncRoute(async (request, response) => 
   const actor = requireInvitationManager(request);
   const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
   if (!current || !["Pending", "Expired", "Failed"].includes(current.status)) throw apiError("This invitation cannot be resent.", 409);
-  if (current.role === "Owner" && actor.role !== "Owner") throw apiError("Only an Owner can resend an Owner invitation.", 403);
+  if (isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) throw apiError("Only a Business Owner can resend a Business Owner invitation.", 403);
   const token = randomBytes(32).toString("base64url");
   let invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { tokenHash: sessionTokenHash(token), status: "Pending", expiresAt: new Date(Date.now() + invitationLifetimeMs), failedReason: "", revokedAt: null } });
   try {
@@ -2857,7 +2908,7 @@ app.post("/api/invitations/:id/revoke", asyncRoute(async (request, response) => 
   const actor = requireInvitationManager(request);
   const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
   if (!current || current.status !== "Pending") throw apiError("Only a pending invitation can be revoked.", 409);
-  if (current.role === "Owner" && actor.role !== "Owner") throw apiError("Only an Owner can revoke an Owner invitation.", 403);
+  if (isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) throw apiError("Only a Business Owner can revoke a Business Owner invitation.", 403);
   const invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { status: "Revoked", revokedAt: new Date() } });
   const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: "Invitation revoked", details: `${invitation.email} invitation revoked.` }) });
   response.json({ invitation: publicInvitation(invitation), auditLog });
@@ -2938,7 +2989,7 @@ app.post("/api/me/attendance", asyncRoute(async (request, response) => {
 
 app.post("/api/branches", asyncRoute(async (request, response) => {
   const account = requireAuthenticatedAccount(request);
-  if (!["Owner", "Super Admin"].includes(account.role)) throw apiError("Only an Owner or Super Admin can create branches.", 403);
+  if (!canManageOrganization(account.role)) throw apiError("Only an Admin or Business Owner can create branches.", 403);
   const name = requireText(request.body?.name, "Branch name");
   const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
   const branch = await prisma.branch.create({
@@ -3010,7 +3061,7 @@ app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
   const categoryAccess = uploadCategories[asset.category];
   if (!categoryAccess) throw apiError("Uploaded asset category is invalid.", 500);
   const actor = assertMutationAllowed(request, categoryAccess.writeModule, asset.branch);
-  if (actor.id !== asset.uploadedById && !["Owner", "Super Admin"].includes(actor.role)) {
+  if (actor.id !== asset.uploadedById && !canManageOrganization(actor.role)) {
     throw apiError("Only the uploader or an organization administrator can remove this asset.", 403);
   }
   const deleted = await storageRequest(asset.objectPath, { method: "DELETE" });
@@ -3251,6 +3302,7 @@ app.post("/api/leads/:id/appointments", asyncRoute(async (request, response) => 
       throw apiError("Selected service is not offered at this branch.", 409);
     }
   }
+  appointmentData.duration = await appointmentDurationFor(appointmentData);
   await assertAppointmentSlotAvailable(appointmentData);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -3605,6 +3657,7 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       notes: clean(values.concern),
       internalNotes: "Created from public online booking.",
     };
+    appointmentData.duration = await appointmentDurationFor(appointmentData);
     await assertAppointmentSlotAvailable(appointmentData);
 
     const lead = await tx.lead.create({

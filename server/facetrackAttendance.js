@@ -1,7 +1,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import express from "express";
 
-const ADMIN_ROLES = new Set(["Super Admin", "Owner", "Branch Manager"]);
+import { ORGANIZATION_MANAGER_ROLES } from "../src/organizationRoles.js";
+
+const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Branch Manager"]);
 const MODULE_ID = "facetrack-attendance";
 const verificationAttempts = new Map();
 const kioskVerificationAttempts = new Map();

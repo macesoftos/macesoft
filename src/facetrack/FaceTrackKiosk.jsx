@@ -7,10 +7,11 @@ import {
   recordFaceTrackKioskAttendance,
   unlockFaceTrackKiosk,
 } from "../lib/api.js";
+import { ORGANIZATION_MANAGER_ROLES } from "../organizationRoles.js";
 import "./facetrack-kiosk.css";
 
 const MODEL_URL = "/facetrack-models";
-const ADMIN_ROLES = new Set(["Super Admin", "Owner", "Branch Manager"]);
+const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Branch Manager"]);
 
 function displayTime(value) {
   return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(value);
@@ -171,7 +172,7 @@ export default function FaceTrackKiosk({ session }) {
 
   if (view === "setup") {
     const canSetUp = session && ADMIN_ROLES.has(session.role);
-    return <main className="kiosk-setup-page"><section className="kiosk-setup-card"><span className="kiosk-logo"><TabletSmartphone /></span><p className="kiosk-kicker">FaceTrack shared iPad</p><h1>Set up clinic kiosk</h1><p>Register this iPad to one clinic branch. Employees will not need to sign in.</p>{canSetUp ? <form onSubmit={registerKiosk}><label><span>Device name</span><input required value={setup.name} onChange={(event) => setSetup({ ...setup, name: event.target.value })} /></label><label><span>Clinic branch</span><input required value={setup.branch} onChange={(event) => setSetup({ ...setup, branch: event.target.value })} placeholder="Example: Mace Davao" /></label><label><span>6-digit administrator PIN</span><input required inputMode="numeric" pattern="[0-9]{6}" maxLength="6" type="password" value={setup.pin} onChange={(event) => setSetup({ ...setup, pin: event.target.value.replace(/\D/g, "") })} /></label>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}<button disabled={saving} type="submit"><ShieldCheck />{saving ? "Registering iPad..." : "Register and open kiosk"}</button></form> : <div className="kiosk-setup-signin"><LockKeyhole /><p>An Owner, Super Admin, or Branch Manager must sign in before registering this iPad.</p><a href="/#/facetrack-attendance">Go to administrator sign in</a></div>}<small>After setup, enable iPad Guided Access to keep this screen open.</small></section></main>;
+    return <main className="kiosk-setup-page"><section className="kiosk-setup-card"><span className="kiosk-logo"><TabletSmartphone /></span><p className="kiosk-kicker">FaceTrack shared iPad</p><h1>Set up clinic kiosk</h1><p>Register this iPad to one clinic branch. Employees will not need to sign in.</p>{canSetUp ? <form onSubmit={registerKiosk}><label><span>Device name</span><input required value={setup.name} onChange={(event) => setSetup({ ...setup, name: event.target.value })} /></label><label><span>Clinic branch</span><input required value={setup.branch} onChange={(event) => setSetup({ ...setup, branch: event.target.value })} placeholder="Example: Mace Davao" /></label><label><span>6-digit administrator PIN</span><input required inputMode="numeric" pattern="[0-9]{6}" maxLength="6" type="password" value={setup.pin} onChange={(event) => setSetup({ ...setup, pin: event.target.value.replace(/\D/g, "") })} /></label>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}<button disabled={saving} type="submit"><ShieldCheck />{saving ? "Registering iPad..." : "Register and open kiosk"}</button></form> : <div className="kiosk-setup-signin"><LockKeyhole /><p>An Admin, Business Owner, or Branch Manager must sign in before registering this iPad.</p><a href="/#/facetrack-attendance">Go to administrator sign in</a></div>}<small>After setup, enable iPad Guided Access to keep this screen open.</small></section></main>;
   }
 
   return <main className={`facetrack-kiosk ${view}`}>

@@ -96,6 +96,26 @@ try {
   const suffix = Date.now().toString(36);
   const clientId = `cl-smoke-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
+  const serviceId = `svc-smoke-${suffix}`;
+
+  const createdService = await jsonRequest("/api/resources/services", {
+    id: serviceId,
+    name: "Automated Smoke Consultation",
+    category: "Consultations",
+    duration: 45,
+    price: 1500,
+    commission: "",
+    consumables: [],
+    branches: ["Mace BGC"],
+    staff: ["Doctor"],
+    room: "Room 1",
+    active: true,
+    pos: true,
+    description: "Created by the API smoke test.",
+    contraindications: "",
+    aftercare: "",
+  });
+  assert(createdService.response.status === 201, "service create failed");
 
   const createdClient = await jsonRequest("/api/resources/clients", {
     id: clientId,
@@ -125,7 +145,7 @@ try {
     date: "2026-09-14",
     time: "10:30",
     clientId,
-    serviceId: "svc-consult",
+    serviceId,
     branch: "Mace BGC",
     room: "Room 1",
     staff: "Dr. Mace",
@@ -139,7 +159,7 @@ try {
     date: "2026-09-14",
     time: "10:30",
     clientId,
-    serviceId: "svc-consult",
+    serviceId,
     branch: "Mace BGC",
     room: "Room 1",
     staff: "Dr. Mace",
@@ -361,6 +381,10 @@ try {
   });
 
   await request(`/api/resources/appointments/${appointmentId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  await request(`/api/resources/services/${serviceId}`, {
     method: "DELETE",
     headers: ownerHeaders,
   });
