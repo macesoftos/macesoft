@@ -525,6 +525,15 @@ function useStoredState(key, initialValue) {
 
 const defaultModuleId = "overview";
 const moduleIdSet = new Set(navItems.map((item) => item.id));
+
+function modulesForSession(session) {
+  const serverModules = session?.access?.modules;
+  if (Array.isArray(serverModules)) {
+    return serverModules.filter((moduleId) => moduleIdSet.has(moduleId));
+  }
+  return roleAccess[session?.role] ?? [];
+}
+
 const mobilePrimaryNavConfig = [
   { id: "overview", label: "Home", icon: Home },
   { id: "appointments", label: "Appointments", icon: CalendarDays },
@@ -618,6 +627,7 @@ function parseCsvRows(text) {
 
 function App() {
   const [session, setSession] = useState(null);
+  const sessionModules = useMemo(() => modulesForSession(session), [session]);
   const [authChecking, setAuthChecking] = useState(true);
   const initialPathModule = typeof window === "undefined" ? "" : moduleFromPath(window.location.pathname);
   const initialHashModule = typeof window === "undefined" ? "" : moduleFromHash(window.location.hash);
@@ -709,6 +719,12 @@ function App() {
   }, [session]);
 
   useEffect(() => {
+    if (session?.branch && session.branch !== "All branches" && branchScope !== session.branch) {
+      setBranchScope(session.branch);
+    }
+  }, [branchScope, session, setBranchScope]);
+
+  useEffect(() => {
     let cancelled = false;
     restoreAccountSession()
       .then((result) => {
@@ -783,7 +799,14 @@ function App() {
 
   const setActiveModule = useCallback(
     (moduleId, options = {}) => {
-      const nextModule = moduleIdSet.has(moduleId) ? moduleId : defaultModuleId;
+      const requestedModule = moduleIdSet.has(moduleId) ? moduleId : defaultModuleId;
+      const fallbackModule = sessionModules.includes(defaultModuleId)
+        ? defaultModuleId
+        : sessionModules[0] || "";
+      const nextModule = !session || sessionModules.includes(requestedModule)
+        ? requestedModule
+        : fallbackModule;
+      if (!nextModule) return;
       setActiveModuleState(nextModule);
 
       if (typeof window !== "undefined") {
@@ -811,12 +834,12 @@ function App() {
       }
       setIsMobileMoreOpen(false);
     },
-    [setActiveModuleState],
+    [session, sessionModules, setActiveModuleState],
   );
 
   useEffect(() => {
     if (!session || typeof window === "undefined") return undefined;
-    const canOpenPosShortcut = (roleAccess[session.role] ?? roleAccess.Employee).includes("pos");
+    const canOpenPosShortcut = sessionModules.includes("pos");
     if (!canOpenPosShortcut) return undefined;
 
     function openPosFromKeyboard(event) {
@@ -828,7 +851,7 @@ function App() {
 
     window.addEventListener("keydown", openPosFromKeyboard);
     return () => window.removeEventListener("keydown", openPosFromKeyboard);
-  }, [activeModule, session, setActiveModule]);
+  }, [activeModule, session, sessionModules, setActiveModule]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -839,10 +862,7 @@ function App() {
         if (routeModule === "pos" && moduleFromHash(window.location.hash) === "pos" && moduleFromPath(window.location.pathname) !== "pos") {
           window.history.replaceState(null, "", "/pos");
         }
-        setActiveModuleState(routeModule);
-        setIsSidebarDrawerOpen(false);
-        setIsMobileMoreOpen(false);
-        window.requestAnimationFrame(() => window.scrollTo(0, 0));
+        setActiveModule(routeModule, { replace: true });
       }
     }
 
@@ -853,7 +873,7 @@ function App() {
       window.removeEventListener("hashchange", syncModuleFromLocation);
       window.removeEventListener("popstate", syncModuleFromLocation);
     };
-  }, [setActiveModuleState]);
+  }, [setActiveModule]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -974,11 +994,10 @@ function App() {
 
   useEffect(() => {
     if (!session) return;
-    const allowed = roleAccess[session.role] ?? roleAccess.Employee;
-    if (!allowed.includes(activeModule)) {
-      setActiveModule(allowed.includes(defaultModuleId) ? defaultModuleId : allowed[0], { replace: true });
+    if (!sessionModules.includes(activeModule)) {
+      setActiveModule(sessionModules.includes(defaultModuleId) ? defaultModuleId : sessionModules[0], { replace: true });
     }
-  }, [activeModule, session, setActiveModule]);
+  }, [activeModule, session, sessionModules, setActiveModule]);
 
   useEffect(() => {
     if (!toast) return;
@@ -1015,9 +1034,8 @@ function App() {
 
   const visibleNav = useMemo(() => {
     if (!session) return [];
-    const allowed = roleAccess[session.role] ?? roleAccess.Employee;
-    return navItems.filter((item) => allowed.includes(item.id));
-  }, [session]);
+    return navItems.filter((item) => sessionModules.includes(item.id));
+  }, [session, sessionModules]);
 
   const visibleNavSections = useMemo(() => {
     const visibleIds = new Set(visibleNav.map((item) => item.id));
@@ -1875,6 +1893,21 @@ function App() {
     return <ChangePasswordScreen account={session} onChangePassword={handlePasswordChange} onLogout={handleLogout} />;
   }
 
+  if (!session.access?.active || !sessionModules.length) {
+    return (
+      <main className="login-page">
+        <section className="login-panel">
+          <div className="login-card auth-loading-card">
+            <ShieldCheck size={28} aria-hidden="true" />
+            <strong>Access role unavailable</strong>
+            <p className="login-helper">Your account is signed in, but its role is not configured for this workspace. Ask an Owner or Super Admin to assign an approved role.</p>
+            <button className="ghost-button full" type="button" onClick={handleLogout}>Sign out</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const activeLabel =
     activeModule === "overview"
       ? `${session.role} Workspace`
@@ -1882,7 +1915,9 @@ function App() {
   const sensitiveAllowed = ["Super Admin", "Owner", "Branch Manager", "Doctor"].includes(session.role);
   const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
-  const canOpenPos = (roleAccess[session.role] ?? roleAccess.Employee).includes("pos");
+  const canOpenPos = sessionModules.includes("pos");
+  const canManageAppointments = sessionModules.includes("appointments");
+  const canAccessAllBranches = session.branch === "All branches";
   const shellClassName = [
     "app-shell",
     showSidebar ? "app-shell-with-sidebar" : "app-shell-full",
@@ -2011,22 +2046,32 @@ function App() {
               </button>
               <label className="branch-select">
                 <Store size={17} aria-hidden="true" />
-                <select value={branchScope} onChange={(event) => setBranchScope(event.target.value)} aria-label="Select branch">
-                  <option>All branches</option>
-                  {branchRecords.map((branch) => (
-                    <option key={branch.id}>{branch.name}</option>
-                  ))}
+                <select
+                  value={canAccessAllBranches ? branchScope : session.branch}
+                  onChange={(event) => setBranchScope(event.target.value)}
+                  aria-label="Select branch"
+                  disabled={!canAccessAllBranches}
+                  title={canAccessAllBranches ? "Filter workspace by branch" : `Access is limited to ${session.branch}`}
+                >
+                  {canAccessAllBranches ? (
+                    <>
+                      <option>All branches</option>
+                      {branchRecords.map((branch) => <option key={branch.id}>{branch.name}</option>)}
+                    </>
+                  ) : (
+                    <option>{session.branch}</option>
+                  )}
                 </select>
                 <ChevronDown size={15} aria-hidden="true" />
               </label>
               <AccountMenu session={session} onLogout={handleLogout} />
             </div>
             </header>
-            {isPosView && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
+            {isPosView && <SystemStrip apiState={apiState} isBooting={isBooting} session={session} settings={settings} stats={stats} />}
           </div>
 
         <section className="content-area">
-          {!isPosView && !isApplicationsView && !isFaceTrackView && activeModule !== "appointments" && <SystemStrip apiState={apiState} isBooting={isBooting} settings={settings} stats={stats} />}
+          {!isPosView && !isApplicationsView && !isFaceTrackView && activeModule !== "appointments" && <SystemStrip apiState={apiState} isBooting={isBooting} session={session} settings={settings} stats={stats} />}
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
           {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
@@ -2083,11 +2128,12 @@ function App() {
             <CardViewModule
               appointments={scopedAppointments}
               services={services}
-              transactions={scopedTransactions}
               staff={staff}
               updateStatus={updateAppointmentStatus}
               openModal={openModal}
               globalSearch={globalSearch}
+              canManageAppointments={canManageAppointments}
+              onOpenRoomView={() => setActiveModule("room-view")}
             />
           )}
           {activeModule === "staff-view" && (
@@ -2914,9 +2960,11 @@ function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
   );
 }
 
-function SystemStrip({ apiState, isBooting, settings, stats }) {
+function SystemStrip({ apiState, isBooting, session, settings, stats }) {
   const databaseTone =
     apiState.status === "connected" ? "ready" : apiState.status === "offline" ? "alert" : "loading";
+  const allowedModules = modulesForSession(session);
+  const accessActive = session?.access?.active === true && allowedModules.length > 0;
 
   return (
     <div className="system-strip" aria-label="System status" aria-live="polite">
@@ -2928,9 +2976,14 @@ function SystemStrip({ apiState, isBooting, settings, stats }) {
         <Database size={16} aria-hidden="true" />
         <span>{apiState.message}</span>
       </div>
-      <div className="system-pill system-pill-secondary">
+      <div
+        className={`system-pill system-pill-role ${accessActive ? "ready" : "alert"}`}
+        title={accessActive
+          ? `${session.role} can access ${allowedModules.length} approved modules in ${session.branch}. Server enforcement is enabled.`
+          : "This account does not have an active server-enforced access policy."}
+      >
         <ShieldCheck size={16} aria-hidden="true" />
-        <span>Role-based access active</span>
+        <span>{accessActive ? `${session.role} access active` : "Role access unavailable"}</span>
       </div>
       <div className="system-pill system-pill-secondary">
         <CircleDollarSign size={16} aria-hidden="true" />
@@ -3047,7 +3100,7 @@ function Dashboard({
 }) {
   const topServices = useMemo(() => tallyItems(transactions, "Service").slice(0, 5), [transactions]);
   const topProducts = useMemo(() => tallyItems(transactions, "Product").slice(0, 5), [transactions]);
-  const allowedModules = roleAccess[session.role] ?? roleAccess.Employee;
+  const allowedModules = modulesForSession(session);
   const appNav = visibleNav.filter((item) => item.id !== "overview");
   const branchCards = branches.map((branch) => {
     const branchTransactions = transactions.filter((transaction) => transaction.branch === branch.name);
@@ -4492,7 +4545,7 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
   );
 }
 
-function CardViewModule({ appointments, services, transactions, staff, updateStatus, openModal, globalSearch }) {
+function CardViewModule({ appointments, services, staff, updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView }) {
   const [date, setDate] = useState("");
   const [staffFilter, setStaffFilter] = useState("All staff");
   const [roomFilter, setRoomFilter] = useState("All rooms");
@@ -4509,10 +4562,6 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
   const inTreatmentCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "In Treatment").length;
   const completedCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "Completed").length;
   const completionRate = cards.length ? Math.round((completedCards / cards.length) * 100) : 0;
-
-  function transactionFor(appointment) {
-    return transactions.find((transaction) => transaction.date === appointment.date && transaction.client === appointment.client);
-  }
 
   return (
     <section className="module-grid card-view-page">
@@ -4565,65 +4614,85 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
               {rooms.map((room) => <option key={room}>{room}</option>)}
             </select>
           </label>
-          <button className="primary-button card-view-add-button" type="button" onClick={() => openModal("appointment")}>
-            <Plus size={18} aria-hidden="true" /> New Card
-          </button>
+          {canManageAppointments ? (
+            <button className="primary-button card-view-add-button" type="button" onClick={() => openModal("appointment")}>
+              <Plus size={18} aria-hidden="true" /> New Card
+            </button>
+          ) : (
+            <span className="card-view-read-only" title="Your role can view cards but cannot change appointments.">
+              <LockKeyhole size={16} aria-hidden="true" /> View only
+            </span>
+          )}
         </div>
       </section>
 
-      <section className="full-span card-view-grid" aria-label={`${cards.length} service cards`}>
-        {cards.map((appointment) => {
-          const transaction = transactionFor(appointment);
-          const start = parseTimeToMinutes(appointment.time);
-          const duration = appointmentDurationMinutes(appointment, services);
-          const end = start + duration;
-          const status = canonicalAppointmentStatus(appointment.status);
-          return (
-            <article className={`service-flow-card ${statusClass(status)}`} key={appointment.id}>
-              <header className="service-card-heading">
-                <span className="service-card-avatar" aria-hidden="true">{initialsFor(appointment.client)}</span>
-                <span className="service-card-client">
-                  <strong>{appointment.client}</strong>
-                  <small>{appointment.service}</small>
-                </span>
-                <time dateTime={`${appointment.date}T${appointment.time}`}>
-                  {formatScheduleTime(start)} – {formatScheduleTime(end)}
-                </time>
-              </header>
-
-              <dl className="service-card-facts">
-                <div><dt>Staff</dt><dd>{appointment.staff || "Unassigned"}</dd></div>
-                <div><dt>Room</dt><dd>{appointment.room || "Unassigned"}</dd></div>
-                <div><dt>Paid</dt><dd>{transaction ? money.format(transaction.total) : money.format(appointment.deposit)}</dd></div>
-              </dl>
-
-              <footer className="service-card-footer">
-                <StatusBadge status={status} />
-                <div className="card-actions">
-                  <button type="button" onClick={() => openModal("appointment", appointment)} title={`View ${appointment.client}'s card`}>
-                    <Eye size={15} aria-hidden="true" /> View
-                  </button>
-                  <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`}>
-                    <UserCheck size={15} aria-hidden="true" /> Arrive
-                  </button>
-                  <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`}>
-                    <Check size={15} aria-hidden="true" /> Done
-                  </button>
-                </div>
-              </footer>
-            </article>
-          );
-        })}
-        {!cards.length && (
-          <div className="surface-panel card-view-empty">
-            <EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." />
-          </div>
-        )}
+      <section className="surface-panel full-span card-view-list-shell" aria-label={`${cards.length} service cards`}>
+        <table className="card-view-list-table">
+          <thead>
+            <tr>
+              <th>Client / Service</th>
+              <th>Time</th>
+              <th>Staff</th>
+              <th>Room</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cards.map((appointment, index) => {
+              const start = parseTimeToMinutes(appointment.time);
+              const duration = appointmentDurationMinutes(appointment, services);
+              const end = start + duration;
+              const status = canonicalAppointmentStatus(appointment.status);
+              return (
+                <tr key={appointment.id}>
+                  <td>
+                    <div className="card-view-client-cell">
+                      <span className={`card-view-list-avatar tone-${index % 5}`} aria-hidden="true">{initialsFor(appointment.client)}</span>
+                      <span>
+                        <strong>{appointment.client}</strong>
+                        <small>{appointment.service}</small>
+                      </span>
+                    </div>
+                  </td>
+                  <td><time dateTime={`${appointment.date}T${appointment.time}`}>{formatScheduleTime(start)} – {formatScheduleTime(end)}</time></td>
+                  <td>{appointment.staff || "Unassigned"}</td>
+                  <td>{appointment.room || "Unassigned"}</td>
+                  <td><StatusBadge status={status} /></td>
+                  <td>
+                    {canManageAppointments ? (
+                      <div className="card-view-list-actions">
+                        <button type="button" onClick={() => openModal("appointment", appointment)} title={`View ${appointment.client}'s card`} aria-label={`View ${appointment.client}'s card`}>
+                          <Eye size={16} aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`} aria-label={`Mark ${appointment.client} as arrived`}>
+                          <UserCheck size={16} aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`} aria-label={`Mark ${appointment.client}'s service as completed`}>
+                          <Check size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="card-view-read-only compact"><LockKeyhole size={14} aria-hidden="true" /> View only</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {!cards.length && (
+              <tr>
+                <td className="card-view-list-empty" colSpan="6">
+                  <EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </section>
 
       <footer className="surface-panel full-span card-view-note">
-        <AlertCircle size={19} aria-hidden="true" />
-        <span>Cards represent {date ? "the selected date's" : "today's"} scheduled services. Use the filters above to view by staff, room, or date.</span>
+        <span><AlertCircle size={19} aria-hidden="true" /> Cards represent {date ? "the selected date's" : "today's"} scheduled services. Use the filters above to view by staff, room, or date.</span>
+        <button className="ghost-button" type="button" onClick={onOpenRoomView}><LayoutGrid size={16} aria-hidden="true" /> View Room View</button>
       </footer>
     </section>
   );

@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   branchWhere,
   canAccessBranch,
+  canMutateBranch,
   filterServiceBranches,
   isPublicApiRequest,
   moduleAllowed,
+  requiredModuleForApiRequest,
 } from "./accessControl.js";
 
 const roles = { Owner: ["clients", "settings"], Receptionist: ["clients"] };
@@ -31,11 +33,27 @@ test("module and branch access enforce least privilege", () => {
   assert.equal(moduleAllowed(receptionist, "settings", roles), false);
   assert.equal(canAccessBranch(receptionist, "Mace BGC"), true);
   assert.equal(canAccessBranch(receptionist, "Mace Davao"), false);
+  assert.equal(canAccessBranch(receptionist, "All branches"), true);
+  assert.equal(canMutateBranch(receptionist, "All branches"), false);
+  assert.equal(canMutateBranch(receptionist, "Mace BGC"), true);
+  assert.equal(canMutateBranch(receptionist, "Mace Davao"), false);
+  assert.equal(canMutateBranch(owner, "Mace Davao"), true);
   assert.equal(canAccessBranch(owner, "Mace Davao"), true);
   assert.deepEqual(branchWhere(receptionist), {
     OR: [{ branch: "Mace BGC" }, { branch: "All branches" }],
   });
   assert.equal(canAccessBranch(receptionist, ""), false);
+});
+
+test("protected API families resolve to their required workspace modules", () => {
+  assert.equal(requiredModuleForApiRequest("/api/bootstrap"), "my-workspace");
+  assert.equal(requiredModuleForApiRequest("/api/settings"), "settings");
+  assert.equal(requiredModuleForApiRequest("/api/settings?tab=tax"), "settings");
+  assert.equal(requiredModuleForApiRequest("/api/marketing/send"), "sms");
+  assert.equal(requiredModuleForApiRequest("/api/leads/lead-1/stage"), "leads");
+  assert.equal(requiredModuleForApiRequest("/api/pos/checkout"), "pos");
+  assert.equal(requiredModuleForApiRequest("/api/auth/session"), "");
+  assert.equal(requiredModuleForApiRequest("/api/resources/clients"), "");
 });
 
 test("branch-bound users only receive services offered by their branch", () => {

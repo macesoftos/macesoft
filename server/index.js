@@ -14,10 +14,12 @@ import { assertProductionEnvironment } from "./productionConfig.js";
 import {
   branchWhere,
   canAccessBranch,
+  canMutateBranch,
   filterServiceBranches,
   isAllBranches,
   isPublicApiRequest,
   moduleAllowed,
+  requiredModuleForApiRequest,
 } from "./accessControl.js";
 import {
   assertGiftCertificateUsable,
@@ -616,7 +618,7 @@ function assertMutationAllowed(request, moduleId, branch = "") {
   }
 
   const targetBranch = clean(branch);
-  if (targetBranch && !canAccessBranch(actor, targetBranch)) {
+  if (targetBranch && !canMutateBranch(actor, targetBranch)) {
     throw apiError(`You do not have access to ${targetBranch}.`, 403);
   }
 
@@ -2533,6 +2535,7 @@ async function ensureDefaultAccounts() {
 }
 
 function publicAccount(account) {
+  const modules = roleAccess[account.role] || [];
   return {
     id: account.id,
     staffId: account.staffId,
@@ -2542,6 +2545,11 @@ function publicAccount(account) {
     branch: account.branch || "",
     status: account.status,
     mustChangePassword: account.mustChangePassword,
+    access: {
+      active: account.status === "Active" && modules.length > 0,
+      branchScoped: !isAllBranches(account.branch),
+      modules,
+    },
   };
 }
 
@@ -2658,6 +2666,10 @@ app.use("/api", (request, _response, next) => {
   if (!request.authAccount) return next(apiError("Authentication is required.", 401));
   if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.get("x-mace-request") !== "app") {
     return next(apiError("This request did not pass the CSRF check.", 403));
+  }
+  const requiredModule = requiredModuleForApiRequest(request.originalUrl);
+  if (requiredModule && !moduleAllowed(request.authActor, requiredModule, roleAccess)) {
+    return next(apiError(`Your role does not allow access to ${requiredModule}.`, 403));
   }
   return next();
 });
@@ -3041,8 +3053,13 @@ app.get("/api/bootstrap", asyncRoute(async (request, response) => {
   response.json(await buildBootstrapPayload(requireAuthenticatedAccount(request)));
 }));
 
-app.get("/api/modules", (_request, response) => {
-  response.json({ modules: sidebarModules, mvpModules });
+app.get("/api/modules", (request, response) => {
+  const actor = requireAuthenticatedAccount(request);
+  const allowedModules = new Set(roleAccess[actor.role] || []);
+  response.json({
+    modules: sidebarModules.filter((module) => allowedModules.has(module.id)),
+    mvpModules: mvpModules.filter((moduleId) => allowedModules.has(moduleId)),
+  });
 });
 
 app.get("/api/marketing/config", (request, response) => {
@@ -3054,7 +3071,8 @@ app.get("/api/marketing/config", (request, response) => {
   });
 });
 
-app.get("/api/settings", asyncRoute(async (_request, response) => {
+app.get("/api/settings", asyncRoute(async (request, response) => {
+  assertReadAllowed(request, "settings");
   response.json(await getPersistedSettings());
 }));
 

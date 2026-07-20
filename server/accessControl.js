@@ -13,6 +13,24 @@ const PUBLIC_API_RULES = [
   ["POST", /^\/api\/facetrack-attendance\/kiosk\/(?:challenge|clock|unlock)$/],
 ];
 
+/** @type {Array<[RegExp, string]>} */
+const API_MODULE_RULES = [
+  [/^\/api\/bootstrap$/, "my-workspace"],
+  [/^\/api\/modules$/, "applications"],
+  [/^\/api\/me(?:\/|$)/, "my-workspace"],
+  [/^\/api\/invitations(?:\/|$)/, "settings"],
+  [/^\/api\/branches(?:\/|$)/, "branches"],
+  [/^\/api\/facetrack-attendance(?:\/|$)/, "facetrack-attendance"],
+  [/^\/api\/settings(?:\/|$)/, "settings"],
+  [/^\/api\/marketing(?:\/|$)/, "sms"],
+  [/^\/api\/leads(?:\/|$)/, "leads"],
+  [/^\/api\/clients(?:\/|$)/, "clients"],
+  [/^\/api\/inventory(?:\/|$)/, "inventory"],
+  [/^\/api\/packages(?:\/|$)/, "packages"],
+  [/^\/api\/transactions(?:\/|$)/, "pos"],
+  [/^\/api\/pos(?:\/|$)/, "pos"],
+];
+
 export function isPublicApiRequest(method, path) {
   const normalizedMethod = String(method || "GET").toUpperCase();
   const normalizedPath = String(path || "").split("?")[0];
@@ -21,14 +39,25 @@ export function isPublicApiRequest(method, path) {
   ));
 }
 
+export function requiredModuleForApiRequest(path) {
+  const normalizedPath = String(path || "").split("?")[0];
+  return API_MODULE_RULES.find(([pattern]) => pattern.test(normalizedPath))?.[1] || "";
+}
+
 export function isAllBranches(branch) {
   return branch === "All branches";
 }
 
 export function canAccessBranch(actor, targetBranch) {
   if (!actor || !actor.role) return false;
+  if (!targetBranch) return false;
   if (isAllBranches(actor.branch) || isAllBranches(targetBranch)) return true;
   return actor.branch === targetBranch;
+}
+
+export function canMutateBranch(actor, targetBranch) {
+  if (!actor || !actor.role || !targetBranch) return false;
+  return isAllBranches(actor.branch) || actor.branch === targetBranch;
 }
 
 export function moduleAllowed(actor, moduleId, roleAccess) {
