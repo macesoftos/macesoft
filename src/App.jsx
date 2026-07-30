@@ -54,6 +54,7 @@ import {
   Settings,
   ShieldCheck,
   ShoppingBag,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Store,
@@ -5897,6 +5898,7 @@ function AppointmentsModule({
     return { from: today, to: today };
   });
   const [filters, setFilters] = useState(defaultFilters);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showDataTable, setShowDataTable] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [selectedId, setSelectedId] = useState("");
@@ -5923,6 +5925,24 @@ function AppointmentsModule({
   });
   const calendarMonthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonth);
   const roomOptions = [...new Set(uniqueRoomsFromBranches().concat(appointments.map((item) => item.room)).filter(Boolean))];
+  const doctorOptions = [...new Set(
+    staff
+      .filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""))
+      .map((person) => person.name)
+      .concat(appointments.map((item) => item.staff))
+      .filter(Boolean),
+  )];
+  const serviceOptions = [...new Set(services.map((service) => service.name).concat(appointments.map((item) => item.service)).filter(Boolean))];
+  const branchOptions = [...new Set(
+    services
+      .flatMap((service) => service.branches || [])
+      .concat(staff.map((person) => person.branch), appointments.map((item) => item.branch))
+      .filter((name) => name && name !== "All branches"),
+  )];
+  const appointmentTypeOptions = [...new Set(appointments.map((item) => item.appointmentType).filter(Boolean))];
+  const insuranceOptions = [...new Set(appointments.map((item) => item.insurance).filter(Boolean))];
+  const activeFilterCount = ["status", "doctor", "room", "service", "branch", "payment", "deposit", "clientType", "appointmentType", "insurance", "tags", "query"]
+    .filter((key) => normalizedFilters[key] !== defaultFilters[key]).length;
   const clientAppointmentCounts = appointments.reduce((counts, appointment) => {
     const key = appointment.clientId || normalize(appointment.client);
     counts[key] = (counts[key] || 0) + 1;
@@ -5996,6 +6016,7 @@ function AppointmentsModule({
       : periodMode === "Custom"
         ? `${customKanbanRows.length} appointments · GMT+8`
       : `${new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(selectedDateObject)} · GMT+8`;
+  const periodUnitLabel = periodMode === "Custom" ? "custom range" : periodMode.toLowerCase();
   const selectedAppointment = appointments.find((item) => item.id === selectedId) ?? null;
   const selectedBranch = normalizedFilters.branch === "All" ? null : normalizedFilters.branch;
   const scopedStaff = staff
@@ -6042,6 +6063,15 @@ function AppointmentsModule({
 
   function setFilter(name, value) {
     setFilters((current) => ({ ...defaultFilters, ...current, [name]: value }));
+  }
+
+  function resetScheduleFilters() {
+    setFilters((current) => ({
+      ...defaultFilters,
+      datePreset: current.datePreset,
+      from: current.from,
+      to: current.to,
+    }));
   }
 
   function selectDate(date) {
@@ -6171,6 +6201,110 @@ function AppointmentsModule({
         </div>
       </div>
 
+      <div className="surface-panel appointment-filter-panel">
+        <div className="appointment-filter-panel-heading">
+          <div className="appointment-filter-heading-copy">
+            <Filter size={17} />
+            <span>
+              <strong>Filter schedule</strong>
+              <small>{displayedRows.length} appointment{displayedRows.length === 1 ? "" : "s"} in this view</small>
+            </span>
+            {activeFilterCount > 0 && <b aria-label={`${activeFilterCount} active filters`}>{activeFilterCount}</b>}
+          </div>
+          <div className="appointment-filter-actions">
+            {activeFilterCount > 0 && <button className="ghost-button appointment-filter-reset" type="button" onClick={resetScheduleFilters}><RefreshCw size={15} /> Clear</button>}
+            <button className="secondary-button appointment-filter-toggle" type="button" aria-expanded={showAdvancedFilters} onClick={() => setShowAdvancedFilters((value) => !value)}>
+              <SlidersHorizontal size={15} /> {showAdvancedFilters ? "Fewer filters" : "More filters"}
+            </button>
+          </div>
+        </div>
+        <div className="appointment-filters primary-filters">
+          <label className="appointment-filter-field">
+            <span>Status</span>
+            <select value={normalizedFilters.status} onChange={(event) => setFilter("status", event.target.value)}>
+              <option>All</option>
+              {appointmentStatuses.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="appointment-filter-field appointment-filter-query">
+            <span>Search appointments</span>
+            <input value={normalizedFilters.query} onChange={(event) => setFilter("query", event.target.value)} placeholder="Patient, phone, doctor, or booking ID" />
+          </label>
+          <label className="appointment-filter-field">
+            <span>Doctor / Staff</span>
+            <select value={normalizedFilters.doctor} onChange={(event) => setFilter("doctor", event.target.value)}>
+              <option>All</option>
+              {doctorOptions.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+        </div>
+        {showAdvancedFilters && (
+          <div className="appointment-filters advanced-filters">
+            <label className="appointment-filter-field">
+              <span>Room</span>
+              <select value={normalizedFilters.room} onChange={(event) => setFilter("room", event.target.value)}>
+                <option>All</option>
+                {roomOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="appointment-filter-field">
+              <span>Service</span>
+              <select value={normalizedFilters.service} onChange={(event) => setFilter("service", event.target.value)}>
+                <option>All</option>
+                {serviceOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="appointment-filter-field">
+              <span>Branch</span>
+              <select value={normalizedFilters.branch} onChange={(event) => setFilter("branch", event.target.value)}>
+                <option>All</option>
+                {branchOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="appointment-filter-field">
+              <span>Payment</span>
+              <select value={normalizedFilters.payment} onChange={(event) => setFilter("payment", event.target.value)}>
+                {["All", "Paid", "Partial", "Unpaid", "No charge"].map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="appointment-filter-field">
+              <span>Deposit</span>
+              <select value={normalizedFilters.deposit} onChange={(event) => setFilter("deposit", event.target.value)}>
+                {["All", "With Deposit", "No Deposit"].map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="appointment-filter-field">
+              <span>Client type</span>
+              <select value={normalizedFilters.clientType} onChange={(event) => setFilter("clientType", event.target.value)}>
+                {["All", "New Client", "Returning Client"].map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            {appointmentTypeOptions.length > 0 && (
+              <label className="appointment-filter-field">
+                <span>Appointment type</span>
+                <select value={normalizedFilters.appointmentType} onChange={(event) => setFilter("appointmentType", event.target.value)}>
+                  <option>All</option>
+                  {appointmentTypeOptions.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+            )}
+            {insuranceOptions.length > 0 && (
+              <label className="appointment-filter-field">
+                <span>Insurance</span>
+                <select value={normalizedFilters.insurance} onChange={(event) => setFilter("insurance", event.target.value)}>
+                  <option>All</option>
+                  {insuranceOptions.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+            )}
+            <label className="appointment-filter-field">
+              <span>Tags</span>
+              <input value={normalizedFilters.tags} onChange={(event) => setFilter("tags", event.target.value)} placeholder="Search appointment tags" />
+            </label>
+          </div>
+        )}
+      </div>
+
       <div className="appointment-scheduler-layout">
         <aside className="surface-panel appointment-scheduler-sidebar">
           <div className="appointment-sidebar-title"><strong>Appointment Calendar</strong><CalendarDays size={17} /></div>
@@ -6184,7 +6318,7 @@ function AppointmentsModule({
               })}
             </div>
           </div>
-          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{periodRows.length} visits in this {activeView.toLowerCase()}</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
+          <div className="appointment-doctor-list-heading"><div><strong>Doctor Appointment List</strong><span>{periodRows.length} visits in this {periodUnitLabel}</span></div><button type="button" onClick={() => setFilter("doctor", "All")} aria-label="Show every doctor">•••</button></div>
           <div className="appointment-doctor-list">
             {practitionerNames.map((name) => {
               const person = staff.find((item) => item.name === name);

@@ -3317,9 +3317,14 @@ button:active {
     grid-template-columns: 1fr;
   }
 
+  .appointment-calendar-panel {
+    grid-row: 1;
+  }
+
   .appointment-scheduler-sidebar {
     display: grid;
     grid-template-columns: minmax(270px, 0.75fr) minmax(300px, 1fr);
+    grid-row: 2;
   }
 
   .appointment-sidebar-title {
@@ -3361,6 +3366,8 @@ button:active {
   .appointment-view-tabs {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+    flex: 0 0 auto;
+    width: 100%;
   }
 
   .appointment-kanban-scope-toolbar {
@@ -3394,21 +3401,38 @@ button:active {
   }
 
   .appointment-metrics-strip {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     margin-inline: -14px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
+    overflow: visible;
   }
 
   .appointment-metrics-strip > button,
   .appointment-metrics-strip > div {
-    min-width: 150px;
+    min-width: 0;
+    padding: 11px 10px;
+    border-bottom: 1px solid var(--line) !important;
+  }
+
+  .appointment-metrics-strip > :nth-child(3n) {
+    border-right: 0;
+  }
+
+  .appointment-metrics-strip > :nth-child(n + 4) {
     border-bottom: 0 !important;
-    scroll-snap-align: start;
+  }
+
+  .appointment-metrics-strip span,
+  .appointment-metrics-strip small {
+    font-size: 0.64rem;
+  }
+
+  .appointment-metrics-strip strong {
+    font-size: 0.96rem;
   }
 
   .appointment-scheduler-sidebar {
-    display: block;
+    display: none;
   }
 
   .appointment-month-calendar {
@@ -3433,12 +3457,24 @@ button:active {
 
   .appointment-filter-panel-heading > div:last-child {
     display: grid;
-    grid-template-columns: 1fr 1.25fr 0.8fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .appointment-filter-panel .primary-filters,
+  .appointment-filter-actions button:only-child {
+    grid-column: 1 / -1;
+  }
+
   .appointment-filter-panel .advanced-filters {
     grid-template-columns: 1fr;
+  }
+
+  .appointment-filter-panel .primary-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appointment-filter-query {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 
   .appointment-filter-panel .primary-filters > :last-child {

@@ -1818,6 +1818,7 @@ td {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   min-height: 62px;
   padding: 10px 12px;
@@ -1858,7 +1859,11 @@ td {
 }
 
 .appointment-view-tabs {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(68px, 1fr));
+  flex: 1 1 500px;
+  width: auto;
+  max-width: none;
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1866,6 +1871,7 @@ td {
 }
 
 .appointment-view-tabs button {
+  min-width: 0;
   min-height: 32px;
   padding: 0 13px;
   border-radius: 6px;
@@ -2494,11 +2500,24 @@ td {
   gap: 9px;
 }
 
+.appointment-filter-heading-copy > svg {
+  flex: 0 0 auto;
+  color: var(--wine);
+}
+
+.appointment-filter-heading-copy > span {
+  display: grid;
+  gap: 1px;
+}
+
 .appointment-filter-panel-heading strong {
+  display: block;
+  color: var(--ink);
   font-size: 0.82rem;
 }
 
-.appointment-filter-panel-heading span {
+.appointment-filter-panel-heading small {
+  display: block;
   color: var(--muted);
   font-size: 0.68rem;
 }
@@ -2512,6 +2531,16 @@ td {
   background: var(--wine);
   color: white;
   font-size: 0.6rem;
+}
+
+.appointment-filter-actions {
+  justify-content: flex-end;
+}
+
+.appointment-filter-actions button {
+  min-height: 34px;
+  padding: 0 11px;
+  font-size: 0.7rem;
 }
 
 .appointment-filter-panel .appointment-filters {
