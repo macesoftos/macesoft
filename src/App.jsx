@@ -96,6 +96,8 @@ import {
   loadLeadWebhookEvents,
   loadMyWorkspace,
   loadInvitations,
+  loadOrganizationAccounts,
+  linkStaffAccount,
   loginAccount,
   logoutAccount,
   mergeLeadDuplicate,
@@ -2341,6 +2343,7 @@ function App() {
             <StaffModule
               staff={staff}
               session={session}
+              setSession={setSession}
               openModal={openModal}
               toggleAttendance={toggleAttendance}
               globalSearch={globalSearch}
@@ -8453,9 +8456,13 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
+function StaffModule({ staff, session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
   const canInvite = canManageOrganization(session.role);
   const [invitations, setInvitations] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [linkTarget, setLinkTarget] = useState(null);
+  const [linkChoice, setLinkChoice] = useState("");
+  const [linking, setLinking] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -8464,8 +8471,35 @@ function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch
 
   const refresh = useCallback(async () => {
     if (!canInvite) return;
-    try { setInvitations((await loadInvitations()).invitations || []); } catch (loadError) { notify(loadError.message, "error"); }
+    try {
+      const [invitationResult, accountResult] = await Promise.all([loadInvitations(), loadOrganizationAccounts()]);
+      setInvitations(invitationResult.invitations || []);
+      setAccounts(accountResult.accounts || []);
+    } catch (loadError) { notify(loadError.message, "error"); }
   }, [canInvite, notify]);
+
+  const accountByStaffId = useMemo(
+    () => new Map(accounts.filter((account) => account.staffId).map((account) => [account.staffId, account])),
+    [accounts],
+  );
+  const unlinkedAccounts = useMemo(() => accounts.filter((account) => !account.staffId), [accounts]);
+
+  async function applyLink(staffRow, accountId) {
+    setLinking(true);
+    try {
+      const result = await linkStaffAccount(staffRow.id, accountId);
+      setAccounts((current) => current.map((account) => (account.id === result.account.id ? result.account : account)));
+      applyAuditLog(result.auditLog);
+      if (result.account.id === session.id) setSession(result.account);
+      notify(accountId ? `${result.account.email} is now connected to ${staffRow.name}.` : `${result.account.email} was disconnected.`);
+      setLinkTarget(null);
+      setLinkChoice("");
+    } catch (linkError) {
+      notify(linkError.message, "error");
+    } finally {
+      setLinking(false);
+    }
+  }
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -8509,6 +8543,29 @@ function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch
             { key: "commissionRate", label: "Commission", render: (row) => `${row.commissionRate}%` },
             { key: "attendance", label: "Attendance", render: (row) => <StatusBadge status={row.attendance} /> },
             {
+              key: "login",
+              label: "Login",
+              className: "staff-login-column",
+              render: (row) => {
+                const linked = accountByStaffId.get(row.id);
+                if (linked) {
+                  return (
+                    <div className="staff-login-cell">
+                      <div><strong>{linked.email}</strong><small>{linked.role}</small></div>
+                      {canInvite && <button type="button" disabled={linking} onClick={() => void applyLink(row, "")}><X size={14} /> Unlink</button>}
+                    </div>
+                  );
+                }
+                if (!canInvite) return <span className="staff-login-empty">Not connected</span>;
+                return (
+                  <button type="button" disabled={linking} onClick={() => { setLinkTarget(row); setLinkChoice(""); }}>
+                    <UserCheck size={14} /> Connect login
+                  </button>
+                );
+              },
+              exportValue: (row) => accountByStaffId.get(row.id)?.email || "",
+            },
+            {
               key: "actions",
               label: "Actions",
               className: "staff-actions-column",
@@ -8548,6 +8605,35 @@ function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch
         </div>
         {error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}
         <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowInvite(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Sending..." : "Send invitation"}</button></div>
+      </form></div>}
+      {linkTarget && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Connect login"><form className="modal-card" onSubmit={(event) => { event.preventDefault(); void applyLink(linkTarget, linkChoice); }}>
+        <button className="modal-close" type="button" onClick={() => setLinkTarget(null)}><X size={18} /></button>
+        <SectionHeader icon={UserCheck} title={`Connect a login to ${linkTarget.name}`} action={`${unlinkedAccounts.length} available`} />
+        {unlinkedAccounts.length ? (
+          <>
+            <div className="form-grid">
+              <label className="full-span">
+                <span>Login</span>
+                <select required value={linkChoice} onChange={(event) => setLinkChoice(event.target.value)}>
+                  <option value="">Select a login…</option>
+                  {unlinkedAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>{account.name} · {account.email} · {account.role}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="modal-hint">The connected login gets My Workspace, attendance, and FaceTrack for this staff profile.</p>
+            <div className="modal-actions">
+              <button className="ghost-button" type="button" onClick={() => setLinkTarget(null)}>Cancel</button>
+              <button className="primary-button" disabled={linking || !linkChoice}>{linking ? "Connecting..." : "Connect login"}</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <EmptyState title="No unconnected logins" copy="Every login already has a staff profile. Invite a member to create a new one." />
+            <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setLinkTarget(null)}>Close</button></div>
+          </>
+        )}
       </form></div>}
     </section>
   );
