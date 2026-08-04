@@ -13,8 +13,9 @@ if (await prisma.account.count()) throw new Error("Owner bootstrap is locked bec
 const salt = randomBytes(16).toString("hex");
 const passwordHash = `scrypt$${salt}$${scryptSync(password, salt, 64).toString("hex")}`;
 await prisma.$transaction(async (tx) => {
-  await tx.account.create({ data: { name, email, passwordHash, role: "Owner", branch: "All branches", status: "Active", mustChangePassword: false } });
-  await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: name, role: "Owner", area: "Authentication", action: "Initial owner created", details: "The one-time production owner bootstrap completed." } });
+  const staff = await tx.staffMember.create({ data: { name, role: "Owner", branch: "All branches", status: "Available" } });
+  await tx.account.create({ data: { staffId: staff.id, name, email, passwordHash, role: "Owner", branch: "All branches", status: "Active", mustChangePassword: false } });
+  await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: name, role: "Owner", area: "Authentication", action: "Initial owner created", details: "The one-time production owner bootstrap completed with a connected staff profile." } });
 });
 console.log(JSON.stringify({ event: "owner_bootstrap_completed", email }));
 await prisma.$disconnect();
