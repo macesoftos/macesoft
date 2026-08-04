@@ -2951,6 +2951,68 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
   response.json({ account: publicAccount(result.account), invitation: publicInvitation(result.invitation) });
 }));
 
+function requireStaffLinkManager(request) {
+  const account = requireAuthenticatedAccount(request);
+  if (!canManageOrganization(account.role)) {
+    throw apiError("Only an Admin or Business Owner can connect logins to staff profiles.", 403);
+  }
+  return account;
+}
+
+app.get("/api/accounts", asyncRoute(async (request, response) => {
+  requireStaffLinkManager(request);
+  const accounts = await prisma.account.findMany({ orderBy: { name: "asc" } });
+  response.json({ accounts: accounts.map(publicAccount) });
+}));
+
+app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
+  const actor = requireStaffLinkManager(request);
+  const staffId = clean(request.params.id);
+  const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
+  if (!staff) throw apiError("Staff profile not found.", 404);
+  if (!canMutateBranch(actor, staff.branch || "All branches")) {
+    throw apiError("This staff profile belongs to another branch.", 403);
+  }
+  const accountId = clean(request.body?.accountId);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const current = await tx.account.findFirst({ where: { staffId } });
+    if (current && isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) {
+      throw apiError("Only a Business Owner can change a Business Owner's login.", 403);
+    }
+
+    if (!accountId) {
+      if (!current) throw apiError("This staff profile is not connected to a login.", 409);
+      const cleared = await tx.account.update({ where: { id: current.id }, data: { staffId: null } });
+      const auditLog = await writeAudit(tx, request, {
+        area: "Access",
+        action: "Login disconnected",
+        details: `${cleared.email} disconnected from ${staff.name}.`,
+      });
+      return { account: cleared, auditLog };
+    }
+
+    const account = await tx.account.findUnique({ where: { id: accountId } });
+    if (!account) throw apiError("That login was not found.", 404);
+    if (isBusinessOwner(account.role) && !isBusinessOwner(actor.role)) {
+      throw apiError("Only a Business Owner can connect a Business Owner login.", 403);
+    }
+    if (account.staffId === staffId) throw apiError("That login is already connected to this staff profile.", 409);
+    if (account.staffId) throw apiError("That login is already connected to another staff profile.", 409);
+    if (current) throw apiError("This staff profile is already connected to another login.", 409);
+
+    const linked = await tx.account.update({ where: { id: account.id }, data: { staffId } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Access",
+      action: "Login connected",
+      details: `${linked.email} connected to ${staff.name}.`,
+    });
+    return { account: linked, auditLog };
+  });
+
+  response.json({ account: publicAccount(result.account), staff, auditLog: result.auditLog });
+}));
+
 function attendanceState(events) {
   const lastType = events[0]?.type ?? "";
   if (!lastType || lastType === "CLOCK_OUT") return { status: "Clocked out", nextActions: ["CLOCK_IN"] };

@@ -56,6 +56,13 @@ test("protected API families resolve to their required workspace modules", () =>
   assert.equal(requiredModuleForApiRequest("/api/resources/clients"), "");
 });
 
+test("staff login connection endpoints are gated behind the staff module", () => {
+  assert.equal(requiredModuleForApiRequest("/api/accounts"), "staff");
+  assert.equal(requiredModuleForApiRequest("/api/staff/staff-1/account"), "staff");
+  assert.equal(isPublicApiRequest("GET", "/api/accounts"), false);
+  assert.equal(isPublicApiRequest("PUT", "/api/staff/staff-1/account"), false);
+});
+
 test("branch-bound users only receive services offered by their branch", () => {
   const rows = [
     { id: "makati", branches: JSON.stringify(["Mace Makati"]) },

@@ -19,6 +19,8 @@ const API_MODULE_RULES = [
   [/^\/api\/modules$/, "applications"],
   [/^\/api\/me(?:\/|$)/, "my-workspace"],
   [/^\/api\/invitations(?:\/|$)/, "settings"],
+  [/^\/api\/accounts(?:\/|$)/, "staff"],
+  [/^\/api\/staff(?:\/|$)/, "staff"],
   [/^\/api\/branches(?:\/|$)/, "branches"],
   [/^\/api\/facetrack-attendance(?:\/|$)/, "facetrack-attendance"],
   [/^\/api\/settings(?:\/|$)/, "settings"],
