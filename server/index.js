@@ -1,7 +1,9 @@
 import "dotenv/config";
 import cors from "cors";
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
@@ -4279,11 +4281,24 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
 }));
 
 if (process.env.NODE_ENV === "production") {
-  const distPath = resolve("dist");
+  const serverDirectory = dirname(fileURLToPath(import.meta.url));
+  const distCandidates = [resolve("dist"), resolve(serverDirectory, "..", "dist")];
+  const distPath = distCandidates.find((candidate) => existsSync(join(candidate, "index.html"))) || distCandidates[0];
+  const shellPath = join(distPath, "index.html");
+  let appShell = null;
+  try {
+    appShell = readFileSync(shellPath);
+  } catch (error) {
+    console.error(`Web build is missing at ${shellPath}. Run "pnpm build" before starting the server.`, error);
+  }
+
   app.use(express.static(distPath, { maxAge: "1d", index: false }));
   app.use((request, response, next) => {
-    if (request.method !== "GET" || request.path.startsWith("/api/")) return next();
-    return response.sendFile(resolve(distPath, "index.html"));
+    if (request.method !== "GET" && request.method !== "HEAD") return next();
+    if (request.path.startsWith("/api/")) return next();
+    if (!appShell) return next();
+    response.setHeader("Cache-Control", "no-cache");
+    return response.type("html").send(appShell);
   });
 }
 
