@@ -13,7 +13,6 @@ test("production fails closed for insecure or incomplete configuration", () => {
     DATABASE_URL: "postgresql://runtime",
     DIRECT_URL: "postgresql://direct",
     FACETRACK_ENCRYPTION_KEY: "short",
-    ENABLE_DEMO_ACCOUNTS: "true",
     API_ALLOW_TRUSTED_HEADERS: "true",
     DATABASE_SSL_REJECT_UNAUTHORIZED: "false",
   });
@@ -61,7 +60,6 @@ test("secure production configuration passes", () => {
     DATABASE_URL: "postgresql://runtime",
     DIRECT_URL: "postgresql://direct",
     FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
-    ENABLE_DEMO_ACCOUNTS: "false",
     API_ALLOW_TRUSTED_HEADERS: "false",
     MARKETING_DRY_RUN: "false",
     DATABASE_SSL_REJECT_UNAUTHORIZED: "true",

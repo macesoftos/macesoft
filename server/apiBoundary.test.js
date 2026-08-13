@@ -30,7 +30,6 @@ test("real API denies private data reads before touching the database", async ()
       API_PORT: String(port),
       DATABASE_URL: "postgresql://boundary:boundary@127.0.0.1:1/boundary",
       DIRECT_URL: "postgresql://boundary:boundary@127.0.0.1:1/boundary",
-      ENABLE_DEMO_ACCOUNTS: "false",
       API_ALLOW_TRUSTED_HEADERS: "false",
     },
     stdio: ["ignore", "pipe", "pipe"],

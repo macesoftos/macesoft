@@ -3378,6 +3378,81 @@ td {
   line-height: 1.35;
 }
 
+.form-grid .multi-select-field {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.94);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+
+.form-grid .multi-select-field:focus-within {
+  border-color: var(--wine);
+  box-shadow: var(--focus-ring);
+}
+
+.multi-select-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.multi-select-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--wine) 24%, var(--line));
+  border-radius: 999px;
+  background: var(--rose-soft);
+  color: var(--wine);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.multi-select-chip button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+
+.multi-select-chip button:hover {
+  background: color-mix(in srgb, var(--wine) 12%, transparent);
+}
+
+.multi-select-empty {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.form-grid .multi-select-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
 .staff-name-with-photo {
   display: inline-flex;
   align-items: center;

@@ -1,5 +1,4 @@
 import { prisma } from "./prisma.js";
-import { randomBytes, scryptSync } from "node:crypto";
 import {
   branches,
   initialAppointments,
@@ -16,7 +15,6 @@ import {
   initialStaff,
   initialTransactions,
   initialTreatments,
-  users,
 } from "../src/data.js";
 
 if (process.env.NODE_ENV === "production") {
@@ -25,12 +23,6 @@ if (process.env.NODE_ENV === "production") {
 
 function asJsonText(value) {
   return JSON.stringify(value ?? []);
-}
-
-function hashPassword(password) {
-  const salt = randomBytes(16).toString("hex");
-  const digest = scryptSync(password, salt, 64).toString("hex");
-  return `scrypt$${salt}$${digest}`;
 }
 
 async function clearDatabase() {
@@ -78,25 +70,6 @@ async function clearDatabase() {
   await prisma.room.deleteMany();
   await prisma.branch.deleteMany();
   await prisma.client.deleteMany();
-}
-
-async function seedAccounts() {
-  const staff = await prisma.staffMember.findMany();
-  const defaultPassword = process.env.SEED_STAFF_PASSWORD || "Mace2026!";
-
-  await prisma.account.createMany({
-    data: users.map((user) => ({
-      id: user.id,
-      staffId: staff.find((person) => person.name === user.name)?.id ?? null,
-      name: user.name,
-      email: user.email.toLowerCase(),
-      passwordHash: hashPassword(defaultPassword),
-      role: user.role,
-      branch: user.branch,
-      status: "Active",
-      mustChangePassword: true,
-    })),
-  });
 }
 
 async function seedBranches() {
@@ -293,7 +266,6 @@ async function main() {
   await seedBranches();
   await seedClients();
   await seedOperationalRecords();
-  await seedAccounts();
   await seedInventoryMovements();
   await seedRevenueRecords();
   await seedGrowthAndAdminRecords();

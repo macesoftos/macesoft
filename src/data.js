@@ -19,20 +19,6 @@ export const serviceCategories = [
   "Retail Add-ons",
 ];
 
-export const users = [
-  { id: "u-owner", name: "Dr. Mace", role: "Owner", email: "owner@mace.test", branch: "All branches" },
-  { id: "u-admin", name: "Admin Sofia", role: "Super Admin", email: "admin@mace.test", branch: "All branches" },
-  { id: "u-manager", name: "Mika Santos", role: "Branch Manager", email: "manager@mace.test", branch: "Mace Davao" },
-  { id: "u-reception", name: "Ria Lim", role: "Receptionist", email: "frontdesk@mace.test", branch: "Mace Davao" },
-  { id: "u-cashier", name: "Cathy Go", role: "Cashier", email: "cashier@mace.test", branch: "Mace Davao" },
-  { id: "u-doctor", name: "Dr. Aria Tan", role: "Doctor", email: "doctor@mace.test", branch: "Mace Davao" },
-  { id: "u-nurse", name: "Nurse Ana", role: "Nurse / Aesthetician", email: "nurse@mace.test", branch: "Mace Davao" },
-  { id: "u-nurse-bea", name: "Nurse Bea", role: "Nurse / Aesthetician", email: "bea@mace.test", branch: "Mace Davao" },
-  { id: "u-inventory", name: "Bea Cruz", role: "Inventory Staff", email: "inventory@mace.test", branch: "Mace Davao" },
-  { id: "u-marketing", name: "Pat Lee", role: "Marketing Staff", email: "marketing@mace.test", branch: "All branches" },
-  { id: "u-employee", name: "Ella Reyes", role: "Employee", email: "employee@mace.test", branch: "Mace Davao" },
-];
-
 export const roleAccess = {
   "Super Admin": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
   Admin: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],

@@ -71,7 +71,6 @@ import {
   initialSettings,
   roleAccess,
   serviceCategories,
-  users,
 } from "./data";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
@@ -692,6 +691,7 @@ function App() {
   const [webhookEvents, setWebhookEvents] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [inventoryMovements, setInventoryMovements] = useState([]);
+  const [organizationAccounts, setOrganizationAccounts] = useState([]);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [cart, setCart] = useState([]);
   const [sendingCampaignId, setSendingCampaignId] = useState("");
@@ -935,7 +935,13 @@ function App() {
 
     async function hydrateFromApi() {
       try {
-        const [health, bootstrap] = await Promise.all([checkApiHealth(), loadBootstrap()]);
+        const [health, bootstrap, accountResult] = await Promise.all([
+          checkApiHealth(),
+          loadBootstrap(),
+          canManageOrganization(session.role)
+            ? loadOrganizationAccounts().catch(() => ({ accounts: [] }))
+            : Promise.resolve({ accounts: [] }),
+        ]);
         if (cancelled) return;
 
         const apiClients = Array.isArray(bootstrap.clients) ? bootstrap.clients : [];
@@ -955,6 +961,7 @@ function App() {
         setCampaigns(Array.isArray(bootstrap.campaigns) ? bootstrap.campaigns : []);
         setAuditLogs(Array.isArray(bootstrap.auditLogs) ? bootstrap.auditLogs : []);
         setInventoryMovements(Array.isArray(bootstrap.inventoryMovements) ? bootstrap.inventoryMovements : []);
+        setOrganizationAccounts(Array.isArray(accountResult.accounts) ? accountResult.accounts : []);
         setLeadIntegrations(Array.isArray(bootstrap.leadIntegrations) ? bootstrap.leadIntegrations : []);
         setWebhookEvents(Array.isArray(bootstrap.webhookEvents) ? bootstrap.webhookEvents : []);
         setBranchRecords(Array.isArray(bootstrap.branches) ? bootstrap.branches : []);
@@ -2188,6 +2195,7 @@ function App() {
               packages={scopedPackages}
               branchRecords={branchRecords}
               settings={settings}
+              users={organizationAccounts}
               visibleNav={visibleNav}
               setActiveModule={setActiveModule}
               openModal={openModal}
@@ -2409,7 +2417,7 @@ function App() {
           {activeModule === "settings" && (
             <SettingsModule
               settings={settings}
-              users={users}
+              users={organizationAccounts}
               auditLogs={auditLogs}
               discounts={discounts}
               openModal={openModal}
@@ -3202,6 +3210,7 @@ function Dashboard({
   packages,
   branchRecords,
   settings,
+  users,
   visibleNav,
   setActiveModule,
   openModal,
@@ -3232,6 +3241,7 @@ function Dashboard({
     treatments,
     packages,
     settings,
+    users,
     topServices,
     topProducts,
     branchCards,
@@ -3651,6 +3661,7 @@ function buildRoleWorkspace({
   treatments,
   packages,
   settings,
+  users,
   topServices,
   topProducts,
   branchCards,
@@ -9755,10 +9766,6 @@ function ModalHost({
   const serviceOptions = services.map((service) => ({ value: service.id, label: service.name }));
   const employeeServiceSuggestions = [
     "All services",
-    "Consultations",
-    "Injectables, consultations",
-    "Facials, IV drips",
-    "Lasers, facials",
     ...services.map((service) => service.name),
   ].filter((value, index, values) => value && values.indexOf(value) === index);
   const staffOptions = staff.map((person) => person.name);
@@ -10126,7 +10133,7 @@ function ModalHost({
         field("schedule", "Schedule"),
         field("commissionType", "Commission type", "suggest", ["Percentage per service", "Fixed amount per service", "Tiered commission", "Doctor rate", "Skin care", "Device care", "No commission / N/A"]),
         field("commissionRate", "Commission rate", "number-suggest", [0, 5, 8, 10, 12, 15, 20]),
-        field("services", "Services allowed", "suggest", employeeServiceSuggestions),
+        field("services", "Services allowed", "multi-select", employeeServiceSuggestions),
         field("status", "Status", "select", ["Available", "In treatment", "On leave", "Inactive"]),
         field("attendance", "Attendance", "select", ["Clocked in", "Clocked out"]),
         field("employmentDate", "Employment date", "date"),
@@ -10700,6 +10707,63 @@ function FormField({ field: item, form, required = false, value, onChange }) {
             ) : null}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (item.type === "multi-select") {
+    const selectedValues = splitList(value).filter((entry, index, entries) => entries.indexOf(entry) === index);
+    const options = (item.options ?? []).map((option) => ({
+      value: typeof option === "string" ? option : option.value,
+      label: typeof option === "string" ? option : option.label,
+    }));
+    const availableOptions = options.filter((option) => !selectedValues.includes(option.value));
+
+    function updateSelected(nextValues) {
+      onChange(nextValues.join(", "));
+    }
+
+    function addSelected(nextValue) {
+      if (!nextValue) return;
+      if (nextValue === "All services") {
+        updateSelected([nextValue]);
+        return;
+      }
+      updateSelected([...selectedValues.filter((entry) => entry !== "All services"), nextValue]);
+    }
+
+    return (
+      <div className={`multi-select-field ${item.className ?? ""}`}>
+        <FieldLabel required={required}>{item.label}</FieldLabel>
+        {selectedValues.length ? (
+          <div className="multi-select-values" aria-live="polite">
+            {selectedValues.map((entry) => (
+              <span className="multi-select-chip" key={entry}>
+                {entry}
+                <button
+                  type="button"
+                  onClick={() => updateSelected(selectedValues.filter((selected) => selected !== entry))}
+                  aria-label={`Remove ${entry}`}
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="multi-select-empty">No services selected yet.</span>
+        )}
+        <select
+          id={fieldId}
+          value=""
+          onChange={(event) => addSelected(event.target.value)}
+          aria-label={`Add ${item.label.toLowerCase()}`}
+          disabled={!availableOptions.length}
+        >
+          <option value="">{availableOptions.length ? "Add a service…" : "All available services selected"}</option>
+          {availableOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <small className="field-suggestion-hint">Choose as many services as this employee can perform.</small>
       </div>
     );
   }

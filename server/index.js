@@ -10,7 +10,7 @@ import helmet from "helmet";
 import nodemailer from "nodemailer";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
-import { initialSettings, roleAccess, users } from "../src/data.js";
+import { initialSettings, roleAccess } from "../src/data.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
 import { nextRoomNames, renameBranchReferences } from "./organizationBranches.js";
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
@@ -2589,29 +2589,6 @@ function hashPassword(password) {
   return `scrypt$${salt}$${scryptSync(password, salt, 64).toString("hex")}`;
 }
 
-async function ensureDefaultAccounts() {
-  if (clean(process.env.ENABLE_DEMO_ACCOUNTS).toLowerCase() !== "true") return;
-  const staff = await prisma.staffMember.findMany();
-  const defaultPassword = process.env.SEED_STAFF_PASSWORD || "Mace2026!";
-  for (const user of users) {
-    await prisma.account.upsert({
-      where: { email: user.email.toLowerCase() },
-      update: {},
-      create: {
-        id: user.id,
-        staffId: staff.find((person) => person.name === user.name)?.id ?? null,
-        name: user.name,
-        email: user.email.toLowerCase(),
-        passwordHash: hashPassword(defaultPassword),
-        role: user.role,
-        branch: user.branch,
-        status: "Active",
-        mustChangePassword: true,
-      },
-    });
-  }
-}
-
 function publicAccount(account) {
   const modules = roleAccess[account.role] || [];
   return {
@@ -4422,9 +4399,6 @@ assertProductionEnvironment();
 
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`MACE ClinicOS listening on port ${port}`);
-  ensureDefaultAccounts().catch((error) => {
-    console.error("Failed to ensure default accounts after startup.", error);
-  });
 });
 
 function shutdown() {

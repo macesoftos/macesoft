@@ -44,14 +44,16 @@ const environment = {
   DATABASE_URL: withSchema(runtimeUrl),
   DIRECT_URL: withSchema(directUrl),
   FACETRACK_ENCRYPTION_KEY: "isolated-release-test-facetrack-key",
-  SEED_STAFF_PASSWORD: "Mace2026!",
-  ENABLE_DEMO_ACCOUNTS: "false",
+  BOOTSTRAP_OWNER_NAME: "Release Test Owner",
+  BOOTSTRAP_OWNER_EMAIL: "owner@release-test.invalid",
+  BOOTSTRAP_OWNER_PASSWORD: "ReleaseTest2026!Owner",
   MARKETING_DRY_RUN: "true",
 };
 
 try {
   await run("pnpm", ["exec", "prisma", "migrate", "deploy"], environment, "migrations");
   await run("pnpm", ["db:seed"], environment, "seed");
+  await run("pnpm", ["bootstrap:owner"], environment, "owner_bootstrap");
   await run("pnpm", ["test:integration"], environment, "api_integration");
   await run("pnpm", ["test:e2e"], environment, "browser_e2e");
   console.log(JSON.stringify({ event: "isolated_release_test_passed", schema }));
