@@ -7565,11 +7565,6 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
   }, [filteredTreatments, selectedId]);
 
   const selectedRecord = filteredTreatments.find((record) => record.id === selectedId) ?? filteredTreatments[0];
-  const uniqueClients = new Set(treatments.map((record) => record.clientId || record.client).filter(Boolean)).size;
-  const signedConsent = treatments.filter((record) => normalize(record.consent) === "signed").length;
-  const photoCount = treatments.reduce((sum, record) => sum + Number(record.photos || 0), 0);
-  const dueCount = treatments.filter(followUpDue).length;
-
   const resetFilters = () => {
     setQuery("");
     setFilter("All records");
@@ -7578,29 +7573,19 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
 
   return (
     <section className="treatments-workspace">
-      <header className="treatments-hero">
-        <div>
-          <span className="treatments-eyebrow"><HeartPulse size={15} aria-hidden="true" /> Clinical care records</span>
-          <h2>Treatment history, clearly documented</h2>
-          <p>Review procedures, clinical notes, consent, supplies, outcomes, and follow-up care in one protected workspace.</p>
-        </div>
-        <div className="treatments-hero-actions">
-          <span><ShieldCheck size={16} aria-hidden="true" /> Role-protected records</span>
-          <button className="primary-button" type="button" onClick={() => openModal("treatment")}>
-            <Plus size={17} aria-hidden="true" /> New treatment
-          </button>
-        </div>
-      </header>
-
-      <div className="treatments-metrics" aria-label="Treatment record summary">
-        <article><span><FileText size={17} /> Records</span><strong>{treatments.length}</strong><small>Complete clinical entries</small></article>
-        <article><span><UserCheck size={17} /> Clients treated</span><strong>{uniqueClients}</strong><small>Unique client profiles</small></article>
-        <article className={dueCount ? "attention" : ""}><span><CalendarDays size={17} /> Follow-ups due</span><strong>{dueCount}</strong><small>Scheduled on or before today</small></article>
-        <article><span><Camera size={17} /> Documentation</span><strong>{photoCount}</strong><small>Protected photo attachments</small></article>
-      </div>
-
       <div className="surface-panel treatments-workbench">
-        <div className="treatments-toolbar">
+        {!treatments.length ? (
+          <div className="treatments-collection-empty">
+            <span><HeartPulse size={24} aria-hidden="true" /></span>
+            <strong>No treatment records yet</strong>
+            <p>Records created by your clinic will appear here.</p>
+            <button className="primary-button" type="button" onClick={() => openModal("treatment")}>
+              <Plus size={17} aria-hidden="true" /> Add treatment
+            </button>
+          </div>
+        ) : (
+          <>
+          <div className="treatments-toolbar">
           <label className="search-box treatments-search">
             <Search size={16} aria-hidden="true" />
             <input
@@ -7622,9 +7607,9 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
               <button className={filter === option ? "active" : ""} key={option} type="button" onClick={() => setFilter(option)}>{option}</button>
             ))}
           </div>
-        </div>
+          </div>
 
-        <div className="treatments-workbench-grid">
+          <div className="treatments-workbench-grid">
           <aside className="treatments-index" aria-label="Treatment record list">
             <div className="treatments-index-heading">
               <div><strong>Clinical records</strong><span>{filteredTreatments.length} of {treatments.length}</span></div>
@@ -7724,7 +7709,9 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
               <div className="treatments-detail-empty"><HeartPulse size={30} /><strong>Select a treatment record</strong><span>Clinical details will appear here.</span></div>
             )}
           </main>
-        </div>
+          </div>
+          </>
+        )}
       </div>
     </section>
   );

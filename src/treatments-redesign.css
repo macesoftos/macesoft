@@ -4,122 +4,43 @@
   min-width: 0;
 }
 
-.treatments-hero {
-  display: flex;
-  min-height: 150px;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 24px 26px;
-  border: 1px solid rgba(88, 57, 44, 0.18);
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at 86% 10%, rgba(230, 204, 174, 0.2), transparent 28%),
-    linear-gradient(135deg, #3f2f28 0%, #6d4b3c 62%, #8a6350 100%);
-  color: #fff;
-  overflow: hidden;
-}
-
-.treatments-hero h2 {
-  max-width: 680px;
-  margin: 10px 0 8px;
-  color: #fff;
-  font-size: clamp(1.55rem, 2.5vw, 2.35rem);
-  line-height: 1.05;
-  letter-spacing: -0.035em;
-}
-
-.treatments-hero p {
-  max-width: 720px;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.76);
-  font-size: 0.9rem;
-  line-height: 1.6;
-}
-
-.treatments-eyebrow,
-.treatments-hero-actions > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #f0dec9;
-  font-size: 0.7rem;
-  font-weight: 850;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.treatments-hero-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.treatments-hero-actions > span {
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.76);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.treatments-hero .primary-button {
-  min-height: 42px;
-  background: #f3e4d2;
-  color: #4d382e;
-}
-
-.treatments-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.treatments-metrics article {
-  position: relative;
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  padding: 15px 17px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-  overflow: hidden;
-}
-
-.treatments-metrics article::after {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: #9a735e;
-  content: "";
-}
-
-.treatments-metrics article.attention::after { background: #b95845; }
-
-.treatments-metrics span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.045em;
-}
-
-.treatments-metrics span svg { color: #7a5543; }
-.treatments-metrics strong { color: var(--ink); font-size: 1.55rem; line-height: 1; }
-.treatments-metrics small { color: var(--muted); font-size: 0.75rem; }
-
 .treatments-workbench {
   min-width: 0;
   padding: 0;
   border-radius: 14px;
   overflow: hidden;
+}
+
+.treatments-collection-empty {
+  display: grid;
+  min-height: 430px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 40px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.treatments-collection-empty > span {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 4px;
+  place-items: center;
+  border-radius: 14px;
+  background: #f4ece5;
+  color: #76513f;
+}
+
+.treatments-collection-empty strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.treatments-collection-empty p {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
 }
 
 .treatments-toolbar {
@@ -416,20 +337,12 @@
 }
 
 @media (max-width: 900px) {
-  .treatments-hero { align-items: flex-start; flex-direction: column; }
-  .treatments-hero-actions { width: 100%; justify-content: space-between; }
-  .treatments-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .treatments-workbench-grid { grid-template-columns: 1fr; }
   .treatments-index { border-right: 0; border-bottom: 1px solid var(--line); }
   .treatments-index-list { max-height: 340px; }
 }
 
 @media (max-width: 620px) {
-  .treatments-hero { min-height: 0; padding: 20px; }
-  .treatments-hero-actions { align-items: stretch; flex-direction: column; }
-  .treatments-hero-actions > span { justify-content: center; }
-  .treatments-metrics { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .treatments-metrics article { padding: 13px; }
   .treatments-toolbar { align-items: stretch; flex-direction: column; }
   .treatments-search { width: 100%; max-width: none; min-width: 0; }
   .treatments-select { justify-content: space-between; }

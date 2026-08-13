@@ -182,11 +182,7 @@ export const initialInventory = [
   { id: "inv-ultralift", item: "Ultralift Cartridge", sku: "DEV-ULT-01", brand: "MACE Devices", category: "Device Consumables", type: "Consumable", unit: "cartridge", packQty: 1, beginning: 10, stock: 4, branch: "Mace Davao", location: "Device suite", reorder: 4, expiry: "2027-05-01", batch: "ULT-2607", supplier: "Device Care PH", cost: 4200, price: 0 },
 ];
 
-export const initialTreatments = [
-  { id: "tr-001", clientId: "cl-celine", client: "Celine Ann Hernandez", date: "2026-07-01", service: "Skin Booster Treatment", provider: "Dr. Mace", room: "Room 2", preNotes: "Skin hydrated. Consent confirmed.", postNotes: "Mild redness expected.", consumables: "Skin Booster Vials, Sterile Syringe Kit", deviceSettings: "N/A", batch: "SBV-2607", consent: "Signed", followUp: "2026-07-08", outcome: "Good tolerance", satisfaction: "Very satisfied", photos: 2 },
-  { id: "tr-002", clientId: "cl-trisha", client: "Trisha Uy", date: "2026-06-19", service: "Mace Resurface", provider: "Nurse Bea", room: "Laser Room", preNotes: "No sun exposure.", postNotes: "Aftercare explained.", consumables: "Laser Tips", deviceSettings: "Level 3, 2 passes", batch: "LTP-2602", consent: "Signed", followUp: "2026-07-04", outcome: "Texture improvement plan ongoing", satisfaction: "Satisfied", photos: 2 },
-  { id: "tr-003", clientId: "cl-andrea", client: "Andrea Lee", date: "2026-06-21", service: "Mace Ultralift", provider: "Dr. Aria Tan", room: "Device Suite", preNotes: "Face mapping completed.", postNotes: "Mild tenderness.", consumables: "Ultralift Cartridge", deviceSettings: "Face protocol A", batch: "ULT-2607", consent: "Signed", followUp: "2026-07-10", outcome: "Initial lifting response", satisfaction: "Happy", photos: 0 },
-];
+export const initialTreatments = [];
 
 export const initialPackages = [
   { id: "pkg-001", name: "Glow Maintenance Plan", clientId: "cl-celine", client: "Celine Ann Hernandez", sessions: 6, used: 2, expires: "2026-12-31", branch: "All branches", transferable: false, status: "Active", price: 18500 },
