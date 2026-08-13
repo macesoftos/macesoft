@@ -13,6 +13,14 @@ import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
 import { nextRoomNames, renameBranchReferences } from "./organizationBranches.js";
+import {
+  ARCHIVED_ROOM_STATUS,
+  activeRoomRecords,
+  findRoomNameMatch,
+  isActiveRoom,
+  isUpcomingRoomAppointment,
+  normalizeRoomName,
+} from "./roomManagement.js";
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
 import { assertProductionEnvironment } from "./productionConfig.js";
 import {
@@ -1060,10 +1068,17 @@ function serializeSale(sale) {
 }
 
 function serializeBranch(branch) {
+  const roomRecords = activeRoomRecords(branch.rooms ?? []).map((room) => ({
+    id: room.id,
+    name: room.name,
+    branchId: room.branchId,
+    status: room.status,
+  }));
   return {
     ...branch,
     devices: parseJsonList(branch.devices),
-    rooms: (branch.rooms ?? []).map((room) => room.name),
+    rooms: roomRecords.map((room) => room.name),
+    roomRecords,
   };
 }
 
@@ -3067,6 +3082,135 @@ app.post("/api/me/attendance", asyncRoute(async (request, response) => {
   response.status(201).json({ event, workspace: await buildMyWorkspace(account) });
 }));
 
+function clinicDateTime(timeZone = "Asia/Manila") {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+async function upcomingRoomAppointments(branchName, roomName) {
+  const now = clinicDateTime();
+  const appointmentCandidates = await prisma.appointment.findMany({
+    where: {
+      branch: branchName,
+      room: roomName,
+      date: { gte: now.date },
+      status: { in: databaseActiveAppointmentStatuses },
+    },
+    orderBy: [{ date: "asc" }, { time: "asc" }],
+    select: { id: true, date: true, time: true, duration: true },
+  });
+  return appointmentCandidates.filter((appointment) => isUpcomingRoomAppointment(appointment, now));
+}
+
+function assertRoomManagementAllowed(request, branchName) {
+  const account = requireAuthenticatedAccount(request);
+  if (!canManageOrganization(account.role)) {
+    throw apiError("Only an Admin or Business Owner can manage rooms.", 403);
+  }
+  return assertMutationAllowed(request, "room-view", branchName);
+}
+
+app.post("/api/rooms", asyncRoute(async (request, response) => {
+  const branchId = requireText(request.body?.branchId, "Branch");
+  const name = normalizeRoomName(request.body?.name);
+  if (!name) throw apiError("Room name is required.", 400);
+
+  const branch = await prisma.branch.findUnique({
+    where: { id: branchId },
+    include: { rooms: { orderBy: { createdAt: "asc" } } },
+  });
+  if (!branch) throw apiError("Branch not found.", 404);
+  assertRoomManagementAllowed(request, branch.name);
+
+  const matchingRoom = findRoomNameMatch(branch.rooms, name);
+  if (matchingRoom && isActiveRoom(matchingRoom)) {
+    throw apiError(`${name} already exists in ${branch.name}.`, 409);
+  }
+
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const room = matchingRoom
+        ? await tx.room.update({
+          where: { id: matchingRoom.id },
+          data: { name, status: "Available" },
+        })
+        : await tx.room.create({ data: { name, branchId: branch.id, status: "Available" } });
+      const auditLog = await writeAudit(tx, request, {
+        area: "Rooms",
+        action: matchingRoom ? "Room restored" : "Room created",
+        details: `${room.name} is available for scheduling at ${branch.name}.`,
+      });
+      const updatedBranch = await tx.branch.findUnique({
+        where: { id: branch.id },
+        include: { rooms: { orderBy: { createdAt: "asc" } } },
+      });
+      return { room, branch: updatedBranch, auditLog };
+    });
+  } catch (error) {
+    if (error?.code === "P2002") throw apiError(`${name} already exists in ${branch.name}.`, 409);
+    throw error;
+  }
+
+  response.status(201).json({
+    room: { ...result.room, branch: branch.name },
+    branch: serializeBranch(result.branch),
+    auditLog: result.auditLog,
+  });
+}));
+
+app.delete("/api/rooms/:id", asyncRoute(async (request, response) => {
+  const room = await prisma.room.findUnique({
+    where: { id: clean(request.params.id) },
+    include: { branch: true },
+  });
+  if (!room || !room.branch || !isActiveRoom(room)) throw apiError("Active room not found.", 404);
+  assertRoomManagementAllowed(request, room.branch.name);
+
+  const upcoming = await upcomingRoomAppointments(room.branch.name, room.name);
+  if (upcoming.length) {
+    const next = upcoming[0];
+    throw apiError(
+      `${room.name} has ${upcoming.length} upcoming appointment${upcoming.length === 1 ? "" : "s"}. Reassign or cancel ${next.date} at ${next.time} before deleting this room.`,
+      409,
+    );
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const archivedRoom = await tx.room.update({
+      where: { id: room.id },
+      data: { status: ARCHIVED_ROOM_STATUS },
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Rooms",
+      action: "Room archived",
+      details: `${archivedRoom.name} was removed from active scheduling at ${room.branch.name}; historical records were preserved.`,
+    });
+    const branch = await tx.branch.findUnique({
+      where: { id: room.branch.id },
+      include: { rooms: { orderBy: { createdAt: "asc" } } },
+    });
+    return { archivedRoom, branch, auditLog };
+  });
+
+  response.json({
+    room: { ...result.archivedRoom, branch: room.branch.name },
+    branch: serializeBranch(result.branch),
+    auditLog: result.auditLog,
+  });
+}));
+
 app.post("/api/branches", asyncRoute(async (request, response) => {
   const account = requireAuthenticatedAccount(request);
   if (!canManageOrganization(account.role)) throw apiError("Only an Admin or Business Owner can create branches.", 403);
@@ -3108,15 +3252,28 @@ app.put("/api/branches/:id", asyncRoute(async (request, response) => {
     throw apiError(`A branch named ${name} already exists.`, 409);
   }
   const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
+  const activeRooms = activeRoomRecords(existing.rooms);
+  const roomsToArchive = roomCount < activeRooms.length ? activeRooms.slice(roomCount) : [];
+  for (const room of roomsToArchive) {
+    const upcoming = await upcomingRoomAppointments(existing.name, room.name);
+    if (upcoming.length) {
+      throw apiError(`${room.name} has upcoming appointments. Reassign or cancel them before reducing the branch room count.`, 409);
+    }
+  }
   const result = await prisma.$transaction(async (tx) => {
     await renameBranchReferences(tx, existing.name, name);
 
-    if (roomCount > existing.rooms.length) {
-      const names = nextRoomNames(existing.rooms, roomCount - existing.rooms.length);
+    if (roomCount > activeRooms.length) {
+      const names = nextRoomNames(existing.rooms, roomCount - activeRooms.length);
       await tx.room.createMany({ data: names.map((roomName) => ({ name: roomName, branchId: existing.id })) });
-    } else if (roomCount < existing.rooms.length) {
-      const roomIds = existing.rooms.slice(roomCount).map((room) => room.id);
-      if (roomIds.length) await tx.room.deleteMany({ where: { id: { in: roomIds } } });
+    } else if (roomsToArchive.length) {
+      const roomIds = roomsToArchive.map((room) => room.id);
+      if (roomIds.length) {
+        await tx.room.updateMany({
+          where: { id: { in: roomIds } },
+          data: { status: ARCHIVED_ROOM_STATUS },
+        });
+      }
     }
 
     const branch = await tx.branch.update({

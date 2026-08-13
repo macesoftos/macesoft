@@ -75,6 +75,117 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
+  await page.goto("/#/room-view");
+  await createTrigger.click();
+  const newRoomAction = createMenu.getByRole("menuitem", { name: "New room" });
+  await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toBeVisible();
+  await expect(newRoomAction).toBeVisible();
+  await newRoomAction.click();
+  const roomDialog = page.getByRole("dialog", { name: "New room" });
+  const roomName = `Release Room ${Date.now()}`;
+  await expect(roomDialog).toBeVisible();
+  await roomDialog.getByLabel("Room name, required").fill(`  ${roomName}  `);
+  const roomCreation = page.waitForResponse((response) => response.url().endsWith("/api/rooms") && response.request().method() === "POST");
+  await roomDialog.getByRole("button", { name: "Add room" }).click();
+  const roomCreationResponse = await roomCreation;
+  expect(roomCreationResponse.status()).toBe(201);
+  const createdRoomPayload = await roomCreationResponse.json();
+  await expect(roomDialog).toBeHidden();
+  await expect(page.getByRole("button", { name: `Actions for ${roomName}` })).toBeVisible();
+
+  const duplicateRoomStatus = await page.evaluate(async ({ branchId, name }) => {
+    const response = await fetch("/api/rooms", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({ branchId, name: `  ${name.toLocaleLowerCase()}  ` }),
+    });
+    return response.status;
+  }, { branchId: createdRoomPayload.room.branchId, name: roomName });
+  expect(duplicateRoomStatus).toBe(409);
+
+  const roomBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
+  await page.reload();
+  expect((await roomBootstrap).status()).toBe(200);
+  await expect(page.getByRole("button", { name: `Actions for ${roomName}` })).toBeVisible();
+
+  const guardAppointmentId = `ap-room-guard-${Date.now()}`;
+  const guardCreationStatus = await page.evaluate(async ({ id, room }) => {
+    const bootstrapResponse = await fetch("/api/bootstrap", { credentials: "include" });
+    const bootstrap = await bootstrapResponse.json();
+    const branch = bootstrap.branches.find((item) => item.rooms.includes(room));
+    const client = bootstrap.clients[0];
+    const response = await fetch("/api/resources/appointments", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({
+        id,
+        date: "2099-12-31",
+        time: "10:00",
+        clientId: client.id,
+        client: client.fullName,
+        serviceName: "Room archive guard",
+        branch: branch.name,
+        room,
+        staff: "Any available",
+        duration: 30,
+        status: "Confirmed",
+        deposit: 0,
+      }),
+    });
+    return response.status;
+  }, { id: guardAppointmentId, room: roomName });
+  expect(guardCreationStatus).toBe(201);
+
+  await page.getByRole("button", { name: `Actions for ${roomName}` }).click();
+  await page.getByRole("menuitem", { name: "Delete room" }).click();
+  const roomDeleteDialog = page.getByRole("alertdialog", { name: `Delete ${roomName}` });
+  await expect(roomDeleteDialog).toContainText(roomName);
+  await expect(roomDeleteDialog).toContainText(createdRoomPayload.room.branch);
+  const blockedRoomDeletion = page.waitForResponse((response) => response.url().endsWith(`/api/rooms/${createdRoomPayload.room.id}`) && response.request().method() === "DELETE");
+  await roomDeleteDialog.getByRole("button", { name: "Confirm delete" }).click();
+  expect((await blockedRoomDeletion).status()).toBe(409);
+  await expect(roomDeleteDialog.getByRole("alert")).toContainText("upcoming appointment");
+
+  const guardDeletionStatus = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/resources/appointments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "X-Mace-Request": "app" },
+    });
+    return response.status;
+  }, guardAppointmentId);
+  expect(guardDeletionStatus).toBe(204);
+
+  const roomDeletion = page.waitForResponse((response) => response.url().endsWith(`/api/rooms/${createdRoomPayload.room.id}`) && response.request().method() === "DELETE");
+  await roomDeleteDialog.getByRole("button", { name: "Confirm delete" }).click();
+  expect((await roomDeletion).status()).toBe(200);
+  await expect(roomDeleteDialog).toBeHidden();
+  await expect(page.getByRole("button", { name: `Actions for ${roomName}` })).toHaveCount(0);
+
+  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/#/room-view");
+    const roomAction = page.getByRole("button", { name: "Actions for Consult Room" });
+    await expect(roomAction).toBeVisible();
+    await roomAction.click();
+    const deleteMenu = page.getByRole("menu", { name: "Consult Room actions" });
+    await expect(deleteMenu).toBeVisible();
+    const deleteMenuBox = await deleteMenu.boundingBox();
+    expect(deleteMenuBox).not.toBeNull();
+    if (!deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
+    expect(deleteMenuBox.x).toBeGreaterThanOrEqual(0);
+    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(deleteMenuBox.y + deleteMenuBox.height).toBeLessThanOrEqual(viewport.height);
+    await page.keyboard.press("Escape");
+
+    await createTrigger.click();
+    await createMenu.getByRole("menuitem", { name: "New room" }).click();
+    await expect(page.getByRole("dialog", { name: "New room" })).toBeVisible();
+    await page.getByRole("button", { name: "Close room form" }).click();
+  }
+
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await page.goto("/#/appointments");

@@ -84,7 +84,9 @@ import {
   acceptInvitation,
   createInvitation,
   createBranchRecord,
+  createRoomRecord,
   deleteBranchRecord,
+  deleteRoomRecord,
   updateBranchRecord,
   addLeadActivity,
   bookLeadAppointment,
@@ -706,9 +708,9 @@ function App() {
       moduleId: activeModule,
       sessionModules,
       canManageOrganization: canManageOrganization(session?.role),
-      context: { appointmentDate: appointmentCreateDate },
+      context: { appointmentDate: appointmentCreateDate, roomBranch: branchScope },
     }),
-    [activeModule, appointmentCreateDate, session?.role, sessionModules],
+    [activeModule, appointmentCreateDate, branchScope, session?.role, sessionModules],
   );
 
   useEffect(() => {
@@ -1305,6 +1307,31 @@ function App() {
     if (branchScope === branch.name) setBranchScope(result.reassignedTo || "All branches");
     applyAuditLog(result.auditLog);
     notify(result.reassignedTo ? `${branch.name} deleted; linked records moved to ${result.reassignedTo}.` : `${branch.name} deleted.`);
+  }
+
+  function replaceBranchRecord(branch) {
+    if (!branch?.id) return;
+    setBranchRecords((current) => [
+      ...current.filter((item) => item.id !== branch.id),
+      branch,
+    ].sort((a, b) => a.name.localeCompare(b.name)));
+  }
+
+  async function saveRoom(values) {
+    const result = await createRoomRecord(values);
+    replaceBranchRecord(result.branch);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify(`${result.room.name} added to ${result.room.branch}.`);
+    return result.room;
+  }
+
+  async function deleteRoom(room) {
+    const result = await deleteRoomRecord(room.id);
+    replaceBranchRecord(result.branch);
+    applyAuditLog(result.auditLog);
+    notify(`${result.room.name} removed from active scheduling.`);
+    return result.room;
   }
 
   function openModal(type, payload = {}) {
@@ -2218,6 +2245,11 @@ function App() {
               appointments={scopedAppointments}
               services={services}
               globalSearch={globalSearch}
+              branchRecords={branchRecords}
+              branchScope={branchScope}
+              canManageRooms={canManageOrganization(session.role)}
+              onCreateRoom={() => openModal("room", branchScope !== "All branches" ? { branch: branchScope } : {})}
+              onDeleteRoom={deleteRoom}
             />
           )}
           {activeModule === "appointments" && (
@@ -2432,9 +2464,10 @@ function App() {
         savePackage={savePackage}
         saveCampaign={saveCampaign}
         saveSettings={saveSettings}
+        saveRoom={saveRoom}
         clients={clients}
         services={services}
-        branches={branches}
+        branches={branchRecords.length ? branchRecords : branches}
         staff={staff}
         inventory={inventory}
         settings={settings}
@@ -5147,9 +5180,33 @@ function StaffAvailabilityModule({ appointments, services, staff, globalSearch }
   );
 }
 
-function RoomAvailabilityModule({ appointments, services, globalSearch }) {
+function RoomAvailabilityModule({
+  appointments,
+  services,
+  globalSearch,
+  branchRecords = [],
+  branchScope = "All branches",
+  canManageRooms = false,
+  onCreateRoom,
+  onDeleteRoom,
+}) {
   const [date, setDate] = useState(todayDate());
-  const rooms = uniqueRoomsFromBranches();
+  const [roomToDelete, setRoomToDelete] = useState(null);
+  const visibleBranches = branchScope === "All branches"
+    ? branchRecords
+    : branchRecords.filter((branch) => branch.name === branchScope);
+  const rooms = visibleBranches.flatMap((branch) => {
+    const records = Array.isArray(branch.roomRecords) && branch.roomRecords.length
+      ? branch.roomRecords
+      : (branch.rooms ?? []).map((name, index) => ({
+        id: "",
+        name,
+        branchId: branch.id,
+        status: "Available",
+        fallbackKey: `${branch.id || branch.name}-${index}`,
+      }));
+    return records.map((room) => ({ ...room, branch: branch.name }));
+  });
   const filtered = appointments
     .filter((appointment) => appointment.date === date)
     .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.room}`).includes(normalize(globalSearch)));
@@ -5161,19 +5218,154 @@ function RoomAvailabilityModule({ appointments, services, globalSearch }) {
         <div className="report-filters single-line">
           <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
         </div>
-        <AvailabilityTimeline
-          resourceLabel="Room"
-          resources={rooms}
-          appointments={filtered}
-          services={services}
-          getResource={(appointment) => appointment.room}
-        />
+        {rooms.length ? (
+          <AvailabilityTimeline
+            resourceLabel="Room"
+            resources={rooms}
+            appointments={filtered}
+            services={services}
+            getResource={(appointment) => `${appointment.branch}\u0000${appointment.room}`}
+            getResourceKey={(room) => `${room.branch}\u0000${room.name}`}
+            renderResource={(room) => (
+              <RoomResourceLabel
+                room={room}
+                showBranch={branchScope === "All branches" && branchRecords.length > 1}
+                canManage={canManageRooms && Boolean(room.id)}
+                onDelete={() => setRoomToDelete(room)}
+              />
+            )}
+          />
+        ) : (
+          <div className="room-empty-state">
+            <EmptyState
+              title="No active rooms"
+              copy={branchScope === "All branches" ? "Add a room to an accessible branch to begin scheduling." : `Add the first room for ${branchScope}.`}
+            />
+            {canManageRooms && <button className="primary-button" type="button" onClick={onCreateRoom}><Plus size={17} /> Add room</button>}
+          </div>
+        )}
       </div>
+      {roomToDelete && (
+        <RoomDeleteDialog
+          room={roomToDelete}
+          onCancel={() => setRoomToDelete(null)}
+          onConfirm={async () => {
+            await onDeleteRoom(roomToDelete);
+            setRoomToDelete(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
-function AvailabilityTimeline({ resourceLabel, resources, appointments, services, getResource }) {
+function RoomResourceLabel({ room, showBranch, canManage, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const deleteRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const focusTimer = window.requestAnimationFrame(() => deleteRef.current?.focus());
+    const closeOutside = (event) => {
+      if (!menuRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.cancelAnimationFrame(focusTimer);
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="room-resource-label">
+      <span><strong>{room.name}</strong>{showBranch && <small>{room.branch}</small>}</span>
+      {canManage && (
+        <div className="room-row-menu" ref={menuRef}>
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label={`Actions for ${room.name}`}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => setOpen((current) => !current)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown") return;
+              event.preventDefault();
+              setOpen(true);
+            }}
+          >
+            <EllipsisVertical size={17} aria-hidden="true" />
+          </button>
+          {open && (
+            <div className="room-row-dropdown" role="menu" aria-label={`${room.name} actions`}>
+              <button
+                ref={deleteRef}
+                className="destructive"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  onDelete();
+                }}
+              >
+                <Trash2 size={16} aria-hidden="true" /> Delete room
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoomDeleteDialog({ room, onCancel, onConfirm }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function confirmDelete() {
+    setSaving(true);
+    setError("");
+    try {
+      await onConfirm();
+    } catch (deleteError) {
+      setError(deleteError?.message || "Unable to delete this room.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="alertdialog" aria-modal="true" aria-label={`Delete ${room.name}`}>
+      <div className="modal-card confirm-card room-delete-dialog">
+        <div className="confirm-icon danger"><Trash2 size={21} aria-hidden="true" /></div>
+        <div>
+          <p className="eyebrow">Room management</p>
+          <h3>Delete {room.name}?</h3>
+          <p><strong>{room.name}</strong> at <strong>{room.branch}</strong> will be removed from active scheduling.</p>
+          <p>Historical appointments and treatment records will remain unchanged. Deletion is blocked if the room has upcoming appointments.</p>
+        </div>
+        {error && <div className="inline-state error" role="alert"><AlertCircle size={17} /> {error}</div>}
+        <div className="confirm-actions">
+          <button className="ghost-button" type="button" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button className="danger-button" type="button" onClick={confirmDelete} disabled={saving}>
+            <Trash2 size={16} /> {saving ? "Deleting..." : "Confirm delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AvailabilityTimeline({ resourceLabel, resources, appointments, services, getResource, getResourceKey = (resource) => resource, renderResource = (resource) => resource }) {
   return (
     <div className="availability-board">
       <div className="availability-scroll">
@@ -5183,10 +5375,11 @@ function AvailabilityTimeline({ resourceLabel, resources, appointments, services
             {scheduleHours.map((minutes) => <span key={minutes}>{formatScheduleTime(minutes)}</span>)}
           </div>
           {resources.map((resource) => {
-            const rowAppointments = appointments.filter((appointment) => getResource(appointment) === resource);
+            const resourceKey = getResourceKey(resource);
+            const rowAppointments = appointments.filter((appointment) => getResource(appointment) === resourceKey);
             return (
-              <React.Fragment key={resource}>
-                <div className="availability-resource">{resource}</div>
+              <React.Fragment key={resourceKey || resource.fallbackKey}>
+                <div className="availability-resource">{renderResource(resource)}</div>
                 <div className="availability-track">
                   <div className="timeline-grid-lines" />
                   {rowAppointments.map((appointment, index) => {
@@ -9672,6 +9865,7 @@ function ModalHost({
   savePackage,
   saveCampaign,
   saveSettings,
+  saveRoom,
   clients,
   services,
   branches,
@@ -9726,6 +9920,17 @@ function ModalHost({
         packages={packages}
         onClose={closeModal}
         onSubmit={saveAppointment}
+      />
+    );
+  }
+
+  if (modal.type === "room") {
+    return (
+      <RoomModal
+        payload={modal.payload}
+        branches={branches}
+        onClose={closeModal}
+        onSubmit={saveRoom}
       />
     );
   }
@@ -10443,6 +10648,75 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
           </div></section>
         </div>
         <footer className="appointment-booking-actions"><button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><div><button className="secondary-button" type="button" onClick={(event) => submit(event, "Draft")} disabled={saving}>Save draft</button><button className="primary-button" type="submit" disabled={saving}><Check size={17} /> {saving ? "Saving..." : "Confirm booking"}</button></div></footer>
+      </form>
+    </div>
+  );
+}
+
+function RoomModal({ payload = {}, branches = [], onClose, onSubmit }) {
+  const initialBranch = branches.find((branch) => branch.name === payload.branch) ?? branches[0];
+  const [form, setForm] = useState({ name: "", branchId: initialBranch?.id ?? "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const selectedBranch = branches.find((branch) => branch.id === form.branchId);
+
+  async function submit(event) {
+    event.preventDefault();
+    const name = form.name.trim().replace(/\s+/g, " ");
+    if (!name) return setError("Room name is required.");
+    if (!selectedBranch) return setError("Select a branch.");
+    if ((selectedBranch.rooms ?? []).some((room) => room.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      return setError(`${name} already exists in ${selectedBranch.name}.`);
+    }
+
+    setSaving(true);
+    setError("");
+    try {
+      await onSubmit({ name, branchId: selectedBranch.id });
+    } catch (submitError) {
+      setError(submitError?.message || "Unable to add this room.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="New room">
+      <form className="modal-card room-modal" onSubmit={submit}>
+        <button className="modal-close" type="button" onClick={onClose} aria-label="Close room form" disabled={saving}><X size={18} /></button>
+        <ModalHeader icon={Home} title="New room" action="Room availability" />
+        <p className="room-modal-copy">Add a room to the selected clinic branch. It will immediately become available for new appointment assignments.</p>
+        {error && <div className="inline-state error" role="alert"><AlertCircle size={17} /> {error}</div>}
+        <div className="form-grid room-modal-fields">
+          <label className="stacked-field">
+            <span>Room name <RequiredMark /></span>
+            <input
+              autoFocus
+              aria-label="Room name, required"
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              placeholder="e.g. Consultation Room"
+              disabled={saving}
+            />
+          </label>
+          <label className="stacked-field">
+            <span>Branch <RequiredMark /></span>
+            <select
+              aria-label="Room branch, required"
+              value={form.branchId}
+              onChange={(event) => setForm((current) => ({ ...current, branchId: event.target.value }))}
+              disabled={saving || branches.length <= 1}
+            >
+              {!branches.length && <option value="">No accessible branches</option>}
+              {branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="modal-actions">
+          <button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="primary-button" type="submit" disabled={saving || !branches.length}>
+            <Plus size={17} /> {saving ? "Adding room..." : "Add room"}
+          </button>
+        </div>
       </form>
     </div>
   );

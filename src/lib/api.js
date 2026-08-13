@@ -123,6 +123,19 @@ export function deleteBranchRecord(id, confirmationName, reassignTo = "") {
   });
 }
 
+export function createRoomRecord(values) {
+  return requestJson("/api/rooms", {
+    method: "POST",
+    body: JSON.stringify(values),
+  });
+}
+
+export function deleteRoomRecord(id) {
+  return requestJson(`/api/rooms/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 export function uploadImageAsset(dataUrl, category, branch) {
   return requestJson("/api/uploads", {
     method: "POST",

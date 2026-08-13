@@ -6189,6 +6189,9 @@ td .inline-actions { flex-wrap: nowrap; }
 }
 
 .availability-corner {
+  position: sticky;
+  left: 0;
+  z-index: 4;
   min-height: 48px;
   display: flex;
   align-items: center;
@@ -6198,12 +6201,136 @@ td .inline-actions { flex-wrap: nowrap; }
 }
 
 .availability-resource {
+  position: sticky;
+  left: 0;
+  z-index: 3;
   min-height: 118px;
   display: flex;
   align-items: center;
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
 }
+
+.room-resource-label {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.room-resource-label > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.room-resource-label strong,
+.room-resource-label small {
+  overflow-wrap: anywhere;
+}
+
+.room-resource-label strong { color: var(--ink); }
+.room-resource-label small { color: var(--muted); font-weight: 650; }
+
+.room-row-menu { position: relative; flex: 0 0 auto; }
+
+.room-row-menu > button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.room-row-menu > button:hover,
+.room-row-menu > button:focus-visible,
+.room-row-menu > button[aria-expanded="true"] {
+  border-color: var(--line);
+  background: #fff;
+  color: var(--wine);
+}
+
+.room-row-dropdown {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 12;
+  width: 170px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(41, 38, 33, 0.14);
+}
+
+.room-row-dropdown button {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--danger);
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-align: left;
+}
+
+.room-row-dropdown button:hover,
+.room-row-dropdown button:focus-visible { background: var(--danger-soft); }
+
+.room-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 34px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.room-modal { width: min(520px, 100%); }
+.room-modal-copy { margin: 4px 0 16px; color: var(--muted); line-height: 1.55; }
+.room-modal-fields { grid-template-columns: 1fr; }
+
+.room-delete-dialog { display: grid; gap: 14px; }
+.room-delete-dialog h3 { margin: 3px 0 0; color: var(--ink); font-size: 1.15rem; }
+.room-delete-dialog p { margin: 6px 0 0; }
+.room-delete-dialog .confirm-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.room-delete-dialog .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.danger-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 800;
+}
+.danger-button:hover:not(:disabled) { filter: brightness(0.92); }
+.danger-button:disabled { cursor: wait; opacity: 0.64; }
 
 .timeline-axis {
   min-height: 48px;
