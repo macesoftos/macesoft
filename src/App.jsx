@@ -4955,10 +4955,6 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
     .filter((appointment) => roomFilter === "All rooms" || appointment.room === roomFilter)
     .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.staff} ${appointment.room}`).includes(normalize(globalSearch)))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
-  const arrivedCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "Arrived").length;
-  const inTreatmentCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "In Treatment").length;
-  const completedCards = cards.filter((item) => canonicalAppointmentStatus(item.status) === "Completed").length;
-  const completionRate = cards.length ? Math.round((completedCards / cards.length) * 100) : 0;
 
   function transactionFor(appointment) {
     return transactions.find((transaction) => transaction.date === appointment.date && transaction.client === appointment.client);
@@ -4966,35 +4962,6 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
 
   return (
     <section className="module-grid card-view-page">
-      <section className="surface-panel full-span card-view-kpi-card" aria-label={date ? `Daily KPI for ${date}` : "KPI for all dates"}>
-        <article className="card-view-kpi-heading">
-          <div className="card-view-kpi-icon primary"><Activity size={27} aria-hidden="true" /></div>
-          <div className="card-view-kpi-copy">
-            <span>Completion rate</span>
-            <strong>{completionRate}%</strong>
-            <small>{date ? "Selected date KPI" : "All dates KPI"}</small>
-          </div>
-        </article>
-        <div className="card-view-kpi-metrics">
-          <article>
-            <div className="card-view-kpi-icon"><CreditCard size={23} aria-hidden="true" /></div>
-            <div><span>Total Cards</span><strong>{cards.length}</strong></div>
-          </article>
-          <article>
-            <div className="card-view-kpi-icon"><UserCheck size={25} aria-hidden="true" /></div>
-            <div><span>Arrived</span><strong>{arrivedCards}</strong></div>
-          </article>
-          <article>
-            <div className="card-view-kpi-icon"><Clock size={25} aria-hidden="true" /></div>
-            <div><span>In Treatment</span><strong>{inTreatmentCards}</strong></div>
-          </article>
-          <article>
-            <div className="card-view-kpi-icon"><Check size={25} aria-hidden="true" /></div>
-            <div><span>Completed</span><strong>{completedCards}</strong></div>
-          </article>
-        </div>
-      </section>
-
       <section className="surface-panel full-span card-view-filter-panel" aria-label="Card filters">
         <div className="card-view-filters">
           <label>

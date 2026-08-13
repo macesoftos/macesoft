@@ -75,6 +75,15 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
+  await page.goto("/#/card-view");
+  await expect(page.getByLabel("Card filters")).toBeVisible();
+  await expect(page.getByText("Completion rate", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Total Cards", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("No service cards", { exact: true })).toBeVisible();
+  for (const demoPatient of ["Mika Santos", "Celine Ann Hernandez", "Andrea Lee", "Trisha Uy"]) {
+    await expect(page.getByText(demoPatient, { exact: true })).toHaveCount(0);
+  }
+
   await page.goto("/#/room-view");
   await createTrigger.click();
   const newRoomAction = createMenu.getByRole("menuitem", { name: "New room" });
