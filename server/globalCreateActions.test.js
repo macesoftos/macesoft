@@ -4,7 +4,7 @@ import { getGlobalCreateActions, globalActionsByModule } from "../src/config/glo
 
 const everyModule = [
   "appointments", "clients", "leads", "services", "treatments", "packages", "staff", "branches",
-  "inventory", "expenses", "sms",
+  "inventory", "expenses", "sms", "room-view",
 ];
 
 test("appointments exposes the two existing creation flows", () => {
@@ -35,6 +35,24 @@ test("branch creation requires organization management permission", () => {
     })[0].handler,
     "branch-create",
   );
+});
+
+test("room view adds room creation only for room managers", () => {
+  assert.deepEqual(
+    getGlobalCreateActions({
+      moduleId: "room-view",
+      sessionModules: ["appointments", "room-view"],
+    }).map((action) => action.id),
+    ["appointment"],
+  );
+  const actions = getGlobalCreateActions({
+    moduleId: "room-view",
+    sessionModules: ["appointments", "room-view"],
+    canManageOrganization: true,
+    context: { roomBranch: "Mace Davao" },
+  });
+  assert.deepEqual(actions.map((action) => action.label), ["New appointment", "New room"]);
+  assert.deepEqual(actions[1].payload, { branch: "Mace Davao" });
 });
 
 test("unsupported routes do not invent creation actions", () => {

@@ -21,6 +21,7 @@ const API_MODULE_RULES = [
   [/^\/api\/invitations(?:\/|$)/, "settings"],
   [/^\/api\/accounts(?:\/|$)/, "staff"],
   [/^\/api\/staff(?:\/|$)/, "staff"],
+  [/^\/api\/rooms(?:\/|$)/, "room-view"],
   [/^\/api\/branches(?:\/|$)/, "branches"],
   [/^\/api\/facetrack-attendance(?:\/|$)/, "facetrack-attendance"],
   [/^\/api\/settings(?:\/|$)/, "settings"],

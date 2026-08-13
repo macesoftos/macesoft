@@ -89,6 +89,17 @@ const actionDefinitions = {
     requiredModules: ["branches"],
     requiresOrganizationManagement: true,
   },
+  room: {
+    id: "room",
+    label: "New room",
+    icon: "room",
+    modal: "room",
+    payload: (/** @type {{ roomBranch?: string }} */ { roomBranch } = {}) => (
+      roomBranch && roomBranch !== "All branches" ? { branch: roomBranch } : {}
+    ),
+    requiredModules: ["room-view"],
+    requiresOrganizationManagement: true,
+  },
 };
 
 export const globalActionsByModule = {
@@ -100,7 +111,7 @@ export const globalActionsByModule = {
   pos: ["client"],
   "card-view": ["appointment"],
   "staff-view": ["appointment"],
-  "room-view": ["appointment"],
+  "room-view": ["appointment", "room"],
   treatments: ["treatment"],
   services: ["service"],
   packages: ["package"],
