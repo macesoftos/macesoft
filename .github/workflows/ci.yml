@@ -26,8 +26,9 @@ jobs:
       DIRECT_URL: postgresql://macesoft:macesoft_test@127.0.0.1:5432/macesoft_test
       FACETRACK_ENCRYPTION_KEY: ci-only-facetrack-key-32-characters
       APP_ORIGIN: http://127.0.0.1:5173
-      SEED_STAFF_PASSWORD: Mace2026!
-      ENABLE_DEMO_ACCOUNTS: "false"
+      BOOTSTRAP_OWNER_NAME: CI Test Owner
+      BOOTSTRAP_OWNER_EMAIL: owner@ci.invalid
+      BOOTSTRAP_OWNER_PASSWORD: CIRelease2026!Owner
       MARKETING_DRY_RUN: "true"
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +49,7 @@ jobs:
           SQL
       - run: pnpm exec prisma migrate deploy
       - run: pnpm db:seed
+      - run: pnpm bootstrap:owner
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

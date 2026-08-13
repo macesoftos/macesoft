@@ -1,5 +1,12 @@
 import { test, expect } from "playwright/test";
 
+const ownerEmail = process.env.BOOTSTRAP_OWNER_EMAIL;
+const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD;
+
+if (!ownerEmail || !ownerPassword) {
+  throw new Error("BOOTSTRAP_OWNER_EMAIL and BOOTSTRAP_OWNER_PASSWORD are required for authenticated browser tests.");
+}
+
 test("anonymous users cannot read clinic data", async ({ request }) => {
   for (const path of ["/api/bootstrap", "/api/clients", "/api/settings"]) {
     const response = await request.get(path);
@@ -9,8 +16,8 @@ test("anonymous users cannot read clinic data", async ({ request }) => {
 
 test("an authenticated owner can open a scoped workspace and sign out", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("owner@mace.test");
-  await page.getByLabel("Password").fill(process.env.SEED_STAFF_PASSWORD || "Mace2026!");
+  await page.getByLabel("Email").fill(ownerEmail);
+  await page.getByLabel("Password").fill(ownerPassword);
   const loginResponse = page.waitForResponse((response) => response.url().endsWith("/api/auth/login") && response.request().method() === "POST");
   await page.getByRole("button", { name: /sign in securely/i }).click();
   expect((await loginResponse).status()).toBe(200);
@@ -22,9 +29,9 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     accountMenu.waitFor({ state: "visible" }),
   ]);
   if (await passwordHeading.isVisible()) {
-    await page.getByLabel("Temporary password").fill(process.env.SEED_STAFF_PASSWORD || "Mace2026!");
-    await page.getByLabel("New password", { exact: true }).fill("Mace2026!ReleaseSafe");
-    await page.getByLabel("Confirm new password").fill("Mace2026!ReleaseSafe");
+    await page.getByLabel("Temporary password").fill(ownerPassword);
+    await page.getByLabel("New password", { exact: true }).fill("ReleaseSafe2026!Owner");
+    await page.getByLabel("Confirm new password").fill("ReleaseSafe2026!Owner");
     const passwordResponse = page.waitForResponse((response) => response.url().endsWith("/api/auth/change-password") && response.request().method() === "POST");
     await page.getByRole("button", { name: /save private password/i }).click();
     expect((await passwordResponse).status()).toBe(200);

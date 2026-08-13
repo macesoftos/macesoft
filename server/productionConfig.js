@@ -38,7 +38,6 @@ export function productionConfigErrors(environment = process.env) {
   if (smtpConfigured[1] && /example\.(?:com|test)/i.test(String(environment.SMTP_FROM || ""))) {
     errors.push("SMTP_FROM must use a real clinic mailbox in production.");
   }
-  if (enabled(environment.ENABLE_DEMO_ACCOUNTS)) errors.push("ENABLE_DEMO_ACCOUNTS must be false in production.");
   if (enabled(environment.API_ALLOW_TRUSTED_HEADERS)) errors.push("API_ALLOW_TRUSTED_HEADERS is forbidden in production.");
   if (enabled(environment.MARKETING_DRY_RUN)) errors.push("MARKETING_DRY_RUN must be false in production.");
   if (disabled(environment.DATABASE_SSL_REJECT_UNAUTHORIZED)) {
