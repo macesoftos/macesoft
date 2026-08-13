@@ -172,12 +172,16 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     await roomAction.click();
     const deleteMenu = page.getByRole("menu", { name: "Consult Room actions" });
     await expect(deleteMenu).toBeVisible();
+    const roomActionBox = await roomAction.boundingBox();
     const deleteMenuBox = await deleteMenu.boundingBox();
+    expect(roomActionBox).not.toBeNull();
     expect(deleteMenuBox).not.toBeNull();
-    if (!deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
+    if (!roomActionBox || !deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
     expect(deleteMenuBox.x).toBeGreaterThanOrEqual(0);
     expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(viewport.width);
     expect(deleteMenuBox.y + deleteMenuBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(deleteMenuBox.x).toBeLessThan(roomActionBox.x);
+    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(roomActionBox.x + roomActionBox.width + 1);
     await page.keyboard.press("Escape");
 
     await createTrigger.click();

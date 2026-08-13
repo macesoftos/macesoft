@@ -6260,9 +6260,9 @@ td .inline-actions { flex-wrap: nowrap; }
 .room-row-dropdown {
   position: absolute;
   top: calc(100% + 5px);
-  left: 0;
+  right: 0;
   z-index: 12;
-  width: 170px;
+  width: 138px;
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -6283,6 +6283,7 @@ td .inline-actions { flex-wrap: nowrap; }
   color: var(--danger);
   font-size: 0.78rem;
   font-weight: 750;
+  white-space: nowrap;
   text-align: left;
 }
 
