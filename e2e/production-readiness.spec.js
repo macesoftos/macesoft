@@ -45,6 +45,57 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   });
   expect(authorization).toEqual({ status: 200, hasClients: true });
 
+  await page.goto("/#/appointments");
+  await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
+
+  const createTrigger = page.getByRole("button", { name: "Create new" });
+  await createTrigger.focus();
+  await page.keyboard.press("ArrowDown");
+  const createMenu = page.getByRole("menu", { name: "Create new" });
+  const newAppointmentAction = createMenu.getByRole("menuitem", { name: "New appointment" });
+  const newClientAction = createMenu.getByRole("menuitem", { name: "New client" });
+  await expect(createMenu).toBeVisible();
+  await expect(newAppointmentAction).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(newClientAction).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(createMenu).toBeHidden();
+  await expect(createTrigger).toBeFocused();
+
+  await createTrigger.click();
+  await newAppointmentAction.click();
+  await expect(page.getByRole("dialog", { name: "New appointment" })).toBeVisible();
+  await page.getByRole("button", { name: "Close form" }).click();
+
+  await page.goto("/#/clients");
+  await createTrigger.click();
+  await expect(createMenu.getByRole("menuitem", { name: "New client" })).toBeVisible();
+  await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/#/appointments");
+    await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
+    await createTrigger.click();
+    await expect(createMenu).toBeVisible();
+    const menuBox = await createMenu.boundingBox();
+    expect(menuBox).not.toBeNull();
+    if (!menuBox) throw new Error("Create menu did not produce a visible bounding box.");
+    expect(menuBox.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
+    await page.keyboard.press("Escape");
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.goto("/#/support");
+  await expect(page.getByRole("button", { name: "Create new" })).toHaveCount(0);
+
   const serviceId = `svc-e2e-${Date.now()}`;
   const serviceCreation = await page.evaluate(async (id) => {
     const response = await fetch("/api/resources/services", {

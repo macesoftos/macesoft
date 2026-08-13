@@ -74,6 +74,8 @@ import {
 } from "./data";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
+import { getGlobalCreateActions } from "./config/globalActions.js";
+import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
 import {
@@ -661,6 +663,8 @@ function App() {
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [modal, setModal] = useState(null);
+  const [appointmentCreateDate, setAppointmentCreateDate] = useState(() => todayDate());
+  const [branchCreateRequest, setBranchCreateRequest] = useState(0);
   const [confirm, setConfirm] = useState(null);
   const [toast, setToast] = useState(null);
   const [receiptToPrint, setReceiptToPrint] = useState(null);
@@ -697,6 +701,15 @@ function App() {
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
   const posTouchStartRef = useRef(null);
   const posChromeHideTimerRef = useRef(0);
+  const globalCreateActions = useMemo(
+    () => getGlobalCreateActions({
+      moduleId: activeModule,
+      sessionModules,
+      canManageOrganization: canManageOrganization(session?.role),
+      context: { appointmentDate: appointmentCreateDate },
+    }),
+    [activeModule, appointmentCreateDate, session?.role, sessionModules],
+  );
 
   useEffect(() => {
     try {
@@ -1296,6 +1309,14 @@ function App() {
 
   function openModal(type, payload = {}) {
     setModal({ type, payload });
+  }
+
+  function handleGlobalCreateAction(action) {
+    if (action.handler === "branch-create") {
+      setBranchCreateRequest((current) => current + 1);
+      return;
+    }
+    if (action.modal) openModal(action.modal, action.payload ?? {});
   }
 
   function closeModal() {
@@ -2066,6 +2087,7 @@ function App() {
               />
             </div>
             <div className="topbar-actions">
+              <GlobalCreateMenu actions={globalCreateActions} onSelect={handleGlobalCreateAction} />
               <label className="search-box">
                 <Search size={17} aria-hidden="true" />
                 <input
@@ -2214,6 +2236,7 @@ function App() {
               openPayment={(draft) => openModal("payment", draft)}
               onPrintReceipt={printReceipt}
               globalSearch={globalSearch}
+              onCreateDateChange={setAppointmentCreateDate}
             />
           )}
           {activeModule === "clients" && (
@@ -2333,6 +2356,8 @@ function App() {
               onUpdateBranch={updateBranch}
               onDeleteBranch={deleteBranch}
               onManageCompany={() => openModal("settings", settings)}
+              createRequest={branchCreateRequest}
+              onCreateRequestHandled={setBranchCreateRequest}
             />
           )}
           {activeModule === "expenses" && (
@@ -4965,11 +4990,7 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
               <LayoutGrid size={16} aria-hidden="true" /> Grid
             </button>
           </div>
-          {canManageAppointments ? (
-            <button className="primary-button card-view-add-button" type="button" onClick={() => openModal("appointment")}>
-              <Plus size={18} aria-hidden="true" /> New Card
-            </button>
-          ) : (
+          {!canManageAppointments && (
             <span className="card-view-read-only" title="Your role can view cards but cannot change appointments.">
               <LockKeyhole size={16} aria-hidden="true" /> View only
             </span>
@@ -6115,6 +6136,7 @@ function AppointmentsModule({
   openPayment,
   onPrintReceipt,
   globalSearch,
+  onCreateDateChange,
 }) {
   const defaultFilters = {
     status: "All",
@@ -6278,16 +6300,10 @@ function AppointmentsModule({
     .filter((room) => normalizedFilters.room === "All" || room === normalizedFilters.room)
     .map((room) => ({ key: room, label: room, subtitle: dayRows.some((item) => item.room === room) ? "Scheduled" : "Available", assignment: { room } }));
   const today = todayDate();
-  const todaysAppointments = appointments.filter((item) => item.date === today);
-  const todayWaiting = todaysAppointments.filter((item) => ["Arrived", "Checked In"].includes(canonicalAppointmentStatus(item.status)));
-  const todayInTreatment = todaysAppointments.filter((item) => canonicalAppointmentStatus(item.status) === "In Treatment");
-  const todayCompleted = todaysAppointments.filter((item) => canonicalAppointmentStatus(item.status) === "Completed");
-  const todayRevenue = transactions.filter((item) => item.date === today && item.status !== "Void").reduce((sum, item) => sum + Number(item.total || 0), 0);
-  const todayNeedsPayment = todaysAppointments.filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
-  const roomsOccupied = roomOptions.filter((room) => todaysAppointments.some((item) => item.room === room && isActiveAppointmentStatus(item.status))).length;
-  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-  const waitValues = todayWaiting.map((item) => Math.max(0, nowMinutes - parseTimeToMinutes(item.time)));
-  const averageWait = waitValues.length ? Math.round(waitValues.reduce((sum, value) => sum + value, 0) / waitValues.length) : 0;
+
+  useEffect(() => {
+    onCreateDateChange?.(selectedDate);
+  }, [onCreateDateChange, selectedDate]);
 
   useEffect(() => {
     const parsed = new Date(`${selectedDate}T12:00:00`);
@@ -6427,24 +6443,6 @@ function AppointmentsModule({
 
   return (
     <section className="appointments-workspace appointment-scheduler-redesign">
-      <div className="surface-panel appointment-command-panel">
-        <div className="appointment-command-header">
-          <div><h2>Manage the clinic schedule</h2><span>Find patients, move visits forward, and resolve issues quickly.</span></div>
-          <div className="appointment-command-actions">
-            <button className="secondary-button" type="button" onClick={() => openModal("client")}><Users size={17} /> New client</button>
-            <button className="primary-button" type="button" onClick={() => openModal("appointment", { status: "Draft", date: selectedDate })}><Plus size={17} /> New appointment</button>
-          </div>
-        </div>
-        <div className="appointment-metrics-strip" aria-label="Live appointment metrics">
-          <button type="button" onClick={() => selectDate(today)}><span>Today</span><strong>{todaysAppointments.length}</strong><small>{todayCompleted.length} completed</small></button>
-          <button type="button" onClick={() => { selectDate(today); setView("Kanban"); }}><span>Waiting</span><strong>{todayWaiting.length}</strong><small>{averageWait ? `${averageWait} min average` : "No wait"}</small></button>
-          <button type="button" onClick={() => { selectDate(today); setView("Kanban"); }}><span>In treatment</span><strong>{todayInTreatment.length}</strong><small>active now</small></button>
-          <button type="button" onClick={() => { selectDate(today); setView("Kanban"); }}><span>Needs payment</span><strong>{todayNeedsPayment.length}</strong><small>{money.format(todayNeedsPayment.reduce((sum, item) => sum + appointmentPaymentSummary(item, services, transactions).due, 0))} due</small></button>
-          <div><span>Revenue today</span><strong>{money.format(todayRevenue)}</strong><small>posted payments</small></div>
-          <div><span>Capacity</span><strong>{Math.max(0, practitionerResources.length - todayInTreatment.length)} doctors</strong><small>{roomsOccupied}/{roomOptions.length} rooms occupied</small></div>
-        </div>
-      </div>
-
       <div className="surface-panel appointment-filter-panel">
         <div className="appointment-filter-panel-heading">
           <div className="appointment-filter-heading-copy">
@@ -7125,9 +7123,6 @@ function ClientsModule({
             >
               <Download size={16} aria-hidden="true" /> {selectedClients.length ? "Export selected" : "Export"}
             </button>
-            <button className="primary-button" type="button" onClick={() => openModal("client")}>
-              <Plus size={16} aria-hidden="true" /> New client
-            </button>
           </div>
         </div>
 
@@ -7243,9 +7238,7 @@ function ClientsModule({
           <div className="clients-empty-state">
             <EmptyState
               title="No clients found"
-              copy="Adjust the search or branch filter, or add a new client record."
-              actionLabel="Add client"
-              onAction={() => openModal("client")}
+              copy="Adjust the search or branch filter, or use Create new in the header."
             />
           </div>
         )}
@@ -7368,9 +7361,6 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
     <section className="module-grid two">
       <div className="surface-panel wide">
         <SectionHeader icon={HeartPulse} title="Treatment Records" action={`${treatments.length} records`} />
-        <button className="primary-button small" type="button" onClick={() => openModal("treatment")}>
-          <Plus size={16} /> New treatment record
-        </button>
         <div className="treatment-list">
           {treatments.map((record) => (
             <article className="treatment-card" key={record.id}>
@@ -7478,9 +7468,6 @@ function ServicesModule({ services, openModal, toggleService }) {
               <LayoutGrid size={15} aria-hidden="true" /> Grid
             </button>
           </div>
-          <button className="primary-button small" type="button" onClick={() => openModal("service")}>
-            <Plus size={16} /> Add service
-          </button>
         </div>
         <div className={`service-grid management ${catalogView === "list" ? "list-view" : "grid-view"}`}>
           {filtered.map((service) => (
@@ -7514,9 +7501,6 @@ function InventoryModule({ inventory, movements, receiveStock, openModal, global
           globalSearch={globalSearch}
           toolbarActions={(
             <>
-              <button className="primary-button small" type="button" onClick={() => openModal("inventory")}>
-                <Plus size={16} /> Add product
-              </button>
               <button className="secondary-button small" type="button" onClick={() => openModal("inventory")}>
                 <PackagePlus size={16} /> Receive stock
               </button>
@@ -7570,9 +7554,6 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
     <section className="module-grid two">
       <div className="surface-panel wide">
         <SectionHeader icon={Gift} title="Packages and Sessions" action={`${packages.length} packages`} />
-        <button className="primary-button small" type="button" onClick={() => openModal("package")}>
-          <Plus size={16} /> Sell package
-        </button>
         <div className="package-list">
           {packages.map((pkg) => (
             <article className="package-card" key={pkg.id}>
@@ -7963,9 +7944,6 @@ function LeadsModule({
           <button className="secondary-button" type="button" disabled={!filteredLeads.length} onClick={() => downloadCsv("mace-leads.csv", filteredLeads, exportColumns)}>
             <Download size={16} aria-hidden="true" /> Export
           </button>
-          <button className="primary-button" type="button" onClick={() => openModal("lead")}>
-            <Plus size={16} aria-hidden="true" /> Add Lead
-          </button>
         </div>
       </div>
 
@@ -8103,9 +8081,7 @@ function LeadsModule({
           <div className="leads-empty-state">
             <EmptyState
               title="No leads found."
-              copy="Adjust the search or filters, or add a new lead to get started."
-              actionLabel="Add Lead"
-              onAction={() => openModal("lead")}
+              copy="Adjust the search or filters, or use Create new in the header."
             />
           </div>
         )}
@@ -8587,14 +8563,6 @@ function MarketingModule({ templates, campaigns, settings, openModal, sendCampai
     <section className="module-grid two">
       <div className="surface-panel wide">
         <SectionHeader icon={MessageSquareText} title="SMS Marketing and Reminders" action={`${settings.smsCredits} credits`} />
-        <div className="toolbar-row">
-          <button className="primary-button small" type="button" onClick={() => openModal("campaign")}>
-            <Plus size={16} /> New campaign
-          </button>
-          <button className="secondary-button small" type="button" onClick={() => openModal("campaign", { channel: "Email" })}>
-            <Mail size={16} /> New email
-          </button>
-        </div>
         <SmartTable
           rows={campaigns}
           globalSearch={globalSearch}
@@ -8828,7 +8796,6 @@ function StaffModule({ staff, session, setSession, openModal, toggleAttendance, 
           toolbarActions={(
             <div className="inline-actions">
               {canInvite && <button className="primary-button small" type="button" onClick={() => setShowInvite(true)}><Mail size={16} /> Invite member</button>}
-              <button className="secondary-button small" type="button" onClick={() => openModal("staff")}><Plus size={16} /> Add staff</button>
             </div>
           )}
           columns={[
@@ -8954,7 +8921,7 @@ function AcceptInvitationScreen({ token }) {
   </form></section></main>;
 }
 
-function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, canDelete, onCreateBranch, onUpdateBranch, onDeleteBranch, onManageCompany }) {
+function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, canDelete, onCreateBranch, onUpdateBranch, onDeleteBranch, onManageCompany, createRequest = 0, onCreateRequestHandled }) {
   const [showCreate, setShowCreate] = useState(false);
   const [branchToEdit, setBranchToEdit] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -8977,10 +8944,15 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     setShowCreate(false);
   }
 
-  function openCreate() {
-    resetEditor();
+  useEffect(() => {
+    if (!createRequest || !canManage) return;
+    setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+    setPhotoError("");
+    setSaveError("");
+    setBranchToEdit(null);
     setShowCreate(true);
-  }
+    onCreateRequestHandled?.(0);
+  }, [canManage, createRequest, onCreateRequestHandled]);
 
   function openEdit(branch) {
     setForm({
@@ -9088,7 +9060,6 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
         {canManage && (
           <div className="branch-organization-actions">
             <button className="ghost-button" type="button" onClick={onManageCompany}><Settings size={17} /> Add / edit company</button>
-            <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add branch</button>
           </div>
         )}
       </div>
@@ -9110,7 +9081,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             <span><b>2</b> Assign rooms and staff</span>
             <span><b>3</b> Start branch operations</span>
           </div>
-          {canManage && <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add first branch</button>}
+          {canManage && <span className="helper-text">Use Create new in the header to add the first branch.</span>}
         </div>
       ) : (
         <div className="branch-grid">
@@ -9210,9 +9181,6 @@ function ExpensesModule({ expenses, openModal, globalSearch }) {
     <section className="module-grid two">
       <div className="surface-panel wide">
         <SectionHeader icon={ReceiptText} title="Expense Tracking" action={`${expenses.length} records`} />
-        <button className="primary-button small" type="button" onClick={() => openModal("expense")}>
-          <Plus size={16} /> Record expense
-        </button>
         <SmartTable
           rows={expenses}
           globalSearch={globalSearch}
