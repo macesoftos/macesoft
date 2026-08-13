@@ -47,6 +47,16 @@ test("real API denies private data reads before touching the database", async ()
 
     const settings = await fetch(`${baseUrl}/api/settings`);
     assert.equal(settings.status, 401);
+
+    const forgotPassword = await fetch(`${baseUrl}/api/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({ email: "admin@clinic.example.ph" }),
+    });
+    assert.equal(forgotPassword.status, 503);
+    assert.deepEqual(await forgotPassword.json(), {
+      error: "Password-reset email is not configured. Contact the system administrator.",
+    });
   } finally {
     api.kill("SIGTERM");
     await new Promise((resolve) => api.once("exit", resolve));

@@ -2895,6 +2895,7 @@ function LoginScreen({ onLogin, settings }) {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
 
   async function submit(event) {
@@ -2913,14 +2914,14 @@ function LoginScreen({ onLogin, settings }) {
   async function sendReset() {
     setError("");
     setForgotMessage("");
-    setSubmitting(true);
+    setResetSubmitting(true);
     try {
       const result = await requestPasswordReset(email);
       setForgotMessage(result.message);
     } catch (resetError) {
       setError(resetError.message || "Unable to request a password reset.");
     } finally {
-      setSubmitting(false);
+      setResetSubmitting(false);
     }
   }
 
@@ -2950,7 +2951,7 @@ function LoginScreen({ onLogin, settings }) {
             Forgot password
           </button>
           {forgotOpen && (
-            <div className="inline-state warning"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || submitting} onClick={sendReset}>Send reset link</button></div>
+            <div className="inline-state warning" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
         </form>
       </section>

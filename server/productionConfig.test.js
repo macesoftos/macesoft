@@ -21,6 +21,8 @@ test("production fails closed for insecure or incomplete configuration", () => {
   assert.ok(errors.some((error) => error.includes("32 characters")));
   assert.ok(errors.some((error) => error.includes("forbidden")));
   assert.ok(errors.some((error) => error.includes("STORAGE_BASE_URL")));
+  assert.ok(errors.some((error) => error.includes("SMTP_HOST")));
+  assert.ok(errors.some((error) => error.includes("SMTP_PASS")));
 });
 
 test("secure production configuration passes", () => {
@@ -37,6 +39,29 @@ test("secure production configuration passes", () => {
     STORAGE_BASE_URL: "https://storage.example.ph",
     STORAGE_BUCKET: "clinical-assets",
     STORAGE_SERVICE_KEY: "secret",
+    SMTP_HOST: "smtp.mail.example",
+    SMTP_FROM: "MACE ClinicOS <no-reply@clinic.example.ph>",
+    SMTP_USER: "no-reply@clinic.example.ph",
+    SMTP_PASS: "mailbox-secret",
   });
   assert.deepEqual(errors, []);
+});
+
+test("production rejects placeholder password-reset senders", () => {
+  const errors = productionConfigErrors({
+    NODE_ENV: "production",
+    APP_ORIGIN: "https://clinic.example.ph",
+    DATABASE_URL: "postgresql://runtime",
+    DIRECT_URL: "postgresql://direct",
+    FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: "true",
+    STORAGE_BASE_URL: "https://storage.example.ph",
+    STORAGE_BUCKET: "clinical-assets",
+    STORAGE_SERVICE_KEY: "secret",
+    SMTP_HOST: "smtp.mail.example",
+    SMTP_FROM: "MACE ClinicOS <no-reply@example.com>",
+    SMTP_USER: "no-reply@example.com",
+    SMTP_PASS: "mailbox-secret",
+  });
+  assert.ok(errors.some((error) => error.includes("real clinic mailbox")));
 });
