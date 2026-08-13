@@ -3524,6 +3524,14 @@ img { max-width: 100%; }
   text-align: right;
 }
 
+.print-receipt-payments span small {
+  display: block;
+  margin-top: 2px;
+  color: #666;
+  font-size: 9px;
+  font-weight: 600;
+}
+
 .print-receipt-table {
   width: 100%;
   border-collapse: collapse;

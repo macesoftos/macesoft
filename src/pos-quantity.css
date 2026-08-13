@@ -1439,6 +1439,46 @@
   font-weight: var(--font-weight-bold);
 }
 
+.payment-modal .payment-reference-field {
+  display: grid;
+  gap: 7px;
+}
+
+.payment-modal .payment-reference-field > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.payment-modal .payment-reference-field > span small {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0;
+  opacity: 0.8;
+}
+
+.payment-modal .payment-reference-field input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+  outline: 0;
+}
+
+.payment-modal .payment-reference-field input:focus {
+  border-color: rgba(109, 75, 60, 0.52);
+  box-shadow: 0 0 0 3px rgba(109, 75, 60, 0.08);
+}
+
 .payment-modal .receipt-preview {
   gap: 10px 16px;
   padding: 14px;
