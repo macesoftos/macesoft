@@ -4,7 +4,7 @@
  */
 
 :root {
-  --font-sans: "Roboto", Arial, sans-serif;
+  --font-sans: "Inter", Arial, sans-serif;
   --font-sans-fallback: Arial, sans-serif;
   --font-family-primary: var(--font-sans, var(--font-sans-fallback));
   --font-size-xs: 12px;
