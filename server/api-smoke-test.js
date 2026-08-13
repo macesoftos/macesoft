@@ -89,7 +89,7 @@ try {
   const unauthorized = await request("/api/resources/clients", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fullName: "Unauthorized Smoke", branch: "Mace BGC" }),
+    body: JSON.stringify({ fullName: "Unauthorized Smoke", branch: "Mace Davao" }),
   });
   assert(unauthorized.response.status === 401, "unauthorized client create was not blocked");
 
@@ -106,7 +106,7 @@ try {
     price: 1500,
     commission: "",
     consumables: [],
-    branches: ["Mace BGC"],
+    branches: ["Mace Davao"],
     staff: ["Doctor"],
     room: "Room 1",
     active: true,
@@ -122,7 +122,7 @@ try {
     fullName: "Automated Smoke Client",
     mobile: `0999${suffix.slice(-6)}`,
     email: "automated-smoke@example.test",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     source: "Automated smoke test",
     marketingOptIn: true,
   });
@@ -133,7 +133,7 @@ try {
     fullName: "Automated Smoke Client Updated",
     mobile: createdClient.payload.record.mobile,
     email: "automated-smoke@example.test",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     source: "Automated smoke test",
     marketingOptIn: false,
   }, { method: "PUT" });
@@ -146,7 +146,7 @@ try {
     time: "10:30",
     clientId,
     serviceId,
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     room: "Room 1",
     staff: "Dr. Mace",
     status: "Pending",
@@ -160,7 +160,7 @@ try {
     time: "10:30",
     clientId,
     serviceId,
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     room: "Room 1",
     staff: "Dr. Mace",
     status: "Pending",
@@ -175,7 +175,7 @@ try {
     phone_number: leadMobile,
     email_address: `lead-${suffix}@example.test`,
     preferred_service: "Aesthetic Consultation",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     campaign: "Smoke Test Campaign",
     consent_source: "Smoke form",
     privacy_consent: true,
@@ -256,7 +256,7 @@ try {
   const impossibleCheckout = await jsonRequest("/api/pos/checkout", {
     draft: {
       clientName: "Automated Smoke Client Updated",
-      branch: "Mace BGC",
+      branch: "Mace Davao",
       staff: "Dr. Mace",
       invoicePrefix: "MACE",
       cart: [
@@ -279,7 +279,7 @@ try {
   const certificateCreate = await jsonRequest("/api/resources/giftCertificates", {
     code: `GC-SMOKE-${suffix}`,
     client: "Automated Smoke Client Updated",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     balance: 800,
     expires: "",
     status: "Active",
@@ -294,7 +294,7 @@ try {
     sessions: 2,
     used: 0,
     expires: "",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     status: "Active",
     price: 0,
   });
@@ -309,7 +309,7 @@ try {
   const tenderCart = {
     clientId,
     clientName: "Automated Smoke Client Updated",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     staff: "Dr. Mace",
     invoicePrefix: "MACE",
     cart: [

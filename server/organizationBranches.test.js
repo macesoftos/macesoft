@@ -4,14 +4,14 @@ import { nextRoomNames, renameBranchReferences, renameServiceBranches } from "./
 
 test("branch service assignments are renamed without duplicates", () => {
   assert.equal(
-    renameServiceBranches(JSON.stringify(["Mace BGC", "Mace Davao"]), "Mace BGC", "Mace Makati"),
+    renameServiceBranches(JSON.stringify(["Mace Cebu", "Mace Davao"]), "Mace Cebu", "Mace Makati"),
     JSON.stringify(["Mace Makati", "Mace Davao"]),
   );
   assert.equal(
-    renameServiceBranches(JSON.stringify(["Mace BGC", "Mace Makati"]), "Mace BGC", "Mace Makati"),
+    renameServiceBranches(JSON.stringify(["Mace Cebu", "Mace Makati"]), "Mace Cebu", "Mace Makati"),
     JSON.stringify(["Mace Makati"]),
   );
-  assert.equal(renameServiceBranches(JSON.stringify(["Mace Davao"]), "Mace BGC", "Mace Makati"), null);
+  assert.equal(renameServiceBranches(JSON.stringify(["Mace Davao"]), "Mace Cebu", "Mace Makati"), null);
 });
 
 test("new room names skip names already used by the branch", () => {
@@ -46,18 +46,18 @@ test("renaming a branch migrates every direct assignment and service list", asyn
     uploadAsset: model("uploadAsset"),
     service: {
       findMany: async () => [
-        { id: "svc-1", branches: JSON.stringify(["Mace BGC", "Mace Davao"]) },
+        { id: "svc-1", branches: JSON.stringify(["Mace Cebu", "Mace Davao"]) },
         { id: "svc-2", branches: JSON.stringify(["Mace Davao"]) },
       ],
       update: async (args) => calls.push({ name: "service", method: "update", args }),
     },
   };
 
-  await renameBranchReferences(database, "Mace BGC", "Mace Makati");
+  await renameBranchReferences(database, "Mace Cebu", "Mace Makati");
 
   assert.equal(calls.filter((call) => call.method === "updateMany").length, 17);
   assert.deepEqual(calls.find((call) => call.name === "client").args, {
-    where: { branch: "Mace BGC" },
+    where: { branch: "Mace Cebu" },
     data: { branch: "Mace Makati" },
   });
   assert.equal(calls.filter((call) => call.name === "lead").length, 2);
