@@ -10436,6 +10436,7 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showTimezoneSelect, setShowTimezoneSelect] = useState(false);
   const selectedService = services.find((item) => item.id === form.serviceId);
   const selectedBranch = branches.find((item) => item.name === form.branch);
   const availableRooms = selectedBranch?.rooms || uniqueRoomsFromBranches();
@@ -10487,14 +10488,14 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
     <div className="modal-backdrop appointment-modal-backdrop" role="dialog" aria-modal="true" aria-label={payload?.id ? "Edit appointment" : "New appointment"}>
       <form className="appointment-booking-drawer" onSubmit={(event) => submit(event, "Pending Confirmation")}>
         <header className="appointment-booking-header">
-          <div><p className="eyebrow">Appointments</p><h2>{payload?.id ? "Edit appointment" : "New appointment"}</h2><span>Choose the patient, treatment, and an available clinic resource.</span></div>
+          <div><p className="eyebrow">Appointments</p><h2>{payload?.id ? "Edit appointment" : "New appointment"}</h2><span>Choose the patient, treatment and schedule.</span></div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close form"><X size={19} /></button>
         </header>
         <div className="appointment-booking-body">
           {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
           <section className="booking-form-section"><div className="booking-step">1</div><div className="booking-section-content"><h3>Client and service</h3>
             <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">Search or select a client</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
-            <div className="booking-two-column"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">Select a service</option>{services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
+            <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">Select a service</option>{services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
             <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
             {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{money.format(selectedService.price || 0)}</strong></div>}
             {patientPackages.length > 0 && <label className="stacked-field"><span>Package / membership</span><select value={form.packageName} onChange={(event) => update("packageName", event.target.value)}><option value="">Pay per visit</option>{patientPackages.map((item) => <option value={item.name} key={item.id}>{item.name} · {item.remaining ?? item.balance ?? 0} remaining</option>)}</select></label>}
@@ -10503,9 +10504,8 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
             <label className="stacked-field"><span>Date <RequiredMark /></span><input aria-label="Date, required" type="date" value={form.date} onChange={(event) => update("date", event.target.value)} /></label>
             <label className="stacked-field"><span>Time <RequiredMark /></span><input aria-label="Time, required" type="time" step="900" value={form.time} onChange={(event) => update("time", event.target.value)} /></label>
             <label className="stacked-field"><span>Duration</span><select value={form.duration} onChange={(event) => update("duration", Number(event.target.value))}>{[15, 30, 45, 60, 75, 90, 120, 180].map((minutes) => <option value={minutes} key={minutes}>{minutes} minutes</option>)}</select></label>
-            <label className="stacked-field"><span>Timezone</span><select value={form.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Manila">Asia/Manila (GMT+8)</option><option value="Asia/Singapore">Asia/Singapore (GMT+8)</option></select></label>
             <label className="stacked-field"><span>Branch <RequiredMark /></span><select aria-label="Branch, required" value={form.branch} onChange={(event) => update("branch", event.target.value)}>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select></label>
-          </div></div></section>
+          </div><div className="booking-timezone-row"><span><strong>Timezone:</strong> {form.timezone === "Asia/Singapore" ? "Asia/Singapore (GMT+8)" : "Asia/Manila (GMT+8)"}</span><button type="button" onClick={() => setShowTimezoneSelect((current) => !current)}>{showTimezoneSelect ? "Done" : "Change"}</button>{showTimezoneSelect && <select aria-label="Timezone" value={form.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Manila">Asia/Manila (GMT+8)</option><option value="Asia/Singapore">Asia/Singapore (GMT+8)</option></select>}</div></div></section>
           <section className="booking-form-section"><div className="booking-step">3</div><div className="booking-section-content"><h3>Staff and room</h3><div className="booking-two-column">
             <label className="stacked-field"><span>Staff <RequiredMark /></span><select aria-label="Staff, required" value={form.staff} onChange={(event) => update("staff", event.target.value)}><option value="">Select available staff</option>{availableStaff.map((person) => <option key={person.id || person.name}>{person.name}</option>)}</select></label>
             <label className="stacked-field"><span>Room <RequiredMark /></span><select aria-label="Room, required" value={form.room} onChange={(event) => update("room", event.target.value)}><option value="">Select a room</option>{availableRooms.map((room) => <option key={room}>{room}</option>)}</select></label>

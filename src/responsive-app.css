@@ -3285,7 +3285,10 @@ button:active {
   .appointment-date-navigator .date-title small { display: none; }
   .booking-two-column { grid-template-columns: 1fr; }
   .booking-two-column label:last-child:nth-child(3) { grid-column: auto; }
-  .appointment-booking-actions { align-items: stretch; flex-direction: column-reverse; }
+  .booking-form-section { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding-top: 15px; padding-bottom: 13px; }
+  .appointment-booking-header { padding-top: 16px; padding-bottom: 14px; }
+  .appointment-booking-body { padding-bottom: 24px; }
+  .appointment-booking-actions { align-items: stretch; flex-direction: column-reverse; padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   .appointment-booking-actions > div { display: grid; grid-template-columns: 1fr 1.4fr; }
 }
 
