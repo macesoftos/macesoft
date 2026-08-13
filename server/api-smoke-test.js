@@ -253,6 +253,44 @@ try {
   });
   assert(duplicateConversion.response.status === 409, "duplicate conversion was not blocked");
 
+  const staffLinkId = `st-smoke-${suffix}`;
+  const createdStaff = await jsonRequest("/api/resources/staff", {
+    id: staffLinkId,
+    name: `Automated Smoke Staff ${suffix}`,
+    role: "Doctor",
+    branch: "Mace BGC",
+    commissionRate: 0,
+  });
+  assert(createdStaff.response.status === 201, "staff create failed");
+
+  const accountList = await request("/api/accounts", { headers: ownerHeaders });
+  assert(accountList.response.ok, "account list failed");
+  assert(Array.isArray(accountList.payload.accounts), "account list did not return accounts");
+
+  const missingStaffLink = await jsonRequest("/api/staff/st-does-not-exist/account", { accountId: "" }, { method: "PUT" });
+  assert(missingStaffLink.response.status === 404, "linking an unknown staff profile was not rejected");
+
+  const unlinkedAccount = accountList.payload.accounts.find((account) => !account.staffId);
+  if (unlinkedAccount) {
+    const linked = await jsonRequest(`/api/staff/${staffLinkId}/account`, { accountId: unlinkedAccount.id }, { method: "PUT" });
+    assert(linked.response.ok, "connecting a login to a staff profile failed");
+    assert(linked.payload.account.staffId === staffLinkId, "connected login did not record the staff profile");
+
+    const alreadyLinked = await jsonRequest(`/api/staff/${staffLinkId}/account`, { accountId: unlinkedAccount.id }, { method: "PUT" });
+    assert(alreadyLinked.response.status === 409, "reconnecting the same login was not rejected");
+
+    const unlinked = await jsonRequest(`/api/staff/${staffLinkId}/account`, { accountId: "" }, { method: "PUT" });
+    assert(unlinked.response.ok, "disconnecting a login failed");
+    assert(unlinked.payload.account.staffId === null, "disconnected login still records a staff profile");
+
+    const alreadyUnlinked = await jsonRequest(`/api/staff/${staffLinkId}/account`, { accountId: "" }, { method: "PUT" });
+    assert(alreadyUnlinked.response.status === 409, "disconnecting an unconnected staff profile was not rejected");
+  } else {
+    console.log("No unconnected login available; skipped the staff login connection round trip.");
+  }
+
+  await request(`/api/resources/staff/${staffLinkId}`, { method: "DELETE", headers: ownerHeaders });
+
   const impossibleCheckout = await jsonRequest("/api/pos/checkout", {
     draft: {
       clientName: "Automated Smoke Client Updated",

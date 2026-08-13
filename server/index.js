@@ -2257,7 +2257,11 @@ function smsReady() {
 }
 
 function emailReady() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM);
+  const host = clean(process.env.SMTP_HOST);
+  const from = clean(process.env.SMTP_FROM);
+  const user = clean(process.env.SMTP_USER);
+  const pass = clean(process.env.SMTP_PASS);
+  return Boolean(host && from && (Boolean(user) === Boolean(pass)));
 }
 
 async function sendTwilioSms({ to, body }) {
@@ -2296,7 +2300,7 @@ async function sendTwilioSms({ to, body }) {
 
 function createEmailTransport() {
   if (!emailReady()) {
-    throw apiError("Email is not configured. Add SMTP settings to .env and restart the API.", 503);
+    throw apiError("Password-reset email is not configured. Contact the system administrator.", 503);
   }
 
   const smtpPort = Number(process.env.SMTP_PORT || 587);
@@ -2307,7 +2311,22 @@ function createEmailTransport() {
     port: smtpPort,
     secure: process.env.SMTP_SECURE ? envFlag(process.env.SMTP_SECURE) : smtpPort === 465,
     auth: user || pass ? { user, pass } : undefined,
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10_000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10_000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20_000),
   });
+}
+
+async function createVerifiedEmailTransport() {
+  const transporter = createEmailTransport();
+  try {
+    await transporter.verify();
+    return transporter;
+  } catch (error) {
+    transporter.close();
+    console.error(JSON.stringify({ event: "smtp_verification_failed", error: clean(error.message) }));
+    throw apiError("Password-reset email is temporarily unavailable. Contact the system administrator.", 503);
+  }
 }
 
 async function sendSmtpEmail({ transporter, to, subject, text }) {
@@ -2318,6 +2337,10 @@ async function sendSmtpEmail({ transporter, to, subject, text }) {
     text,
     html: textToHtml(text),
   });
+
+  if (!Array.isArray(result.accepted) || result.accepted.length === 0) {
+    throw new Error("The SMTP server did not accept the email recipient.");
+  }
 
   return result.messageId;
 }
@@ -2767,30 +2790,45 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
 
 app.post("/api/auth/forgot-password", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();
-  const account = /^\S+@\S+\.\S+$/.test(email)
-    ? await prisma.account.findUnique({ where: { email } })
-    : null;
-  if (account?.status === "Active") {
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-    await prisma.$transaction([
-      prisma.passwordResetToken.deleteMany({ where: { accountId: account.id, usedAt: null } }),
-      prisma.passwordResetToken.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } }),
-    ]);
-    const origin = clean(process.env.APP_ORIGIN).split(",")[0] || `http://localhost:${port}`;
-    const resetUrl = `${origin.replace(/\/$/, "")}/?reset=${encodeURIComponent(token)}`;
-    try {
-      await sendSmtpEmail({
-        transporter: createEmailTransport(),
-        to: account.email,
-        subject: "Reset your MACE ClinicOS password",
-        text: `Use this single-use link within 30 minutes to reset your password:\n\n${resetUrl}\n\nIf you did not request this, you can ignore this email.`,
-      });
-    } catch (error) {
-      console.error(JSON.stringify({ event: "password_reset_delivery_failed", accountId: account.id, error: clean(error.message) }));
+  const transporter = await createVerifiedEmailTransport();
+  try {
+    const account = /^\S+@\S+\.\S+$/.test(email)
+      ? await prisma.account.findUnique({ where: { email } })
+      : null;
+    if (account?.status === "Active") {
+      const token = randomBytes(32).toString("base64url");
+      const tokenHash = sessionTokenHash(token);
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+      await prisma.$transaction([
+        prisma.passwordResetToken.deleteMany({ where: { accountId: account.id, usedAt: null } }),
+        prisma.passwordResetToken.create({ data: { tokenHash, accountId: account.id, expiresAt } }),
+      ]);
+      const configuredOrigin = clean(process.env.APP_ORIGIN).split(",")[0];
+      const requestOrigin = clean(request.get("origin"));
+      const localRequestOrigin = process.env.NODE_ENV !== "production" && /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(requestOrigin)
+        ? requestOrigin
+        : "";
+      const origin = configuredOrigin || localRequestOrigin || "http://127.0.0.1:5173";
+      const resetUrl = `${origin.replace(/\/$/, "")}/?reset=${encodeURIComponent(token)}`;
+      try {
+        await sendSmtpEmail({
+          transporter,
+          to: account.email,
+          subject: "Reset your MACE ClinicOS password",
+          text: `Use this single-use link within 30 minutes to reset your password:\n\n${resetUrl}\n\nIf you did not request this, you can ignore this email.`,
+        });
+      } catch (error) {
+        console.error(JSON.stringify({ event: "password_reset_delivery_failed", accountId: account.id, error: clean(error.message) }));
+        await prisma.passwordResetToken.deleteMany({ where: { tokenHash } }).catch((cleanupError) => {
+          console.error(JSON.stringify({ event: "password_reset_token_cleanup_failed", accountId: account.id, error: clean(cleanupError.message) }));
+        });
+        throw apiError("Password-reset email could not be delivered. Please try again later.", 502);
+      }
     }
+    response.status(202).json({ message: "If the account exists, a password-reset email has been sent." });
+  } finally {
+    transporter.close();
   }
-  response.status(202).json({ message: "If the account exists, a password-reset email has been sent." });
 }));
 
 app.post("/api/auth/reset-password", asyncRoute(async (request, response) => {
@@ -2949,6 +2987,68 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
     return { account, invitation: accepted };
   });
   response.json({ account: publicAccount(result.account), invitation: publicInvitation(result.invitation) });
+}));
+
+function requireStaffLinkManager(request) {
+  const account = requireAuthenticatedAccount(request);
+  if (!canManageOrganization(account.role)) {
+    throw apiError("Only an Admin or Business Owner can connect logins to staff profiles.", 403);
+  }
+  return account;
+}
+
+app.get("/api/accounts", asyncRoute(async (request, response) => {
+  requireStaffLinkManager(request);
+  const accounts = await prisma.account.findMany({ orderBy: { name: "asc" } });
+  response.json({ accounts: accounts.map(publicAccount) });
+}));
+
+app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
+  const actor = requireStaffLinkManager(request);
+  const staffId = clean(request.params.id);
+  const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
+  if (!staff) throw apiError("Staff profile not found.", 404);
+  if (!canMutateBranch(actor, staff.branch || "All branches")) {
+    throw apiError("This staff profile belongs to another branch.", 403);
+  }
+  const accountId = clean(request.body?.accountId);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const current = await tx.account.findFirst({ where: { staffId } });
+    if (current && isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) {
+      throw apiError("Only a Business Owner can change a Business Owner's login.", 403);
+    }
+
+    if (!accountId) {
+      if (!current) throw apiError("This staff profile is not connected to a login.", 409);
+      const cleared = await tx.account.update({ where: { id: current.id }, data: { staffId: null } });
+      const auditLog = await writeAudit(tx, request, {
+        area: "Access",
+        action: "Login disconnected",
+        details: `${cleared.email} disconnected from ${staff.name}.`,
+      });
+      return { account: cleared, auditLog };
+    }
+
+    const account = await tx.account.findUnique({ where: { id: accountId } });
+    if (!account) throw apiError("That login was not found.", 404);
+    if (isBusinessOwner(account.role) && !isBusinessOwner(actor.role)) {
+      throw apiError("Only a Business Owner can connect a Business Owner login.", 403);
+    }
+    if (account.staffId === staffId) throw apiError("That login is already connected to this staff profile.", 409);
+    if (account.staffId) throw apiError("That login is already connected to another staff profile.", 409);
+    if (current) throw apiError("This staff profile is already connected to another login.", 409);
+
+    const linked = await tx.account.update({ where: { id: account.id }, data: { staffId } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Access",
+      action: "Login connected",
+      details: `${linked.email} connected to ${staff.name}.`,
+    });
+    return { account: linked, auditLog };
+  });
+
+  response.json({ account: publicAccount(result.account), staff, auditLog: result.auditLog });
 }));
 
 function attendanceState(events) {
@@ -4303,9 +4403,16 @@ if (process.env.NODE_ENV === "production") {
 }
 
 app.use((error, _request, response, _next) => {
-  const status = error.status || 500;
-  const message = status === 500 ? "Clinic API failed to process the request." : error.message;
-  if (status === 500) {
+  const databaseUnavailable = !error.status && (
+    ["P1000", "P1001", "P1002", "P1003", "P1011", "P1017"].includes(error.code)
+    || error?.cause?.code === "XX000"
+    || /tenant\/user .* not found|database .* does not exist|connection (?:refused|terminated)|ENOTFOUND/i.test(`${clean(error.message)} ${clean(error?.cause?.message)}`)
+  );
+  const status = error.status || (databaseUnavailable ? 503 : 500);
+  const message = databaseUnavailable
+    ? "Clinic database is temporarily unavailable. Contact the system administrator."
+    : status === 500 ? "Clinic API failed to process the request." : error.message;
+  if (status === 500 || databaseUnavailable) {
     console.error(error);
   }
   response.status(status).json({ error: message });

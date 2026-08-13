@@ -2848,3 +2848,37 @@ td {
 .staff-management-grid .staff-actions-column .inline-actions {
   justify-content: flex-end;
 }
+
+.staff-management-grid .staff-login-column {
+  min-width: 220px;
+}
+
+.staff-login-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.staff-login-cell div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.staff-login-cell strong,
+.staff-login-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-login-empty {
+  opacity: 0.6;
+}
+
+.modal-hint {
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}

@@ -15,7 +15,16 @@ function present(environment, names, errors) {
 export function productionConfigErrors(environment = process.env) {
   if (environment.NODE_ENV !== "production") return [];
   const errors = [];
-  present(environment, ["APP_ORIGIN", "DATABASE_URL", "DIRECT_URL", "FACETRACK_ENCRYPTION_KEY"], errors);
+  present(environment, [
+    "APP_ORIGIN",
+    "DATABASE_URL",
+    "DIRECT_URL",
+    "FACETRACK_ENCRYPTION_KEY",
+    "SMTP_HOST",
+    "SMTP_FROM",
+    "SMTP_USER",
+    "SMTP_PASS",
+  ], errors);
 
   const origins = String(environment.APP_ORIGIN || "").split(",").map((value) => value.trim()).filter(Boolean);
   if (origins.some((origin) => !origin.startsWith("https://") || origin.includes("example.com"))) {
@@ -23,6 +32,9 @@ export function productionConfigErrors(environment = process.env) {
   }
   if (String(environment.FACETRACK_ENCRYPTION_KEY || "").length < 32) {
     errors.push("FACETRACK_ENCRYPTION_KEY must contain at least 32 characters.");
+  }
+  if (/example\.(?:com|test)/i.test(String(environment.SMTP_FROM || ""))) {
+    errors.push("SMTP_FROM must use a real clinic mailbox in production.");
   }
   if (enabled(environment.ENABLE_DEMO_ACCOUNTS)) errors.push("ENABLE_DEMO_ACCOUNTS must be false in production.");
   if (enabled(environment.API_ALLOW_TRUSTED_HEADERS)) errors.push("API_ALLOW_TRUSTED_HEADERS is forbidden in production.");
@@ -35,7 +47,7 @@ export function productionConfigErrors(environment = process.env) {
     present(environment, ["STORAGE_BASE_URL", "STORAGE_BUCKET", "STORAGE_SERVICE_KEY"], errors);
   }
   if (enabled(environment.REQUIRE_MARKETING_PROVIDERS)) {
-    present(environment, ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "SMTP_HOST", "SMTP_FROM"], errors);
+    present(environment, ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"], errors);
     if (!environment.TWILIO_FROM_NUMBER && !environment.TWILIO_MESSAGING_SERVICE_SID) {
       errors.push("TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID is required in production.");
     }
