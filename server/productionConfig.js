@@ -20,11 +20,13 @@ export function productionConfigErrors(environment = process.env) {
     "DATABASE_URL",
     "DIRECT_URL",
     "FACETRACK_ENCRYPTION_KEY",
-    "SMTP_HOST",
-    "SMTP_FROM",
-    "SMTP_USER",
-    "SMTP_PASS",
   ], errors);
+
+  const smtpNames = ["SMTP_HOST", "SMTP_FROM", "SMTP_USER", "SMTP_PASS"];
+  const smtpConfigured = smtpNames.map((name) => Boolean(String(environment[name] || "").trim()));
+  if (smtpConfigured.some(Boolean) && !smtpConfigured.every(Boolean)) {
+    errors.push("SMTP_HOST, SMTP_FROM, SMTP_USER, and SMTP_PASS must be configured together.");
+  }
 
   const origins = String(environment.APP_ORIGIN || "").split(",").map((value) => value.trim()).filter(Boolean);
   if (origins.some((origin) => !origin.startsWith("https://") || origin.includes("example.com"))) {
@@ -33,7 +35,7 @@ export function productionConfigErrors(environment = process.env) {
   if (String(environment.FACETRACK_ENCRYPTION_KEY || "").length < 32) {
     errors.push("FACETRACK_ENCRYPTION_KEY must contain at least 32 characters.");
   }
-  if (/example\.(?:com|test)/i.test(String(environment.SMTP_FROM || ""))) {
+  if (smtpConfigured[1] && /example\.(?:com|test)/i.test(String(environment.SMTP_FROM || ""))) {
     errors.push("SMTP_FROM must use a real clinic mailbox in production.");
   }
   if (enabled(environment.ENABLE_DEMO_ACCOUNTS)) errors.push("ENABLE_DEMO_ACCOUNTS must be false in production.");
