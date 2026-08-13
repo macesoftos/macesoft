@@ -3276,27 +3276,15 @@ td {
   position: fixed;
   inset: 0 0 0 auto;
   z-index: 140;
-  width: min(620px, 94vw);
+  width: min(548px, 94vw);
+  height: 100dvh;
   max-height: 100dvh;
   margin: 0;
-  padding: 20px;
-  overflow: auto;
-  border-radius: 14px 0 0 14px;
-  box-shadow: -20px 0 60px rgba(41, 38, 33, 0.2);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px 0 0 10px;
+  box-shadow: -12px 0 32px rgba(41, 38, 33, 0.14);
   animation: appointment-drawer-in 220ms cubic-bezier(.2,.8,.2,1) both;
-}
-
-.appointment-details-drawer .appointment-primary-actions {
-  display: flex;
-  flex-wrap: wrap;
-}
-
-.appointment-details-drawer .appointment-primary-actions .primary-button {
-  flex: 1 1 180px;
-}
-
-.appointment-details-drawer .appointment-facts-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .appointment-slot-picker {

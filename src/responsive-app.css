@@ -1830,100 +1830,31 @@
   }
 }
 
-/* Appointment details: compact responsive hierarchy. */
-@media (max-width: 980px) {
-  .appointment-detail-summary {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .appointment-detail-summary .appointment-summary-primary {
-    grid-column: 1 / -1;
-  }
-
-  .appointment-facts-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .appointment-history-section .appointment-timeline {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 640px) {
   .appointment-details-drawer {
-    gap: 12px;
-    padding: 12px;
+    width: 100vw;
+    max-width: none;
+    border-radius: 0;
   }
 
   .appointment-details-hero {
-    padding: 14px;
-  }
-
-  .appointment-patient-heading {
-    align-items: flex-start;
+    padding: 14px 16px 12px;
   }
 
   .appointment-patient-heading .client-avatar.large {
-    width: 46px;
-    height: 46px;
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
   }
 
-  .appointment-hero-meta {
-    display: grid;
-    gap: 4px;
-  }
-
-  .appointment-detail-summary,
-  .appointment-clinical-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .appointment-detail-summary .appointment-summary-primary {
-    grid-column: auto;
-  }
-
-  .appointment-detail-summary article {
-    min-height: 78px;
-  }
-
-  .appointment-primary-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .appointment-primary-actions button {
-    width: 100%;
-  }
-
-  .appointment-primary-actions .primary-button {
-    grid-column: 1 / -1;
-  }
-
-  .appointment-primary-actions .icon-only-action {
-    width: 100%;
-  }
-
-  .appointment-status-actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .appointment-status-actions > div {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .status-transition-button {
-    justify-content: center;
-  }
-
-  .appointment-facts-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .appointment-clinical-grid .mini-panel {
-    min-height: auto;
-  }
+  .appointment-details-body { padding: 14px 16px 20px; }
+  .appointment-detail-row,
+  .appointment-summary-status-row,
+  .appointment-summary-payment-row,
+  .appointment-detail-rows .appointment-detail-row { grid-template-columns: 112px minmax(0, 1fr); }
+  .appointment-disclosure-content { padding-left: 26px; }
+  .appointment-details-footer { padding-inline: 16px; }
+  .appointment-footer-main-actions button { font-size: 0.78rem; }
 }
 
 html {
@@ -3477,17 +3408,8 @@ button:active {
 
   .appointment-details-drawer {
     width: 100vw;
-    padding: 15px;
+    padding: 0;
     border-radius: 0;
-  }
-
-  .appointment-details-drawer .appointment-facts-grid,
-  .appointment-details-drawer .appointment-detail-summary {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .appointment-details-drawer .appointment-primary-actions > button {
-    flex: 1 1 calc(50% - 8px);
   }
 
   .appointment-booking-drawer {

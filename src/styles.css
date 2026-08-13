@@ -2440,44 +2440,52 @@ img { max-width: 100%; }
 }
 
 .appointment-details-drawer {
-  align-self: start;
   display: grid;
-  gap: 16px;
-  padding: 20px;
-  background: linear-gradient(180deg, #fff 0%, #fffdf9 100%);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: #fff;
 }
 
 .appointment-details-hero {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at 90% 10%, rgba(207, 190, 164, 0.28), transparent 32%),
-    linear-gradient(135deg, #fffdf9, var(--rose-soft));
+  gap: 16px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
 }
 
 .appointment-patient-heading {
   min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 14px;
+  align-items: flex-start;
+  gap: 12px;
 }
 
+.appointment-patient-heading > div:last-child { min-width: 0; }
+.appointment-patient-heading .client-avatar.large { width: 52px; height: 52px; flex: 0 0 52px; }
+
 .appointment-patient-heading h3 {
-  margin: 4px 0 7px;
+  margin: 2px 0 4px;
   color: var(--ink);
-  font-size: clamp(1.3rem, 2vw, 1.7rem);
-  line-height: 1.05;
+  font-size: 1.25rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.appointment-hero-service {
+  display: block;
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .appointment-hero-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px 12px;
+  gap: 4px 12px;
+  margin-top: 4px;
 }
 
 .appointment-hero-meta span {
@@ -2491,193 +2499,205 @@ img { max-width: 100%; }
 
 .appointment-hero-meta svg { color: var(--wine); }
 
-.appointment-detail-summary {
+.appointment-details-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px 24px;
+  overscroll-behavior: contain;
+}
+
+.appointment-compact-summary {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
-  gap: 10px;
-}
-
-.appointment-detail-summary article {
-  min-width: 0;
-  min-height: 92px;
-  display: grid;
-  align-content: center;
-  gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-}
-
-.appointment-detail-summary article > span:first-child {
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.appointment-detail-summary article > strong {
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 1rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.appointment-detail-summary article > small {
-  overflow: hidden;
-  color: var(--muted);
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.appointment-detail-summary .payment-due {
-  border-color: rgba(165, 125, 72, 0.28);
-  background: var(--gold-soft);
-}
-
-.appointment-detail-summary .payment-due > strong {
-  color: var(--wine-dark);
-  font-size: 1.25rem;
-}
-
-.appointment-detail-summary .payment-clear { background: var(--green-soft); }
-
-.appointment-primary-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.appointment-primary-actions button { min-height: 40px; }
-.appointment-primary-actions .icon-only-action { width: 42px; padding-inline: 0; }
-
-.appointment-status-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 12px;
-  border: 1px solid var(--line);
+  gap: 0;
+  padding: 4px 16px;
   border-radius: 10px;
   background: var(--paper);
 }
 
-.appointment-status-actions > span {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
+.appointment-detail-row,
+.appointment-summary-status-row,
+.appointment-summary-payment-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 126px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 9px 0;
 }
 
-.appointment-status-actions > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.appointment-compact-summary > * + *,
+.appointment-detail-rows > * + * { border-top: 1px solid rgba(221, 215, 205, 0.72); }
 
-.status-transition-button {
-  min-height: 32px;
+.appointment-detail-row > span,
+.appointment-summary-status-row > span,
+.appointment-summary-payment-row > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.appointment-detail-row > strong,
+.appointment-summary-payment-row strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.appointment-summary-status-row > div,
+.appointment-summary-payment-row > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.appointment-summary-payment-row small { color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+.appointment-payment-badge { display: inline-flex; align-items: center; width: fit-content; min-height: 24px; padding: 3px 8px; border-radius: 999px; font-size: 0.72rem !important; }
+.appointment-payment-badge.paid { background: var(--green-soft); color: var(--green); }
+.appointment-payment-badge.neutral { background: #fff; color: var(--muted); }
+
+.appointment-status-menu,
+.appointment-overflow-menu { position: relative; }
+
+.appointment-status-menu > summary,
+.appointment-overflow-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.appointment-status-menu > summary::-webkit-details-marker,
+.appointment-overflow-menu > summary::-webkit-details-marker,
+.appointment-disclosure > summary::-webkit-details-marker,
+.appointment-more-details > summary::-webkit-details-marker { display: none; }
+
+.appointment-status-menu > summary {
+  min-height: 34px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 10px;
+  padding: 0 9px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 6px;
   background: #fff;
   color: var(--wine);
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
-.status-transition-button:hover { border-color: var(--wine); background: var(--rose-soft); }
+.appointment-status-menu[open] > summary svg,
+.appointment-disclosure[open] > summary > svg,
+.appointment-more-details[open] > summary svg { transform: rotate(180deg); }
 
-.appointment-detail-section {
+.appointment-status-menu > div,
+.appointment-overflow-menu > div {
+  position: absolute;
+  right: 0;
+  z-index: 5;
   display: grid;
-  gap: 12px;
-  padding-top: 2px;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(41, 38, 33, 0.14);
 }
 
-.appointment-detail-section + .appointment-detail-section {
-  padding-top: 16px;
+.appointment-status-menu > div { top: calc(100% + 6px); }
+.appointment-overflow-menu > div { right: 0; bottom: calc(100% + 8px); }
+
+.appointment-status-menu button,
+.appointment-overflow-menu button {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.appointment-status-menu button:hover,
+.appointment-overflow-menu button:hover { background: var(--paper); }
+.appointment-status-menu button.danger,
+.appointment-overflow-menu button.danger { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; color: var(--danger); }
+
+.appointment-disclosure-list { margin-top: 16px; }
+
+.appointment-disclosure {
   border-top: 1px solid var(--line);
 }
 
-.appointment-detail-section-heading {
+.appointment-disclosure:last-child { border-bottom: 1px solid var(--line); }
+
+.appointment-disclosure > summary {
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 10px 2px;
+  list-style: none;
+  cursor: pointer;
 }
 
-.appointment-detail-section-heading > div {
+.appointment-disclosure > summary > span {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.appointment-detail-section-heading strong,
-.appointment-detail-section-heading small { display: block; }
-.appointment-detail-section-heading strong { color: var(--ink); font-size: 0.92rem; }
-.appointment-detail-section-heading small { margin-top: 2px; color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+.appointment-disclosure > summary > span > svg { color: var(--wine); }
+.appointment-disclosure > summary strong,
+.appointment-disclosure > summary small { display: block; }
+.appointment-disclosure > summary strong { color: var(--ink); font-size: 0.88rem; }
+.appointment-disclosure > summary small { margin-top: 2px; color: var(--muted); font-size: 0.72rem; font-weight: 600; }
+.appointment-disclosure > summary > svg,
+.appointment-more-details > summary svg,
+.appointment-status-menu > summary svg { flex: 0 0 auto; transition: transform 160ms ease; }
 
-.appointment-section-icon {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background: var(--gold-soft);
-  color: var(--wine);
-}
+.appointment-disclosure-content { padding: 0 2px 16px 28px; }
+.appointment-detail-rows { display: grid; }
+.appointment-detail-rows .appointment-detail-row { grid-template-columns: 138px minmax(0, 1fr); }
 
-.appointment-section-icon.clinical { background: var(--green-soft); color: var(--green); }
+.appointment-more-details { margin-top: 8px; }
+.appointment-more-details > summary { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; list-style: none; color: var(--wine); font-size: 0.78rem; font-weight: 700; cursor: pointer; }
+.appointment-more-details > .appointment-detail-rows { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 
-.appointment-facts-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.appointment-content-groups { display: grid; gap: 0; }
+.appointment-content-group { min-width: 0; padding: 12px 0; }
+.appointment-content-group + .appointment-content-group { border-top: 1px solid rgba(221, 215, 205, 0.72); }
+.appointment-content-group > strong { display: block; margin-bottom: 6px; color: var(--ink); font-size: 0.78rem; }
+.appointment-content-group p,
+.appointment-content-group small { display: block; margin: 4px 0 0; color: var(--muted); font-size: 0.78rem; line-height: 1.5; overflow-wrap: anywhere; }
 
-.appointment-facts-grid .record-item {
-  min-height: 68px;
-  padding: 11px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
-}
+.appointment-history-section .appointment-timeline { display: grid; gap: 0; }
+.appointment-history-section .appointment-timeline article { min-height: auto; padding: 12px 0; border: 0; border-radius: 0; background: transparent; }
+.appointment-history-section .appointment-timeline article + article { border-top: 1px solid rgba(221, 215, 205, 0.72); }
 
-.appointment-clinical-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.appointment-clinical-grid .mini-panel {
-  min-height: 128px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: #fff;
-}
-
-.appointment-history-section .appointment-timeline {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.appointment-history-section .appointment-timeline article {
+.appointment-details-footer {
   position: relative;
-  min-height: 110px;
-  align-content: start;
-  padding: 14px 14px 14px 18px;
-  border-radius: 10px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: #fff;
 }
 
-.appointment-history-section .appointment-timeline article::before {
-  content: "";
-  position: absolute;
-  top: 14px;
-  bottom: 14px;
-  left: 0;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--gold);
-}
+.appointment-footer-main-actions { min-width: 0; flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.appointment-footer-main-actions button { min-width: 0; min-height: 42px; padding-inline: 12px; }
+.appointment-overflow-menu > summary { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
 
 .drawer-heading {
   display: flex;
