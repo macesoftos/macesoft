@@ -1,21 +1,21 @@
 @font-face {
-  font-family: "Geist";
-  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-family: "Roboto";
+  src: url("/fonts/Roboto-Variable.woff2") format("woff2");
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Geist";
-  src: url("/fonts/Geist-Italic-Variable.woff2") format("woff2");
+  font-family: "Roboto";
+  src: url("/fonts/Roboto-Italic-Variable.woff2") format("woff2");
   font-style: italic;
   font-weight: 100 900;
   font-display: swap;
 }
 
 :root {
-  --font-sans: "Geist", Arial, sans-serif;
+  --font-sans: "Roboto", Arial, sans-serif;
   --font-sans-fallback: Arial, sans-serif;
   --font-family-primary: var(--font-sans, var(--font-sans-fallback));
   --font-size-xs: 12px;
