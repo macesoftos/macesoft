@@ -6670,7 +6670,15 @@ function AppointmentDetailsDrawer({
   const transitions = appointmentStatusTransitions[status] ?? [];
   const standardTransitions = transitions.filter((value) => value !== "Cancelled");
   const canCancel = transitions.includes("Cancelled");
-  const durationMinutes = appointmentDurationMinutes(appointment, services);
+  const recordedDuration = Number(appointment.duration) >= 15
+    ? Number(appointment.duration)
+    : Number(service?.duration) >= 15
+      ? Number(service.duration)
+      : null;
+  const appointmentTime = appointment.time
+    ? formatScheduleTime(parseTimeToMinutes(appointment.time))
+    : "Time not recorded";
+  const durationLabel = recordedDuration ? `${recordedDuration} min` : "Duration not recorded";
   const paymentLabel = payment.due > 0
     ? `${money.format(payment.due)} due`
     : payment.price > 0
@@ -6690,11 +6698,9 @@ function AppointmentDetailsDrawer({
     .filter((item) => !appointment.packageName || item.name === appointment.packageName)
     .slice(0, 4);
   const timeline = [
-    { title: "Booking created", time: appointment.createdAt, actor: "System", detail: `${appointment.service} at ${appointment.branch}` },
-    { title: `Status: ${status}`, time: appointment.updatedAt, actor: "Clinic team", detail: appointment.internalNotes || "Latest appointment state." },
     ...matchingPayments.map((transaction) => ({
       title: "Payment collected",
-      time: `${transaction.date}T${transaction.time || "00:00"}`,
+      time: transaction.time ? `${transaction.date}T${transaction.time}` : transaction.date,
       actor: transaction.staff,
       detail: `${transaction.invoice} / ${money.format(transaction.total)}`,
     })),
@@ -6719,7 +6725,7 @@ function AppointmentDetailsDrawer({
             <strong className="appointment-hero-service">{appointment.service}</strong>
             <div className="appointment-hero-meta">
               <span><CalendarDays size={14} /> {formatDate(appointment.date)}</span>
-              <span><Clock size={14} /> {formatScheduleTime(parseTimeToMinutes(appointment.time))} · {durationMinutes} min</span>
+              <span><Clock size={14} /> {appointmentTime} · {durationLabel}</span>
             </div>
           </div>
         </div>
@@ -6766,11 +6772,11 @@ function AppointmentDetailsDrawer({
                 <summary>More details <ChevronDown size={15} /></summary>
                 <div className="appointment-detail-rows">
                   <AppointmentDetailRow label="Birthday" value={client?.birthday || client?.dob || "Not recorded"} />
-                  <AppointmentDetailRow label="Patient type" value={appointment.appointmentType || "Treatment"} />
-                  <AppointmentDetailRow label="Timezone" value={appointment.timezone || "Asia/Manila"} />
-                  <AppointmentDetailRow label="Insurance" value={appointment.insurance || "None recorded"} />
-                  <AppointmentDetailRow label="Tags" value={appointment.tags || client?.tag || "None"} />
-                  <AppointmentDetailRow label="Package" value={appointment.packageName || "Pay per visit"} />
+                  <AppointmentDetailRow label="Patient type" value={appointment.appointmentType} />
+                  <AppointmentDetailRow label="Timezone" value={appointment.timezone} />
+                  <AppointmentDetailRow label="Insurance" value={appointment.insurance} />
+                  <AppointmentDetailRow label="Tags" value={appointment.tags || client?.tag} />
+                  <AppointmentDetailRow label="Package" value={appointment.packageName} />
                   <AppointmentDetailRow label="Booking ID" value={appointment.id} />
                 </div>
               </details>
@@ -6781,8 +6787,8 @@ function AppointmentDetailsDrawer({
             <summary><span><CalendarDays size={17} /><span><strong>Visit details</strong><small>Schedule and assigned resources</small></span></span><ChevronDown size={17} /></summary>
             <div className="appointment-disclosure-content appointment-detail-rows">
               <AppointmentDetailRow label="Service" value={appointment.service} />
-              <AppointmentDetailRow label="Date and time" value={`${formatDate(appointment.date)} · ${formatScheduleTime(parseTimeToMinutes(appointment.time))}`} />
-              <AppointmentDetailRow label="Appointment duration" value={`${durationMinutes} minutes`} />
+              <AppointmentDetailRow label="Date and time" value={`${formatDate(appointment.date)} · ${appointmentTime}`} />
+              <AppointmentDetailRow label="Appointment duration" value={recordedDuration ? `${recordedDuration} minutes` : ""} />
               <AppointmentDetailRow label="Doctor / Staff" value={staffLabel || "Not assigned"} />
               <AppointmentDetailRow label="Branch" value={appointment.branch || "Not assigned"} />
               <AppointmentDetailRow label="Room" value={appointment.room || "Not assigned"} />
@@ -6823,9 +6829,10 @@ function AppointmentDetailsDrawer({
                 <article key={`${event.title}-${index}`}>
                   <span>{formatDateTime(event.time)}</span>
                   <strong>{event.title}</strong>
-                  <small>{event.actor || "System"} / {event.detail}</small>
+                  {(event.actor || event.detail) && <small>{[event.actor, event.detail].filter(Boolean).join(" / ")}</small>}
                 </article>
               ))}
+              {!timeline.length && <small>No recorded appointment history.</small>}
             </div>
           </details>
         </div>

@@ -1,7 +1,6 @@
 import { prisma } from "./prisma.js";
 import {
   branches,
-  initialAppointments,
   initialCampaigns,
   initialClients,
   initialDiscounts,
@@ -111,13 +110,6 @@ async function seedOperationalRecords() {
     data: initialStaff.map((staff) => ({
       ...staff,
       commissionRate: Number(staff.commissionRate || 0),
-    })),
-  });
-
-  await prisma.appointment.createMany({
-    data: initialAppointments.map((appointment) => ({
-      ...appointment,
-      deposit: Number(appointment.deposit || 0),
     })),
   });
 
