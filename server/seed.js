@@ -12,7 +12,6 @@ import {
   initialSmsTemplates,
   initialStaff,
   initialTransactions,
-  initialTreatments,
 } from "../src/data.js";
 
 if (process.env.NODE_ENV === "production") {
@@ -109,13 +108,6 @@ async function seedOperationalRecords() {
     data: initialStaff.map((staff) => ({
       ...staff,
       commissionRate: Number(staff.commissionRate || 0),
-    })),
-  });
-
-  await prisma.treatment.createMany({
-    data: initialTreatments.map((treatment) => ({
-      ...treatment,
-      photos: Number(treatment.photos || 0),
     })),
   });
 

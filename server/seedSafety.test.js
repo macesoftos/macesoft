@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { initialAppointments, initialLeads, initialStaff } from "../src/data.js";
+import { initialAppointments, initialLeads, initialStaff, initialTreatments } from "../src/data.js";
 
 test("development seed never preloads staff profiles", () => {
   assert.deepEqual(initialStaff, []);
@@ -23,6 +23,24 @@ test("the demo appointment cleanup targets only the retired seed identities", ()
   assert.match(migration, /DELETE FROM "Appointment"/);
   assert.match(migration, /\("id", "client", "service"\)/);
   assert.doesNotMatch(migration, /DELETE FROM "Appointment"\s*;/);
+});
+
+test("development seed never preloads treatment records", () => {
+  assert.deepEqual(initialTreatments, []);
+});
+
+test("the demo treatment cleanup targets only the retired seed identities", () => {
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20260814023000_remove_demo_treatments/migration.sql", import.meta.url),
+    "utf8",
+  );
+
+  for (const id of ["tr-001", "tr-002", "tr-003"]) {
+    assert.match(migration, new RegExp(`'${id}'`));
+  }
+  assert.match(migration, /DELETE FROM "Treatment"/);
+  assert.match(migration, /\("id", "client", "service", "date"\)/);
+  assert.doesNotMatch(migration, /DELETE FROM "Treatment"\s*;/);
 });
 
 test("development seed never preloads lead records", () => {
