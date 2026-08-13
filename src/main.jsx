@@ -4,6 +4,7 @@ import App from "./App.jsx";
 import "./styles.css";
 import "./pos-quantity.css";
 import "./enhancements.css";
+import "./treatments-redesign.css";
 import "./responsive-app.css";
 import "./vercel-typography.css";
 
