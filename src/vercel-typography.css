@@ -4,7 +4,7 @@
  */
 
 :root {
-  --font-sans: "Geist", Arial, sans-serif;
+  --font-sans: "Roboto", Arial, sans-serif;
   --font-sans-fallback: Arial, sans-serif;
   --font-family-primary: var(--font-sans, var(--font-sans-fallback));
   --font-size-xs: 12px;
@@ -304,7 +304,7 @@ code,
 kbd,
 pre,
 samp {
-  font-family: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 @media (max-width: 640px) {
