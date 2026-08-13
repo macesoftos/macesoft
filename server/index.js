@@ -40,6 +40,7 @@ import {
   packageAfterRedemption,
   packageAfterVoid,
 } from "./posTenders.js";
+import { normalizePaymentReference } from "./paymentReference.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -4275,12 +4276,16 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   assertMutationAllowed(request, "pos", branch);
 
   const payments = Array.isArray(paymentData.payments) ? paymentData.payments : [];
-  const normalizedPayments = payments.map((payment) => ({
-    method: requireText(payment.method, "Payment method"),
-    amount: numberValue(payment.amount, "Payment amount", { min: 0 }),
-    ...(clean(payment.giftCertificateId) ? { giftCertificateId: clean(payment.giftCertificateId) } : {}),
-    ...(clean(payment.packageId) ? { packageId: clean(payment.packageId) } : {}),
-  })).filter((payment) => payment.amount > 0);
+  const normalizedPayments = payments.map((payment) => {
+    const referenceNumber = normalizePaymentReference(payment.referenceNumber);
+    return {
+      method: requireText(payment.method, "Payment method"),
+      amount: numberValue(payment.amount, "Payment amount", { min: 0 }),
+      ...(referenceNumber ? { referenceNumber } : {}),
+      ...(clean(payment.giftCertificateId) ? { giftCertificateId: clean(payment.giftCertificateId) } : {}),
+      ...(clean(payment.packageId) ? { packageId: clean(payment.packageId) } : {}),
+    };
+  }).filter((payment) => payment.amount > 0);
   if (!normalizedPayments.length) {
     throw apiError("At least one payment amount is required.");
   }

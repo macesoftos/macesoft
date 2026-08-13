@@ -2548,7 +2548,7 @@ function PrintableReceipt({ receipt, settings }) {
           <div className="print-receipt-payments">
             {payments.length ? payments.map((payment, index) => (
               <div key={`${payment.method}-${index}`}>
-                <span>{payment.method}</span>
+                <span>{payment.method}{payment.referenceNumber && <small>Ref: {payment.referenceNumber}</small>}</span>
                 <strong>{money.format(payment.amount)}</strong>
               </div>
             )) : <div><span>Payment</span><strong>Not posted</strong></div>}
@@ -10468,11 +10468,11 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
     if (draft.splitPayment) {
       const firstAmount = Math.floor(Number(draft.total || 0) / 2);
       return [
-        { method: "Cash", amount: firstAmount },
-        { method: "Credit Card", amount: Number(draft.total || 0) - firstAmount },
+        { method: "Cash", amount: firstAmount, referenceNumber: "" },
+        { method: "Credit Card", amount: Number(draft.total || 0) - firstAmount, referenceNumber: "" },
       ];
     }
-    return [{ method: draft.paymentMethod || "Cash", amount: draft.total }];
+    return [{ method: draft.paymentMethod || "Cash", amount: draft.total, referenceNumber: "" }];
   });
   const [notes, setNotes] = useState(draft.notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -10508,7 +10508,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
   }
 
   function changeMethod(index, method) {
-    updatePayment(index, { method, giftCertificateId: undefined, packageId: undefined });
+    updatePayment(index, { method, referenceNumber: "", giftCertificateId: undefined, packageId: undefined });
   }
 
   function chooseCertificate(index, certificateId) {
@@ -10594,6 +10594,17 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
                   </button>
                 )}
               </div>
+              <label className="payment-reference-field">
+                <span>Reference number <small>Optional</small></span>
+                <input
+                  aria-label={`Payment ${index + 1} reference number`}
+                  autoComplete="off"
+                  maxLength={120}
+                  placeholder={payment.method === "Cash" ? "Receipt or acknowledgement number" : `${payment.method} transaction reference`}
+                  value={payment.referenceNumber || ""}
+                  onChange={(event) => updatePayment(index, { referenceNumber: event.target.value })}
+                />
+              </label>
               {payment.method === "Gift Certificate" && (
                 <select
                   className="payment-tender-select"
@@ -10633,7 +10644,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
             </div>
           ))}
         </div>
-        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: "GCash", amount: 0 }])}>
+        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: "GCash", amount: 0, referenceNumber: "" }])}>
           <Plus size={16} /> Add split payment
         </button>
         <label className="stacked-field">
