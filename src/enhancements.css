@@ -70,7 +70,6 @@
 .payment-options button,
 .payment-row button,
 .cart-row button,
-.system-pill,
 .login-card button {
   transition:
     background-color var(--dur) var(--ease),
@@ -1854,35 +1853,6 @@ td {
   color: var(--faint);
   font-size: 0.76rem;
   line-height: 1.45;
-}
-
-.system-strip {
-  margin-bottom: 14px;
-}
-
-.system-pill {
-  min-height: 30px;
-  border-radius: 999px;
-  background: #fff;
-  font-size: 0.74rem;
-}
-
-.system-pill.loading {
-  position: relative;
-  overflow: hidden;
-}
-
-.system-pill.loading::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-  animation: mace-skeleton 1.3s infinite;
-}
-
-@keyframes mace-skeleton {
-  to { transform: translateX(100%); }
 }
 
 @media (max-width: 980px) {

@@ -2525,32 +2525,6 @@ button:active {
     display: none;
   }
 
-  .system-strip {
-    display: grid;
-    grid-template-columns: 1fr;
-    overflow-x: visible;
-    gap: 8px;
-    margin: 0 0 12px;
-  }
-
-  /* Keep the phone header operational: healthy, low-priority metadata remains
-     available on larger layouts while API state and actionable alerts stay visible. */
-  .system-pill-workspace.ready,
-  .system-pill-secondary {
-    display: none;
-  }
-
-  .system-pill {
-    width: 100%;
-    min-width: 0;
-    justify-content: flex-start;
-  }
-
-  .system-pill span {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
   .content-area {
     gap: 12px;
   }
@@ -3285,7 +3259,10 @@ button:active {
   .appointment-date-navigator .date-title small { display: none; }
   .booking-two-column { grid-template-columns: 1fr; }
   .booking-two-column label:last-child:nth-child(3) { grid-column: auto; }
-  .appointment-booking-actions { align-items: stretch; flex-direction: column-reverse; }
+  .booking-form-section { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding-top: 15px; padding-bottom: 13px; }
+  .appointment-booking-header { padding-top: 16px; padding-bottom: 14px; }
+  .appointment-booking-body { padding-bottom: 24px; }
+  .appointment-booking-actions { align-items: stretch; flex-direction: column-reverse; padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   .appointment-booking-actions > div { display: grid; grid-template-columns: 1fr 1.4fr; }
 }
 
