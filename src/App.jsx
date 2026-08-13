@@ -2404,7 +2404,7 @@ function App() {
             />
           )}
           {activeModule === "booking" && (
-            <BookingPortal services={services} onSubmit={publicBooking} />
+            <BookingPortal services={services} staff={staff} onSubmit={publicBooking} />
           )}
           {activeModule === "settings" && (
             <SettingsModule
@@ -9488,7 +9488,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   );
 }
 
-function BookingPortal({ services, onSubmit }) {
+function BookingPortal({ services, staff, onSubmit }) {
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -9554,7 +9554,7 @@ function BookingPortal({ services, onSubmit }) {
             <label><span>Branch</span><select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })}>{branches.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
             <label><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
             <label><span>Time</span><input type="time" value={form.time} onChange={(event) => setForm({ ...form, time: event.target.value })} /></label>
-            <label><span>Preferred staff</span><select value={form.staff} onChange={(event) => setForm({ ...form, staff: event.target.value })}><option>Any available</option><option>Dr. Mace</option><option>Dr. Aria Tan</option><option>Nurse Ana</option><option>Nurse Bea</option></select></label>
+            <label><span>Preferred staff</span><select value={form.staff} onChange={(event) => setForm({ ...form, staff: event.target.value })}><option>Any available</option>{staff.filter((person) => person.branch === form.branch && person.status !== "Inactive").map((person) => <option key={person.id} value={person.name}>{person.name}</option>)}</select></label>
             <button className="primary-button" type="button" onClick={() => setStep(3)}>Continue</button>
           </div>
         )}
