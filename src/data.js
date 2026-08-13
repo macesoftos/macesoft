@@ -225,13 +225,8 @@ export const initialLeads = [
   { id: "lead-004", name: "Rachelle Go", firstName: "Rachelle", lastName: "Go", mobile: "0918 001 8821", email: "rachelle.go@example.test", source: "Website", sourcePlatform: "Website", campaign: "Ultralift Landing Page", interest: "Mace Ultralift", concern: "Jawline and cheeks", status: "Follow-Up", priority: "Normal", score: 63, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 15, reason: "Complete phone and email" }, { points: 5, reason: "Campaign attribution available" }]), owner: "Mika Santos", branch: "Mace Davao", assignedBranch: "Mace Davao", created: "2026-06-30", nextAction: "Second follow-up", nextFollowUpAt: "2026-07-10T09:00:00.000Z", followUpCount: 2, slaDueAt: "2026-06-30T03:15:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Landing page", consentTimestamp: "2026-06-30T03:00:00.000Z", firstTouchSource: "Website", latestTouchSource: "Website Consultation Form", nextStep: "Follow up tomorrow" },
 ];
 
-export const initialStaff = [
-  { id: "st-dr-mace", name: "Dr. Mace", role: "Doctor", branch: "Mace Davao", schedule: "9:00 AM - 5:00 PM", commissionType: "Doctor rate", commissionRate: 12, services: "Injectables, consultations", status: "Available", attendance: "Clocked in", employmentDate: "2022-01-05", phone: "0917 109 8462" },
-  { id: "st-aria", name: "Dr. Aria Tan", role: "Doctor", branch: "Mace Davao", schedule: "10:00 AM - 6:00 PM", commissionType: "Doctor rate", commissionRate: 10, services: "Devices, consultations", status: "Available", attendance: "Clocked in", employmentDate: "2024-08-12", phone: "0917 334 2218" },
-  { id: "st-ana", name: "Nurse Ana", role: "Nurse / Aesthetician", branch: "Mace Davao", schedule: "10:00 AM - 7:00 PM", commissionType: "Skin care", commissionRate: 8, services: "Facials, IV drips", status: "In treatment", attendance: "Clocked in", employmentDate: "2023-04-20", phone: "0918 220 7719" },
-  { id: "st-bea", name: "Nurse Bea", role: "Nurse / Aesthetician", branch: "Mace Davao", schedule: "8:00 AM - 5:00 PM", commissionType: "Device care", commissionRate: 8, services: "Lasers, facials", status: "Available", attendance: "Clocked in", employmentDate: "2023-10-03", phone: "0916 777 8822" },
-  { id: "st-ria", name: "Ria Lim", role: "Receptionist", branch: "Mace Davao", schedule: "9:00 AM - 6:00 PM", commissionType: "N/A", commissionRate: 0, services: "Front desk", status: "Available", attendance: "Clocked in", employmentDate: "2025-02-15", phone: "0917 600 8891" },
-];
+// Staff profiles are created by clinic administrators and are never preloaded.
+export const initialStaff = [];
 
 export const initialExpenses = [
   { id: "ex-001", date: "2026-07-02", name: "Clinic supplies", category: "Supplies", branch: "Mace Davao", amount: 12400, method: "Bank Transfer", approver: "Owner", status: "Approved", notes: "Monthly replenishment.", receipt: "Attached" },
