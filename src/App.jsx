@@ -6168,13 +6168,12 @@ function AppointmentsModule({
   });
   const calendarMonthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonth);
   const roomOptions = [...new Set(uniqueRoomsFromBranches().concat(appointments.map((item) => item.room)).filter(Boolean))];
-  const doctorOptions = [...new Set(
-    staff
-      .filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""))
-      .map((person) => person.name)
-      .concat(appointments.map((item) => item.staff))
-      .filter(Boolean),
-  )];
+  const appointmentPractitioners = staff.filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""));
+  const activePractitionerNames = new Set(appointmentPractitioners.map((person) => person.name));
+  const appointmentStaffLabel = (appointment) => activePractitionerNames.has(appointment.staff) ? appointment.staff : "Unassigned";
+  const hasUnassignedAppointments = appointments.some((appointment) => appointmentStaffLabel(appointment) === "Unassigned");
+  const doctorOptions = [...new Set(appointmentPractitioners.map((person) => person.name))];
+  if (hasUnassignedAppointments) doctorOptions.push("Unassigned");
   const serviceOptions = [...new Set(services.map((service) => service.name).concat(appointments.map((item) => item.service)).filter(Boolean))];
   const branchOptions = [...new Set(
     services
@@ -6195,7 +6194,7 @@ function AppointmentsModule({
 
   const matchingRows = appointments
     .filter((item) => normalizedFilters.status === "All" || canonicalAppointmentStatus(item.status) === normalizedFilters.status)
-    .filter((item) => normalizedFilters.doctor === "All" || item.staff === normalizedFilters.doctor)
+    .filter((item) => normalizedFilters.doctor === "All" || appointmentStaffLabel(item) === normalizedFilters.doctor)
     .filter((item) => normalizedFilters.room === "All" || item.room === normalizedFilters.room)
     .filter((item) => normalizedFilters.service === "All" || item.service === normalizedFilters.service)
     .filter((item) => normalizedFilters.branch === "All" || item.branch === normalizedFilters.branch)
@@ -6262,16 +6261,18 @@ function AppointmentsModule({
   const periodUnitLabel = periodMode === "Custom" ? "custom range" : periodMode.toLowerCase();
   const selectedAppointment = appointments.find((item) => item.id === selectedId) ?? null;
   const selectedBranch = normalizedFilters.branch === "All" ? null : normalizedFilters.branch;
-  const scopedStaff = staff
-    .filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""))
+  const scopedStaff = appointmentPractitioners
     .filter((person) => !selectedBranch || person.branch === selectedBranch || person.branch === "All branches");
-  const practitionerNames = [...new Set(scopedStaff.map((person) => person.name).concat(periodRows.map((item) => item.staff)).filter(Boolean))];
+  const scopedStaffNames = new Set(scopedStaff.map((person) => person.name));
+  const appointmentPractitionerKey = (appointment) => scopedStaffNames.has(appointment.staff) ? appointment.staff : "Unassigned";
+  const practitionerNames = [...new Set(scopedStaff.map((person) => person.name))];
+  if (periodRows.some((appointment) => appointmentPractitionerKey(appointment) === "Unassigned")) practitionerNames.push("Unassigned");
   const practitionerResources = practitionerNames
     .filter((name) => normalizedFilters.doctor === "All" || name === normalizedFilters.doctor)
     .map((name) => {
       const person = staff.find((item) => item.name === name);
-      const room = dayRows.find((item) => item.staff === name)?.room;
-      return { key: name, label: name, subtitle: room || person?.role || "Practitioner", photo: person?.photo, assignment: { staff: name } };
+      const room = dayRows.find((item) => appointmentPractitionerKey(item) === name)?.room;
+      return { key: name, label: name, subtitle: room || person?.role || "No staff assigned", photo: person?.photo, assignment: { staff: name === "Unassigned" ? "" : name } };
     });
   const roomResources = roomOptions
     .filter((room) => normalizedFilters.room === "All" || room === normalizedFilters.room)
@@ -6565,7 +6566,7 @@ function AppointmentsModule({
           <div className="appointment-doctor-list">
             {practitionerNames.map((name) => {
               const person = staff.find((item) => item.name === name);
-              const doctorRows = periodRows.filter((item) => item.staff === name);
+              const doctorRows = periodRows.filter((item) => appointmentPractitionerKey(item) === name);
               const next = doctorRows[0];
               return (
                 <button className={normalizedFilters.doctor === name ? "selected" : ""} type="button" key={name} onClick={() => setFilter("doctor", normalizedFilters.doctor === name ? "All" : name)}>
@@ -6592,11 +6593,11 @@ function AppointmentsModule({
             </div>
           </div>
           {scheduleFeedback && <div className={`appointment-schedule-feedback ${scheduleFeedback.type}`}><span>{scheduleFeedback.message}</span><button type="button" onClick={() => setScheduleFeedback(null)} aria-label="Dismiss message"><X size={14} /></button></div>}
-          {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={(item) => item.staff} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={appointmentPractitionerKey} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
           {activeView === "Week" && <AppointmentWeekView appointments={weekRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
           {activeView === "Month" && <AppointmentMonthView appointments={monthRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
           {activeView === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
-          {activeView === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={(item) => item.staff} />}
+          {activeView === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={appointmentPractitionerKey} />}
           {activeView === "Kanban" && (
             <div className="appointment-kanban-workspace">
               <div className="appointment-kanban-scope-toolbar">
@@ -6624,7 +6625,7 @@ function AppointmentsModule({
                         const scheduleLabel = resolvedKanbanScope === "Day"
                           ? formatScheduleTime(parseTimeToMinutes(appointment.time))
                           : `${formatDate(appointment.date)} · ${formatScheduleTime(parseTimeToMinutes(appointment.time))}`;
-                        return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => setSelectedId(appointment.id)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {scheduleLabel} · {appointment.staff}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
+                        return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => setSelectedId(appointment.id)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {scheduleLabel} · {appointmentStaffLabel(appointment)}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
                       })}{!items.length && <span className="appointment-kanban-empty">No appointments</span>}</div>
                     </section>
                   );
@@ -6637,16 +6638,17 @@ function AppointmentsModule({
 
       {contextMenu && <div className="appointment-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} role="menu"><button type="button" onClick={() => { setSelectedId(contextMenu.appointment.id); setContextMenu(null); }}><Eye size={15} /> View details</button><button type="button" onClick={() => openModal("appointment", contextMenu.appointment)}><Edit3 size={15} /> Edit appointment</button><button type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Checked In")}><UserCheck size={15} /> Check in</button><button type="button" onClick={() => openPayment(paymentDraftForAppointment(contextMenu.appointment))}><CreditCard size={15} /> Collect payment</button><button className="danger" type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button></div>}
 
-      <AppointmentDetailsDrawer appointment={selectedAppointment} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
+      <AppointmentDetailsDrawer appointment={selectedAppointment} staffLabel={selectedAppointment ? appointmentStaffLabel(selectedAppointment) : ""} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
 
       <div className="appointment-data-toggle"><button className="secondary-button" type="button" onClick={() => setShowDataTable((value) => !value)}><FileText size={16} /> {showDataTable ? "Hide data table" : "Show data table"}</button></div>
-      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${displayedRows.length} records`} /><SmartTable rows={displayedRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff" }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
+      {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${displayedRows.length} records`} /><SmartTable rows={displayedRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff", render: appointmentStaffLabel }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
     </section>
   );
 }
 
 function AppointmentDetailsDrawer({
   appointment,
+  staffLabel,
   client,
   services,
   transactions,
@@ -6745,7 +6747,7 @@ function AppointmentDetailsDrawer({
             </div>
           </div>
           <AppointmentDetailRow label="Branch and room" value={`${appointment.branch || "Branch not assigned"} · ${appointment.room || "Room not assigned"}`} />
-          <AppointmentDetailRow label="Doctor / Staff" value={appointment.staff || "Not assigned"} />
+          <AppointmentDetailRow label="Doctor / Staff" value={staffLabel || "Not assigned"} />
           <div className="appointment-summary-payment-row">
             <span>Payment</span>
             <div><strong className={payment.due <= 0 ? `appointment-payment-badge ${payment.price > 0 ? "paid" : "neutral"}` : ""}>{paymentLabel}</strong><small>{money.format(payment.applied)} applied</small></div>
@@ -6781,7 +6783,7 @@ function AppointmentDetailsDrawer({
               <AppointmentDetailRow label="Service" value={appointment.service} />
               <AppointmentDetailRow label="Date and time" value={`${formatDate(appointment.date)} · ${formatScheduleTime(parseTimeToMinutes(appointment.time))}`} />
               <AppointmentDetailRow label="Appointment duration" value={`${durationMinutes} minutes`} />
-              <AppointmentDetailRow label="Doctor / Staff" value={appointment.staff || "Not assigned"} />
+              <AppointmentDetailRow label="Doctor / Staff" value={staffLabel || "Not assigned"} />
               <AppointmentDetailRow label="Branch" value={appointment.branch || "Not assigned"} />
               <AppointmentDetailRow label="Room" value={appointment.room || "Not assigned"} />
               <AppointmentContentGroup title="Service protocol" rows={[service?.description, service?.contraindications, service?.aftercare].filter(Boolean)} empty="No service protocol notes." />
