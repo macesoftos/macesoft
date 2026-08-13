@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { initialStaff } from "../src/data.js";
+import { initialAppointments, initialStaff } from "../src/data.js";
 
 test("development seed never preloads staff profiles", () => {
   assert.deepEqual(initialStaff, []);
+});
+
+test("development seed never preloads appointment records", () => {
+  assert.deepEqual(initialAppointments, []);
 });
 
 test("runtime and development seed contain no demo account provisioning", () => {
