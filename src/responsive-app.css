@@ -2127,7 +2127,7 @@ button:active {
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: minmax(210px, 1fr) auto auto auto;
+    grid-template-columns: auto minmax(210px, 1fr) auto auto auto;
     flex: 0 0 auto;
     width: 100%;
     align-items: center;
@@ -2143,9 +2143,16 @@ button:active {
   .topbar-actions .branch-select,
   .topbar-actions .topbar-pos-button,
   .topbar-actions .icon-button,
-  .topbar-actions .account-menu {
+  .topbar-actions .account-menu,
+  .topbar-actions .global-create-menu {
     grid-row: 2;
   }
+
+  .topbar-actions .global-create-menu { grid-column: 1 / 2; }
+  .topbar-actions .branch-select { grid-column: 2 / 3; }
+  .topbar-actions .topbar-pos-button { grid-column: 3 / 4; }
+  .topbar-actions .icon-button { grid-column: 4 / 5; }
+  .topbar-actions .account-menu { grid-column: 5 / 6; }
 
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2299,7 +2306,7 @@ button:active {
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     width: 100%;
     max-width: 100%;
     align-items: center;
@@ -2313,7 +2320,7 @@ button:active {
   }
 
   .topbar-actions .branch-select {
-    grid-column: 1 / 2;
+    grid-column: 2 / 3;
     grid-row: 2;
     min-width: 0;
   }
@@ -2323,12 +2330,17 @@ button:active {
   }
 
   .topbar-actions .topbar-pos-button {
-    grid-column: 2 / 3;
+    grid-column: 3 / 4;
     grid-row: 2;
   }
 
   .topbar-actions .icon-button {
-    grid-column: 3 / 4;
+    grid-column: 4 / 5;
+    grid-row: 2;
+  }
+
+  .topbar-actions .global-create-menu {
+    grid-column: 1 / 2;
     grid-row: 2;
   }
 
@@ -2422,7 +2434,7 @@ button:active {
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     gap: 8px;
     width: 100%;
   }
@@ -2438,7 +2450,7 @@ button:active {
   }
 
   .topbar-actions .branch-select {
-    grid-column: 1 / 2;
+    grid-column: 2 / 3;
     min-width: 0;
     width: 100%;
   }
@@ -2448,12 +2460,17 @@ button:active {
   }
 
   .topbar-actions .topbar-pos-button {
-    grid-column: 2 / 3;
+    grid-column: 3 / 4;
     padding-inline: 10px;
   }
 
   .topbar-actions .icon-button {
-    grid-column: 3 / 4;
+    grid-column: 4 / 5;
+  }
+
+  .topbar-actions .global-create-menu {
+    grid-column: 1 / 2;
+    grid-row: 2;
   }
 
   .topbar-actions .account-menu {
@@ -3076,16 +3093,21 @@ button:active {
   }
 
   .topbar-actions {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
-  .topbar-actions .topbar-pos-button {
+  .topbar-actions .global-create-menu {
     grid-column: 1 / 2;
     grid-row: 2;
   }
 
-  .topbar-actions .icon-button {
+  .topbar-actions .topbar-pos-button {
     grid-column: 2 / 3;
+    grid-row: 2;
+  }
+
+  .topbar-actions .icon-button {
+    grid-column: 3 / 4;
     grid-row: 2;
   }
 
