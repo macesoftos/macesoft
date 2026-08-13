@@ -666,11 +666,6 @@ function App() {
   const [receiptToPrint, setReceiptToPrint] = useState(null);
   const [printReceiptNonce, setPrintReceiptNonce] = useState(0);
   const [isBooting, setIsBooting] = useState(true);
-  const [apiState, setApiState] = useState({
-    status: "checking",
-    message: "Checking database connection...",
-  });
-
   const [clients, setClients] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [services, setServices] = useState([]);
@@ -935,7 +930,7 @@ function App() {
 
     async function hydrateFromApi() {
       try {
-        const [health, bootstrap, accountResult] = await Promise.all([
+        const [, bootstrap, accountResult] = await Promise.all([
           checkApiHealth(),
           loadBootstrap(),
           canManageOrganization(session.role)
@@ -975,16 +970,6 @@ function App() {
           );
         }
 
-        const connectedClientCount = Number.isFinite(Number(health.clientCount))
-          ? Number(health.clientCount)
-          : Array.isArray(apiClients)
-            ? apiClients.length
-            : 0;
-
-        setApiState({
-          status: "connected",
-          message: `Supabase connected / ${connectedClientCount} clients / ${bootstrap.appointments?.length ?? 0} bookings`,
-        });
       } catch {
         try {
           const apiClients = await listResourceRecords("clients");
@@ -997,21 +982,10 @@ function App() {
                 apiClients.some((client) => client.id === current) ? current : apiClients[0].id,
               );
             }
-            setApiState({
-              status: "offline",
-              message: `Partial sync / ${apiClients.length} clients restored / other modules unavailable`,
-            });
             return;
           }
         } catch {
           // The dedicated client fallback is best-effort; retain the full offline state below.
-        }
-
-        if (!cancelled) {
-          setApiState({
-            status: "offline",
-            message: "API offline / writes require reconnection",
-          });
         }
       }
     }
@@ -1208,13 +1182,6 @@ function App() {
     setAuditLogs((current) => [auditLog, ...current.filter((item) => item.id !== auditLog.id)].slice(0, 150));
   }
 
-  function markApiConnected(message) {
-    setApiState({
-      status: "connected",
-      message,
-    });
-  }
-
   function addAudit(action, details, area = "System", actor = session) {
     setAuditLogs((current) => [
       {
@@ -1386,7 +1353,6 @@ function App() {
     applyAuditLog(result.auditLog);
     setCart([]);
     closeModal();
-    markApiConnected("SQLite connected / POS transaction saved");
     notify(`Transaction ${result.sale.invoice} completed.`);
   }
 
@@ -1421,7 +1387,6 @@ function App() {
     const result = await saveResourceRecord("appointments", record, { existing: Boolean(values.id) });
     upsertById(setAppointments, result.record);
     applyAuditLog(result.auditLog);
-    markApiConnected("SQLite connected / appointment saved");
     if (!silent) {
       closeModal();
       const recurring = !values.id && record.recurrence !== "None" && record.recurrenceUntil;
@@ -1442,7 +1407,6 @@ function App() {
       const result = await saveResourceRecord("appointments", { ...appointment, status: nextStatus }, { existing: true });
       upsertById(setAppointments, result.record);
       applyAuditLog(result.auditLog);
-      markApiConnected("SQLite connected / appointment status saved");
       notify(`Appointment marked ${nextStatus}.`);
     } catch (error) {
       notify(error.message || "Unable to update appointment status.", "error");
@@ -1464,7 +1428,6 @@ function App() {
     setSelectedClientId(result.record.id);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / client saved");
     notify(isExisting ? "Client updated." : "Client added.");
   }
 
@@ -1492,7 +1455,6 @@ function App() {
       }
     }
 
-    if (saved > 0) markApiConnected("SQLite connected / clients imported");
     if (failed > 0) {
       notify(`${saved} client${saved === 1 ? "" : "s"} imported, ${failed} failed.`, "warning");
     } else {
@@ -1511,7 +1473,6 @@ function App() {
             await deleteResourceRecord("clients", client.id);
             removeById(setClients, client.id);
             setSelectedClientId((current) => (current === client.id ? clients.find((item) => item.id !== client.id)?.id : current));
-            markApiConnected("SQLite connected / client deleted");
             addAudit("Client profile deleted", `${client.fullName} removed from client records.`, "Client Records");
             notify("Client deleted.");
           } catch (error) {
@@ -1538,7 +1499,6 @@ function App() {
     upsertById(setServices, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / service saved");
     notify(values.id ? "Service updated." : "Service created.");
   }
 
@@ -1549,7 +1509,6 @@ function App() {
       const result = await saveResourceRecord("services", { ...service, active: !service.active }, { existing: true });
       upsertById(setServices, result.record);
       applyAuditLog(result.auditLog);
-      markApiConnected("SQLite connected / service status saved");
     } catch (error) {
       notify(error.message || "Unable to update service.", "error");
     }
@@ -1570,7 +1529,6 @@ function App() {
     upsertById(setInventory, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / inventory saved");
     notify(values.id ? "Inventory updated." : "Inventory item added.");
   }
 
@@ -1580,7 +1538,6 @@ function App() {
       upsertById(setInventory, result.inventoryItem);
       upsertById(setInventoryMovements, result.movement);
       applyAuditLog(result.auditLog);
-      markApiConnected("SQLite connected / stock movement saved");
       notify("Stock movement saved.");
     } catch (error) {
       notify(error.message || "Unable to save stock movement.", "error");
@@ -1601,7 +1558,6 @@ function App() {
     upsertById(setLeads, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / lead saved");
     notify(values.id ? "Lead updated." : "Lead added.");
   }
 
@@ -1631,7 +1587,6 @@ function App() {
       }
     }
 
-    if (saved > 0) markApiConnected("SQLite connected / leads imported");
     if (failed > 0) {
       notify(`${saved} lead${saved === 1 ? "" : "s"} imported, ${failed} failed.`, "warning");
     } else {
@@ -1649,7 +1604,6 @@ function App() {
           try {
             await deleteResourceRecord("leads", lead.id);
             removeById(setLeads, lead.id);
-            markApiConnected("SQLite connected / lead deleted");
             addAudit("Lead deleted", `${lead.name} removed from lead records.`, "Leads");
             notify("Lead deleted.");
           } catch (error) {
@@ -1667,7 +1621,6 @@ function App() {
       const result = await updateLeadStage(id, { ...extra, status: canonicalLeadStatus(status) });
       upsertById(setLeads, result.lead);
       applyAuditLog(result.auditLog);
-      markApiConnected("SQLite connected / lead status saved");
       notify(`Lead marked ${status}.`);
     } catch (error) {
       notify(error.message || "Unable to update lead.", "error");
@@ -1746,7 +1699,6 @@ function App() {
       const [integrationsResult, webhookResult] = await Promise.all([loadLeadIntegrations(), loadLeadWebhookEvents()]);
       setLeadIntegrations(Array.isArray(integrationsResult.integrations) ? integrationsResult.integrations : []);
       setWebhookEvents(Array.isArray(webhookResult.events) ? webhookResult.events : []);
-      markApiConnected("SQLite connected / lead integrations refreshed");
       notify("Lead integrations refreshed.");
     } catch (error) {
       notify(error.message || "Unable to refresh lead integrations.", "error");
@@ -1765,7 +1717,6 @@ function App() {
     upsertById(setTreatments, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / treatment saved");
     notify("Treatment record saved.");
   }
 
@@ -1779,7 +1730,6 @@ function App() {
     upsertById(setExpenses, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / expense saved");
     notify("Expense saved.");
   }
 
@@ -1793,7 +1743,6 @@ function App() {
     upsertById(setStaff, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / employee saved");
     notify("Employee saved.");
   }
 
@@ -1805,7 +1754,6 @@ function App() {
       const result = await saveResourceRecord("staff", { ...person, attendance }, { existing: true });
       upsertById(setStaff, result.record);
       applyAuditLog(result.auditLog);
-      markApiConnected("SQLite connected / attendance saved");
     } catch (error) {
       notify(error.message || "Unable to update attendance.", "error");
     }
@@ -1826,7 +1774,6 @@ function App() {
     upsertById(setPackages, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / package saved");
     notify("Package saved.");
   }
 
@@ -1835,7 +1782,6 @@ function App() {
       const result = await redeemPackageRecord(id);
       upsertById(setPackages, result.record);
       applyAuditLog(result.auditLog);
-      markApiConnected("SQLite connected / package session redeemed");
       notify("Package session redeemed.");
     } catch (error) {
       notify(error.message || "Unable to redeem package session.", "error");
@@ -1854,7 +1800,6 @@ function App() {
     upsertById(setCampaigns, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / campaign saved");
     notify("Campaign saved.");
   }
 
@@ -1907,7 +1852,6 @@ function App() {
         applyAuditLog(savedSettings.auditLog);
       }
 
-      markApiConnected("SQLite connected / campaign delivery saved");
       notify(failed ? `${sent} ${channelLabel} sent, ${failed} failed.` : `${sent} ${channelLabel} sent.`);
     } catch (error) {
       addAudit("Marketing campaign failed", `${campaign.name}: ${error.message || "Delivery failed."}`, "Marketing");
@@ -1922,7 +1866,6 @@ function App() {
     setSettings(result.settings);
     applyAuditLog(result.auditLog);
     closeModal();
-    markApiConnected("SQLite connected / settings saved");
     notify("Settings updated.");
   }
 
@@ -1932,7 +1875,6 @@ function App() {
     if (result.lead) upsertById(setLeads, result.lead);
     if (result.appointment?.client) upsertById(setAppointments, result.appointment);
     if (result.auditLog) applyAuditLog(result.auditLog);
-    markApiConnected("SQLite connected / online booking saved");
     notify("Online booking submitted.");
   }
 
@@ -1959,7 +1901,6 @@ function App() {
               upsertById(setPackages, pkg);
             }
             applyAuditLog(result.auditLog);
-            markApiConnected("SQLite connected / transaction voided");
             notify("Transaction voided. Stock and prepaid tenders restored.", "warning");
           } catch (error) {
             notify(error.message || "Unable to void transaction.", "error");
@@ -2171,11 +2112,9 @@ function App() {
               <AccountMenu session={session} onLogout={handleLogout} />
             </div>
             </header>
-            {isPosView && <SystemStrip apiState={apiState} isBooting={isBooting} session={session} settings={settings} stats={stats} />}
           </div>
 
         <section className="content-area">
-          {!isPosView && !isApplicationsView && !isFaceTrackView && activeModule !== "appointments" && <SystemStrip apiState={apiState} isBooting={isBooting} session={session} settings={settings} stats={stats} />}
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
           {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
@@ -3071,45 +3010,6 @@ function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
         </form>
       </section>
     </main>
-  );
-}
-
-function SystemStrip({ apiState, isBooting, session, settings, stats }) {
-  const databaseTone =
-    apiState.status === "connected" ? "ready" : apiState.status === "offline" ? "alert" : "loading";
-  const allowedModules = modulesForSession(session);
-  const accessActive = session?.access?.active === true && allowedModules.length > 0;
-
-  return (
-    <div className="system-strip" aria-label="System status" aria-live="polite">
-      <div className={`system-pill system-pill-workspace ${isBooting ? "loading" : "ready"}`}>
-        <Database size={16} aria-hidden="true" />
-        <span>{isBooting ? "Preparing workspace records..." : "Workspace ready"}</span>
-      </div>
-      <div className={`system-pill system-pill-database ${databaseTone}`}>
-        <Database size={16} aria-hidden="true" />
-        <span>{apiState.message}</span>
-      </div>
-      <div
-        className={`system-pill system-pill-role ${accessActive ? "ready" : "alert"}`}
-        title={accessActive
-          ? `${session.role} can access ${allowedModules.length} approved modules in ${session.branch}. Server enforcement is enabled.`
-          : "This account does not have an active server-enforced access policy."}
-      >
-        <ShieldCheck size={16} aria-hidden="true" />
-        <span>{accessActive ? `${session.role} access active` : "Role access unavailable"}</span>
-      </div>
-      <div className="system-pill system-pill-secondary">
-        <CircleDollarSign size={16} aria-hidden="true" />
-        <span>{settings.taxMode} / {settings.currency}</span>
-      </div>
-      {stats.lowStock.length > 0 && (
-        <div className="system-pill system-pill-inventory alert">
-          <AlertCircle size={16} aria-hidden="true" />
-          <span>{stats.lowStock.length} inventory alert{stats.lowStock.length > 1 ? "s" : ""}</span>
-        </div>
-      )}
-    </div>
   );
 }
 

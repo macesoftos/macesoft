@@ -1276,15 +1276,6 @@
   box-shadow: none;
 }
 
-.pos-page-shell .pos-top-chrome .system-strip {
-  margin: 0;
-  padding: 12px var(--workspace-inline-pad) 14px;
-}
-
-.pos-page-shell .pos-top-chrome .system-pill {
-  background: rgba(255, 255, 255, 0.86);
-}
-
 @media (pointer: coarse) {
   .pos-top-reveal-zone {
     height: 38px;

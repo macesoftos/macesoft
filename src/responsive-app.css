@@ -2525,32 +2525,6 @@ button:active {
     display: none;
   }
 
-  .system-strip {
-    display: grid;
-    grid-template-columns: 1fr;
-    overflow-x: visible;
-    gap: 8px;
-    margin: 0 0 12px;
-  }
-
-  /* Keep the phone header operational: healthy, low-priority metadata remains
-     available on larger layouts while API state and actionable alerts stay visible. */
-  .system-pill-workspace.ready,
-  .system-pill-secondary {
-    display: none;
-  }
-
-  .system-pill {
-    width: 100%;
-    min-width: 0;
-    justify-content: flex-start;
-  }
-
-  .system-pill span {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
   .content-area {
     gap: 12px;
   }

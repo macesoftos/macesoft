@@ -1150,31 +1150,6 @@ img { max-width: 100%; }
   background: var(--rose-soft);
 }
 
-.system-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.system-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.system-pill.ready { background: var(--green-soft); color: var(--green); }
-.system-pill.loading { background: var(--blue-soft); color: var(--blue); }
-.system-pill.alert { background: var(--danger-soft); color: var(--danger); }
-
 .content-area,
 .module-grid,
 .action-list,
@@ -6698,7 +6673,6 @@ td .inline-actions { flex-wrap: nowrap; }
 
 .eyebrow,
 .sidebar-section-label,
-.system-pill,
 .status-badge,
 .workflow-chips span {
   font-size: var(--font-size-xs);
