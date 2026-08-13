@@ -7,7 +7,6 @@ import {
   initialExpenses,
   initialGiftCertificates,
   initialInventory,
-  initialLeads,
   initialPackages,
   initialSettings,
   initialSmsTemplates,
@@ -182,7 +181,6 @@ async function seedRevenueRecords() {
 }
 
 async function seedGrowthAndAdminRecords() {
-  await prisma.lead.createMany({ data: initialLeads });
   await prisma.smsTemplate.createMany({ data: initialSmsTemplates });
   await prisma.marketingCampaign.createMany({
     data: initialCampaigns.map((campaign) => ({

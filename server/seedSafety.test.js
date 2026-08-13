@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { initialAppointments, initialStaff } from "../src/data.js";
+import { initialAppointments, initialLeads, initialStaff } from "../src/data.js";
 
 test("development seed never preloads staff profiles", () => {
   assert.deepEqual(initialStaff, []);
@@ -9,6 +9,23 @@ test("development seed never preloads staff profiles", () => {
 
 test("development seed never preloads appointment records", () => {
   assert.deepEqual(initialAppointments, []);
+});
+
+test("development seed never preloads lead records", () => {
+  assert.deepEqual(initialLeads, []);
+});
+
+test("the demo lead cleanup targets only the retired seed identities", () => {
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20260814010000_remove_demo_leads/migration.sql", import.meta.url),
+    "utf8",
+  );
+
+  for (const id of ["lead-001", "lead-002", "lead-003", "lead-004"]) {
+    assert.match(migration, new RegExp(`'${id}'`));
+  }
+  assert.match(migration, /DELETE FROM "Lead"/);
+  assert.doesNotMatch(migration, /DELETE FROM "Lead"\s*;/);
 });
 
 test("runtime and development seed contain no demo account provisioning", () => {
