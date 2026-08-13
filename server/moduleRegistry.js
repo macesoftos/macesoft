@@ -1,5 +1,5 @@
 export const sidebarModules = [
-  { id: "overview", label: "Overview", table: null, phase: "core", section: "Main" },
+  { id: "overview", label: "Dashboard", table: null, phase: "core", section: "Main" },
   { id: "appointments", label: "Appointments", table: "Appointment", phase: "core", section: "Main" },
   { id: "clients", label: "Clients", table: "Client", phase: "core", section: "Main" },
   { id: "leads", label: "Leads", table: "Lead", phase: "growth", section: "Main" },
