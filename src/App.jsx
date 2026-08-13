@@ -8864,7 +8864,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
               {photoError && <div className="inline-state danger"><AlertCircle size={16} /><span>{photoError}</span></div>}
             </div>
             <div className="form-grid">
-              <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE BGC" /></label>
+              <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE Makati" /></label>
               <label><span>City</span><input required value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label>
               <label className="full-span"><span>Complete address</span><input required value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Building, street, city" /></label>
               <label><span>Phone</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Branch contact number" /></label>

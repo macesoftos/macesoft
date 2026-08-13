@@ -52,7 +52,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
         price: 1500,
         commission: "",
         consumables: [],
-        branches: ["Mace BGC"],
+        branches: ["Mace Davao"],
         staff: ["Doctor"],
         room: "Room 1",
         active: true,
