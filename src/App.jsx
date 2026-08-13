@@ -6666,6 +6666,14 @@ function AppointmentDetailsDrawer({
   const payment = appointmentPaymentSummary(appointment, services, transactions);
   const status = canonicalAppointmentStatus(appointment.status);
   const transitions = appointmentStatusTransitions[status] ?? [];
+  const standardTransitions = transitions.filter((value) => value !== "Cancelled");
+  const canCancel = transitions.includes("Cancelled");
+  const durationMinutes = appointmentDurationMinutes(appointment, services);
+  const paymentLabel = payment.due > 0
+    ? `${money.format(payment.due)} due`
+    : payment.price > 0
+      ? "Paid"
+      : "No charge";
   const matchingPayments = appointmentPayments(appointment, transactions);
   const matchingAudits = auditLogs
     .filter((log) => ["Appointments", "Online Booking"].includes(log.area))
@@ -6700,126 +6708,165 @@ function AppointmentDetailsDrawer({
     <>
     <button className="appointment-drawer-backdrop" type="button" onClick={onClose} aria-label="Close appointment details" />
     <aside className="surface-panel appointment-details-drawer" aria-label="Appointment details">
-      <div className="appointment-details-hero">
+      <header className="appointment-details-hero">
         <div className="appointment-patient-heading">
           <ClientAvatar client={client || { fullName: appointment.client }} size="large" />
           <div>
             <p className="eyebrow">Appointment details</p>
             <h3>{appointment.client}</h3>
+            <strong className="appointment-hero-service">{appointment.service}</strong>
             <div className="appointment-hero-meta">
               <span><CalendarDays size={14} /> {formatDate(appointment.date)}</span>
-              <span><Clock size={14} /> {appointment.time}</span>
-              <span><FileText size={14} /> {appointment.id}</span>
+              <span><Clock size={14} /> {formatScheduleTime(parseTimeToMinutes(appointment.time))} · {durationMinutes} min</span>
             </div>
           </div>
         </div>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="Clear selected appointment"><X size={17} /></button>
-      </div>
+        <button className="icon-button" type="button" onClick={onClose} aria-label="Close appointment details"><X size={18} /></button>
+      </header>
 
-      <div className="appointment-detail-summary">
-        <article className="appointment-summary-primary">
-          <span>Visit</span>
-          <strong>{appointment.service}</strong>
-          <small>{appointmentDurationMinutes(appointment, services)} min · {appointment.room || "Room not assigned"}</small>
-        </article>
-        <article>
-          <span>Appointment status</span>
-          <StatusBadge status={status} />
-          <small>{appointment.branch}</small>
-        </article>
-        <article className={payment.due > 0 ? "payment-due" : "payment-clear"}>
-          <span>Balance due</span>
-          <strong>{money.format(payment.due)}</strong>
-          <small>{payment.status} · {money.format(payment.applied)} applied</small>
-        </article>
-      </div>
-
-      <div className="appointment-primary-actions">
-        <button className="primary-button" type="button" onClick={() => onPayment(appointment)} disabled={payment.price <= 0 || payment.due <= 0}>
-          <CreditCard size={16} /> Collect {money.format(payment.due)}
-        </button>
-        <button className="secondary-button" type="button" onClick={() => onEdit(appointment)}><Edit3 size={16} /> Edit appointment</button>
-        <button className="secondary-button" type="button" onClick={() => onReminder(appointment)}><Send size={16} /> Send reminder</button>
-        <button className="secondary-button" type="button" onClick={() => onEmail(appointment)}><Mail size={16} /> Email</button>
-        <button className="secondary-button icon-only-action" type="button" onClick={() => onPrint(appointment)} aria-label="Print appointment"><Printer size={16} /></button>
-      </div>
-
-      {transitions.length > 0 && (
-        <section className="appointment-status-actions" aria-label="Update appointment status">
-          <span>Move appointment to</span>
-          <div>
-            {transitions.slice(0, 4).map((value) => (
-              <button className="status-transition-button" type="button" key={value} onClick={() => onStatus(appointment.id, value)}>
-                <Check size={14} /> {value}
-              </button>
-            ))}
+      <div className="appointment-details-body">
+        <section className="appointment-compact-summary" aria-label="Appointment summary">
+          <AppointmentDetailRow label="Service" value={appointment.service} />
+          <div className="appointment-summary-status-row">
+            <span>Current status</span>
+            <div>
+              <StatusBadge status={status} />
+              {transitions.length > 0 && (
+                <details className="appointment-status-menu">
+                  <summary>Update status <ChevronDown size={15} /></summary>
+                  <div role="menu" aria-label="Update appointment status">
+                    {standardTransitions.map((value) => (
+                      <button type="button" role="menuitem" key={value} onClick={() => onStatus(appointment.id, value)}><Check size={14} /> {value}</button>
+                    ))}
+                    {canCancel && <button className="danger" type="button" role="menuitem" onClick={() => onStatus(appointment.id, "Cancelled")}><X size={14} /> Cancelled</button>}
+                  </div>
+                </details>
+              )}
+            </div>
+          </div>
+          <AppointmentDetailRow label="Branch and room" value={`${appointment.branch || "Branch not assigned"} · ${appointment.room || "Room not assigned"}`} />
+          <AppointmentDetailRow label="Doctor / Staff" value={appointment.staff || "Not assigned"} />
+          <div className="appointment-summary-payment-row">
+            <span>Payment</span>
+            <div><strong className={payment.due <= 0 ? `appointment-payment-badge ${payment.price > 0 ? "paid" : "neutral"}` : ""}>{paymentLabel}</strong><small>{money.format(payment.applied)} applied</small></div>
           </div>
         </section>
-      )}
 
-      <section className="appointment-detail-section">
-        <div className="appointment-detail-section-heading">
-          <div>
-            <span className="appointment-section-icon"><ClipboardCheck size={17} /></span>
-            <div><strong>Visit information</strong><small>Contact, location, staff, and charges</small></div>
-          </div>
-        </div>
-        <div className="drawer-section-grid appointment-facts-grid">
-          <RecordItem label="Mobile" value={client?.mobile || "Not recorded"} />
-          <RecordItem label="Email" value={client?.email || "Not recorded"} />
-          <RecordItem label="Birthday" value={client?.birthday || client?.dob || "Not recorded"} />
-          <RecordItem label="Patient type" value={appointment.appointmentType || "Treatment"} />
-          <RecordItem label="Branch" value={appointment.branch} />
-          <RecordItem label="Room" value={appointment.room} />
-          <RecordItem label="Doctor / Staff" value={appointment.staff} />
-          <RecordItem label="Duration" value={`${appointmentDurationMinutes(appointment, services)} minutes`} />
-          <RecordItem label="Timezone" value={appointment.timezone || "Asia/Manila"} />
-          <RecordItem label="Insurance" value={appointment.insurance || "None recorded"} />
-          <RecordItem label="Tags" value={appointment.tags || client?.tag || "None"} />
-          <RecordItem label="Package" value={appointment.packageName || "Pay per visit"} />
-          <RecordItem label="Service price" value={money.format(payment.price)} />
-          <RecordItem label="Deposit" value={money.format(payment.deposit)} />
-        </div>
-      </section>
+        <div className="appointment-disclosure-list">
+          <details className="appointment-disclosure" open>
+            <summary><span><PhoneCall size={17} /><span><strong>Patient information</strong><small>Contact details</small></span></span><ChevronDown size={17} /></summary>
+            <div className="appointment-disclosure-content">
+              <div className="appointment-detail-rows">
+                <AppointmentDetailRow label="Mobile number" value={client?.mobile || "Not recorded"} />
+                <AppointmentDetailRow label="Email address" value={client?.email || "Not recorded"} />
+              </div>
+              <details className="appointment-more-details">
+                <summary>More details <ChevronDown size={15} /></summary>
+                <div className="appointment-detail-rows">
+                  <AppointmentDetailRow label="Birthday" value={client?.birthday || client?.dob || "Not recorded"} />
+                  <AppointmentDetailRow label="Patient type" value={appointment.appointmentType || "Treatment"} />
+                  <AppointmentDetailRow label="Timezone" value={appointment.timezone || "Asia/Manila"} />
+                  <AppointmentDetailRow label="Insurance" value={appointment.insurance || "None recorded"} />
+                  <AppointmentDetailRow label="Tags" value={appointment.tags || client?.tag || "None"} />
+                  <AppointmentDetailRow label="Package" value={appointment.packageName || "Pay per visit"} />
+                  <AppointmentDetailRow label="Booking ID" value={appointment.id} />
+                </div>
+              </details>
+            </div>
+          </details>
 
-      <section className="appointment-detail-section">
-        <div className="appointment-detail-section-heading">
-          <div>
-            <span className="appointment-section-icon clinical"><HeartPulse size={17} /></span>
-            <div><strong>Clinical context</strong><small>Important notes for safe service delivery</small></div>
-          </div>
-        </div>
-        <div className="drawer-copy-grid appointment-clinical-grid">
-          <MiniPanel icon={HeartPulse} title="Medical Notes" rows={[client?.medicalNotes, client?.allergies, client?.contraindications].filter(Boolean)} empty="No medical notes recorded." />
-          <MiniPanel icon={FileText} title="Service Protocol" rows={[service?.description, service?.contraindications, service?.aftercare].filter(Boolean)} empty="No service protocol notes." />
-          <MiniPanel icon={MessageSquareText} title="Internal Notes" rows={[appointment.notes, appointment.internalNotes].filter(Boolean)} empty="No notes on this booking." />
-          <MiniPanel icon={WalletCards} title="Payment History" rows={matchingPayments.map((transaction) => `${transaction.invoice} - ${money.format(transaction.total)} - ${transaction.status}`)} empty="No posted payment for this appointment." />
-          <MiniPanel icon={ClipboardCheck} title="SOAP / Treatment Notes" rows={matchingTreatments.flatMap((item) => [item.preNotes, item.postNotes, item.deviceSettings]).filter(Boolean)} empty="No treatment notes linked to this visit." />
-          <MiniPanel icon={ReceiptText} title="Prescription & Aftercare" rows={matchingTreatments.flatMap((item) => [item.prescription, item.aftercare, item.consumables]).filter(Boolean)} empty="No prescription or aftercare record." />
-          <MiniPanel icon={Image} title="Attachments" rows={matchingTreatments.flatMap((item) => splitList(item.photos)).filter(Boolean)} empty="No treatment attachments." />
-          <MiniPanel icon={Gift} title="Packages" rows={matchingPackages.map((item) => `${item.name} · ${item.remaining ?? item.balance ?? 0} remaining · ${item.status}`)} empty="No package linked to this patient." />
-        </div>
-      </section>
+          <details className="appointment-disclosure">
+            <summary><span><CalendarDays size={17} /><span><strong>Visit details</strong><small>Schedule and assigned resources</small></span></span><ChevronDown size={17} /></summary>
+            <div className="appointment-disclosure-content appointment-detail-rows">
+              <AppointmentDetailRow label="Service" value={appointment.service} />
+              <AppointmentDetailRow label="Date and time" value={`${formatDate(appointment.date)} · ${formatScheduleTime(parseTimeToMinutes(appointment.time))}`} />
+              <AppointmentDetailRow label="Appointment duration" value={`${durationMinutes} minutes`} />
+              <AppointmentDetailRow label="Doctor / Staff" value={appointment.staff || "Not assigned"} />
+              <AppointmentDetailRow label="Branch" value={appointment.branch || "Not assigned"} />
+              <AppointmentDetailRow label="Room" value={appointment.room || "Not assigned"} />
+              <AppointmentContentGroup title="Service protocol" rows={[service?.description, service?.contraindications, service?.aftercare].filter(Boolean)} empty="No service protocol notes." />
+            </div>
+          </details>
 
-      <section className="appointment-detail-section appointment-history-section">
-        <div className="appointment-detail-section-heading">
-          <div>
-            <span className="appointment-section-icon"><Clock size={17} /></span>
-            <div><strong>Activity timeline</strong><small>{timeline.length} recorded events</small></div>
+          <details className="appointment-disclosure">
+            <summary><span><WalletCards size={17} /><span><strong>Payment</strong><small>{paymentLabel}</small></span></span><ChevronDown size={17} /></summary>
+            <div className="appointment-disclosure-content">
+              <div className="appointment-detail-rows">
+                <AppointmentDetailRow label="Payment status" value={payment.status} />
+                <AppointmentDetailRow label="Service price" value={money.format(payment.price)} />
+                <AppointmentDetailRow label="Deposit" value={money.format(payment.deposit)} />
+                <AppointmentDetailRow label="Applied payments" value={money.format(payment.applied)} />
+                <AppointmentDetailRow label="Balance" value={money.format(payment.due)} />
+              </div>
+              <AppointmentContentGroup title="Payment history" rows={matchingPayments.map((transaction) => `${transaction.invoice} · ${money.format(transaction.total)} · ${transaction.status}`)} empty="No posted payment for this appointment." />
+            </div>
+          </details>
+
+          <details className="appointment-disclosure">
+            <summary><span><MessageSquareText size={17} /><span><strong>Notes</strong><small>Clinical and internal context</small></span></span><ChevronDown size={17} /></summary>
+            <div className="appointment-disclosure-content appointment-content-groups">
+              <AppointmentContentGroup title="Medical notes" rows={[client?.medicalNotes, client?.allergies, client?.contraindications].filter(Boolean)} empty="No medical notes recorded." />
+              <AppointmentContentGroup title="Internal notes" rows={[appointment.notes, appointment.internalNotes].filter(Boolean)} empty="No notes on this booking." />
+              <AppointmentContentGroup title="SOAP / Treatment notes" rows={matchingTreatments.flatMap((item) => [item.preNotes, item.postNotes, item.deviceSettings]).filter(Boolean)} empty="No treatment notes linked to this visit." />
+              <AppointmentContentGroup title="Prescription and aftercare" rows={matchingTreatments.flatMap((item) => [item.prescription, item.aftercare, item.consumables]).filter(Boolean)} empty="No prescription or aftercare record." />
+              <AppointmentContentGroup title="Attachments" rows={matchingTreatments.flatMap((item) => splitList(item.photos)).filter(Boolean)} empty="No treatment attachments." />
+              <AppointmentContentGroup title="Packages" rows={matchingPackages.map((item) => `${item.name} · ${item.remaining ?? item.balance ?? 0} remaining · ${item.status}`)} empty="No package linked to this patient." />
+            </div>
+          </details>
+
+          <details className="appointment-disclosure appointment-history-section">
+            <summary><span><Clock size={17} /><span><strong>Appointment history</strong><small>{timeline.length} recorded events</small></span></span><ChevronDown size={17} /></summary>
+            <div className="appointment-disclosure-content appointment-timeline">
+              {timeline.map((event, index) => (
+                <article key={`${event.title}-${index}`}>
+                  <span>{formatDateTime(event.time)}</span>
+                  <strong>{event.title}</strong>
+                  <small>{event.actor || "System"} / {event.detail}</small>
+                </article>
+              ))}
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <footer className="appointment-details-footer">
+        <div className="appointment-footer-main-actions">
+          {payment.due > 0 ? (
+            <button className="primary-button" type="button" onClick={() => onPayment(appointment)}><CreditCard size={16} /> Collect {money.format(payment.due)}</button>
+          ) : (
+            <button className="primary-button" type="button" onClick={() => onEdit(appointment)}><Edit3 size={16} /> Edit appointment</button>
+          )}
+          {payment.due > 0 ? (
+            <button className="secondary-button" type="button" onClick={() => onEdit(appointment)}><Edit3 size={16} /> Edit appointment</button>
+          ) : (
+            <button className="secondary-button" type="button" onClick={() => onReminder(appointment)}><Send size={16} /> Send reminder</button>
+          )}
+        </div>
+        <details className="appointment-overflow-menu">
+          <summary aria-label="More appointment actions"><EllipsisVertical size={19} /></summary>
+          <div role="menu" aria-label="More appointment actions">
+            {payment.due > 0 && <button type="button" role="menuitem" onClick={() => onReminder(appointment)}><Send size={15} /> Send reminder</button>}
+            <button type="button" role="menuitem" onClick={() => onEmail(appointment)}><Mail size={15} /> Email</button>
+            <button type="button" role="menuitem" onClick={() => onPrint(appointment)}><Printer size={15} /> Print</button>
+            {canCancel && <button className="danger" type="button" role="menuitem" onClick={() => onStatus(appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button>}
           </div>
-        </div>
-        <div className="appointment-timeline">
-          {timeline.map((event, index) => (
-            <article key={`${event.title}-${index}`}>
-              <span>{formatDateTime(event.time)}</span>
-              <strong>{event.title}</strong>
-              <small>{event.actor || "System"} / {event.detail}</small>
-            </article>
-          ))}
-        </div>
-      </section>
+        </details>
+      </footer>
     </aside>
     </>
+  );
+}
+
+function AppointmentDetailRow({ label, value }) {
+  return <div className="appointment-detail-row"><span>{label}</span><strong>{value || "Not set"}</strong></div>;
+}
+
+function AppointmentContentGroup({ title, rows, empty }) {
+  return (
+    <section className="appointment-content-group">
+      <strong>{title}</strong>
+      {rows.length ? rows.map((row, index) => <p key={`${title}-${index}`}>{row}</p>) : <small>{empty}</small>}
+    </section>
   );
 }
 
