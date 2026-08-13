@@ -15,16 +15,19 @@ function present(environment, names, errors) {
 export function productionConfigErrors(environment = process.env) {
   if (environment.NODE_ENV !== "production") return [];
   const errors = [];
+  const smtpNames = ["SMTP_HOST", "SMTP_FROM", "SMTP_USER", "SMTP_PASS"];
+  const smtpConfigured = smtpNames.some((name) => String(environment[name] || "").trim());
+  const smtpRequired = enabled(environment.REQUIRE_SMTP);
   present(environment, [
     "APP_ORIGIN",
     "DATABASE_URL",
     "DIRECT_URL",
     "FACETRACK_ENCRYPTION_KEY",
-    "SMTP_HOST",
-    "SMTP_FROM",
-    "SMTP_USER",
-    "SMTP_PASS",
   ], errors);
+
+  // Email is optional at startup, but a partially configured SMTP provider must
+  // still fail closed. Set REQUIRE_SMTP=true when email delivery is a release gate.
+  if (smtpRequired || smtpConfigured) present(environment, smtpNames, errors);
 
   const origins = String(environment.APP_ORIGIN || "").split(",").map((value) => value.trim()).filter(Boolean);
   if (origins.some((origin) => !origin.startsWith("https://") || origin.includes("example.com"))) {
@@ -33,7 +36,7 @@ export function productionConfigErrors(environment = process.env) {
   if (String(environment.FACETRACK_ENCRYPTION_KEY || "").length < 32) {
     errors.push("FACETRACK_ENCRYPTION_KEY must contain at least 32 characters.");
   }
-  if (/example\.(?:com|test)/i.test(String(environment.SMTP_FROM || ""))) {
+  if ((smtpRequired || smtpConfigured) && /example\.(?:com|test)/i.test(String(environment.SMTP_FROM || ""))) {
     errors.push("SMTP_FROM must use a real clinic mailbox in production.");
   }
   if (enabled(environment.ENABLE_DEMO_ACCOUNTS)) errors.push("ENABLE_DEMO_ACCOUNTS must be false in production.");

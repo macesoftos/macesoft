@@ -21,6 +21,55 @@ test("production fails closed for insecure or incomplete configuration", () => {
   assert.ok(errors.some((error) => error.includes("32 characters")));
   assert.ok(errors.some((error) => error.includes("forbidden")));
   assert.ok(errors.some((error) => error.includes("STORAGE_BASE_URL")));
+  assert.ok(!errors.some((error) => error.includes("SMTP_")));
+});
+
+test("production permits SMTP to remain disabled", () => {
+  const errors = productionConfigErrors({
+    NODE_ENV: "production",
+    APP_ORIGIN: "https://clinic.example.ph",
+    DATABASE_URL: "postgresql://runtime",
+    DIRECT_URL: "postgresql://direct",
+    FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: "true",
+    STORAGE_BASE_URL: "https://storage.example.ph",
+    STORAGE_BUCKET: "clinical-assets",
+    STORAGE_SERVICE_KEY: "secret",
+  });
+  assert.deepEqual(errors, []);
+});
+
+test("production rejects partial SMTP configuration", () => {
+  const errors = productionConfigErrors({
+    NODE_ENV: "production",
+    APP_ORIGIN: "https://clinic.example.ph",
+    DATABASE_URL: "postgresql://runtime",
+    DIRECT_URL: "postgresql://direct",
+    FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: "true",
+    STORAGE_BASE_URL: "https://storage.example.ph",
+    STORAGE_BUCKET: "clinical-assets",
+    STORAGE_SERVICE_KEY: "secret",
+    SMTP_HOST: "smtp.mail.example",
+  });
+  assert.ok(errors.some((error) => error.includes("SMTP_FROM")));
+  assert.ok(errors.some((error) => error.includes("SMTP_USER")));
+  assert.ok(errors.some((error) => error.includes("SMTP_PASS")));
+});
+
+test("production can require SMTP explicitly", () => {
+  const errors = productionConfigErrors({
+    NODE_ENV: "production",
+    APP_ORIGIN: "https://clinic.example.ph",
+    DATABASE_URL: "postgresql://runtime",
+    DIRECT_URL: "postgresql://direct",
+    FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: "true",
+    STORAGE_BASE_URL: "https://storage.example.ph",
+    STORAGE_BUCKET: "clinical-assets",
+    STORAGE_SERVICE_KEY: "secret",
+    REQUIRE_SMTP: "true",
+  });
   assert.ok(errors.some((error) => error.includes("SMTP_HOST")));
   assert.ok(errors.some((error) => error.includes("SMTP_PASS")));
 });
