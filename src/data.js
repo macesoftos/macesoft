@@ -22,15 +22,15 @@ export const serviceCategories = [
 export const users = [
   { id: "u-owner", name: "Dr. Mace", role: "Owner", email: "owner@mace.test", branch: "All branches" },
   { id: "u-admin", name: "Admin Sofia", role: "Super Admin", email: "admin@mace.test", branch: "All branches" },
-  { id: "u-manager", name: "Mika Santos", role: "Branch Manager", email: "manager@mace.test", branch: "Mace BGC" },
-  { id: "u-reception", name: "Ria Lim", role: "Receptionist", email: "frontdesk@mace.test", branch: "Mace BGC" },
-  { id: "u-cashier", name: "Cathy Go", role: "Cashier", email: "cashier@mace.test", branch: "Mace BGC" },
-  { id: "u-doctor", name: "Dr. Aria Tan", role: "Doctor", email: "doctor@mace.test", branch: "Mace BGC" },
+  { id: "u-manager", name: "Mika Santos", role: "Branch Manager", email: "manager@mace.test", branch: "Mace Davao" },
+  { id: "u-reception", name: "Ria Lim", role: "Receptionist", email: "frontdesk@mace.test", branch: "Mace Davao" },
+  { id: "u-cashier", name: "Cathy Go", role: "Cashier", email: "cashier@mace.test", branch: "Mace Davao" },
+  { id: "u-doctor", name: "Dr. Aria Tan", role: "Doctor", email: "doctor@mace.test", branch: "Mace Davao" },
   { id: "u-nurse", name: "Nurse Ana", role: "Nurse / Aesthetician", email: "nurse@mace.test", branch: "Mace Davao" },
   { id: "u-nurse-bea", name: "Nurse Bea", role: "Nurse / Aesthetician", email: "bea@mace.test", branch: "Mace Davao" },
   { id: "u-inventory", name: "Bea Cruz", role: "Inventory Staff", email: "inventory@mace.test", branch: "Mace Davao" },
   { id: "u-marketing", name: "Pat Lee", role: "Marketing Staff", email: "marketing@mace.test", branch: "All branches" },
-  { id: "u-employee", name: "Ella Reyes", role: "Employee", email: "employee@mace.test", branch: "Mace BGC" },
+  { id: "u-employee", name: "Ella Reyes", role: "Employee", email: "employee@mace.test", branch: "Mace Davao" },
 ];
 
 export const roleAccess = {
@@ -49,18 +49,6 @@ export const roleAccess = {
 };
 
 export const branches = [
-  {
-    id: "br-bgc",
-    name: "Mace BGC",
-    city: "Taguig",
-    address: "Bonifacio Global City, Taguig",
-    phone: "0917 109 8462",
-    hours: "10:00 AM - 8:00 PM",
-    rooms: ["Room 1", "Room 2", "Laser Room", "Device Suite"],
-    staff: 8,
-    devices: ["Mace Ultralift", "Mace Sculpt", "Picowhite"],
-    image: assets.clinic,
-  },
   {
     id: "br-davao",
     name: "Mace Davao",
@@ -86,7 +74,7 @@ export const initialClients = [
     address: "BGC, Taguig",
     city: "Taguig",
     emergency: "Marco Hernandez - 0917 200 9911",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     source: "Website",
     referral: "MACE website",
     medicalNotes: "Sensitive skin. Prefers doctor review before injectables.",
@@ -115,7 +103,7 @@ export const initialClients = [
     address: "Makati City",
     city: "Makati",
     emergency: "Lia Santos - 0928 500 4422",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     source: "Instagram",
     referral: "Instagram",
     medicalNotes: "First consultation. Asked for acne plan.",
@@ -173,7 +161,7 @@ export const initialClients = [
     address: "Quezon City",
     city: "Quezon City",
     emergency: "Ana Uy - 0915 109 2117",
-    branch: "Mace BGC",
+    branch: "Mace Davao",
     source: "Facebook",
     referral: "Facebook page",
     medicalNotes: "Acne scar program in progress.",
@@ -195,22 +183,22 @@ export const initialClients = [
 ];
 
 export const initialAppointments = [
-  { id: "ap-001", date: "2026-07-03", time: "09:30", clientId: "cl-mika", client: "Mika Santos", service: "Aesthetic Consultation", branch: "Mace BGC", room: "Room 1", staff: "Dr. Mace", status: "Confirmed", deposit: 0, notes: "First consult from Instagram.", internalNotes: "Offer acne protocol." },
-  { id: "ap-002", date: "2026-07-03", time: "11:00", clientId: "cl-celine", client: "Celine Ann Hernandez", service: "Skin Booster Treatment", branch: "Mace BGC", room: "Room 2", staff: "Nurse Ana", status: "Arrived", deposit: 2000, notes: "Maintenance session.", internalNotes: "Check hydration plan." },
+  { id: "ap-001", date: "2026-07-03", time: "09:30", clientId: "cl-mika", client: "Mika Santos", service: "Aesthetic Consultation", branch: "Mace Davao", room: "Room 1", staff: "Dr. Mace", status: "Confirmed", deposit: 0, notes: "First consult from Instagram.", internalNotes: "Offer acne protocol." },
+  { id: "ap-002", date: "2026-07-03", time: "11:00", clientId: "cl-celine", client: "Celine Ann Hernandez", service: "Skin Booster Treatment", branch: "Mace Davao", room: "Room 2", staff: "Nurse Ana", status: "Arrived", deposit: 2000, notes: "Maintenance session.", internalNotes: "Check hydration plan." },
   { id: "ap-003", date: "2026-07-03", time: "13:30", clientId: "cl-andrea", client: "Andrea Lee", service: "Mace Ultralift", branch: "Mace Davao", room: "Device Suite", staff: "Dr. Aria Tan", status: "Pending", deposit: 0, notes: "Client asked about contour results.", internalNotes: "Doctor review before device." },
-  { id: "ap-004", date: "2026-07-03", time: "15:00", clientId: "cl-trisha", client: "Trisha Uy", service: "Mace Resurface", branch: "Mace BGC", room: "Laser Room", staff: "Nurse Bea", status: "Confirmed", deposit: 1000, notes: "Aftercare reminder needed.", internalNotes: "Patch test done." },
+  { id: "ap-004", date: "2026-07-03", time: "15:00", clientId: "cl-trisha", client: "Trisha Uy", service: "Mace Resurface", branch: "Mace Davao", room: "Laser Room", staff: "Nurse Bea", status: "Confirmed", deposit: 1000, notes: "Aftercare reminder needed.", internalNotes: "Patch test done." },
 ];
 
 export const initialInventory = [
-  { id: "inv-skin-booster", item: "Skin Booster Vials", sku: "INJ-SBV-10", brand: "MACE Clinical", category: "Injectables", type: "Consumable", unit: "vial", packQty: 10, beginning: 30, stock: 18, branch: "Mace BGC", location: "Cold storage", reorder: 10, expiry: "2026-11-30", batch: "SBV-2607", supplier: "Derma Supply PH", cost: 3200, price: 0 },
-  { id: "inv-botox", item: "Botox Units", sku: "INJ-BTX-100", brand: "MACE Clinical", category: "Injectables", type: "Consumable", unit: "unit", packQty: 100, beginning: 30, stock: 9, branch: "Mace BGC", location: "Cold storage", reorder: 12, expiry: "2026-09-20", batch: "BTX-2605", supplier: "Aesthetic Med PH", cost: 240, price: 0 },
-  { id: "inv-filler", item: "Filler Syringe", sku: "INJ-FLR-01", brand: "MACE Clinical", category: "Injectables", type: "Consumable", unit: "syringe", packQty: 1, beginning: 12, stock: 7, branch: "Mace BGC", location: "Cold storage", reorder: 5, expiry: "2026-10-15", batch: "FLR-2606", supplier: "Aesthetic Med PH", cost: 5800, price: 0 },
-  { id: "inv-syringe", item: "Sterile Syringe Kit", sku: "SUP-SYK-01", brand: "MedSafe", category: "Supplies", type: "Consumable", unit: "kit", packQty: 1, beginning: 80, stock: 45, branch: "Mace BGC", location: "Procedure room", reorder: 25, expiry: "2027-01-12", batch: "SYK-2604", supplier: "MedSafe Supplies", cost: 90, price: 0 },
+  { id: "inv-skin-booster", item: "Skin Booster Vials", sku: "INJ-SBV-10", brand: "MACE Clinical", category: "Injectables", type: "Consumable", unit: "vial", packQty: 10, beginning: 30, stock: 18, branch: "Mace Davao", location: "Cold storage", reorder: 10, expiry: "2026-11-30", batch: "SBV-2607", supplier: "Derma Supply PH", cost: 3200, price: 0 },
+  { id: "inv-botox", item: "Botox Units", sku: "INJ-BTX-100", brand: "MACE Clinical", category: "Injectables", type: "Consumable", unit: "unit", packQty: 100, beginning: 30, stock: 9, branch: "Mace Davao", location: "Cold storage", reorder: 12, expiry: "2026-09-20", batch: "BTX-2605", supplier: "Aesthetic Med PH", cost: 240, price: 0 },
+  { id: "inv-filler", item: "Filler Syringe", sku: "INJ-FLR-01", brand: "MACE Clinical", category: "Injectables", type: "Consumable", unit: "syringe", packQty: 1, beginning: 12, stock: 7, branch: "Mace Davao", location: "Cold storage", reorder: 5, expiry: "2026-10-15", batch: "FLR-2606", supplier: "Aesthetic Med PH", cost: 5800, price: 0 },
+  { id: "inv-syringe", item: "Sterile Syringe Kit", sku: "SUP-SYK-01", brand: "MedSafe", category: "Supplies", type: "Consumable", unit: "kit", packQty: 1, beginning: 80, stock: 45, branch: "Mace Davao", location: "Procedure room", reorder: 25, expiry: "2027-01-12", batch: "SYK-2604", supplier: "MedSafe Supplies", cost: 90, price: 0 },
   { id: "inv-post-cream", item: "Post-care Cream", sku: "RTL-PCC-30", brand: "MACE Skin", category: "Retail", type: "Retail", unit: "tube", packQty: 1, beginning: 50, stock: 34, branch: "Mace Davao", location: "Retail shelf", reorder: 20, expiry: "2027-04-30", batch: "PCC-2607", supplier: "MACE Skin Lab", cost: 420, price: 1200, image: "/brand/products/post-care-cream.png" },
   { id: "inv-laser-tips", item: "Laser Tips", sku: "DEV-LTP-01", brand: "Device Care", category: "Device Consumables", type: "Consumable", unit: "tip", packQty: 1, beginning: 18, stock: 6, branch: "Mace Davao", location: "Laser room", reorder: 8, expiry: "2026-12-01", batch: "LTP-2602", supplier: "Device Care PH", cost: 950, price: 0 },
-  { id: "inv-cleanser-kit", item: "Cleanser Travel Kit", sku: "RTL-CLK-01", brand: "MACE Skin", category: "Retail", type: "Retail", unit: "kit", packQty: 1, beginning: 36, stock: 24, branch: "Mace BGC", location: "Retail shelf", reorder: 12, expiry: "2027-02-18", batch: "CLK-2606", supplier: "MACE Skin Lab", cost: 520, price: 1500, image: "/brand/products/cleanser-travel-kit.png" },
-  { id: "inv-iv-kit", item: "IV Glow Kit", sku: "IV-GLW-01", brand: "MACE Wellness", category: "IV Drips", type: "Consumable", unit: "kit", packQty: 1, beginning: 22, stock: 11, branch: "Mace BGC", location: "IV Lounge", reorder: 8, expiry: "2026-08-30", batch: "IVG-2605", supplier: "Wellness Supply PH", cost: 1800, price: 0 },
-  { id: "inv-ultralift", item: "Ultralift Cartridge", sku: "DEV-ULT-01", brand: "MACE Devices", category: "Device Consumables", type: "Consumable", unit: "cartridge", packQty: 1, beginning: 10, stock: 4, branch: "Mace BGC", location: "Device suite", reorder: 4, expiry: "2027-05-01", batch: "ULT-2607", supplier: "Device Care PH", cost: 4200, price: 0 },
+  { id: "inv-cleanser-kit", item: "Cleanser Travel Kit", sku: "RTL-CLK-01", brand: "MACE Skin", category: "Retail", type: "Retail", unit: "kit", packQty: 1, beginning: 36, stock: 24, branch: "Mace Davao", location: "Retail shelf", reorder: 12, expiry: "2027-02-18", batch: "CLK-2606", supplier: "MACE Skin Lab", cost: 520, price: 1500, image: "/brand/products/cleanser-travel-kit.png" },
+  { id: "inv-iv-kit", item: "IV Glow Kit", sku: "IV-GLW-01", brand: "MACE Wellness", category: "IV Drips", type: "Consumable", unit: "kit", packQty: 1, beginning: 22, stock: 11, branch: "Mace Davao", location: "IV Lounge", reorder: 8, expiry: "2026-08-30", batch: "IVG-2605", supplier: "Wellness Supply PH", cost: 1800, price: 0 },
+  { id: "inv-ultralift", item: "Ultralift Cartridge", sku: "DEV-ULT-01", brand: "MACE Devices", category: "Device Consumables", type: "Consumable", unit: "cartridge", packQty: 1, beginning: 10, stock: 4, branch: "Mace Davao", location: "Device suite", reorder: 4, expiry: "2027-05-01", batch: "ULT-2607", supplier: "Device Care PH", cost: 4200, price: 0 },
 ];
 
 export const initialTreatments = [
@@ -221,7 +209,7 @@ export const initialTreatments = [
 
 export const initialPackages = [
   { id: "pkg-001", name: "Glow Maintenance Plan", clientId: "cl-celine", client: "Celine Ann Hernandez", sessions: 6, used: 2, expires: "2026-12-31", branch: "All branches", transferable: false, status: "Active", price: 18500 },
-  { id: "pkg-002", name: "Acne Recovery Plan", clientId: "cl-trisha", client: "Trisha Uy", sessions: 4, used: 1, expires: "2026-10-30", branch: "Mace BGC", transferable: false, status: "Active", price: 14000 },
+  { id: "pkg-002", name: "Acne Recovery Plan", clientId: "cl-trisha", client: "Trisha Uy", sessions: 4, used: 1, expires: "2026-10-30", branch: "Mace Davao", transferable: false, status: "Active", price: 14000 },
   { id: "pkg-003", name: "Lift & Define Plan", clientId: "cl-andrea", client: "Andrea Lee", sessions: 3, used: 0, expires: "2026-12-15", branch: "All branches", transferable: true, status: "Pending", price: 48000 },
 ];
 
@@ -231,30 +219,30 @@ export const initialGiftCertificates = [
 ];
 
 export const initialLeads = [
-  { id: "lead-001", name: "Janine Cruz", firstName: "Janine", lastName: "Cruz", mobile: "0917 771 2011", email: "janine.cruz@example.test", source: "Website", sourcePlatform: "Website", campaign: "July Skin Boosters", interest: "Skin Booster Treatment", concern: "Dryness before an event", status: "New Inquiry", priority: "High", score: 65, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 10, reason: "Reachable contact method" }, { points: 15, reason: "Shared preferred appointment schedule" }]), owner: "Ria Lim", branch: "Mace BGC", assignedBranch: "Mace BGC", created: "2026-07-03", preferredDate: "2026-07-12", preferredTime: "15:00", nextAction: "Initial response", nextFollowUpAt: "2026-07-11T10:00:00.000Z", slaDueAt: "2026-07-03T01:15:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Website form", consentTimestamp: "2026-07-03T01:00:00.000Z", consentVersion: "website-v1", firstTouchSource: "Website", latestTouchSource: "Website", nextStep: "Call today" },
-  { id: "lead-002", name: "Patricia Lim", firstName: "Patricia", lastName: "Lim", mobile: "0916 220 3412", source: "Instagram", sourcePlatform: "Instagram", campaign: "Botox Reel Inquiry", interest: "Botulinum Toxin Injections", concern: "Forehead lines", status: "Connected", priority: "Normal", score: 55, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 10, reason: "Reachable contact method" }, { points: 5, reason: "Campaign attribution available" }]), owner: "Mika Santos", branch: "Mace BGC", assignedBranch: "Mace BGC", created: "2026-07-02", lastContactedAt: "2026-07-02T08:00:00.000Z", firstRespondedAt: "2026-07-02T08:00:00.000Z", nextAction: "Send estimate", nextFollowUpAt: "2026-07-11T06:30:00.000Z", followUpCount: 1, slaDueAt: "2026-07-02T07:05:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Instagram inquiry", consentTimestamp: "2026-07-02T07:00:00.000Z", firstTouchSource: "Instagram", latestTouchSource: "Instagram", nextStep: "Send estimate" },
+  { id: "lead-001", name: "Janine Cruz", firstName: "Janine", lastName: "Cruz", mobile: "0917 771 2011", email: "janine.cruz@example.test", source: "Website", sourcePlatform: "Website", campaign: "July Skin Boosters", interest: "Skin Booster Treatment", concern: "Dryness before an event", status: "New Inquiry", priority: "High", score: 65, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 10, reason: "Reachable contact method" }, { points: 15, reason: "Shared preferred appointment schedule" }]), owner: "Ria Lim", branch: "Mace Davao", assignedBranch: "Mace Davao", created: "2026-07-03", preferredDate: "2026-07-12", preferredTime: "15:00", nextAction: "Initial response", nextFollowUpAt: "2026-07-11T10:00:00.000Z", slaDueAt: "2026-07-03T01:15:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Website form", consentTimestamp: "2026-07-03T01:00:00.000Z", consentVersion: "website-v1", firstTouchSource: "Website", latestTouchSource: "Website", nextStep: "Call today" },
+  { id: "lead-002", name: "Patricia Lim", firstName: "Patricia", lastName: "Lim", mobile: "0916 220 3412", source: "Instagram", sourcePlatform: "Instagram", campaign: "Botox Reel Inquiry", interest: "Botulinum Toxin Injections", concern: "Forehead lines", status: "Connected", priority: "Normal", score: 55, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 10, reason: "Reachable contact method" }, { points: 5, reason: "Campaign attribution available" }]), owner: "Mika Santos", branch: "Mace Davao", assignedBranch: "Mace Davao", created: "2026-07-02", lastContactedAt: "2026-07-02T08:00:00.000Z", firstRespondedAt: "2026-07-02T08:00:00.000Z", nextAction: "Send estimate", nextFollowUpAt: "2026-07-11T06:30:00.000Z", followUpCount: 1, slaDueAt: "2026-07-02T07:05:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Instagram inquiry", consentTimestamp: "2026-07-02T07:00:00.000Z", firstTouchSource: "Instagram", latestTouchSource: "Instagram", nextStep: "Send estimate" },
   { id: "lead-003", name: "Elaine Tan", firstName: "Elaine", lastName: "Tan", mobile: "0927 881 3000", source: "Facebook", sourcePlatform: "Meta Facebook", campaign: "Resurface Lead Ad", formId: "fb-form-resurface", externalLeadId: "fb-lead-elaine-001", interest: "Mace Resurface", status: "Appointment Booked", priority: "High", score: 78, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 15, reason: "Shared preferred appointment schedule" }, { points: 8, reason: "Routed to a branch" }]), owner: "Nurse Bea", branch: "Mace Davao", assignedBranch: "Mace Davao", created: "2026-07-01", linkedAppointmentId: "ap-004", preferredDate: "2026-07-12", preferredTime: "13:30", nextAction: "Confirm deposit", nextFollowUpAt: "2026-07-11T07:00:00.000Z", followUpCount: 1, permissionToContact: true, marketingConsent: true, privacyConsent: true, consentSource: "Facebook lead form", consentTimestamp: "2026-07-01T05:00:00.000Z", firstTouchSource: "Facebook Lead Ad", latestTouchSource: "Facebook Lead Ad", nextStep: "Confirm deposit" },
-  { id: "lead-004", name: "Rachelle Go", firstName: "Rachelle", lastName: "Go", mobile: "0918 001 8821", email: "rachelle.go@example.test", source: "Website", sourcePlatform: "Website", campaign: "Ultralift Landing Page", interest: "Mace Ultralift", concern: "Jawline and cheeks", status: "Follow-Up", priority: "Normal", score: 63, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 15, reason: "Complete phone and email" }, { points: 5, reason: "Campaign attribution available" }]), owner: "Mika Santos", branch: "Mace BGC", assignedBranch: "Mace BGC", created: "2026-06-30", nextAction: "Second follow-up", nextFollowUpAt: "2026-07-10T09:00:00.000Z", followUpCount: 2, slaDueAt: "2026-06-30T03:15:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Landing page", consentTimestamp: "2026-06-30T03:00:00.000Z", firstTouchSource: "Website", latestTouchSource: "Website Consultation Form", nextStep: "Follow up tomorrow" },
+  { id: "lead-004", name: "Rachelle Go", firstName: "Rachelle", lastName: "Go", mobile: "0918 001 8821", email: "rachelle.go@example.test", source: "Website", sourcePlatform: "Website", campaign: "Ultralift Landing Page", interest: "Mace Ultralift", concern: "Jawline and cheeks", status: "Follow-Up", priority: "Normal", score: 63, scoreReasons: JSON.stringify([{ points: 20, reason: "Identified service or treatment interest" }, { points: 15, reason: "Complete phone and email" }, { points: 5, reason: "Campaign attribution available" }]), owner: "Mika Santos", branch: "Mace Davao", assignedBranch: "Mace Davao", created: "2026-06-30", nextAction: "Second follow-up", nextFollowUpAt: "2026-07-10T09:00:00.000Z", followUpCount: 2, slaDueAt: "2026-06-30T03:15:00.000Z", permissionToContact: true, marketingConsent: false, privacyConsent: true, consentSource: "Landing page", consentTimestamp: "2026-06-30T03:00:00.000Z", firstTouchSource: "Website", latestTouchSource: "Website Consultation Form", nextStep: "Follow up tomorrow" },
 ];
 
 export const initialStaff = [
-  { id: "st-dr-mace", name: "Dr. Mace", role: "Doctor", branch: "Mace BGC", schedule: "9:00 AM - 5:00 PM", commissionType: "Doctor rate", commissionRate: 12, services: "Injectables, consultations", status: "Available", attendance: "Clocked in", employmentDate: "2022-01-05", phone: "0917 109 8462" },
+  { id: "st-dr-mace", name: "Dr. Mace", role: "Doctor", branch: "Mace Davao", schedule: "9:00 AM - 5:00 PM", commissionType: "Doctor rate", commissionRate: 12, services: "Injectables, consultations", status: "Available", attendance: "Clocked in", employmentDate: "2022-01-05", phone: "0917 109 8462" },
   { id: "st-aria", name: "Dr. Aria Tan", role: "Doctor", branch: "Mace Davao", schedule: "10:00 AM - 6:00 PM", commissionType: "Doctor rate", commissionRate: 10, services: "Devices, consultations", status: "Available", attendance: "Clocked in", employmentDate: "2024-08-12", phone: "0917 334 2218" },
-  { id: "st-ana", name: "Nurse Ana", role: "Nurse / Aesthetician", branch: "Mace BGC", schedule: "10:00 AM - 7:00 PM", commissionType: "Skin care", commissionRate: 8, services: "Facials, IV drips", status: "In treatment", attendance: "Clocked in", employmentDate: "2023-04-20", phone: "0918 220 7719" },
+  { id: "st-ana", name: "Nurse Ana", role: "Nurse / Aesthetician", branch: "Mace Davao", schedule: "10:00 AM - 7:00 PM", commissionType: "Skin care", commissionRate: 8, services: "Facials, IV drips", status: "In treatment", attendance: "Clocked in", employmentDate: "2023-04-20", phone: "0918 220 7719" },
   { id: "st-bea", name: "Nurse Bea", role: "Nurse / Aesthetician", branch: "Mace Davao", schedule: "8:00 AM - 5:00 PM", commissionType: "Device care", commissionRate: 8, services: "Lasers, facials", status: "Available", attendance: "Clocked in", employmentDate: "2023-10-03", phone: "0916 777 8822" },
-  { id: "st-ria", name: "Ria Lim", role: "Receptionist", branch: "Mace BGC", schedule: "9:00 AM - 6:00 PM", commissionType: "N/A", commissionRate: 0, services: "Front desk", status: "Available", attendance: "Clocked in", employmentDate: "2025-02-15", phone: "0917 600 8891" },
+  { id: "st-ria", name: "Ria Lim", role: "Receptionist", branch: "Mace Davao", schedule: "9:00 AM - 6:00 PM", commissionType: "N/A", commissionRate: 0, services: "Front desk", status: "Available", attendance: "Clocked in", employmentDate: "2025-02-15", phone: "0917 600 8891" },
 ];
 
 export const initialExpenses = [
-  { id: "ex-001", date: "2026-07-02", name: "Clinic supplies", category: "Supplies", branch: "Mace BGC", amount: 12400, method: "Bank Transfer", approver: "Owner", status: "Approved", notes: "Monthly replenishment.", receipt: "Attached" },
+  { id: "ex-001", date: "2026-07-02", name: "Clinic supplies", category: "Supplies", branch: "Mace Davao", amount: 12400, method: "Bank Transfer", approver: "Owner", status: "Approved", notes: "Monthly replenishment.", receipt: "Attached" },
   { id: "ex-002", date: "2026-07-01", name: "Utilities", category: "Utilities", branch: "Mace Davao", amount: 8900, method: "Cash", approver: "Branch Manager", status: "Approved", notes: "Electric and water.", receipt: "Attached" },
-  { id: "ex-003", date: "2026-06-30", name: "Training refresh", category: "Training", branch: "Mace BGC", amount: 18000, method: "Credit Card", approver: "Owner", status: "For approval", notes: "Device protocol refresh.", receipt: "Pending" },
+  { id: "ex-003", date: "2026-06-30", name: "Training refresh", category: "Training", branch: "Mace Davao", amount: 18000, method: "Credit Card", approver: "Owner", status: "For approval", notes: "Device protocol refresh.", receipt: "Pending" },
   { id: "ex-004", date: "2026-06-28", name: "Instagram campaign", category: "Marketing", branch: "All branches", amount: 22000, method: "Credit Card", approver: "Owner", status: "Approved", notes: "Promo ads.", receipt: "Attached" },
 ];
 
 export const initialTransactions = [
-  { id: "txn-260703-001", invoice: "MACE-260703-001", date: "2026-07-03", time: "10:15", client: "Walk-in", branch: "Mace BGC", staff: "Nurse Ana", items: [{ name: "Mace Signature Facial", type: "Service", qty: 1, price: 3200 }], subtotal: 3200, discount: 0, total: 3200, payments: [{ method: "GCash", amount: 3200 }], status: "Paid", notes: "Walk-in service." },
-  { id: "txn-260702-001", invoice: "MACE-260702-001", date: "2026-07-02", time: "14:20", client: "Celine Ann Hernandez", branch: "Mace BGC", staff: "Dr. Mace", items: [{ name: "Skin Booster Treatment", type: "Service", qty: 1, price: 9500 }, { name: "Post-care Cream", type: "Product", qty: 1, price: 1200 }], subtotal: 10700, discount: 700, total: 10000, payments: [{ method: "Cash", amount: 6000 }, { method: "Credit Card", amount: 4000 }], status: "Paid", notes: "VIP courtesy discount." },
+  { id: "txn-260703-001", invoice: "MACE-260703-001", date: "2026-07-03", time: "10:15", client: "Walk-in", branch: "Mace Davao", staff: "Nurse Ana", items: [{ name: "Mace Signature Facial", type: "Service", qty: 1, price: 3200 }], subtotal: 3200, discount: 0, total: 3200, payments: [{ method: "GCash", amount: 3200 }], status: "Paid", notes: "Walk-in service." },
+  { id: "txn-260702-001", invoice: "MACE-260702-001", date: "2026-07-02", time: "14:20", client: "Celine Ann Hernandez", branch: "Mace Davao", staff: "Dr. Mace", items: [{ name: "Skin Booster Treatment", type: "Service", qty: 1, price: 9500 }, { name: "Post-care Cream", type: "Product", qty: 1, price: 1200 }], subtotal: 10700, discount: 700, total: 10000, payments: [{ method: "Cash", amount: 6000 }, { method: "Credit Card", amount: 4000 }], status: "Paid", notes: "VIP courtesy discount." },
   { id: "txn-260701-002", invoice: "MACE-260701-002", date: "2026-07-01", time: "17:05", client: "Andrea Lee", branch: "Mace Davao", staff: "Dr. Aria Tan", items: [{ name: "Mace Ultralift", type: "Service", qty: 1, price: 18000 }], subtotal: 18000, discount: 0, total: 18000, payments: [{ method: "Bank Transfer", amount: 13500 }], status: "Partial", notes: "Balance due on next visit." },
 ];
 
