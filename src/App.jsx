@@ -96,6 +96,8 @@ import {
   loadLeadWebhookEvents,
   loadMyWorkspace,
   loadInvitations,
+  loadOrganizationAccounts,
+  linkStaffAccount,
   loginAccount,
   logoutAccount,
   mergeLeadDuplicate,
@@ -1110,6 +1112,26 @@ function App() {
     [inventory, branchScope],
   );
 
+  const scopeRecords = useCallback(
+    (records) => records.filter((item) => branchScope === "All branches" || item.branch === branchScope),
+    [branchScope],
+  );
+
+  const scopedClients = useMemo(() => scopeRecords(clients), [clients, scopeRecords]);
+  const scopedExpenses = useMemo(() => scopeRecords(expenses), [expenses, scopeRecords]);
+  const scopedLeads = useMemo(() => scopeRecords(leads), [leads, scopeRecords]);
+  const scopedStaff = useMemo(() => scopeRecords(staff), [staff, scopeRecords]);
+  const scopedTreatments = useMemo(() => {
+    if (branchScope === "All branches") return treatments;
+    const scopedClientIds = new Set(scopedClients.map((client) => client.id));
+    const scopedClientNames = new Set(scopedClients.map((client) => normalize(client.fullName)));
+    return treatments.filter((treatment) => (
+      (treatment.clientId && scopedClientIds.has(treatment.clientId))
+      || scopedClientNames.has(normalize(treatment.client))
+    ));
+  }, [branchScope, scopedClients, treatments]);
+  const scopedPackages = useMemo(() => scopeRecords(packages), [packages, scopeRecords]);
+
   const stats = useMemo(() => {
     const today = todayDate();
     const todaysTransactions = scopedTransactions.filter((transaction) => transaction.date === today);
@@ -1117,14 +1139,14 @@ function App() {
     const monthTransactions = scopedTransactions.filter((transaction) => transaction.date?.startsWith(monthPrefix));
     const revenueToday = todaysTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
     const revenueMonth = monthTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
-    const expensesMonth = expenses
+    const expensesMonth = scopedExpenses
       .filter((expense) => expense.date?.startsWith(monthPrefix))
       .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const todaysAppointments = scopedAppointments.filter((appointment) => appointment.date === today);
     const pendingAppointments = scopedAppointments.filter((appointment) => canonicalAppointmentStatus(appointment.status) === "Pending Confirmation");
     const noShows = scopedAppointments.filter((appointment) => canonicalAppointmentStatus(appointment.status) === "No Show");
     const lowStock = scopedInventory.filter((item) => stockStatus(item) !== "Healthy");
-    const openLeads = leads.filter((lead) => !closedLeadStatuses.includes(canonicalLeadStatus(lead.status)));
+    const openLeads = scopedLeads.filter((lead) => !closedLeadStatuses.includes(canonicalLeadStatus(lead.status)));
     const servicesToday = todaysTransactions.reduce(
       (sum, transaction) => sum + transaction.items.filter((item) => item.type === "Service").length,
       0,
@@ -1141,10 +1163,10 @@ function App() {
       lowStock,
       openLeads,
       servicesToday,
-      newClients: clients.filter((client) => client.retention === "New").length,
-      returningClients: clients.filter((client) => client.retention === "Returning").length,
+      newClients: scopedClients.filter((client) => client.retention === "New").length,
+      returningClients: scopedClients.filter((client) => client.retention === "Returning").length,
     };
-  }, [clients, expenses, leads, scopedAppointments, scopedInventory, scopedTransactions]);
+  }, [scopedAppointments, scopedClients, scopedExpenses, scopedInventory, scopedLeads, scopedTransactions]);
 
   function notify(message, tone = "success") {
     setToast({ id: createId("toast"), message, tone });
@@ -1985,8 +2007,8 @@ function App() {
 
   const activeLabel =
     activeModule === "overview"
-      ? `${session.role} Workspace`
-      : navItems.find((item) => item.id === activeModule)?.label ?? "Overview";
+      ? "Dashboard"
+      : navItems.find((item) => item.id === activeModule)?.label ?? "Dashboard";
   const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
   const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
@@ -2153,16 +2175,18 @@ function App() {
             <Dashboard
               session={session}
               stats={stats}
-              clients={clients}
+              branchScope={branchScope}
+              clients={scopedClients}
               appointments={scopedAppointments}
               transactions={scopedTransactions}
               inventory={scopedInventory}
-              leads={leads}
+              leads={scopedLeads}
               services={services}
-              staff={staff}
-              expenses={expenses}
-              treatments={treatments}
-              packages={packages}
+              staff={scopedStaff}
+              expenses={scopedExpenses}
+              treatments={scopedTreatments}
+              packages={scopedPackages}
+              branchRecords={branchRecords}
               settings={settings}
               visibleNav={visibleNav}
               setActiveModule={setActiveModule}
@@ -2341,6 +2365,7 @@ function App() {
             <StaffModule
               staff={staff}
               session={session}
+              setSession={setSession}
               openModal={openModal}
               toggleAttendance={toggleAttendance}
               globalSearch={globalSearch}
@@ -2892,6 +2917,7 @@ function LoginScreen({ onLogin, settings }) {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
 
   async function submit(event) {
@@ -2910,14 +2936,14 @@ function LoginScreen({ onLogin, settings }) {
   async function sendReset() {
     setError("");
     setForgotMessage("");
-    setSubmitting(true);
+    setResetSubmitting(true);
     try {
       const result = await requestPasswordReset(email);
       setForgotMessage(result.message);
     } catch (resetError) {
       setError(resetError.message || "Unable to request a password reset.");
     } finally {
-      setSubmitting(false);
+      setResetSubmitting(false);
     }
   }
 
@@ -2947,7 +2973,7 @@ function LoginScreen({ onLogin, settings }) {
             Forgot password
           </button>
           {forgotOpen && (
-            <div className="inline-state warning"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || submitting} onClick={sendReset}>Send reset link</button></div>
+            <div className="inline-state warning" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
         </form>
       </section>
@@ -3163,6 +3189,7 @@ function ApplicationsModule({ session, visibleNav, setActiveModule }) {
 function Dashboard({
   session,
   stats,
+  branchScope,
   clients,
   appointments,
   transactions,
@@ -3173,6 +3200,7 @@ function Dashboard({
   expenses,
   treatments,
   packages,
+  branchRecords,
   settings,
   visibleNav,
   setActiveModule,
@@ -3181,12 +3209,15 @@ function Dashboard({
   const topServices = useMemo(() => tallyItems(transactions, "Service").slice(0, 5), [transactions]);
   const topProducts = useMemo(() => tallyItems(transactions, "Product").slice(0, 5), [transactions]);
   const allowedModules = modulesForSession(session);
+  const canViewFinancialDashboard = ["pos", "expenses", "reports"].every((module) => allowedModules.includes(module));
   const appNav = visibleNav.filter((item) => item.id !== "overview");
-  const branchCards = branches.map((branch) => {
-    const branchTransactions = transactions.filter((transaction) => transaction.branch === branch.name);
-    const revenue = branchTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
-    return { ...branch, revenue };
-  });
+  const branchCards = branchRecords
+    .filter((branch) => branchScope === "All branches" || branch.name === branchScope)
+    .map((branch) => {
+      const branchTransactions = transactions.filter((transaction) => transaction.branch === branch.name);
+      const revenue = branchTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
+      return { ...branch, revenue };
+    });
   const config = buildRoleWorkspace({
     session,
     stats,
@@ -3208,11 +3239,27 @@ function Dashboard({
     setActiveModule,
     openModal,
   });
-  const showHero = session.role !== "Cashier";
+  const showHero = session.role !== "Cashier" && !canViewFinancialDashboard;
   const showActionStrip = session.role === "Cashier";
 
   return (
     <div className={`overview-dashboard overview-${config.tone}`}>
+      {canViewFinancialDashboard && (
+        <OverallBusinessDashboard
+          allowedModules={allowedModules}
+          appointments={appointments}
+          branchScope={branchScope}
+          clients={clients}
+          expenses={expenses}
+          inventory={inventory}
+          leads={leads}
+          packages={packages}
+          setActiveModule={setActiveModule}
+          transactions={transactions}
+          treatments={treatments}
+        />
+      )}
+
       {showHero && (
         <section className={`surface-panel role-hero ${config.tone}`}>
           <div>
@@ -3261,11 +3308,13 @@ function Dashboard({
         </section>
       )}
 
-      <section className="summary-grid role-summary-grid">
-        {config.metrics.map((metric) => (
-          <Metric key={metric.label} {...metric} />
-        ))}
-      </section>
+      {!canViewFinancialDashboard && (
+        <section className="summary-grid role-summary-grid">
+          {config.metrics.map((metric) => (
+            <Metric key={metric.label} {...metric} />
+          ))}
+        </section>
+      )}
 
       <section className="role-work-grid">
         <div className="surface-panel">
@@ -3302,6 +3351,289 @@ function Dashboard({
         ))}
       </section>
     </div>
+  );
+}
+
+const dashboardPeriods = [
+  { id: "all", label: "All time" },
+  { id: "today", label: "Today" },
+  { id: "month", label: "This month" },
+  { id: "year", label: "This year" },
+];
+
+function dashboardPeriodRange(period) {
+  const today = todayDate();
+  if (period === "today") return { from: today, to: today };
+  if (period === "month") return { from: `${today.slice(0, 7)}-01`, to: today };
+  if (period === "year") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  return { from: "", to: "" };
+}
+
+function dashboardPeriodCopy(period) {
+  const today = new Date(`${todayDate()}T12:00:00`);
+  if (period === "today") {
+    return new Intl.DateTimeFormat("en-PH", { month: "long", day: "numeric", year: "numeric" }).format(today);
+  }
+  if (period === "month") {
+    return new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(today);
+  }
+  if (period === "year") return `${today.getFullYear()} year to date`;
+  return "All recorded activity";
+}
+
+function dashboardRecordDate(record) {
+  return String(record?.date || record?.created || record?.createdAt || "").slice(0, 10);
+}
+
+function dashboardRecordInRange(record, range) {
+  if (!range.from && !range.to) return true;
+  const date = dashboardRecordDate(record);
+  if (!date) return false;
+  return (!range.from || date >= range.from) && (!range.to || date <= range.to);
+}
+
+function collectedTransactionAmount(transaction) {
+  if (transaction.status === "Void") return 0;
+  const payments = Array.isArray(transaction.payments) ? transaction.payments : [];
+  const collected = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  return collected > 0 ? collected : Number(transaction.total || 0);
+}
+
+function monthKeysEndingAt(monthKey, count = 6) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const anchor = new Date(year, month - 1, 1, 12);
+  return Array.from({ length: count }, (_, index) => {
+    const value = new Date(anchor.getFullYear(), anchor.getMonth() - (count - index - 1), 1, 12);
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+function OverallBusinessDashboard({
+  allowedModules,
+  appointments,
+  branchScope,
+  clients,
+  expenses,
+  inventory,
+  leads,
+  packages,
+  setActiveModule,
+  transactions,
+  treatments,
+}) {
+  const [period, setPeriod] = useState("all");
+  const range = useMemo(() => dashboardPeriodRange(period), [period]);
+  const activeTransactions = useMemo(
+    () => transactions.filter((transaction) => transaction.status !== "Void"),
+    [transactions],
+  );
+  const periodTransactions = useMemo(
+    () => activeTransactions.filter((transaction) => dashboardRecordInRange(transaction, range)),
+    [activeTransactions, range],
+  );
+  const periodExpenses = useMemo(
+    () => expenses.filter((expense) => dashboardRecordInRange(expense, range)),
+    [expenses, range],
+  );
+  const earnings = periodTransactions.reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0);
+  const grossSales = periodTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
+  const approvedExpenses = periodExpenses
+    .filter((expense) => expense.status === "Approved")
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const pendingExpenses = periodExpenses.filter((expense) => expense.status === "For approval");
+  const pendingExpenseTotal = pendingExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const netEarnings = earnings - approvedExpenses;
+  const netMargin = earnings ? Math.round((netEarnings / earnings) * 100) : 0;
+  const outstandingSales = Math.max(0, grossSales - earnings);
+  const averageTransaction = periodTransactions.length ? earnings / periodTransactions.length : 0;
+  const countInPeriod = (records) => records.filter((record) => dashboardRecordInRange(record, range)).length;
+  const allowed = new Set(allowedModules);
+
+  const recordBreakdown = [
+    { module: "clients", label: "Clients", count: countInPeriod(clients), icon: Users },
+    { module: "appointments", label: "Appointments", count: countInPeriod(appointments), icon: CalendarDays },
+    { module: "pos", label: "Transactions", count: countInPeriod(transactions), icon: WalletCards },
+    { module: "treatments", label: "Treatments", count: countInPeriod(treatments), icon: HeartPulse },
+    { module: "expenses", label: "Expenses", count: countInPeriod(expenses), icon: ReceiptText },
+    { module: "leads", label: "Leads", count: countInPeriod(leads), icon: Inbox },
+    { module: "inventory", label: "Inventory", count: countInPeriod(inventory), icon: Boxes },
+    { module: "packages", label: "Packages", count: countInPeriod(packages), icon: Gift },
+  ].filter((item) => allowed.has(item.module));
+  const totalRecords = recordBreakdown.reduce((sum, item) => sum + item.count, 0);
+
+  const activityMonths = [...activeTransactions, ...expenses]
+    .map((record) => dashboardRecordDate(record).slice(0, 7))
+    .filter((value) => /^\d{4}-\d{2}$/.test(value))
+    .sort();
+  const trendMonths = monthKeysEndingAt(activityMonths.at(-1) || todayDate().slice(0, 7));
+  const trendRows = trendMonths.map((month) => {
+    const monthTransactions = activeTransactions.filter((transaction) => transaction.date?.startsWith(month));
+    const monthExpenses = expenses.filter((expense) => expense.status === "Approved" && expense.date?.startsWith(month));
+    return {
+      month,
+      earnings: monthTransactions.reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0),
+      expenses: monthExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0),
+    };
+  });
+  const trendMax = Math.max(1, ...trendRows.flatMap((row) => [row.earnings, row.expenses]));
+  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "short" });
+  const recentActivity = [
+    ...activeTransactions.map((transaction) => ({
+      id: `sale-${transaction.id}`,
+      date: transaction.date,
+      time: transaction.time || "",
+      title: transaction.invoice || "Sale",
+      meta: transaction.client || transaction.branch,
+      amount: collectedTransactionAmount(transaction),
+      kind: "earning",
+      status: transaction.status,
+    })),
+    ...expenses.map((expense) => ({
+      id: `expense-${expense.id}`,
+      date: expense.date,
+      time: "",
+      title: expense.name,
+      meta: expense.category || expense.branch,
+      amount: Number(expense.amount || 0),
+      kind: "expense",
+      status: expense.status,
+    })),
+  ].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)).slice(0, 6);
+  const openLeadCount = leads.filter((lead) => !closedLeadStatuses.includes(canonicalLeadStatus(lead.status))).length;
+  const activeAppointmentCount = appointments.filter((appointment) => isActiveAppointmentStatus(appointment.status)).length;
+  const lowStockCount = inventory.filter((item) => stockStatus(item) !== "Healthy").length;
+
+  return (
+    <section className="business-dashboard" aria-labelledby="business-dashboard-title">
+      <header className="business-dashboard-header">
+        <div>
+          <p className="eyebrow">Business overview</p>
+          <h2 id="business-dashboard-title">Your clinic, by the numbers.</h2>
+          <p>{branchScope} · {dashboardPeriodCopy(period)}</p>
+        </div>
+        <div className="dashboard-period-tabs" role="group" aria-label="Dashboard reporting period">
+          {dashboardPeriods.map((option) => (
+            <button
+              aria-pressed={period === option.id}
+              className={period === option.id ? "active" : ""}
+              key={option.id}
+              onClick={() => setPeriod(option.id)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="business-kpi-grid">
+        <article className="business-kpi-card records">
+          <div className="business-kpi-icon"><Database size={21} aria-hidden="true" /></div>
+          <div><span>Total records</span><strong>{totalRecords.toLocaleString("en-PH")}</strong></div>
+          <small>Across {recordBreakdown.length} accessible modules</small>
+        </article>
+        <article className="business-kpi-card earnings">
+          <div className="business-kpi-icon"><CircleDollarSign size={21} aria-hidden="true" /></div>
+          <div><span>Earnings</span><strong>{money.format(earnings)}</strong></div>
+          <small>{periodTransactions.length} transaction{periodTransactions.length === 1 ? "" : "s"} collected</small>
+        </article>
+        <article className="business-kpi-card expenses">
+          <div className="business-kpi-icon"><ReceiptText size={21} aria-hidden="true" /></div>
+          <div><span>Expenses</span><strong>{money.format(approvedExpenses)}</strong></div>
+          <small>{pendingExpenses.length ? `${money.format(pendingExpenseTotal)} awaiting approval` : "No costs awaiting approval"}</small>
+        </article>
+        <article className={`business-kpi-card net ${netEarnings < 0 ? "negative" : ""}`}>
+          <div className="business-kpi-icon"><BarChart3 size={21} aria-hidden="true" /></div>
+          <div><span>Net earnings</span><strong>{money.format(netEarnings)}</strong></div>
+          <small>{netMargin}% net margin after approved costs</small>
+        </article>
+      </div>
+
+      <div className="business-insights-grid">
+        <article className="surface-panel finance-trend-panel">
+          <div className="finance-panel-heading">
+            <div>
+              <p className="eyebrow">Cash flow</p>
+              <h3>Six-month financial trend</h3>
+            </div>
+            <div className="finance-chart-legend" aria-label="Chart legend">
+              <span><i className="earning" /> Earnings</span>
+              <span><i className="expense" /> Expenses</span>
+            </div>
+          </div>
+          <div className="finance-chart" role="img" aria-label="Monthly earnings and approved expenses for the last six recorded months">
+            {trendRows.map((row) => (
+              <div className="finance-chart-month" key={row.month} title={`${row.month}: ${money.format(row.earnings)} earnings, ${money.format(row.expenses)} expenses`}>
+                <div className="finance-chart-bars">
+                  <span className="earning" style={{ height: row.earnings ? `${Math.max(8, (row.earnings / trendMax) * 100)}%` : "2px" }} />
+                  <span className="expense" style={{ height: row.expenses ? `${Math.max(8, (row.expenses / trendMax) * 100)}%` : "2px" }} />
+                </div>
+                <small>{monthLabel.format(new Date(`${row.month}-01T12:00:00`))}</small>
+              </div>
+            ))}
+          </div>
+          <div className="finance-summary-strip">
+            <span><small>Average transaction</small><strong>{money.format(averageTransaction)}</strong></span>
+            <span><small>Gross sales</small><strong>{money.format(grossSales)}</strong></span>
+            <span><small>Outstanding</small><strong>{money.format(outstandingSales)}</strong></span>
+          </div>
+        </article>
+
+        <article className="surface-panel records-snapshot-panel">
+          <div className="finance-panel-heading">
+            <div>
+              <p className="eyebrow">Records</p>
+              <h3>Records snapshot</h3>
+            </div>
+            <span>{totalRecords.toLocaleString("en-PH")} total</span>
+          </div>
+          <div className="record-breakdown-grid">
+            {recordBreakdown.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button key={item.module} onClick={() => setActiveModule(item.module)} type="button">
+                  <span><Icon size={17} aria-hidden="true" />{item.label}</span>
+                  <strong>{item.count.toLocaleString("en-PH")}</strong>
+                </button>
+              );
+            })}
+          </div>
+          <div className="operations-strip">
+            <span><strong>{activeAppointmentCount}</strong><small>Active bookings</small></span>
+            <span><strong>{openLeadCount}</strong><small>Open leads</small></span>
+            <span><strong>{lowStockCount}</strong><small>Stock alerts</small></span>
+          </div>
+        </article>
+      </div>
+
+      <article className="surface-panel financial-activity-panel">
+        <div className="finance-panel-heading">
+          <div>
+            <p className="eyebrow">Latest movement</p>
+            <h3>Recent earnings and expenses</h3>
+          </div>
+          <button type="button" onClick={() => setActiveModule("reports")}>View reports <ChevronRight size={15} aria-hidden="true" /></button>
+        </div>
+        {recentActivity.length ? (
+          <div className="financial-activity-list">
+            {recentActivity.map((item) => (
+              <div className="financial-activity-row" key={item.id}>
+                <span className={`financial-activity-icon ${item.kind}`}>
+                  {item.kind === "earning" ? <WalletCards size={17} aria-hidden="true" /> : <ReceiptText size={17} aria-hidden="true" />}
+                </span>
+                <span className="financial-activity-copy"><strong>{item.title}</strong><small>{item.meta} · {formatDate(item.date)}</small></span>
+                <StatusBadge status={item.status} />
+                <strong className={item.kind === "earning" ? "amount-positive" : "amount-negative"}>
+                  {item.kind === "earning" ? "+" : "−"}{money.format(item.amount)}
+                </strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No financial activity yet" copy="Sales and approved expense records will appear here." />
+        )}
+      </article>
+    </section>
   );
 }
 
@@ -8453,9 +8785,13 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
+function StaffModule({ staff, session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
   const canInvite = canManageOrganization(session.role);
   const [invitations, setInvitations] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [linkTarget, setLinkTarget] = useState(null);
+  const [linkChoice, setLinkChoice] = useState("");
+  const [linking, setLinking] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -8464,8 +8800,35 @@ function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch
 
   const refresh = useCallback(async () => {
     if (!canInvite) return;
-    try { setInvitations((await loadInvitations()).invitations || []); } catch (loadError) { notify(loadError.message, "error"); }
+    try {
+      const [invitationResult, accountResult] = await Promise.all([loadInvitations(), loadOrganizationAccounts()]);
+      setInvitations(invitationResult.invitations || []);
+      setAccounts(accountResult.accounts || []);
+    } catch (loadError) { notify(loadError.message, "error"); }
   }, [canInvite, notify]);
+
+  const accountByStaffId = useMemo(
+    () => new Map(accounts.filter((account) => account.staffId).map((account) => [account.staffId, account])),
+    [accounts],
+  );
+  const unlinkedAccounts = useMemo(() => accounts.filter((account) => !account.staffId), [accounts]);
+
+  async function applyLink(staffRow, accountId) {
+    setLinking(true);
+    try {
+      const result = await linkStaffAccount(staffRow.id, accountId);
+      setAccounts((current) => current.map((account) => (account.id === result.account.id ? result.account : account)));
+      applyAuditLog(result.auditLog);
+      if (result.account.id === session.id) setSession(result.account);
+      notify(accountId ? `${result.account.email} is now connected to ${staffRow.name}.` : `${result.account.email} was disconnected.`);
+      setLinkTarget(null);
+      setLinkChoice("");
+    } catch (linkError) {
+      notify(linkError.message, "error");
+    } finally {
+      setLinking(false);
+    }
+  }
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -8509,6 +8872,29 @@ function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch
             { key: "commissionRate", label: "Commission", render: (row) => `${row.commissionRate}%` },
             { key: "attendance", label: "Attendance", render: (row) => <StatusBadge status={row.attendance} /> },
             {
+              key: "login",
+              label: "Login",
+              className: "staff-login-column",
+              render: (row) => {
+                const linked = accountByStaffId.get(row.id);
+                if (linked) {
+                  return (
+                    <div className="staff-login-cell">
+                      <div><strong>{linked.email}</strong><small>{linked.role}</small></div>
+                      {canInvite && <button type="button" disabled={linking} onClick={() => void applyLink(row, "")}><X size={14} /> Unlink</button>}
+                    </div>
+                  );
+                }
+                if (!canInvite) return <span className="staff-login-empty">Not connected</span>;
+                return (
+                  <button type="button" disabled={linking} onClick={() => { setLinkTarget(row); setLinkChoice(""); }}>
+                    <UserCheck size={14} /> Connect login
+                  </button>
+                );
+              },
+              exportValue: (row) => accountByStaffId.get(row.id)?.email || "",
+            },
+            {
               key: "actions",
               label: "Actions",
               className: "staff-actions-column",
@@ -8548,6 +8934,35 @@ function StaffModule({ staff, session, openModal, toggleAttendance, globalSearch
         </div>
         {error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}
         <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowInvite(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Sending..." : "Send invitation"}</button></div>
+      </form></div>}
+      {linkTarget && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Connect login"><form className="modal-card" onSubmit={(event) => { event.preventDefault(); void applyLink(linkTarget, linkChoice); }}>
+        <button className="modal-close" type="button" onClick={() => setLinkTarget(null)}><X size={18} /></button>
+        <SectionHeader icon={UserCheck} title={`Connect a login to ${linkTarget.name}`} action={`${unlinkedAccounts.length} available`} />
+        {unlinkedAccounts.length ? (
+          <>
+            <div className="form-grid">
+              <label className="full-span">
+                <span>Login</span>
+                <select required value={linkChoice} onChange={(event) => setLinkChoice(event.target.value)}>
+                  <option value="">Select a login…</option>
+                  {unlinkedAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>{account.name} · {account.email} · {account.role}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="modal-hint">The connected login gets My Workspace, attendance, and FaceTrack for this staff profile.</p>
+            <div className="modal-actions">
+              <button className="ghost-button" type="button" onClick={() => setLinkTarget(null)}>Cancel</button>
+              <button className="primary-button" disabled={linking || !linkChoice}>{linking ? "Connecting..." : "Connect login"}</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <EmptyState title="No unconnected logins" copy="Every login already has a staff profile. Invite a member to create a new one." />
+            <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setLinkTarget(null)}>Close</button></div>
+          </>
+        )}
       </form></div>}
     </section>
   );

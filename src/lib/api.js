@@ -67,6 +67,17 @@ export function loadInvitations() {
   return requestJson("/api/invitations");
 }
 
+export function loadOrganizationAccounts() {
+  return requestJson("/api/accounts");
+}
+
+export function linkStaffAccount(staffId, accountId) {
+  return requestJson(`/api/staff/${encodeURIComponent(staffId)}/account`, {
+    method: "PUT",
+    body: JSON.stringify({ accountId }),
+  });
+}
+
 export function createInvitation(payload) {
   return requestJson("/api/invitations", { method: "POST", body: JSON.stringify(payload) });
 }

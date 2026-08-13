@@ -25,7 +25,7 @@ import {
 
 export const navItems = [
   { id: "my-workspace", label: "My Workspace", icon: UserCheck, section: "main" },
-  { id: "overview", label: "Overview", icon: LayoutDashboard, section: "main" },
+  { id: "overview", label: "Dashboard", icon: LayoutDashboard, section: "main" },
   { id: "applications", label: "Applications", icon: LayoutGrid, section: "main" },
   { id: "appointments", label: "Appointments", icon: CalendarDays, section: "main" },
   { id: "clients", label: "Clients", icon: Users, section: "main" },
