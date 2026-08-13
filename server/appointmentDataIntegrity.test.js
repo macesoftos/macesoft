@@ -14,3 +14,9 @@ test("appointment history contains only persisted payments and audit records", (
   assert.doesNotMatch(appSource, /title:\s*["']Booking created["']/);
   assert.doesNotMatch(appSource, /Latest appointment state/);
 });
+
+test("card view opens directly on API-backed filters and appointment records", () => {
+  assert.doesNotMatch(appSource, /card-view-kpi/);
+  assert.doesNotMatch(appSource, />Completion rate</);
+  assert.doesNotMatch(appSource, />Total Cards</);
+});

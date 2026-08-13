@@ -11,6 +11,20 @@ test("development seed never preloads appointment records", () => {
   assert.deepEqual(initialAppointments, []);
 });
 
+test("the demo appointment cleanup targets only the retired seed identities", () => {
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20260814030000_remove_demo_appointments/migration.sql", import.meta.url),
+    "utf8",
+  );
+
+  for (const id of ["ap-001", "ap-002", "ap-003", "ap-004"]) {
+    assert.match(migration, new RegExp(`'${id}'`));
+  }
+  assert.match(migration, /DELETE FROM "Appointment"/);
+  assert.match(migration, /\("id", "client", "service"\)/);
+  assert.doesNotMatch(migration, /DELETE FROM "Appointment"\s*;/);
+});
+
 test("development seed never preloads lead records", () => {
   assert.deepEqual(initialLeads, []);
 });

@@ -461,15 +461,6 @@ img { max-width: 100%; }
 }
 
 @media (max-width: 520px) {
-  .card-view-kpi-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .card-view-kpi-metrics > div {
-    padding: 10px 12px;
-  }
-  .card-view-kpi-metrics > div:nth-child(odd) {
-    border-left: 0;
-  }
   .applications-page { padding: 10px; border-radius: 0; }
   .applications-glass { padding: 14px 8px 24px; }
   .applications-title-wrap { align-items: flex-start; gap: 12px; }
@@ -5466,88 +5457,6 @@ td .inline-actions { flex-wrap: nowrap; }
   box-shadow: 0 7px 20px rgba(36, 54, 48, 0.035);
 }
 
-.card-view-kpi-card {
-  display: grid;
-  grid-template-columns: minmax(230px, 1.05fr) minmax(0, 4fr);
-  align-items: center;
-  padding: 24px 26px;
-}
-
-.card-view-kpi-heading,
-.card-view-kpi-metrics > article {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.card-view-kpi-heading {
-  padding-right: 28px;
-}
-
-.card-view-kpi-icon {
-  flex: 0 0 auto;
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #e1e5e6;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #ffffff, #f7f9f9);
-  color: #17221f;
-}
-
-.card-view-kpi-icon.primary {
-  border-color: #dcebe3;
-  background: #e9f4ed;
-  color: #176248;
-}
-
-.card-view-kpi-copy,
-.card-view-kpi-metrics > article > div:last-child {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.card-view-kpi-heading span,
-.card-view-kpi-metrics span {
-  color: #202a27;
-  font-size: 0.79rem;
-  font-weight: 650;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.card-view-kpi-heading strong,
-.card-view-kpi-metrics strong {
-  color: #0f1715;
-  font-size: 1.85rem;
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
-}
-
-.card-view-kpi-heading small {
-  margin-top: 2px;
-  color: #53615d;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.card-view-kpi-metrics {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.card-view-kpi-metrics > article {
-  min-height: 78px;
-  justify-content: center;
-  padding: 0 clamp(16px, 2vw, 34px);
-  border-left: 1px solid #e1e5e6;
-}
-
 .card-view-filter-panel {
   padding: 17px 18px;
 }
@@ -6039,19 +5948,6 @@ td .inline-actions { flex-wrap: nowrap; }
   .card-view-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .card-view-kpi-card {
-    grid-template-columns: 1fr;
-    gap: 22px;
-  }
-
-  .card-view-kpi-heading {
-    padding-right: 0;
-  }
-
-  .card-view-kpi-metrics > article:first-child {
-    border-left: 0;
-  }
 }
 
 @media (max-width: 920px) {
@@ -6072,28 +5968,6 @@ td .inline-actions { flex-wrap: nowrap; }
 }
 
 @media (max-width: 720px) {
-  .card-view-kpi-card {
-    padding: 18px;
-  }
-
-  .card-view-kpi-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .card-view-kpi-metrics > article {
-    justify-content: flex-start;
-    padding: 14px;
-    border-top: 1px solid #e1e5e6;
-  }
-
-  .card-view-kpi-metrics > article:nth-child(odd) {
-    border-left: 0;
-  }
-
-  .card-view-kpi-metrics > article:nth-child(-n + 2) {
-    border-top: 0;
-  }
-
   .card-view-grid,
   .card-view-filters {
     grid-template-columns: 1fr;
@@ -6124,20 +5998,6 @@ td .inline-actions { flex-wrap: nowrap; }
 }
 
 @media (max-width: 420px) {
-  .card-view-kpi-metrics {
-    grid-template-columns: 1fr;
-  }
-
-  .card-view-kpi-metrics > article,
-  .card-view-kpi-metrics > article:nth-child(odd) {
-    border-top: 1px solid #e1e5e6;
-    border-left: 0;
-  }
-
-  .card-view-kpi-metrics > article:first-child {
-    border-top: 0;
-  }
-
   .service-card-heading {
     grid-template-columns: 42px minmax(0, 1fr);
   }
@@ -6618,21 +6478,6 @@ td .inline-actions { flex-wrap: nowrap; }
   .mini-metrics,
   .payment-options {
     grid-template-columns: 1fr;
-  }
-  .card-view-kpi-card {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .card-view-kpi-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-    max-width: none;
-  }
-  .card-view-kpi-metrics > div {
-    padding: 10px 12px;
-  }
-  .card-view-kpi-metrics > div:nth-child(odd) {
-    border-left: 0;
   }
   .client-database-title-row {
     align-items: stretch;
