@@ -27,3 +27,16 @@ test("the cleanup migration removes only reserved-domain demo accounts", () => {
   assert.match(migration, /LIKE '%@mace\.test'/i);
   assert.doesNotMatch(migration, /admin@macebydrmace\.com/i);
 });
+
+test("the removed Dr. Aria demo profile is unassigned without deleting appointments", () => {
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20260813234000_unassign_removed_dr_aria_appointments/migration.sql", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(migration, /UPDATE "Appointment"/);
+  assert.match(migration, /SET "staff" = ''/);
+  assert.match(migration, /Dr\. Aria Tan/);
+  assert.match(migration, /NOT EXISTS/);
+  assert.doesNotMatch(migration, /DELETE FROM "Appointment"/);
+});
