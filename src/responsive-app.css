@@ -1853,7 +1853,11 @@
   .appointment-summary-payment-row,
   .appointment-detail-rows .appointment-detail-row { grid-template-columns: 112px minmax(0, 1fr); }
   .appointment-disclosure-content { padding-left: 26px; }
-  .appointment-details-footer { padding-inline: 16px; }
+  .appointment-details-footer {
+    margin: 0 10px max(10px, env(safe-area-inset-bottom));
+    padding: 8px;
+    border-radius: 10px;
+  }
   .appointment-footer-main-actions button { font-size: 0.78rem; }
 }
 
