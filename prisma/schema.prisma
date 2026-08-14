@@ -112,6 +112,7 @@ model Account {
   failedLoginCount     Int                          @default(0)
   lockedUntil          DateTime?
   lastLoginAt          DateTime?
+  notificationsReadAt  DateTime?
   sessions             AuthSession[]
   attendanceEvents     AttendanceEvent[]
   faceTrackEnrollments FaceTrackProfile[]           @relation("FaceTrackEnrolledBy")
@@ -894,6 +895,20 @@ model AuditLog {
 
   @@index([area])
   @@index([actor])
+}
+
+model AppNotification {
+  id        String   @id @default(cuid())
+  module    String
+  title     String
+  message   String
+  recordId  String   @default("")
+  branches  String[] @default(["All branches"])
+  actor     String   @default("System")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([module, createdAt])
 }
 
 model SystemSetting {
