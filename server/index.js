@@ -271,6 +271,7 @@ const uploadCategories = {
   "branch-photo": { readModule: null, writeModule: "branches" },
   "expense-receipt": { readModule: "expenses", writeModule: "expenses" },
   "treatment-photo": { readModule: "treatments", writeModule: "treatments" },
+  "marketing-image": { readModule: null, writeModule: "sms", public: true },
   "flipbook-logo": { readModule: null, writeModule: "flipbooks" },
   "flipbook-pdf": { readModule: "flipbooks", writeModule: "flipbooks" },
 };
@@ -3716,15 +3717,17 @@ app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
   if (!asset) throw apiError("Uploaded asset was not found.", 404);
   const categoryAccess = uploadCategories[asset.category];
   if (!categoryAccess) throw apiError("Uploaded asset category is invalid.", 500);
-  const actor = categoryAccess.readModule
-    ? assertReadAllowed(request, categoryAccess.readModule)
-    : requireAuthenticatedAccount(request);
-  if (!canAccessBranch(actor, asset.branch)) throw apiError("You do not have access to this uploaded asset.", 403);
+  if (!categoryAccess.public) {
+    const actor = categoryAccess.readModule
+      ? assertReadAllowed(request, categoryAccess.readModule)
+      : requireAuthenticatedAccount(request);
+    if (!canAccessBranch(actor, asset.branch)) throw apiError("You do not have access to this uploaded asset.", 403);
+  }
   const stored = await storageRequest(asset.objectPath);
   if (!stored.ok) throw apiError("Uploaded asset is unavailable.", stored.status === 404 ? 404 : 502);
   const buffer = Buffer.from(await stored.arrayBuffer());
   response.set({
-    "Cache-Control": "private, max-age=300",
+    "Cache-Control": categoryAccess.public ? "public, max-age=31536000, immutable" : "private, max-age=300",
     "Content-Disposition": "inline",
     "Content-Length": String(buffer.length),
     "Content-Type": asset.mimeType,

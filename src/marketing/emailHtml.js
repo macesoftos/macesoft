@@ -99,9 +99,14 @@ function blockEmailHtml(block, origin, theme) {
     return `<div style="${style}"><a href="${escapeEmailHtml(link)}" target="_blank" style="display:inline-block;padding:13px 28px;border-radius:6px;background:${safeColor(block.background, theme.buttonBackground)};color:${theme.buttonTextColor};font-family:Arial,sans-serif;font-size:15px;text-decoration:none">${escapeEmailHtml(block.content)}</a></div>`;
   }
   if (block.type === "treatment") {
-    const rows = String(block.content || "").split(/\n\s*\n/).filter(Boolean).map((row) => {
+    const rows = String(block.content || "").split(/\n\s*\n/).filter(Boolean).map((row, index) => {
       const [title, ...copy] = row.split("\n");
-      return `<tr><td style="padding:14px 18px;border-bottom:1px solid #e6ddd4"><strong>${escapeEmailHtml(title)}</strong><br><span style="font-size:13px;color:#70675f">${escapeEmailHtml(copy.join(" "))}</span></td></tr>`;
+      const rowIcon = block.itemIcons?.[index] || {};
+      const iconSrc = safeEmailUrl(rowIcon.src, origin);
+      const icon = iconSrc
+        ? `<img src="${escapeEmailHtml(iconSrc)}" alt="${escapeEmailHtml(rowIcon.alt || "")}" width="26" style="display:block;width:26px;height:26px;object-fit:contain;border:0">`
+        : `<span style="display:inline-block;width:26px;height:26px;border:1px solid #cbb9a8;border-radius:50%;font-size:15px;line-height:26px;text-align:center">&#10022;</span>`;
+      return `<tr><td width="46" align="center" valign="middle" style="width:46px;padding:14px 0 14px 18px;border-bottom:1px solid #e6ddd4">${icon}</td><td valign="middle" style="padding:14px 18px 14px 10px;border-bottom:1px solid #e6ddd4"><strong>${escapeEmailHtml(title)}</strong><br><span style="font-size:13px;color:#70675f">${escapeEmailHtml(copy.join(" "))}</span></td></tr>`;
     }).join("");
     return `<div style="${style}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f2ec">${rows}</table></div>`;
   }
