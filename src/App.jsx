@@ -5411,9 +5411,12 @@ function RoomAvailabilityModule({
   return (
     <section className="module-grid">
       <div className="surface-panel">
-        <SectionHeader icon={Home} title="Room Availability View" action={date} />
-        <div className="report-filters single-line">
-          <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+        <div className="room-availability-toolbar">
+          <SectionHeader icon={Home} title="Room Availability View" />
+          <label className="room-availability-date">
+            <span>Date</span>
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
         </div>
         {rooms.length ? (
           <AvailabilityTimeline
