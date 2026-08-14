@@ -35,6 +35,7 @@ import {
   PanelLeftOpen,
   Plus,
   Redo2,
+  RotateCcw,
   Save,
   Search,
   Send,
@@ -443,13 +444,17 @@ function campaignWarnings(draft) {
 }
 
 export default function MarketingWorkspace({
+  askConfirm,
   campaigns = [],
   clients = [],
+  deleteCampaignForever,
   globalSearch = "",
   isLoading = false,
+  moveCampaignToDeleted,
   notify,
   onOpenGlobalNavigation,
   openModal,
+  restoreCampaign,
   saveCampaign,
   sendCampaign,
   sendingCampaignId,
@@ -461,6 +466,8 @@ export default function MarketingWorkspace({
   const [draft, setDraft] = useState(() => normalizedDraft(safeJsonRead(draftStorageKey, null)));
   const [savedTemplates, setSavedTemplates] = useState(() => safeJsonRead(templateStorageKey, []));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => safeJsonRead(sidebarStorageKey, false) === true);
+  const activeCampaigns = useMemo(() => campaigns.filter((campaign) => !campaign.deletedAt), [campaigns]);
+  const deletedCampaigns = useMemo(() => campaigns.filter((campaign) => Boolean(campaign.deletedAt)), [campaigns]);
 
   useEffect(() => {
     function syncRoute() {
@@ -477,7 +484,8 @@ export default function MarketingWorkspace({
 
   useEffect(() => {
     const label = workspaceNavigation.find((item) => item.id === route.section)?.label ?? "Marketing";
-    document.title = route.mode === "create" ? `${draft.name || "Create campaign"} — Marketing — MACE` : `${label} — Marketing — MACE`;
+    const pageLabel = route.mode === "deleted" ? "Deleted campaigns" : label;
+    document.title = route.mode === "create" ? `${draft.name || "Create campaign"} — Marketing — MACE` : `${pageLabel} — Marketing — MACE`;
     return () => {
       document.title = "Mace Clinic System";
     };
@@ -601,6 +609,7 @@ export default function MarketingWorkspace({
         ) : (
           <>
             <MarketingHeader
+              mode={route.mode}
               onCreate={() => beginCampaign()}
               onOpenGlobalNavigation={onOpenGlobalNavigation}
               section={route.section}
@@ -610,9 +619,14 @@ export default function MarketingWorkspace({
                 <MarketingLoading />
               ) : (
                 <MarketingPage
-                  campaigns={campaigns}
+                  askConfirm={askConfirm}
+                  campaigns={activeCampaigns}
                   clients={clients}
+                  deletedCampaigns={deletedCampaigns}
+                  deleteCampaignForever={deleteCampaignForever}
                   globalSearch={globalSearch}
+                  mode={route.mode}
+                  moveCampaignToDeleted={moveCampaignToDeleted}
                   navigate={navigate}
                   notify={notify}
                   onCreate={beginCampaign}
@@ -630,6 +644,7 @@ export default function MarketingWorkspace({
                     notify?.("Template duplicated.");
                   }}
                   openModal={openModal}
+                  restoreCampaign={restoreCampaign}
                   savedTemplates={savedTemplates}
                   section={route.section}
                   sendCampaign={sendCampaign}
@@ -647,8 +662,10 @@ export default function MarketingWorkspace({
   );
 }
 
-function MarketingHeader({ onCreate, onOpenGlobalNavigation, section }) {
-  const label = workspaceNavigation.find((item) => item.id === section)?.label ?? "Overview";
+function MarketingHeader({ mode, onCreate, onOpenGlobalNavigation, section }) {
+  const sectionLabel = workspaceNavigation.find((item) => item.id === section)?.label ?? "Overview";
+  const isDeleted = section === "campaigns" && mode === "deleted";
+  const label = isDeleted ? "Deleted campaigns" : sectionLabel;
   return (
     <header className="marketing-header">
       <div className="marketing-heading-row">
@@ -656,11 +673,11 @@ function MarketingHeader({ onCreate, onOpenGlobalNavigation, section }) {
           <Menu size={20} aria-hidden="true" />
         </button>
         <div>
-          <p className="marketing-breadcrumb"><span>Marketing</span><ChevronRight size={14} aria-hidden="true" />{label}</p>
+          <p className="marketing-breadcrumb"><span>Marketing</span><ChevronRight size={14} aria-hidden="true" />{isDeleted ? <><span>Campaigns</span><ChevronRight size={14} aria-hidden="true" />Deleted</> : label}</p>
           <h1>{label}</h1>
         </div>
       </div>
-      {section !== "settings" && (
+      {section !== "settings" && !isDeleted && (
         <button className="marketing-primary-button" onClick={onCreate} type="button">
           <Plus size={17} aria-hidden="true" /> Create campaign
         </button>
@@ -671,7 +688,7 @@ function MarketingHeader({ onCreate, onOpenGlobalNavigation, section }) {
 
 function MarketingPage(props) {
   switch (props.section) {
-    case "campaigns": return <CampaignsPage {...props} />;
+    case "campaigns": return props.mode === "deleted" ? <DeletedCampaignsPage {...props} /> : <CampaignsPage {...props} />;
     case "templates": return <TemplatesPage {...props} />;
     case "audiences": return <AudiencesPage {...props} />;
     case "automations": return <AutomationsPage {...props} />;
@@ -719,18 +736,45 @@ function MarketingOverview({ campaigns, navigate, onCreate }) {
   );
 }
 
-function CampaignsPage({ campaigns, globalSearch, onCreate, openModal, sendCampaign, sendingCampaignId }) {
+function CampaignsPage({ askConfirm, campaigns, deletedCampaigns, globalSearch, moveCampaignToDeleted, navigate, notify, onCreate, openModal, sendCampaign, sendingCampaignId }) {
   const [channel, setChannel] = useState("All channels");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
+  const [busyId, setBusyId] = useState("");
   const filtered = campaigns.filter((campaign) => {
     const search = `${globalSearch} ${query}`.trim().toLowerCase();
     return (!search || `${campaign.name} ${campaign.segment} ${campaign.channel} ${campaign.status}`.toLowerCase().includes(search))
       && (channel === "All channels" || campaign.channel === channel)
       && (status === "All statuses" || campaign.status === status);
   });
+
+  function confirmMoveToDeleted(campaign) {
+    const run = async () => {
+      setBusyId(campaign.id);
+      try {
+        await moveCampaignToDeleted(campaign);
+      } catch (error) {
+        notify?.(error.message || "Unable to move the campaign to Deleted.", "error");
+      } finally {
+        setBusyId("");
+      }
+    };
+    const confirmation = {
+      title: "Move campaign to Deleted?",
+      copy: `“${campaign.name}” will leave active campaigns and reports. You can restore it from the Deleted page.`,
+      actionLabel: "Move to Deleted",
+      onConfirm: () => { void run(); },
+    };
+    if (askConfirm) askConfirm(confirmation);
+    else confirmation.onConfirm();
+  }
+
   return (
     <div className="marketing-list-page">
+      <div className="marketing-list-actions">
+        <div><strong>{campaigns.length.toLocaleString("en-PH")} active campaign{campaigns.length === 1 ? "" : "s"}</strong><span>Deleted campaigns stay recoverable until you remove them forever.</span></div>
+        <button onClick={() => navigate("campaigns", "deleted")} type="button"><Trash2 size={15} aria-hidden="true" /> Deleted <b>{deletedCampaigns.length}</b></button>
+      </div>
       <div className="marketing-toolbar">
         <label className="marketing-search"><Search size={16} /><input aria-label="Search campaigns" onChange={(event) => setQuery(event.target.value)} placeholder="Search campaigns" type="search" value={query} /></label>
         <label><span>Channel</span><select aria-label="Filter by channel" value={channel} onChange={(event) => setChannel(event.target.value)}><option>All channels</option><option>Email</option><option>SMS</option><option>Email + SMS</option></select></label>
@@ -749,13 +793,88 @@ function CampaignsPage({ campaigns, globalSearch, onCreate, openModal, sendCampa
                   <td><StatusPill value={campaign.status} /></td>
                   <td>{campaignDate(campaign)}</td>
                   <td><strong>{Number(campaign.sent || 0).toLocaleString("en-PH")}</strong> delivered<small>{Number(campaign.booked || 0)} bookings</small></td>
-                  <td><div className="marketing-row-actions"><button onClick={() => openModal("campaign", campaign)} type="button">Edit</button><button disabled={sendingCampaignId === campaign.id || campaign.channel === "Email + SMS"} onClick={() => sendCampaign(campaign.id)} title={campaign.channel === "Email + SMS" ? "Combined delivery requires the coordinated delivery endpoint" : undefined} type="button">{sendingCampaignId === campaign.id ? "Sending…" : campaign.channel === "Email + SMS" ? "Setup required" : "Send"}</button></div></td>
+                  <td><div className="marketing-row-actions"><button onClick={() => openModal("campaign", campaign)} type="button">Edit</button><button disabled={sendingCampaignId === campaign.id || campaign.channel === "Email + SMS"} onClick={() => sendCampaign(campaign.id)} title={campaign.channel === "Email + SMS" ? "Combined delivery requires the coordinated delivery endpoint" : undefined} type="button">{sendingCampaignId === campaign.id ? "Sending…" : campaign.channel === "Email + SMS" ? "Setup required" : "Send"}</button><button aria-label={`Delete ${campaign.name}`} className="danger" disabled={busyId === campaign.id} onClick={() => confirmMoveToDeleted(campaign)} type="button"><Trash2 size={14} aria-hidden="true" />{busyId === campaign.id ? "Moving…" : "Delete"}</button></div></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       ) : <MarketingEmpty title="No campaigns match these filters" copy="Clear the filters or create a new campaign." action="Create campaign" onAction={onCreate} />}
+    </div>
+  );
+}
+
+function DeletedCampaignsPage({ askConfirm, deletedCampaigns, deleteCampaignForever, globalSearch, navigate, notify, restoreCampaign }) {
+  const [query, setQuery] = useState("");
+  const [busyId, setBusyId] = useState("");
+  const search = `${globalSearch} ${query}`.trim().toLowerCase();
+  const filtered = [...deletedCampaigns]
+    .sort((left, right) => new Date(right.deletedAt || 0) - new Date(left.deletedAt || 0))
+    .filter((campaign) => !search || `${campaign.name} ${campaign.segment} ${campaign.channel} ${campaign.status}`.toLowerCase().includes(search));
+
+  async function restore(campaign) {
+    setBusyId(campaign.id);
+    try {
+      await restoreCampaign(campaign);
+    } catch (error) {
+      notify?.(error.message || "Unable to restore the campaign.", "error");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  function confirmDeleteForever(campaign) {
+    const run = async () => {
+      setBusyId(campaign.id);
+      try {
+        await deleteCampaignForever(campaign);
+      } catch (error) {
+        notify?.(error.message || "Unable to permanently delete the campaign.", "error");
+      } finally {
+        setBusyId("");
+      }
+    };
+    const confirmation = {
+      title: "Delete campaign forever?",
+      copy: `“${campaign.name}” and its delivery history will be permanently removed. This cannot be undone.`,
+      actionLabel: "Delete forever",
+      onConfirm: () => { void run(); },
+    };
+    if (askConfirm) askConfirm(confirmation);
+    else confirmation.onConfirm();
+  }
+
+  return (
+    <div className="marketing-list-page marketing-deleted-page">
+      <div className="marketing-list-actions">
+        <div><strong>{deletedCampaigns.length.toLocaleString("en-PH")} deleted campaign{deletedCampaigns.length === 1 ? "" : "s"}</strong><span>Restore campaigns or delete them forever when they are no longer needed.</span></div>
+        <button onClick={() => navigate("campaigns")} type="button"><ArrowLeft size={15} aria-hidden="true" /> Back to campaigns</button>
+      </div>
+      <div className="marketing-toolbar single">
+        <label className="marketing-search"><Search size={16} /><input aria-label="Search deleted campaigns" onChange={(event) => setQuery(event.target.value)} placeholder="Search deleted campaigns" type="search" value={query} /></label>
+      </div>
+      {filtered.length ? (
+        <div className="marketing-table-wrap">
+          <table className="marketing-table marketing-deleted-table">
+            <thead><tr><th>Campaign</th><th>Channel</th><th>Audience</th><th>Previous status</th><th>Deleted</th><th>Delivery summary</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody>
+              {filtered.map((campaign) => (
+                <tr key={campaign.id}>
+                  <td><strong>{campaign.name}</strong><small>{campaign.subject || "No email subject"}</small></td>
+                  <td><ChannelPill value={campaign.channel} /></td>
+                  <td>{campaign.segment}</td>
+                  <td><StatusPill value={campaign.status} /></td>
+                  <td>{campaign.deletedAt ? new Date(campaign.deletedAt).toLocaleDateString("en-PH", { day: "numeric", month: "short", year: "numeric" }) : "—"}</td>
+                  <td><strong>{Number(campaign.sent || 0).toLocaleString("en-PH")}</strong> delivered<small>{Number(campaign.booked || 0)} bookings</small></td>
+                  <td><div className="marketing-row-actions deleted"><button disabled={busyId === campaign.id} onClick={() => { void restore(campaign); }} type="button"><RotateCcw size={14} aria-hidden="true" /> Restore</button><button aria-label={`Delete ${campaign.name} forever`} className="danger" disabled={busyId === campaign.id} onClick={() => confirmDeleteForever(campaign)} type="button"><Trash2 size={14} aria-hidden="true" /> Delete forever</button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="marketing-deleted-empty"><span><Trash2 size={22} aria-hidden="true" /></span><h3>{deletedCampaigns.length ? "No deleted campaigns match your search" : "No deleted campaigns"}</h3><p>{deletedCampaigns.length ? "Try another campaign name, channel, or audience." : "Campaigns you delete will stay here until you restore them or delete them forever."}</p><button onClick={() => navigate("campaigns")} type="button">Back to campaigns</button></div>
+      )}
     </div>
   );
 }

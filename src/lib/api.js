@@ -437,6 +437,25 @@ export function sendMarketingCampaign(payload) {
   });
 }
 
+export function moveMarketingCampaignToDeleted(id) {
+  return requestJson(`/api/marketing/campaigns/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreMarketingCampaign(id) {
+  return requestJson(`/api/marketing/campaigns/${encodeURIComponent(id)}/restore`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function deleteMarketingCampaignForever(id) {
+  return requestJson(`/api/marketing/campaigns/${encodeURIComponent(id)}/permanent`, {
+    method: "DELETE",
+  });
+}
+
 export function loadModuleRegistry() {
   return requestJson("/api/modules");
 }

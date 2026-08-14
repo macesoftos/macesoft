@@ -101,6 +101,7 @@ import {
   bookLeadAppointment,
   completePosCheckout,
   convertLeadToClient,
+  deleteMarketingCampaignForever,
   deleteResourceRecord,
   listResourceRecords,
   loadBootstrap,
@@ -123,6 +124,7 @@ import {
   resetAccountPassword,
   resendInvitation,
   restoreAccountSession,
+  restoreMarketingCampaign,
   revokeInvitation,
   inspectInvitation,
   scheduleLeadFollowUp,
@@ -134,6 +136,7 @@ import {
   submitPublicLead,
   updateLeadStage,
   uploadTreatmentPhoto,
+  moveMarketingCampaignToDeleted,
   deleteTreatmentPhoto,
   uploadImageAsset,
   voidTransactionRecord,
@@ -2031,6 +2034,29 @@ function App() {
     return result.record;
   }
 
+  async function moveCampaignToDeleted(campaign) {
+    const result = await moveMarketingCampaignToDeleted(campaign.id);
+    upsertById(setCampaigns, result.campaign);
+    applyAuditLog(result.auditLog);
+    notify("Campaign moved to Deleted.");
+    return result.campaign;
+  }
+
+  async function restoreCampaign(campaign) {
+    const result = await restoreMarketingCampaign(campaign.id);
+    upsertById(setCampaigns, result.campaign);
+    applyAuditLog(result.auditLog);
+    notify("Campaign restored.");
+    return result.campaign;
+  }
+
+  async function deleteCampaignForever(campaign) {
+    const result = await deleteMarketingCampaignForever(campaign.id);
+    removeById(setCampaigns, result.id);
+    applyAuditLog(result.auditLog);
+    notify("Campaign permanently deleted.");
+  }
+
   async function sendCampaign(id) {
     const campaign = campaigns.find((item) => item.id === id);
     if (!campaign) {
@@ -2569,7 +2595,11 @@ function App() {
               campaigns={campaigns}
               settings={settings}
               openModal={openModal}
+              askConfirm={askConfirm}
               onOpenGlobalNavigation={() => setActiveModule("applications")}
+              moveCampaignToDeleted={moveCampaignToDeleted}
+              restoreCampaign={restoreCampaign}
+              deleteCampaignForever={deleteCampaignForever}
               saveCampaign={saveCampaign}
               sendCampaign={sendCampaign}
               sendingCampaignId={sendingCampaignId}

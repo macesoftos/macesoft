@@ -835,21 +835,24 @@ model SmsTemplate {
 }
 
 model MarketingCampaign {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   name       String
   segment    String
   channel    String
-  templateId String   @default("")
-  subject    String   @default("")
-  message    String   @default("")
-  html       String   @default("")
+  templateId String    @default("")
+  subject    String    @default("")
+  message    String    @default("")
+  html       String    @default("")
   design     Json?
-  sent       Int      @default(0)
-  booked     Int      @default(0)
-  credits    Int      @default(0)
-  status     String   @default("Draft")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  sent       Int       @default(0)
+  booked     Int       @default(0)
+  credits    Int       @default(0)
+  status     String    @default("Draft")
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([deletedAt])
 }
 
 model Expense {

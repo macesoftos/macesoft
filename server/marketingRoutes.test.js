@@ -12,6 +12,7 @@ import {
 test("Marketing routes expose the approved canonical workspace URLs", () => {
   assert.equal(marketingHash(), "#/marketing");
   assert.equal(marketingHash("campaigns"), "#/marketing/campaigns");
+  assert.equal(marketingHash("campaigns", "deleted"), "#/marketing/campaigns/deleted");
   assert.equal(marketingHash("templates"), "#/marketing/templates");
   assert.equal(marketingHash("audiences"), "#/marketing/audiences");
   assert.equal(marketingHash("automations"), "#/marketing/automations");
@@ -19,10 +20,11 @@ test("Marketing routes expose the approved canonical workspace URLs", () => {
   assert.equal(marketingHash("settings"), "#/marketing/settings");
 });
 
-test("Marketing route parsing supports the workspace and campaign builder", () => {
+test("Marketing route parsing supports the workspace, campaign builder, and Deleted page", () => {
   assert.deepEqual(marketingRouteFromHash("#/marketing"), { section: "overview", mode: "index" });
   assert.deepEqual(marketingRouteFromHash("#/marketing/campaigns"), { section: "campaigns", mode: "index" });
   assert.deepEqual(marketingRouteFromHash("#/marketing/campaigns/new"), { section: "campaigns", mode: "create" });
+  assert.deepEqual(marketingRouteFromHash("#/marketing/campaigns/deleted"), { section: "campaigns", mode: "deleted" });
   assert.equal(marketingSectionFromHash("#/marketing/reports"), "reports");
   assert.equal(isMarketingHash("#/marketing/settings"), true);
   assert.equal(isMarketingHash("#/sms"), false);

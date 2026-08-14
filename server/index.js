@@ -4252,6 +4252,9 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
   const id = String(request.params.id);
   const existing = await prisma[config.delegate].findUnique({ where: { id } });
   if (!existing) throw apiError(`${config.area} record not found.`, 404);
+  if (request.params.resource === "campaigns" && existing.deletedAt) {
+    throw apiError("Restore this campaign before editing it.", 409);
+  }
   await assertResourceMutationAllowed(request, config, existing);
   const data = await config.normalize(request.body, id);
   await assertResourceMutationAllowed(request, config, data);
@@ -4280,6 +4283,9 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
   const config = configForResource(request.params.resource);
   if (config.readOnly) {
     throw apiError(`${request.params.resource} cannot be deleted through the generic API.`, 405);
+  }
+  if (request.params.resource === "campaigns") {
+    throw apiError("Use the Marketing Deleted page to remove campaigns safely.", 405);
   }
 
   const id = String(request.params.id);
@@ -4875,9 +4881,85 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   response.status(201).json(result);
 }));
 
+app.delete("/api/marketing/campaigns/:id", asyncRoute(async (request, response) => {
+  assertMutationAllowed(request, "sms");
+  const id = String(request.params.id);
+  const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
+  if (!existing) throw apiError("Campaign not found.", 404);
+  if (existing.deletedAt) throw apiError("Campaign is already in Deleted.", 409);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const campaign = await tx.marketingCampaign.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Campaign moved to Deleted",
+      details: `${campaign.name} moved to Deleted and can be restored.`,
+    });
+    return { campaign, auditLog };
+  });
+
+  response.json(result);
+}));
+
+app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, response) => {
+  assertMutationAllowed(request, "sms");
+  const id = String(request.params.id);
+  const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
+  if (!existing) throw apiError("Campaign not found.", 404);
+  if (!existing.deletedAt) throw apiError("Campaign is not in Deleted.", 409);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const campaign = await tx.marketingCampaign.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Campaign restored",
+      details: `${campaign.name} restored to active campaigns.`,
+    });
+    return { campaign, auditLog };
+  });
+
+  response.json(result);
+}));
+
+app.delete("/api/marketing/campaigns/:id/permanent", asyncRoute(async (request, response) => {
+  assertMutationAllowed(request, "sms");
+  const id = String(request.params.id);
+  const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
+  if (!existing) throw apiError("Campaign not found.", 404);
+  if (!existing.deletedAt) {
+    throw apiError("Move this campaign to Deleted before deleting it forever.", 409);
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const campaign = await tx.marketingCampaign.delete({ where: { id } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Campaign permanently deleted",
+      details: `${campaign.name} permanently deleted.`,
+    });
+    return { id: campaign.id, auditLog };
+  });
+
+  response.json(result);
+}));
+
 app.post("/api/marketing/send", asyncRoute(async (request, response) => {
   const actor = assertMutationAllowed(request, "sms");
   const campaign = request.body?.campaign ?? {};
+  if (clean(campaign.id)) {
+    const storedCampaign = await prisma.marketingCampaign.findUnique({
+      where: { id: clean(campaign.id) },
+      select: { deletedAt: true },
+    });
+    if (!storedCampaign) throw apiError("Campaign not found.", 404);
+    if (storedCampaign.deletedAt) throw apiError("Restore this campaign before sending it.", 409);
+  }
   const settings = await getPersistedSettings();
   const channel = marketingChannel(campaign);
   const clients = await listResource("clients", actor);
