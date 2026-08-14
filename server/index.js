@@ -2530,8 +2530,12 @@ function emailReady() {
   return Boolean(host && from && (Boolean(user) === Boolean(pass)));
 }
 
-function assertMarketingProviderReady(campaign) {
+function assertMarketingChannelSupported(campaign) {
   if (clean(campaign?.channel).includes("+")) throw apiError("Combined Email + SMS scheduling requires the coordinated delivery provider.", 503);
+}
+
+function assertMarketingProviderReady(campaign) {
+  assertMarketingChannelSupported(campaign);
   if (envFlag(process.env.MARKETING_DRY_RUN)) return;
   const channel = marketingChannel(campaign);
   if (channel === "sms" && !smsReady()) throw apiError("SMS delivery is not configured. Connect Twilio before scheduling this campaign.", 503);
@@ -5208,7 +5212,7 @@ app.post("/api/marketing/campaigns/:id/schedule", asyncRoute(async (request, res
   const scheduledAt = new Date(clean(request.body?.scheduledAt) || existing.scheduledAt || "");
   if (Number.isNaN(scheduledAt.getTime())) throw apiError("Choose a valid delivery date and time.");
   if (scheduledAt.getTime() <= Date.now()) throw apiError("Choose a delivery time in the future.");
-  assertMarketingProviderReady(existing);
+  assertMarketingChannelSupported(existing);
 
   const marketingSettings = await getPersistedSettings();
   const transition = scheduleMarketingState({
@@ -5240,7 +5244,7 @@ app.post("/api/marketing/campaigns/:id/approve", asyncRoute(async (request, resp
   if (!canManageOrganization(actor.role)) throw apiError("Only an Admin or Business Owner can approve Marketing campaigns.", 403);
   if (existing.deletedAt) throw apiError("Restore this campaign before approving it.", 409);
   if (!existing.scheduledAt) throw apiError("Choose a delivery date and time before approving this campaign.");
-  assertMarketingProviderReady(existing);
+  assertMarketingChannelSupported(existing);
 
   const result = await prisma.$transaction(async (tx) => {
     const campaign = await tx.marketingCampaign.update({ where: { id }, data: approveMarketingState({ actorId: actor.id }) });
@@ -5402,6 +5406,16 @@ async function processDueMarketingCampaigns() {
     if (!dueCampaigns.length) return;
     const allClients = await listResource("clients");
     for (const campaign of dueCampaigns) {
+      try {
+        assertMarketingProviderReady(campaign);
+      } catch (error) {
+        const message = `Waiting for delivery provider: ${clean(error.message) || "Provider unavailable."}`.slice(0, 1000);
+        await prisma.marketingCampaign.updateMany({
+          where: { id: campaign.id, deliveryStatus: marketingDeliveryStates.queued, lastDeliveryError: { not: message } },
+          data: { lastDeliveryError: message },
+        });
+        continue;
+      }
       const claimed = await prisma.marketingCampaign.updateMany({
         where: { id: campaign.id, deliveryStatus: marketingDeliveryStates.queued, status: "Scheduled" },
         data: { deliveryStatus: marketingDeliveryStates.processing, lastDeliveryError: "", status: "Sending" },
