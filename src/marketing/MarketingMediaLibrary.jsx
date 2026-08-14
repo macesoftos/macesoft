@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   ChevronDown,
@@ -172,7 +173,7 @@ export function MarketingMediaPage(props) {
 }
 
 export function MarketingMediaPicker({ initialSelectedUrl, loadMedia, notify, onClose, onSelect, uploadImage }) {
-  return (
+  const dialog = (
     <div className="marketing-media-dialog" role="dialog" aria-modal="true" aria-label="Content studio">
       <button aria-label="Close Content studio" className="marketing-media-backdrop" onClick={onClose} type="button" />
       <section>
@@ -182,4 +183,6 @@ export function MarketingMediaPicker({ initialSelectedUrl, loadMedia, notify, on
       </section>
     </div>
   );
+  if (typeof document === "undefined") return dialog;
+  return createPortal(dialog, document.querySelector(".marketing-workspace") || document.body);
 }
