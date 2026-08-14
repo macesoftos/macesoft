@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+const cardViewSource = appSource.match(/function CardViewModule[\s\S]*?\nfunction StaffAvailabilityModule/)?.[0] ?? "";
 
 test("appointment details do not invent missing record values", () => {
   assert.doesNotMatch(appSource, /appointment\.appointmentType\s*\|\|\s*["']Treatment["']/);
@@ -16,7 +17,12 @@ test("appointment history contains only persisted payments and audit records", (
 });
 
 test("card view opens directly on API-backed filters and appointment records", () => {
-  assert.doesNotMatch(appSource, /card-view-kpi/);
-  assert.doesNotMatch(appSource, />Completion rate</);
-  assert.doesNotMatch(appSource, />Total Cards</);
+  assert.doesNotMatch(cardViewSource, /card-view-kpi/);
+  assert.doesNotMatch(cardViewSource, />Completion rate</);
+  assert.doesNotMatch(cardViewSource, />Total Cards</);
+  assert.match(cardViewSource, /useState\(todayDate\(\)\)/);
+  assert.match(cardViewSource, /appointment\.date === date/);
+  assert.doesNotMatch(cardViewSource, /!date \|\| appointment\.date === date/);
+  assert.match(appSource, /<CardViewModule[\s\S]*?branchRecords=\{branchRecords\}/);
+  assert.doesNotMatch(cardViewSource, /uniqueRoomsFromBranches/);
 });

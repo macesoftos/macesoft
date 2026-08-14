@@ -25,6 +25,19 @@ test("the demo appointment cleanup targets only the retired seed identities", ()
   assert.doesNotMatch(migration, /DELETE FROM "Appointment"\s*;/);
 });
 
+test("the orphaned Card View demo cleanup targets one exact booking", () => {
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20260814051500_remove_orphan_card_view_demo/migration.sql", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(migration, /"id" = 'ap-mro2kp6q-3tjnt'/);
+  assert.match(migration, /"clientId" IS NULL/);
+  assert.match(migration, /"client" = 'Andrea Lee'/);
+  assert.match(migration, /"service" = 'Aesthetic Consultation'/);
+  assert.doesNotMatch(migration, /DELETE FROM "Appointment"\s*;/);
+});
+
 test("development seed never preloads treatment records", () => {
   assert.deepEqual(initialTreatments, []);
 });
