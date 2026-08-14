@@ -125,6 +125,7 @@ import {
   updateLeadStage,
   uploadImageAsset,
   voidTransactionRecord,
+  apiAuthenticationRequiredEvent,
 } from "./lib/api.js";
 
 const storageKey = (key) => `mace-clinicos-${key}`;
@@ -657,6 +658,7 @@ function parseCsvRows(text) {
 
 function App() {
   const [session, setSession] = useState(null);
+  const [sessionNotice, setSessionNotice] = useState("");
   const sessionModules = useMemo(() => modulesForSession(session), [session]);
   const [authChecking, setAuthChecking] = useState(true);
   const initialPathModule = typeof window === "undefined" ? "" : moduleFromPath(window.location.pathname);
@@ -720,6 +722,34 @@ function App() {
     [activeModule, appointmentCreateDate, branchScope, session?.role, sessionModules],
   );
 
+  const clearWorkspaceData = useCallback(() => {
+    setClients([]);
+    setAppointments([]);
+    setServices([]);
+    setInventory([]);
+    setTransactions([]);
+    setTreatments([]);
+    setPackages([]);
+    setGiftCertificates([]);
+    setLeads([]);
+    setStaff([]);
+    setExpenses([]);
+    setDiscounts([]);
+    setSmsTemplates([]);
+    setCampaigns([]);
+    setBranchRecords([]);
+    setLeadIntegrations([]);
+    setWebhookEvents([]);
+    setAuditLogs([]);
+    setInventoryMovements([]);
+    setOrganizationAccounts([]);
+    setSelectedClientId("");
+    setCart([]);
+    setReceiptToPrint(null);
+    setModal(null);
+    setConfirm(null);
+  }, []);
+
   useEffect(() => {
     try {
       retiredSensitiveStorageKeys.forEach((key) => window.localStorage.removeItem(storageKey(key)));
@@ -758,6 +788,17 @@ function App() {
   useEffect(() => {
     setApiSessionContext(session);
   }, [session]);
+
+  useEffect(() => {
+    function handleAuthenticationRequired() {
+      clearWorkspaceData();
+      setSession(null);
+      setSessionNotice("Your session expired. Sign in again to continue.");
+    }
+
+    window.addEventListener(apiAuthenticationRequiredEvent, handleAuthenticationRequired);
+    return () => window.removeEventListener(apiAuthenticationRequiredEvent, handleAuthenticationRequired);
+  }, [clearWorkspaceData]);
 
   useEffect(() => {
     if (session?.branch && session.branch !== "All branches" && branchScope !== session.branch) {
@@ -1223,6 +1264,7 @@ function App() {
   async function handleLogin(email, password) {
     const result = await loginAccount(email, password);
     const user = result.account;
+    setSessionNotice("");
     setSession(user);
     setActiveModule("my-workspace");
     addAudit("Signed in", `${user.name} opened ${settings.productName} as ${user.role}.`, "Authentication", user);
@@ -1232,28 +1274,8 @@ function App() {
   async function handleLogout() {
     addAudit("Signed out", `${session?.name ?? "User"} ended the workspace session.`, "Authentication");
     await logoutAccount().catch(() => {});
-    setClients([]);
-    setAppointments([]);
-    setServices([]);
-    setInventory([]);
-    setTransactions([]);
-    setTreatments([]);
-    setPackages([]);
-    setGiftCertificates([]);
-    setLeads([]);
-    setStaff([]);
-    setExpenses([]);
-    setDiscounts([]);
-    setSmsTemplates([]);
-    setCampaigns([]);
-    setBranchRecords([]);
-    setLeadIntegrations([]);
-    setWebhookEvents([]);
-    setAuditLogs([]);
-    setInventoryMovements([]);
-    setSelectedClientId("");
-    setCart([]);
-    setReceiptToPrint(null);
+    clearWorkspaceData();
+    setSessionNotice("");
     setSession(null);
     setActiveModule("overview");
   }
@@ -1991,7 +2013,7 @@ function App() {
     if (invitationToken) return <AcceptInvitationScreen token={invitationToken} settings={settings} />;
     const resetToken = publicParams.get("reset");
     if (resetToken) return <ResetPasswordScreen token={resetToken} />;
-    return <LoginScreen onLogin={handleLogin} settings={settings} />;
+    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} settings={settings} />;
   }
 
   if (session.mustChangePassword) {
@@ -3146,7 +3168,7 @@ function PublicLeadCapturePage() {
   );
 }
 
-function LoginScreen({ onLogin, settings }) {
+function LoginScreen({ notice, onLogin, settings }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -3199,6 +3221,7 @@ function LoginScreen({ onLogin, settings }) {
             <span>Password</span>
             <input autoComplete="current-password" type="password" placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} />
           </label>
+          {notice && <div className="inline-state warning" role="alert"><AlertCircle size={17} /><span>{notice}</span></div>}
           {error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}
           <button className="primary-button full" type="submit" disabled={submitting || !email || !password}>
             <LockKeyhole size={17} aria-hidden="true" />
@@ -8317,6 +8340,7 @@ function LeadsModule({
   const [page, setPage] = useState(1);
   const [selectedLeadId, setSelectedLeadId] = useStoredState("selected-lead", leads[0]?.id ?? "");
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailFocus, setDetailFocus] = useState("");
   const [actionMenu, setActionMenu] = useState(null);
   const [quickAction, setQuickAction] = useState(null);
   const [quickActionValue, setQuickActionValue] = useState("");
@@ -8461,6 +8485,14 @@ function LeadsModule({
 
   async function changeStage(lead, status, extra = {}) {
     const nextStatus = canonicalLeadStatus(status);
+    if (nextStatus === "Appointment Booked" && !lead.linkedAppointmentId) {
+      setSelectedLeadId(lead.id);
+      setDetailFocus("booking");
+      setDetailsOpen(true);
+      setActionMenu(null);
+      notify("Add the appointment details, then select Book Appointment.", "warning");
+      return;
+    }
     const payload = nextStatus === "Lost" ? { lossReason: lossReason || "No response", ...extra } : extra;
     await updateStatus(lead.id, nextStatus, payload);
     setSelectedLeadId(lead.id);
@@ -8479,6 +8511,7 @@ function LeadsModule({
 
   function openLeadDetails(lead) {
     setSelectedLeadId(lead.id);
+    setDetailFocus("");
     setDetailsOpen(true);
     setActionMenu(null);
   }
@@ -8872,6 +8905,7 @@ function LeadsModule({
               convertLead={convertLead}
               mergeLead={mergeLead}
               openModal={openModal}
+              focusBooking={detailFocus === "booking"}
             />
           </div>
         </div>
@@ -8917,7 +8951,19 @@ function LeadDetailPanel({
   convertLead,
   mergeLead,
   openModal,
+  focusBooking,
 }) {
+  const bookingSectionRef = useRef(null);
+
+  useEffect(() => {
+    if (!focusBooking) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      bookingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      bookingSectionRef.current?.querySelector("select")?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusBooking, lead?.id]);
+
   if (!lead) {
     return (
       <aside className="surface-panel lead-detail-panel">
@@ -9026,7 +9072,7 @@ function LeadDetailPanel({
         </div>
       </div>
 
-      <div className="lead-detail-section">
+      <div className="lead-detail-section lead-booking-section" ref={bookingSectionRef}>
         <h4>Book</h4>
         <div className="lead-action-form">
           <label>

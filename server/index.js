@@ -2763,7 +2763,7 @@ app.use("/api", asyncRoute(async (request, _response, next) => {
   next();
 }));
 
-app.use("/api", (request, _response, next) => {
+app.use("/api", (request, response, next) => {
   if (isPublicApiRequest(request.method, request.originalUrl)) return next();
   if (process.env.NODE_ENV === "test" && envFlag(process.env.API_ALLOW_TRUSTED_HEADERS)) {
     const actor = actorFromRequest(request);
@@ -2772,7 +2772,10 @@ app.use("/api", (request, _response, next) => {
       request.authActor = actor;
     }
   }
-  if (!request.authAccount) return next(apiError("Authentication is required.", 401));
+  if (!request.authAccount) {
+    clearSessionCookie(response);
+    return next(apiError("Authentication is required.", 401));
+  }
   if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.get("x-mace-request") !== "app") {
     return next(apiError("This request did not pass the CSRF check.", 403));
   }
