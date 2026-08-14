@@ -39,10 +39,8 @@ import {
 import {
   assertGiftCertificateUsable,
   assertPackageRedeemable,
-  giftCertificateAfterPayment,
-  packageAfterRedemption,
-  packageAfterVoid,
 } from "./posTenders.js";
+import { assertDiscountUsable, assertPackageOwnedByClient, inventoryWhereForBranch } from "./posSecurity.js";
 import { normalizePaymentReference } from "./paymentReference.js";
 import {
   canonicalTreatmentPhotoKind,
@@ -69,6 +67,11 @@ import {
   marketingDeliveryStates,
   scheduleMarketingState,
 } from "./marketingDelivery.js";
+import {
+  createMarketingSurveyToken,
+  marketingSurveyResponseId,
+  verifyMarketingSurveyToken,
+} from "./marketingSurveySecurity.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -134,6 +137,7 @@ app.use(express.json({
     request.rawBody = buffer.toString("utf8");
   },
 }));
+app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
 app.use("/api", (_request, response, next) => {
   response.setHeader("Cache-Control", "private, no-store");
@@ -469,6 +473,7 @@ const integrationDefaults = [
   { provider: "offline", label: "Phone, Walk-in, Referral, Events", requires: [] },
   { provider: "third-party", label: "Zapier, Make, n8n, Custom Systems", requires: ["LEADS_WEBHOOK_SECRET or LEADS_API_KEY"] },
 ];
+const supportedLeadProviders = new Set(integrationDefaults.map((integration) => integration.provider));
 const webhookRateLimit = new Map();
 const scheduleStartMinutes = 8 * 60;
 const scheduleEndMinutes = 20 * 60;
@@ -1804,8 +1809,14 @@ async function listLeadIntegrations() {
 }
 
 function rateLimitWebhook(request, provider) {
+  if (!supportedLeadProviders.has(provider)) throw apiError("Unsupported lead webhook provider.", 404);
   const key = `${provider}:${request.ip || request.socket?.remoteAddress || "unknown"}`;
   const now = Date.now();
+  if (webhookRateLimit.size > 1_000) {
+    for (const [bucketKey, value] of webhookRateLimit) {
+      if (value.resetAt < now) webhookRateLimit.delete(bucketKey);
+    }
+  }
   const bucket = webhookRateLimit.get(key) ?? { count: 0, resetAt: now + 60_000 };
   if (bucket.resetAt < now) {
     bucket.count = 0;
@@ -1979,19 +1990,20 @@ function webhookIdentity(provider, request, normalized) {
   };
 }
 
-async function detectLeadDuplicate(tx, normalized) {
+async function detectLeadDuplicate(tx, normalized, branch) {
   if (clean(normalized.externalLeadId)) {
     const identity = await tx.externalLeadIdentity.findUnique({
       where: { provider_externalLeadId: { provider: clean(normalized.sourcePlatform), externalLeadId: clean(normalized.externalLeadId) } },
       include: { lead: true },
     });
-    if (identity?.lead) {
+    if (identity?.lead?.branch === branch) {
       return { type: "external", confidence: 100, lead: identity.lead, reasons: ["Same external platform lead ID"] };
     }
   }
 
   const candidates = await tx.lead.findMany({
     where: {
+      branch,
       OR: [
         clean(normalized.mobile) ? { mobile: clean(normalized.mobile) } : undefined,
         clean(normalized.email) ? { email: clean(normalized.email).toLowerCase() } : undefined,
@@ -2016,6 +2028,7 @@ async function detectLeadDuplicate(tx, normalized) {
 
   const clientCandidates = await tx.client.findMany({
     where: {
+      branch,
       OR: [
         clean(normalized.mobile) ? { mobile: clean(normalized.mobile) } : undefined,
         clean(normalized.email) ? { email: clean(normalized.email).toLowerCase() } : undefined,
@@ -2032,11 +2045,14 @@ async function detectLeadDuplicate(tx, normalized) {
   return { type: "none", confidence: 0, reasons: [] };
 }
 
-async function routeIncomingLead(tx, normalized) {
-  let branch = clean(normalized.branch);
+async function routeIncomingLead(tx, normalized, { defaultBranch = "", allowPayloadBranch = false } = {}) {
+  let branch = clean(defaultBranch) || (allowPayloadBranch ? clean(normalized.branch) : "");
   if (!branch) {
     const firstBranch = await tx.branch.findFirst({ orderBy: { name: "asc" } });
     branch = firstBranch?.name || "All branches";
+  } else {
+    const configuredBranch = await tx.branch.findUnique({ where: { name: branch }, select: { id: true } });
+    if (!configuredBranch) throw apiError("The lead integration is assigned to an unavailable branch.", 409);
   }
   let owner = clean(normalized.owner);
   if (!owner || owner === "Front Desk") {
@@ -2117,8 +2133,11 @@ async function processLeadWebhook(provider, request, options = {}) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const duplicate = await detectLeadDuplicate(tx, normalized);
-      const routing = await routeIncomingLead(tx, normalized);
+      const routing = await routeIncomingLead(tx, normalized, {
+        defaultBranch: integration.defaultBranch,
+        allowPayloadBranch: options.allowPayloadBranch === true,
+      });
+      const duplicate = await detectLeadDuplicate(tx, normalized, routing.branch);
       const leadData = normalizeLeadPayload({
         ...normalized,
         branch: routing.branch,
@@ -2243,14 +2262,14 @@ async function processLeadWebhook(provider, request, options = {}) {
   }
 }
 
-async function appointmentDurationFor(data) {
+async function appointmentDurationFor(data, database = prisma) {
   if (Number(data.duration) >= 15) return Number(data.duration);
   let service = null;
   if (data.serviceId) {
-    service = await prisma.service.findUnique({ where: { id: data.serviceId } });
+    service = await database.service.findUnique({ where: { id: data.serviceId } });
   }
   if (!service && data.service) {
-    service = await prisma.service.findFirst({ where: { name: data.service } });
+    service = await database.service.findFirst({ where: { name: data.service } });
   }
   return Math.max(15, Number(service?.duration || 60));
 }
@@ -2320,11 +2339,11 @@ async function assertAppointmentStatusTransition(data, existingId = "") {
   }
 }
 
-async function assertAppointmentSlotAvailable(data, existingId = "") {
+async function assertAppointmentSlotAvailable(data, existingId = "", { database = prisma, unassignedCapacity = 0 } = {}) {
   await assertAppointmentStatusTransition(data, existingId);
   if (!isActiveAppointmentStatus(data.status)) return;
 
-  const duration = await appointmentDurationFor(data);
+  const duration = await appointmentDurationFor(data, database);
   const start = parseTimeToMinutes(data.time);
   const end = start + duration;
   if (start < scheduleStartMinutes || end > scheduleEndMinutes) {
@@ -2335,7 +2354,7 @@ async function assertAppointmentSlotAvailable(data, existingId = "") {
   }
 
   if (data.staff && !["Any available", "To assign"].includes(data.staff)) {
-    const staffMember = await prisma.staffMember.findFirst({ where: { name: data.staff } });
+    const staffMember = await database.staffMember.findFirst({ where: { name: data.staff, branch: data.branch } });
     const unavailable = ["inactive", "on leave", "off duty", "unavailable"].some((status) =>
       clean(staffMember?.status).toLowerCase().includes(status),
     );
@@ -2344,7 +2363,7 @@ async function assertAppointmentSlotAvailable(data, existingId = "") {
     }
   }
 
-  const candidates = await prisma.appointment.findMany({
+  const candidates = await database.appointment.findMany({
     where: {
       date: data.date,
       branch: data.branch,
@@ -2353,10 +2372,12 @@ async function assertAppointmentSlotAvailable(data, existingId = "") {
     },
   });
 
+  let overlappingAppointments = 0;
   for (const appointment of candidates) {
     const appointmentStart = parseTimeToMinutes(appointment.time);
-    const appointmentEnd = appointmentStart + await appointmentDurationFor(appointment);
+    const appointmentEnd = appointmentStart + await appointmentDurationFor(appointment, database);
     if (!rangesOverlap(start, end, appointmentStart, appointmentEnd)) continue;
+    overlappingAppointments += 1;
 
     const sameRoom = data.room && data.room !== "To assign" && data.room === appointment.room;
     const sameStaff =
@@ -2368,6 +2389,9 @@ async function assertAppointmentSlotAvailable(data, existingId = "") {
       const conflictTarget = sameRoom ? `room ${data.room}` : data.staff;
       throw apiError(`${conflictTarget} is already booked from ${appointment.time} for ${appointment.service}.`, 409);
     }
+  }
+  if (unassignedCapacity > 0 && overlappingAppointments >= unassignedCapacity) {
+    throw apiError("That time has reached the branch's online-booking capacity. Choose another time.", 409);
   }
 }
 
@@ -2481,6 +2505,9 @@ function pickTemplate({ campaign, templates, channel }) {
 
 function marketingMergeValues({ client, campaign, settings }) {
   const fullName = clean(client.fullName);
+  const surveyRecipient = clean(client.email || client.mobile || client.id);
+  const rootSecret = clean(process.env.FACETRACK_ENCRYPTION_KEY) || (process.env.NODE_ENV !== "production" ? clean(process.env.DATABASE_URL) : "");
+  const surveySecret = rootSecret ? createHmac("sha256", rootSecret).update("macesoft-marketing-survey-v1").digest("hex") : "";
   return {
     client: client.fullName,
     name: client.fullName,
@@ -2498,7 +2525,16 @@ function marketingMergeValues({ client, campaign, settings }) {
     current_year: String(new Date().getFullYear()),
     unsubscribe_url: "#unsubscribe",
     preferences_url: "#preferences",
+    survey_token: clean(campaign.id) && surveyRecipient && surveySecret
+      ? createMarketingSurveyToken({ campaignId: campaign.id, recipient: surveyRecipient, secret: surveySecret })
+      : "",
   };
+}
+
+function marketingSurveySigningSecret() {
+  const rootSecret = clean(process.env.FACETRACK_ENCRYPTION_KEY) || (process.env.NODE_ENV !== "production" ? clean(process.env.DATABASE_URL) : "");
+  if (!rootSecret) throw apiError("Marketing survey signing is not configured.", 503);
+  return createHmac("sha256", rootSecret).update("macesoft-marketing-survey-v1").digest("hex");
 }
 
 function renderMarketingText(text, context) {
@@ -2702,7 +2738,7 @@ async function buildBootstrapPayload(actor) {
   };
 }
 
-async function buildSaleDraftItems(cart) {
+async function buildSaleDraftItems(cart, branch) {
   if (!Array.isArray(cart) || !cart.length) {
     throw apiError("Cart must contain at least one item.");
   }
@@ -2715,6 +2751,10 @@ async function buildSaleDraftItems(cart) {
       if (!service || !service.active || !service.pos) {
         throw apiError(`${item.name || "Selected service"} is unavailable for POS.`);
       }
+      const offeredBranches = parseJsonList(service.branches);
+      if (offeredBranches.length && !offeredBranches.includes(branch) && !offeredBranches.includes("All branches")) {
+        throw apiError(`${service.name} is not offered at ${branch}.`, 409);
+      }
       prepared.push({
         source: service,
         sourceId: service.id,
@@ -2725,7 +2765,9 @@ async function buildSaleDraftItems(cart) {
         consumables: parseJsonList(service.consumables),
       });
     } else if (item.type === "Product") {
-      const product = await prisma.inventoryItem.findUnique({ where: { id: requireText(item.inventoryId, "Inventory item") } });
+      const product = await prisma.inventoryItem.findFirst({
+        where: inventoryWhereForBranch(requireText(item.inventoryId, "Inventory item"), branch),
+      });
       if (!product || product.type !== "Retail") {
         throw apiError(`${item.name || "Selected product"} is unavailable for POS.`);
       }
@@ -2749,23 +2791,47 @@ async function buildSaleDraftItems(cart) {
   return prepared;
 }
 
-async function calculateCheckout(draft) {
-  const items = await buildSaleDraftItems(draft.cart);
+async function calculateCheckout(draft, { actor, branch }) {
+  const items = await buildSaleDraftItems(draft.cart, branch);
   const subtotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
+  const clientId = clean(draft.clientId);
+  const client = clientId ? await prisma.client.findFirst({ where: { id: clientId, branch } }) : null;
+  if (clientId && !client) throw apiError("The selected client is not available at this branch.", 404);
   const discountId = clean(draft.discount?.id || draft.discountId);
   const discount = discountId ? await prisma.discount.findUnique({ where: { id: discountId } }) : null;
-  const discountAmount = discount?.active
+  if (discountId) assertDiscountUsable(discount, { role: actor.role, client, items });
+  const discountAmount = discount
     ? discount.type === "Percentage"
       ? Math.round((subtotal * Number(discount.value || 0)) / 100)
       : Number(discount.value || 0)
     : 0;
-  const depositCredit = numberValue(draft.depositCredit, "Deposit credit", { min: 0 });
+  const requestedDepositCredit = numberValue(draft.depositCredit, "Deposit credit", { min: 0 });
+  const appointmentId = clean(draft.appointmentId);
+  let depositCredit = 0;
+  let creditedAppointmentId = null;
+  let creditedAppointmentUpdatedAt = null;
+  if (appointmentId) {
+    const appointment = await prisma.appointment.findFirst({ where: { id: appointmentId, branch } });
+    if (!appointment || !clientId || appointment.clientId !== clientId) {
+      throw apiError("The appointment deposit does not belong to the selected client and branch.", 403);
+    }
+    const matchesService = items.length === 1 && items[0].type === "Service" && items[0].sourceId === appointment.serviceId;
+    if (!matchesService) throw apiError("An appointment deposit can only be applied to its booked service.", 409);
+    depositCredit = Math.min(Number(appointment.deposit || 0), subtotal);
+    creditedAppointmentId = depositCredit > 0 ? appointment.id : null;
+    creditedAppointmentUpdatedAt = creditedAppointmentId ? appointment.updatedAt : null;
+  } else if (requestedDepositCredit > 0) {
+    throw apiError("Select the appointment that owns this deposit credit.", 409);
+  }
   const totalDiscount = Math.min(discountAmount + depositCredit, subtotal);
 
   return {
     items,
     subtotal,
     discount,
+    depositCredit,
+    appointmentId: creditedAppointmentId,
+    appointmentUpdatedAt: creditedAppointmentUpdatedAt,
     discountAmount: totalDiscount,
     total: Math.max(0, subtotal - totalDiscount),
   };
@@ -3246,7 +3312,12 @@ app.post("/api/invitations/:id/revoke", asyncRoute(async (request, response) => 
   const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
   if (!current || current.status !== "Pending") throw apiError("Only a pending invitation can be revoked.", 409);
   if (isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) throw apiError("Only a Business Owner can revoke a Business Owner invitation.", 403);
-  const invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { status: "Revoked", revokedAt: new Date() } });
+  const revoked = await prisma.userInvitation.updateMany({
+    where: { id: current.id, status: "Pending", revokedAt: null },
+    data: { status: "Revoked", revokedAt: new Date() },
+  });
+  if (revoked.count !== 1) throw apiError("This invitation is no longer pending.", 409);
+  const invitation = await prisma.userInvitation.findUnique({ where: { id: current.id } });
   const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: "Invitation revoked", details: `${invitation.email} invitation revoked.` }) });
   response.json({ invitation: publicInvitation(invitation), auditLog });
 }));
@@ -3266,11 +3337,25 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
   const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash } });
   if (!invitation || invitation.status !== "Pending") throw apiError("This invitation is no longer available.", 409);
   if (invitation.expiresAt <= new Date()) {
-    await prisma.userInvitation.update({ where: { id: invitation.id }, data: { status: "Expired" } });
+    await prisma.userInvitation.updateMany({
+      where: { id: invitation.id, status: "Pending", expiresAt: { lte: new Date() } },
+      data: { status: "Expired" },
+    });
     throw apiError("This invitation has expired.", 410);
   }
   await invitationBranch(invitation.branch, invitation.role);
   const result = await prisma.$transaction(async (tx) => {
+    const acceptedClaim = await tx.userInvitation.updateMany({
+      where: {
+        id: invitation.id,
+        tokenHash,
+        status: "Pending",
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { status: "Accepted", acceptedAt: new Date() },
+    });
+    if (acceptedClaim.count !== 1) throw apiError("This invitation is no longer available.", 409);
     let account = await tx.account.findUnique({ where: { email: invitation.email } });
     if (account && !verifyPassword(password, account.passwordHash)) throw apiError("Use the password for the existing account.", 401);
     if (!account) {
@@ -3279,7 +3364,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
     } else {
       account = await tx.account.update({ where: { id: account.id }, data: { role: invitation.role, branch: invitation.branch, status: "Active" } });
     }
-    const accepted = await tx.userInvitation.update({ where: { id: invitation.id }, data: { status: "Accepted", acceptedAt: new Date() } });
+    const accepted = await tx.userInvitation.findUnique({ where: { id: invitation.id } });
     await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: invitation.name, role: invitation.role, area: "Access", action: "Invitation accepted", details: `${invitation.email} joined the organization.` } });
     return { account, invitation: accepted };
   });
@@ -3376,7 +3461,10 @@ async function buildMyWorkspace(account) {
   end.setDate(end.getDate() + 1);
   const [events, appointments] = await Promise.all([
     prisma.attendanceEvent.findMany({ where: { staffId: staff.id, occurredAt: { gte: start, lt: end } }, orderBy: { occurredAt: "desc" } }),
-    prisma.appointment.findMany({ where: { staff: staff.name, date: start.toISOString().slice(0, 10) }, orderBy: { time: "asc" } }),
+    prisma.appointment.findMany({
+      where: { staff: staff.name, branch: staff.branch, date: start.toISOString().slice(0, 10) },
+      orderBy: { time: "asc" },
+    }),
   ]);
   return { account: publicAccount(account), staff, events, appointments, attendance: attendanceState(events) };
 }
@@ -3975,7 +4063,11 @@ app.get("/api/leads/webhooks/meta-facebook", (request, response) => {
 app.post("/api/leads/webhooks/:provider", asyncRoute(async (request, response) => {
   const provider = clean(request.params.provider).toLowerCase();
   const result = await processLeadWebhook(provider, request);
-  response.status(result.duplicateEvent || result.status === "Duplicate" ? 200 : 201).json(result);
+  response.status(result.duplicateEvent || result.status === "Duplicate" ? 200 : 201).json({
+    status: result.status,
+    duplicateEvent: result.duplicateEvent,
+    reference: result.event?.providerEventId || request.requestId,
+  });
 }));
 
 app.post("/api/leads/:id/stage", asyncRoute(async (request, response) => {
@@ -4537,7 +4629,7 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   request.body = publicPayload;
   request.rawBody = JSON.stringify(publicPayload);
   try {
-    const result = await processLeadWebhook("website", request, { authMethod: "public-form" });
+    const result = await processLeadWebhook("website", request, { authMethod: "public-form", allowPayloadBranch: true });
     response.status(result.duplicateEvent ? 200 : 201).json({
       submitted: true,
       reference: result.event?.providerEventId || request.requestId,
@@ -4559,40 +4651,31 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   if (!service || !service.active) {
     throw apiError("Selected service is unavailable.", 404);
   }
-  const branch = await prisma.branch.findUnique({ where: { name: booking.branch } });
+  const branch = await prisma.branch.findUnique({ where: { name: booking.branch }, include: { rooms: true } });
   if (!branch) throw apiError("Selected branch is unavailable.", 404);
   const serviceBranches = parseJsonList(service.branches);
   if (serviceBranches.length && !serviceBranches.includes(booking.branch) && !serviceBranches.includes("All branches")) {
     throw apiError("Selected service is not offered at this branch.", 409);
   }
+  const publicBookingKey = `public_${createHash("sha256").update(booking.submissionId).digest("hex")}`;
 
   const result = await prisma.$transaction(async (tx) => {
-    let client = await tx.client.findFirst({ where: { mobile, branch: booking.branch } });
-    if (!client) {
-      client = await tx.client.create({
-        data: normalizeClientPayload({
-          fullName: booking.fullName,
-          mobile,
-          email: booking.email,
-          branch: booking.branch,
-          source: "Online Booking",
-          referral: "Public portal",
-          skinConcerns: booking.concern,
-          treatmentGoals: "Consultation request",
-          marketingOptIn: booking.marketingConsent,
-          preferredStaff: "Any available",
-          tag: "Online",
-          retention: "New",
-          nextVisit: booking.date,
-        }),
-      });
-    }
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`public-booking:${booking.branch}:${booking.date}`}))`;
+    const replay = await tx.appointment.findUnique({ where: { publicBookingKey } });
+    if (replay) return { appointment: replay, replayed: true };
+
+    const staffCapacity = await tx.staffMember.count({
+      where: { branch: booking.branch, status: { not: "Inactive" } },
+    });
+    const roomCapacity = activeRoomRecords(branch.rooms).length;
+    const capacitySignals = [staffCapacity, roomCapacity].filter((value) => value > 0);
+    const unassignedCapacity = capacitySignals.length ? Math.min(...capacitySignals) : 1;
 
     const appointmentData = {
       date: booking.date,
       time: booking.time,
-      clientId: client.id,
-      client: client.fullName,
+      clientId: null,
+      client: booking.fullName,
       serviceId: booking.serviceId,
       service: service.name,
       branch: booking.branch,
@@ -4602,9 +4685,10 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       deposit: 0,
       notes: booking.concern,
       internalNotes: "Created from public online booking.",
+      publicBookingKey,
     };
-    appointmentData.duration = await appointmentDurationFor(appointmentData);
-    await assertAppointmentSlotAvailable(appointmentData);
+    appointmentData.duration = await appointmentDurationFor(appointmentData, tx);
+    await assertAppointmentSlotAvailable(appointmentData, "", { database: tx, unassignedCapacity });
 
     const lead = await tx.lead.create({
       data: {
@@ -4671,10 +4755,10 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       title: "New online booking",
     });
 
-    return { client, lead: linkedLead, appointment, auditLog };
+    return { lead: linkedLead, appointment, auditLog, replayed: false };
   });
 
-  response.status(201).json({
+  response.status(result.replayed ? 200 : 201).json({
     bookingReference: result.appointment.id,
     appointment: {
       id: result.appointment.id,
@@ -4737,17 +4821,23 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
   }
 
   assertMutationAllowed(request, "packages", pkg.branch);
-  assertPackageRedeemable(pkg);
 
   const result = await prisma.$transaction(async (tx) => {
-    const record = await tx.clinicPackage.update({
-      where: { id },
-      data: packageAfterRedemption(pkg),
+    const current = await tx.clinicPackage.findUnique({ where: { id } });
+    assertPackageRedeemable(current);
+    const redeemed = await tx.clinicPackage.updateMany({
+      where: { id, used: current.used, status: current.status },
+      data: { used: { increment: 1 } },
     });
+    if (redeemed.count !== 1) throw apiError(`Package ${current.name} changed while it was being redeemed. Try again.`, 409);
+    let record = await tx.clinicPackage.findUnique({ where: { id } });
+    if (Number(record.used || 0) >= Number(record.sessions || 0)) {
+      record = await tx.clinicPackage.update({ where: { id }, data: { status: "Completed" } });
+    }
     const auditLog = await writeAudit(tx, request, {
       area: "Packages",
       action: "Package session redeemed",
-      details: `${pkg.name} redeemed for ${pkg.client}.`,
+      details: `${current.name} redeemed for ${current.client}.`,
     });
     return { record, auditLog };
   });
@@ -4770,13 +4860,15 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
 
   const actor = actorFromRequest(request);
   const result = await prisma.$transaction(async (tx) => {
-    const record = await tx.sale.update({ where: { id }, data: { status: "Void" }, include: { items: true } });
+    const claimed = await tx.sale.updateMany({ where: { id, status: { not: "Void" } }, data: { status: "Void" } });
+    if (claimed.count !== 1) throw apiError("This transaction was already voided.", 409);
+    const record = await tx.sale.findUnique({ where: { id }, include: { items: true } });
 
     const saleMovements = await tx.inventoryMovement.findMany({ where: { reason: `Sold on ${sale.invoice}` } });
     const reversalMovements = [];
     for (const movement of saleMovements) {
       if (!movement.itemId) continue;
-      const item = await tx.inventoryItem.findUnique({ where: { id: movement.itemId } });
+      const item = await tx.inventoryItem.findFirst({ where: inventoryWhereForBranch(movement.itemId, sale.branch) });
       if (!item) continue;
       await tx.inventoryItem.update({
         where: { id: movement.itemId },
@@ -4816,8 +4908,8 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
       restoredCertificates.push(await tx.giftCertificate.update({
         where: { id: certificateId },
         data: {
-          balance: Number(certificate.balance || 0) + amount,
-          status: certificate.status === "Used" ? "Active" : certificate.status,
+          balance: { increment: amount },
+          status: "Active",
         },
       }));
     }
@@ -4825,10 +4917,11 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     for (const [packageId, sessions] of packageRestores) {
       const pkg = await tx.clinicPackage.findUnique({ where: { id: packageId } });
       if (!pkg) continue;
-      restoredPackages.push(await tx.clinicPackage.update({
-        where: { id: packageId },
-        data: packageAfterVoid(pkg, sessions),
-      }));
+      const restored = await tx.clinicPackage.updateMany({
+        where: { id: packageId, used: { gte: sessions } },
+        data: { used: { decrement: sessions }, status: "Active" },
+      });
+      if (restored.count === 1) restoredPackages.push(await tx.clinicPackage.findUnique({ where: { id: packageId } }));
     }
 
     const reversalNotes = [
@@ -4845,7 +4938,10 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     return {
       record: serializeSale(record),
       movements: reversalMovements,
-      inventory: reversalMovements.length ? await tx.inventoryItem.findMany({ orderBy: [{ item: "asc" }] }) : null,
+      inventory: reversalMovements.length ? await tx.inventoryItem.findMany({
+        where: { OR: [{ branch: sale.branch }, { branch: "All branches" }] },
+        orderBy: [{ item: "asc" }],
+      }) : null,
       giftCertificates: restoredCertificates,
       packages: restoredPackages,
       auditLog,
@@ -4860,6 +4956,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   const paymentData = request.body?.payment ?? {};
   const branch = requireText(draft.branch, "Branch");
   assertMutationAllowed(request, "pos", branch);
+  const actor = actorFromRequest(request);
 
   const payments = Array.isArray(paymentData.payments) ? paymentData.payments : [];
   const normalizedPayments = payments.map((payment) => {
@@ -4882,22 +4979,51 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     if (payment.method === "Package" && !payment.packageId) {
       throw apiError("Select the client package used for this payment.");
     }
+    if (payment.giftCertificateId && payment.method !== "Gift Certificate") {
+      throw apiError("Gift certificate identifiers can only be used with Gift Certificate payments.");
+    }
+    if (payment.packageId && payment.method !== "Package") {
+      throw apiError("Package identifiers can only be used with Package payments.");
+    }
   }
 
-  const checkout = await calculateCheckout(draft);
+  const checkout = await calculateCheckout(draft, { actor, branch });
   const paidAmount = normalizedPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const deductions = await inventoryDeductionsForSale(checkout.items, branch);
-  const actor = actorFromRequest(request);
 
-  const result = await prisma.$transaction(async (tx) => {
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+    if (checkout.appointmentId) {
+      const existingDepositSale = await tx.sale.findUnique({ where: { appointmentId: checkout.appointmentId } });
+      if (existingDepositSale) throw apiError("This appointment deposit was already applied to another sale.", 409);
+      const currentAppointment = await tx.appointment.findFirst({
+        where: { id: checkout.appointmentId, branch, clientId: clean(draft.clientId), updatedAt: checkout.appointmentUpdatedAt },
+        select: { id: true },
+      });
+      if (!currentAppointment) throw apiError("The appointment changed during checkout. Review its deposit and try again.", 409);
+    }
+    if (checkout.discount) {
+      const claimedDiscount = await tx.discount.updateMany({
+        where: { id: checkout.discount.id, active: true, updatedAt: checkout.discount.updatedAt },
+        data: { usage: { increment: 1 } },
+      });
+      if (claimedDiscount.count !== 1) throw apiError("The selected discount changed during checkout. Review it and try again.", 409);
+    }
+    const settledInventory = new Map();
     for (const deduction of deductions) {
-      const item = await tx.inventoryItem.findUnique({ where: { id: deduction.inventoryId } });
+      const item = await tx.inventoryItem.findFirst({ where: inventoryWhereForBranch(deduction.inventoryId, branch) });
       if (!item) {
-        throw apiError(`Inventory item ${deduction.item} no longer exists.`, 409);
+        throw apiError(`Inventory item ${deduction.item} is not available at ${branch}.`, 409);
       }
-      if (Number(item.stock || 0) < deduction.qty) {
+      const reserved = await tx.inventoryItem.updateMany({
+        where: { ...inventoryWhereForBranch(deduction.inventoryId, branch), stock: { gte: deduction.qty } },
+        data: { stock: { decrement: deduction.qty } },
+      });
+      if (reserved.count !== 1) {
         throw apiError(`Inventory is insufficient for ${item.item}.`, 409);
       }
+      settledInventory.set(deduction.inventoryId, await tx.inventoryItem.findUnique({ where: { id: deduction.inventoryId } }));
     }
 
     const settledCertificates = [];
@@ -4909,10 +5035,16 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     for (const [certificateId, amount] of certificateCharges) {
       const certificate = await tx.giftCertificate.findUnique({ where: { id: certificateId } });
       assertGiftCertificateUsable(certificate, { branch, amount });
-      settledCertificates.push(await tx.giftCertificate.update({
-        where: { id: certificateId },
-        data: giftCertificateAfterPayment(certificate, amount),
-      }));
+      const charged = await tx.giftCertificate.updateMany({
+        where: { id: certificateId, balance: certificate.balance, status: certificate.status },
+        data: { balance: { decrement: amount } },
+      });
+      if (charged.count !== 1) throw apiError(`Gift certificate ${certificate.code} changed during checkout. Try again.`, 409);
+      let settled = await tx.giftCertificate.findUnique({ where: { id: certificateId } });
+      if (Number(settled.balance || 0) <= 0) {
+        settled = await tx.giftCertificate.update({ where: { id: certificateId }, data: { status: "Used" } });
+      }
+      settledCertificates.push(settled);
     }
 
     const settledPackages = [];
@@ -4924,13 +5056,20 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     for (const [packageId, sessions] of packageRedemptions) {
       const pkg = await tx.clinicPackage.findUnique({ where: { id: packageId } });
       assertPackageRedeemable(pkg, { branch });
+      assertPackageOwnedByClient(pkg, draft.clientId);
       if (Number(pkg.used || 0) + sessions > Number(pkg.sessions || 0)) {
         throw apiError(`Package ${pkg.name} only has ${Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left.`, 409);
       }
-      settledPackages.push(await tx.clinicPackage.update({
-        where: { id: packageId },
-        data: packageAfterRedemption(pkg, sessions),
-      }));
+      const redeemed = await tx.clinicPackage.updateMany({
+        where: { id: packageId, used: pkg.used, status: pkg.status },
+        data: { used: { increment: sessions } },
+      });
+      if (redeemed.count !== 1) throw apiError(`Package ${pkg.name} changed during checkout. Try again.`, 409);
+      let settled = await tx.clinicPackage.findUnique({ where: { id: packageId } });
+      if (Number(settled.used || 0) >= Number(settled.sessions || 0)) {
+        settled = await tx.clinicPackage.update({ where: { id: packageId }, data: { status: "Completed" } });
+      }
+      settledPackages.push(settled);
     }
 
     const saleCount = await tx.sale.count();
@@ -4948,6 +5087,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         total: checkout.total,
         payments: JSON.stringify(normalizedPayments),
         status: paidAmount >= checkout.total ? "Paid" : "Partial",
+        appointmentId: checkout.appointmentId,
         notes: clean(paymentData.notes || draft.notes),
         items: {
           create: checkout.items.map((item) => ({
@@ -4963,10 +5103,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 
     const movements = [];
     for (const deduction of deductions) {
-      const updatedItem = await tx.inventoryItem.update({
-        where: { id: deduction.inventoryId },
-        data: { stock: { decrement: deduction.qty } },
-      });
+      const updatedItem = settledInventory.get(deduction.inventoryId);
       const movement = await tx.inventoryMovement.create({
         data: {
           date: sale.date,
@@ -4980,7 +5117,6 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       });
       movements.push(movement);
     }
-
     const tenderNotes = [
       ...settledCertificates.map((certificate) => `GC ${certificate.code} balance ${certificate.balance}`),
       ...settledPackages.map((pkg) => `${pkg.name} ${pkg.used}/${pkg.sessions} sessions`),
@@ -4993,13 +5129,23 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 
     return {
       sale: serializeSale(sale),
-      inventory: await tx.inventoryItem.findMany({ orderBy: [{ item: "asc" }] }),
+      inventory: await tx.inventoryItem.findMany({
+        where: { OR: [{ branch }, { branch: "All branches" }] },
+        orderBy: [{ item: "asc" }],
+      }),
       movements,
       giftCertificates: settledCertificates,
       packages: settledPackages,
       auditLog,
     };
-  });
+    });
+  } catch (error) {
+    const target = Array.isArray(error?.meta?.target) ? error.meta.target.join(",") : clean(error?.meta?.target);
+    if (error?.code === "P2002" && target.includes("appointmentId")) {
+      throw apiError("This appointment deposit was already applied to another sale.", 409);
+    }
+    throw error;
+  }
 
   response.status(201).json(result);
 }));
@@ -5111,11 +5257,11 @@ app.delete("/api/marketing/templates/:id", asyncRoute(async (request, response) 
   response.json(result);
 }));
 
-app.get("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (request, response) => {
+async function validatedMarketingSurveyRequest(request, values) {
   const campaignId = boundedPublicText(request.params.campaignId, "Campaign", 100);
   const blockId = boundedPublicText(request.params.blockId, "Survey block", 140);
-  const answer = boundedPublicText(request.query.answer, "Survey answer", 200);
-  const recipient = boundedPublicText(request.query.recipient, "Survey recipient", 320);
+  const answer = boundedPublicText(values.answer, "Survey answer", 200);
+  const token = boundedPublicText(values.token, "Survey token", 1_500);
   const campaign = await prisma.marketingCampaign.findFirst({ where: { id: campaignId, deletedAt: null } });
   if (!campaign) throw apiError("This survey campaign is no longer available.", 404);
   const block = findMarketingDesignBlock(campaign.design?.blocks, blockId);
@@ -5123,11 +5269,38 @@ app.get("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (r
   const choices = Array.isArray(block.choices) ? block.choices : [];
   const selected = choices.find((choice) => clean(choice.value || choice.label) === answer);
   if (!selected) throw apiError("Choose one of the available survey answers.");
-  await prisma.marketingSurveyResponse.create({
-    data: { campaignId, blockId, answer, recipient },
+  const verified = verifyMarketingSurveyToken(token, { campaignId, secret: marketingSurveySigningSecret() });
+  return { answer, block, blockId, campaign, campaignId, token, verified };
+}
+
+app.get("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (request, response) => {
+  const survey = await validatedMarketingSurveyRequest(request, request.query);
+  const action = `/api/public/marketing/survey/${encodeURIComponent(survey.campaignId)}/${encodeURIComponent(survey.blockId)}`;
+  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm feedback — MACE</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}button{border:0;border-radius:8px;background:#4a2d1c;color:#fff;padding:12px 20px;font:inherit;cursor:pointer}</style></head><body><main class="card"><h1>Confirm your response</h1><p>Submit “${escapeHtml(survey.answer)}” for ${escapeHtml(survey.campaign.name)}?</p><form method="post" action="${action}"><input type="hidden" name="answer" value="${escapeHtml(survey.answer)}"><input type="hidden" name="token" value="${escapeHtml(survey.token)}"><button type="submit">Submit feedback</button></form></main></body></html>`);
+}));
+
+app.post("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (request, response) => {
+  const survey = await validatedMarketingSurveyRequest(request, request.body ?? {});
+  const id = marketingSurveyResponseId({
+    campaignId: survey.campaignId,
+    blockId: survey.blockId,
+    recipientId: survey.verified.recipientId,
   });
-  const confirmation = clean(block.confirmationMessage) || "Thank you for sharing your feedback.";
-  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Thank you — MACE</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}a{color:#4a2d1c}</style></head><body><main class="card"><h1>Thank you</h1><p>${escapeHtml(confirmation)}</p><p>Your response has been recorded for ${escapeHtml(campaign.name)}.</p><a href="https://macebydrmace.com/">Return to MACE</a></main></body></html>`);
+  try {
+    await prisma.marketingSurveyResponse.create({
+      data: {
+      id,
+      campaignId: survey.campaignId,
+      blockId: survey.blockId,
+      answer: survey.answer,
+      recipient: survey.verified.recipientId,
+      },
+    });
+  } catch (error) {
+    if (error?.code !== "P2002") throw error;
+  }
+  const confirmation = clean(survey.block.confirmationMessage) || "Thank you for sharing your feedback.";
+  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Thank you — MACE</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}a{color:#4a2d1c}</style></head><body><main class="card"><h1>Thank you</h1><p>${escapeHtml(confirmation)}</p><p>Your response has been recorded for ${escapeHtml(survey.campaign.name)}.</p><a href="https://macebydrmace.com/">Return to MACE</a></main></body></html>`);
 }));
 
 app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, response) => {

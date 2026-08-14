@@ -225,9 +225,11 @@ async function policyFor(prisma) {
 }
 
 async function consumeChallenge(tx, accountId, challengeId, purpose) {
-  const challenge = await tx.faceTrackChallenge.findFirst({ where: { id: clean(challengeId), accountId, purpose } });
-  if (!challenge || challenge.usedAt || challenge.expiresAt <= new Date()) throw apiError("The camera verification session expired. Please try again.", 409);
-  await tx.faceTrackChallenge.update({ where: { id: challenge.id }, data: { usedAt: new Date() } });
+  const consumed = await tx.faceTrackChallenge.updateMany({
+    where: { id: clean(challengeId), accountId, purpose, usedAt: null, expiresAt: { gt: new Date() } },
+    data: { usedAt: new Date() },
+  });
+  if (consumed.count !== 1) throw apiError("The camera verification session expired. Please try again.", 409);
 }
 
 async function kioskFromRequest(prisma, request) {
@@ -240,13 +242,19 @@ async function kioskFromRequest(prisma, request) {
 }
 
 async function consumeKioskChallenge(tx, deviceId, challengeId) {
-  const challenge = await tx.faceTrackKioskChallenge.findFirst({
-    where: { id: clean(challengeId), deviceId, purpose: "KIOSK_CLOCK" },
+  const consumed = await tx.faceTrackKioskChallenge.updateMany({
+    where: {
+      id: clean(challengeId),
+      deviceId,
+      purpose: "KIOSK_CLOCK",
+      usedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    data: { usedAt: new Date() },
   });
-  if (!challenge || challenge.usedAt || challenge.expiresAt <= new Date()) {
+  if (consumed.count !== 1) {
     throw apiError("The kiosk camera session expired. Please try again.", 409);
   }
-  await tx.faceTrackKioskChallenge.update({ where: { id: challenge.id }, data: { usedAt: new Date() } });
 }
 
 async function recordVerifiedClock(prisma, { staff, profile, policy, confidence, idempotencyKey, actor, consume }) {
@@ -355,18 +363,17 @@ export function createFaceTrackAttendanceRouter(prisma) {
     enforceVerificationRateLimit(request);
     const purpose = clean(request.body?.purpose).toUpperCase();
     if (!["ENROLL", "CLOCK"].includes(purpose)) throw apiError("Unsupported verification purpose.");
-    const nonce = randomBytes(24).toString("base64url");
+    if (purpose === "ENROLL") requireAdmin(request);
     const challenge = await prisma.faceTrackChallenge.create({
-      data: { accountId: account.id, purpose, nonceHash: createHash("sha256").update(nonce).digest("hex"), expiresAt: new Date(Date.now() + 2 * 60_000) },
+      data: { accountId: account.id, purpose, nonceHash: createHash("sha256").update(randomBytes(32)).digest("hex"), expiresAt: new Date(Date.now() + 2 * 60_000) },
     });
-    response.status(201).json({ challengeId: challenge.id, nonce, expiresAt: challenge.expiresAt });
+    response.status(201).json({ challengeId: challenge.id, expiresAt: challenge.expiresAt });
   }));
 
   router.post("/enroll", asyncRoute(async (request, response) => {
-    const account = requireAccount(request);
-    const staffId = clean(request.body?.staffId || account.staffId);
-    const isSelf = staffId && staffId === account.staffId;
-    if (!isSelf && !ADMIN_ROLES.has(account.role)) throw apiError("Only an administrator can enroll another employee.", 403);
+    const account = requireAdmin(request);
+    const staffId = clean(request.body?.staffId);
+    if (!staffId) throw apiError("Choose the employee being enrolled.");
     if (request.body?.consent !== true) throw apiError("Employee biometric consent is required.");
     const descriptor = averageDescriptors(request.body?.descriptors);
     const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
@@ -497,16 +504,15 @@ export function createFaceTrackAttendanceRouter(prisma) {
   router.post("/kiosk/challenge", asyncRoute(async (request, response) => {
     const device = await kioskFromRequest(prisma, request);
     enforceKioskRateLimit(request, device);
-    const nonce = randomBytes(24).toString("base64url");
     const challenge = await prisma.faceTrackKioskChallenge.create({
       data: {
         deviceId: device.id,
         purpose: "KIOSK_CLOCK",
-        nonceHash: createHash("sha256").update(nonce).digest("hex"),
+        nonceHash: createHash("sha256").update(randomBytes(32)).digest("hex"),
         expiresAt: new Date(Date.now() + 2 * 60_000),
       },
     });
-    response.status(201).json({ challengeId: challenge.id, nonce, expiresAt: challenge.expiresAt });
+    response.status(201).json({ challengeId: challenge.id, expiresAt: challenge.expiresAt });
   }));
 
   router.post("/kiosk/clock", asyncRoute(async (request, response) => {

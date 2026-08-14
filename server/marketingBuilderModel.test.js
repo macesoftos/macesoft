@@ -93,5 +93,6 @@ test("Product fields, responsive visibility, tracking, and Survey links export",
   assert.match(html, /utm_source=mace/);
   assert.match(html, /mace-mobile-only/);
   assert.match(html, /\/api\/public\/marketing\/survey\/campaign-1\//);
-  assert.match(html, /recipient={{email\|anonymous}}/);
+  assert.match(html, /token={{survey_token}}/);
+  assert.doesNotMatch(html, /recipient={{email\|anonymous}}/);
 });

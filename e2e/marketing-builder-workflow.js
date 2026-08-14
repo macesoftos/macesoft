@@ -220,10 +220,16 @@ export async function verifyMarketingBuilder(page, expect) {
   await managedSections.nth(1).locator(".marketing-manage-section-actions button").first().click();
   await expect(managedSections.nth(0)).toHaveAttribute("data-block-id", firstManagedId);
 
+  // Let the debounce-triggered autosave finish before exercising the explicit
+  // Save button. Otherwise both identical writes queue against a remote test
+  // database and the assertion can observe the first response while the UI is
+  // still waiting for the second.
+  const saveState = page.locator(".marketing-builder-actions > span");
+  await expect(saveState).toContainText("Saved to campaign", { timeout: 60_000 });
   const campaignSave = page.waitForResponse((response) => response.url().includes("/api/resources/campaigns") && ["POST", "PUT"].includes(response.request().method()));
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   expect((await campaignSave).status()).toBeLessThan(300);
-  await expect(page.getByText(/Saved to campaign/)).toBeVisible();
+  await expect(saveState).toContainText("Saved to campaign", { timeout: 60_000 });
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: /Export HTML/i }).click();

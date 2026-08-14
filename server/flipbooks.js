@@ -185,8 +185,7 @@ function asyncRoute(handler) {
 }
 
 function viewerKeyFor(request) {
-  const supplied = boundedText(request.get("x-flipbook-viewer"), "Viewer identifier", 160);
-  const fingerprint = supplied || `${request.ip}|${clean(request.get("user-agent"))}`;
+  const fingerprint = `${request.ip || request.socket?.remoteAddress || "unknown"}|${clean(request.get("user-agent")).slice(0, 500)}`;
   return tokenHash(fingerprint);
 }
 

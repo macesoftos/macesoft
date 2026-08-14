@@ -327,8 +327,12 @@ try {
     body: JSON.stringify(leadPayload),
   });
   assert(webhook.response.status === 201, "valid lead webhook did not create a lead");
-  assert(webhook.payload.lead?.id, "webhook response did not include a lead");
-  const webhookLeadId = webhook.payload.lead.id;
+  assert(webhook.payload.reference === `lead-event-${suffix}`, "webhook response did not include its opaque reference");
+  assert(!webhook.payload.lead && !webhook.payload.event, "webhook response disclosed internal lead data");
+  const webhookEvents = await request("/api/leads/webhook-events", { headers: ownerHeaders });
+  const webhookEvent = webhookEvents.payload.events?.find((event) => event.providerEventId === webhook.payload.reference);
+  assert(webhookEvent?.leadId, "authenticated webhook event list did not include the created lead");
+  const webhookLeadId = webhookEvent.leadId;
 
   const retryWebhook = await request("/api/leads/webhooks/website", {
     method: "POST",
