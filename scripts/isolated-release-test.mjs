@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import pg from "pg";
 
 const directUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
@@ -9,6 +10,46 @@ const schema = `codex_release_${Date.now()}_${process.pid}`;
 const isolatedApiPort = process.env.ISOLATED_API_PORT || "3198";
 const isolatedWebPort = process.env.ISOLATED_WEB_PORT || "5187";
 const isolatedOrigin = `http://127.0.0.1:${isolatedWebPort}`;
+const isolatedStorageBucket = "isolated-release-assets";
+const isolatedStorageObjects = new Map();
+
+const isolatedStorageServer = createServer((request, response) => {
+  const prefix = `/storage/v1/object/${isolatedStorageBucket}/`;
+  const pathname = new URL(request.url || "/", "http://127.0.0.1").pathname;
+  if (!pathname.startsWith(prefix)) {
+    response.writeHead(404).end();
+    return;
+  }
+  const key = decodeURIComponent(pathname.slice(prefix.length));
+  if (request.method === "POST") {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      isolatedStorageObjects.set(key, { body: Buffer.concat(chunks), contentType: request.headers["content-type"] || "application/octet-stream" });
+      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ Key: key }));
+    });
+    return;
+  }
+  if (request.method === "DELETE") {
+    isolatedStorageObjects.delete(key);
+    response.writeHead(200, { "Content-Type": "application/json" }).end("{}");
+    return;
+  }
+  const stored = isolatedStorageObjects.get(key);
+  if (request.method === "GET" && stored) {
+    response.writeHead(200, { "Content-Length": String(stored.body.length), "Content-Type": stored.contentType }).end(stored.body);
+    return;
+  }
+  response.writeHead(404).end();
+});
+
+await new Promise((resolve, reject) => {
+  isolatedStorageServer.once("error", reject);
+  isolatedStorageServer.listen(0, "127.0.0.1", () => resolve(undefined));
+});
+const isolatedStorageAddress = isolatedStorageServer.address();
+if (!isolatedStorageAddress || typeof isolatedStorageAddress === "string") throw new Error("Isolated object storage did not start on a TCP port.");
+const isolatedStorageOrigin = `http://127.0.0.1:${isolatedStorageAddress.port}`;
 
 function withSchema(value) {
   const url = new URL(value);
@@ -72,6 +113,9 @@ const environment = {
   E2E_WORKERS: "1",
   MARKETING_DRY_RUN: "true",
   PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: "1",
+  STORAGE_BASE_URL: isolatedStorageOrigin,
+  STORAGE_BUCKET: isolatedStorageBucket,
+  STORAGE_SERVICE_KEY: "isolated-release-storage-key",
   VITE_API_PROXY: `http://127.0.0.1:${isolatedApiPort}`,
   VITE_PORT: isolatedWebPort,
 };
@@ -85,15 +129,20 @@ try {
   await run("pnpm", ["test:e2e"], environment, "browser_e2e");
   console.log(JSON.stringify({ event: "isolated_release_test_passed", schema }));
 } finally {
-  const url = new URL(directUrl);
-  url.searchParams.delete("schema");
-  url.searchParams.delete("sslmode");
-  const client = new pg.Client({ connectionString: url.toString(), ssl: { rejectUnauthorized: false } });
   try {
-    await client.connect();
-    await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    console.log(JSON.stringify({ event: "isolated_release_schema_removed", schema }));
+    const url = new URL(directUrl);
+    url.searchParams.delete("schema");
+    url.searchParams.delete("sslmode");
+    const client = new pg.Client({ connectionString: url.toString(), ssl: { rejectUnauthorized: false } });
+    try {
+      await client.connect();
+      await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      console.log(JSON.stringify({ event: "isolated_release_schema_removed", schema }));
+    } finally {
+      await client.end().catch(() => {});
+    }
   } finally {
-    await client.end().catch(() => {});
+    isolatedStorageObjects.clear();
+    await new Promise((resolve) => isolatedStorageServer.close(resolve));
   }
 }

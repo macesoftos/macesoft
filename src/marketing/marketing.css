@@ -1494,6 +1494,8 @@
 .marketing-email-block:hover { border-color: #cdbdaf; }
 .marketing-email-block.selected { border-color: var(--marketing-espresso); box-shadow: 0 0 0 1px rgba(67, 43, 29, 0.16); }
 .marketing-email-block.dragging { opacity: 0.34; transform: scale(0.985); }
+.marketing-email-block.image-drop-active { border-color: #704c38; box-shadow: 0 0 0 2px rgba(112, 76, 56, 0.2); cursor: copy; }
+.marketing-email-block.image-uploading { cursor: wait; }
 .marketing-email-block:active { cursor: grabbing; }
 .marketing-block-grip { position: absolute; left: 5px; top: 50%; z-index: 4; display: inline-flex; opacity: 0; transform: translateY(-50%); color: var(--marketing-espresso); transition: opacity 120ms ease; }
 .marketing-email-block:hover > .marketing-block-grip,
@@ -1501,6 +1503,13 @@
 .marketing-block-actions { position: absolute; right: 5px; top: 5px; z-index: 3; display: flex; overflow: hidden; border: 1px solid #d8d0c8; border-radius: 5px; background: #fff; box-shadow: 0 3px 9px rgba(42, 30, 22, 0.08); }
 .marketing-block-actions button { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; padding: 0; border: 0; border-right: 1px solid #eee8e1; background: #fff; color: #4e433b; }
 .marketing-block-actions button:last-child { border-right: 0; }
+.marketing-canvas-image-drop { position: absolute; inset: 4px; z-index: 7; display: grid; place-items: center; align-content: center; gap: 5px; padding: 16px; border: 2px dashed #704c38; border-radius: 5px; background: rgba(250, 246, 241, 0.94); color: #4a3021; pointer-events: none; text-align: center; }
+.marketing-canvas-image-drop strong { font-size: 12px; }
+.marketing-canvas-image-drop small { color: #75685e; font-size: 8px; }
+.marketing-email-block.image-uploading .marketing-canvas-image-drop { border-style: solid; background: rgba(250, 246, 241, 0.97); }
+.marketing-email-block.image-uploading .marketing-canvas-image-drop svg { animation: marketing-canvas-upload 850ms ease-in-out infinite alternate; }
+.marketing-canvas-image-error { position: absolute; right: 6px; bottom: 6px; z-index: 7; display: inline-flex; max-width: calc(100% - 12px); align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #d9a79d; border-radius: 5px; background: #fff3f0; color: #8c3025; cursor: default; font-size: 8px; pointer-events: none; }
+@keyframes marketing-canvas-upload { to { transform: translateY(-4px); } }
 .marketing-layout-block { padding: 8px; }
 .marketing-layout-columns { display: grid; align-items: stretch; }
 .marketing-layout-column { min-width: 0; padding: 5px; border: 1px dashed transparent; border-radius: 5px; background: rgba(255, 255, 255, 0.42); transition: border-color 120ms ease, background 120ms ease; }

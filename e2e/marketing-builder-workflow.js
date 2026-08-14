@@ -1,6 +1,17 @@
 import { mkdir } from "node:fs/promises";
 
 const artifactDirectory = "test-results/marketing-builder";
+const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+async function imageFileTransfer(page, name = "canvas-drop-e2e.png") {
+  return page.evaluateHandle(({ base64, fileName }) => {
+    const binary = window.atob(base64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], fileName, { type: "image/png" }));
+    return transfer;
+  }, { base64: onePixelPng, fileName: name });
+}
 
 export async function verifyMarketingBuilder(page, expect) {
   await mkdir(artifactDirectory, { recursive: true });
@@ -8,6 +19,25 @@ export async function verifyMarketingBuilder(page, expect) {
   await page.goto("/#/marketing/campaigns/new");
   await expect(page.getByTestId("marketing-workspace")).toBeVisible();
   await expect(page.getByRole("heading", { name: /Summer Skin Reset/i })).toBeVisible();
+
+  const canvasImage = page.locator(".marketing-email-block.type-image").first();
+  const imageTransfer = await imageFileTransfer(page);
+  await canvasImage.dispatchEvent("dragenter", { dataTransfer: imageTransfer });
+  await expect(canvasImage.getByText("Drop image to replace", { exact: true })).toBeVisible();
+  const canvasUpload = page.waitForResponse((response) => response.url().endsWith("/api/uploads") && response.request().method() === "POST");
+  await canvasImage.dispatchEvent("drop", { dataTransfer: imageTransfer });
+  const canvasUploadResponse = await canvasUpload;
+  expect(canvasUploadResponse.status()).toBe(201);
+  const canvasUploadBody = await canvasUploadResponse.json();
+  const canvasAssetId = canvasUploadBody.asset?.id;
+  expect(canvasAssetId).toBeTruthy();
+  await expect(canvasImage.locator("img")).toHaveAttribute("src", new RegExp(`/api/uploads/${canvasAssetId}$`));
+  await expect(canvasImage.getByText("Uploading image…", { exact: true })).toBeHidden();
+  const mediaResponse = await page.request.get("/api/marketing/media");
+  expect(mediaResponse.status()).toBe(200);
+  const mediaBody = await mediaResponse.json();
+  expect(mediaBody.assets.some((asset) => asset.id === canvasAssetId && asset.name === "canvas-drop-e2e.png")).toBe(true);
+  await page.screenshot({ path: `${artifactDirectory}/canvas-image-drop-uploaded.png`, fullPage: false });
 
   await page.getByRole("button", { name: "Drag or click to add Product", exact: true }).click();
   const settings = page.locator(".marketing-block-settings");
@@ -91,4 +121,7 @@ export async function verifyMarketingBuilder(page, expect) {
   await page.getByRole("button", { name: "Return to MACE applications" }).click();
   await page.getByRole("button", { name: "My Workspace", exact: true }).click();
   await expect(page.getByLabel(/open account menu for/i)).toBeVisible();
+
+  const cleanupResponse = await page.request.delete(`/api/uploads/${canvasAssetId}`, { headers: { "X-Mace-Request": "app" } });
+  expect(cleanupResponse.status()).toBe(204);
 }
