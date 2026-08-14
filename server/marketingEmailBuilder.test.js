@@ -150,3 +150,25 @@ test("treatment row icon rejects unsafe URLs during export", () => {
   assert.doesNotMatch(html, /javascript:/i);
   assert.match(html, /&#10022;/);
 });
+
+test("social blocks export recognizable platform icons instead of initial letters", () => {
+  const html = buildVisualEmailHtml({
+    blocks: [{
+      id: "social-1",
+      type: "social",
+      iconStyle: "outline",
+      iconSize: 32,
+      iconSpacing: 12,
+      items: [
+        { id: "facebook-1", platform: "Facebook", url: "https://facebook.com/mace", label: "Follow MACE on Facebook" },
+        { id: "linkedin-1", platform: "LinkedIn", url: "https://linkedin.com/company/mace", label: "Follow MACE on LinkedIn" },
+      ],
+    }],
+  }, {}, "https://app.macebydrmace.com");
+
+  assert.match(html, /src="https:\/\/app\.macebydrmace\.com\/brand\/social\/facebook\.svg"/);
+  assert.match(html, /src="https:\/\/app\.macebydrmace\.com\/brand\/social\/linkedin\.svg"/);
+  assert.match(html, /alt="Follow MACE on Facebook"/);
+  assert.match(html, /alt="Follow MACE on LinkedIn"/);
+  assert.doesNotMatch(html, />F<|>L</);
+});

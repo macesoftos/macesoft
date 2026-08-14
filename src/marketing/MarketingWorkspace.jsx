@@ -87,6 +87,7 @@ import {
   validMarketingUrl,
   visibleOn,
 } from "./builderModel.js";
+import { socialIconDefinition } from "./socialIcons.js";
 import {
   deleteMarketingEmailTemplate,
   loadMarketingEmailTemplates,
@@ -2185,6 +2186,11 @@ function SaveTemplateDialog({ draft, html, notify, onClose, onSaveTemplate }) {
   );
 }
 
+function SocialPlatformIcon({ platform, size }) {
+  const icon = socialIconDefinition(platform);
+  return <svg aria-hidden="true" focusable="false" height={size} viewBox="0 0 24 24" width={size}><path d={icon.path} fill="currentColor" /></svg>;
+}
+
 function RenderedBlock({ block, preview, style }) {
   const mobile = preview === "mobile";
   if (block.type === "logo") return <div className="marketing-email-logo" style={{ ...style, background: block.background, justifyItems: block.align === "left" ? "start" : block.align === "right" ? "end" : "center" }}><a href={block.link || "#logo"} onClick={(event) => event.preventDefault()}><img src={block.src || "/brand/mace-logo.png"} alt={block.decorative ? "" : block.alt || "MACE"} style={{ maxWidth: "100%", width: mobile ? block.mobileWidth || block.width || 140 : block.width || 140 }} /></a></div>;
@@ -2205,7 +2211,7 @@ function RenderedBlock({ block, preview, style }) {
   if (block.type === "divider") return <div className="marketing-divider" style={{ paddingBottom: block.spacingBottom, paddingTop: block.spacingTop, textAlign: block.align }}><i style={{ borderTop: `${block.thickness || 1}px ${block.lineStyle || "solid"} ${block.color || "#ddd4c9"}`, display: "inline-block", width: `${block.width || 100}%` }} /></div>;
   if (block.type === "spacer") return <div style={{ height: Math.max(0, Number(mobile ? block.mobileHeight ?? 20 : block.desktopHeight ?? block.padding ?? 24)) }} aria-label="Spacer" />;
   if (block.type === "video") return <div className="marketing-video-block" style={style}><div style={{ aspectRatio: block.aspectRatio === "4:3" ? "4 / 3" : block.aspectRatio === "1:1" ? "1 / 1" : "16 / 9", borderRadius: block.borderRadius, overflow: "hidden" }}><img src={block.src || "/brand/result-1.jpg"} alt={block.alt || "Video preview"} /><span style={{ color: block.playColor }}><Monitor size={22} /></span></div><strong>{block.content}</strong>{block.caption && <small>{block.caption}</small>}</div>;
-  if (block.type === "social") return <div className="marketing-social-block" style={{ ...style, gap: block.iconSpacing }}>{(block.items || []).filter((item) => validMarketingUrl(item.url)).map((item) => <a className={`icon-${block.iconStyle || "outline"}`} href={item.url} key={item.id} onClick={(event) => event.preventDefault()} style={{ background: block.iconStyle === "filled" ? block.iconColor : "transparent", borderColor: block.iconColor, color: block.iconStyle === "filled" ? "#fff" : block.iconColor, fontSize: block.iconStyle === "text" ? 12 : block.iconSize }} title={item.label}>{block.iconStyle === "text" ? item.platform : item.platform.slice(0, 1)}</a>)}</div>;
+  if (block.type === "social") return <div className="marketing-social-block" style={{ ...style, gap: block.iconSpacing }}>{(block.items || []).filter((item) => validMarketingUrl(item.url)).map((item) => <a aria-label={item.label || item.platform} className={`icon-${block.iconStyle || "outline"}`} href={item.url} key={item.id} onClick={(event) => event.preventDefault()} style={{ background: block.iconStyle === "filled" ? block.iconColor : "transparent", borderColor: block.iconColor, color: block.iconStyle === "filled" ? "#fff" : block.iconColor }} title={item.label || item.platform}>{block.iconStyle === "text" ? item.platform : <SocialPlatformIcon platform={item.platform} size={block.iconSize || 24} />}</a>)}</div>;
   if (block.type === "survey") return <div className="marketing-survey-block" style={style}><strong>{block.content}</strong><div>{(block.choices || []).map((choice) => <a href="#survey" key={choice.id} onClick={(event) => event.preventDefault()} style={{ background: block.answerStyle === "text" ? "transparent" : block.background, borderRadius: block.borderRadius, color: block.answerStyle === "text" ? block.color : block.textColor }}>{choice.label}</a>)}</div></div>;
   if (block.type === "code") return <div className="marketing-code-block" style={style} dangerouslySetInnerHTML={{ __html: sanitizeEmailFragment(block.content) }} />;
   if (["product", "productRecommendation"].includes(block.type)) {

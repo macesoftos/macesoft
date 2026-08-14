@@ -189,6 +189,12 @@ export async function verifyMarketingBuilder(page, expect) {
   await expect(page.getByRole("button", { name: "Show Marketing menu" })).toBeVisible();
   await page.screenshot({ path: `${artifactDirectory}/product-editor-desktop.png`, fullPage: false });
 
+  await page.getByRole("button", { name: "Drag or click to add Social", exact: true }).click();
+  const socialBlock = page.locator(".marketing-email-block.type-social.selected");
+  await expect(socialBlock.getByRole("link", { name: "Follow MACE on Instagram" }).locator("svg")).toHaveCount(1);
+  await expect(socialBlock.getByRole("link", { name: "Visit the MACE website" }).locator("svg")).toHaveCount(1);
+  await expect(socialBlock.getByText(/^[IW]$/)).toHaveCount(0);
+
   const campaignSave = page.waitForResponse((response) => response.url().includes("/api/resources/campaigns") && ["POST", "PUT"].includes(response.request().method()));
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   expect((await campaignSave).status()).toBeLessThan(300);
@@ -204,6 +210,9 @@ export async function verifyMarketingBuilder(page, expect) {
   await expect(previewDialog).toBeVisible();
   const previewFrame = previewDialog.locator("iframe").contentFrame();
   await expect(previewFrame.getByText("E2E Brightening Treatment", { exact: true })).toBeVisible();
+  const previewSocialIcons = previewFrame.locator('img[src*="/brand/social/"]');
+  await expect(previewSocialIcons).toHaveCount(2);
+  await expect.poll(() => previewSocialIcons.first().evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
   if (hasRealObjectStorage) {
     const previewUpload = previewFrame.locator(`img[src*="/api/public/marketing-assets/${canvasAssetId}"]`);
     await expect(previewUpload).toHaveCount(1);
