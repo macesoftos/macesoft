@@ -2167,7 +2167,7 @@ function App() {
       ? "Dashboard"
       : navItems.find((item) => item.id === activeModule)?.label ?? "Dashboard";
   const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
-  const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView;
+  const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView && !isMarketingView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = sessionModules.includes("pos");
   const canManageAppointments = sessionModules.includes("appointments");
@@ -2182,7 +2182,7 @@ function App() {
     isFaceTrackView ? "facetrack-page-shell" : "",
     isMarketingView ? "marketing-page-shell" : "",
     isPosView && isPosChromeRevealed ? "pos-chrome-revealed" : "",
-    "has-mobile-navigation",
+    !isMarketingView ? "has-mobile-navigation" : "marketing-standalone-shell",
   ].filter(Boolean).join(" ");
   const posChromeHandlers = isPosView
     ? {
@@ -2529,7 +2529,7 @@ function App() {
               campaigns={campaigns}
               settings={settings}
               openModal={openModal}
-              onOpenGlobalNavigation={() => setIsSidebarDrawerOpen(true)}
+              onOpenGlobalNavigation={() => setActiveModule("applications")}
               saveCampaign={saveCampaign}
               sendCampaign={sendCampaign}
               sendingCampaignId={sendingCampaignId}
@@ -2599,7 +2599,7 @@ function App() {
         </section>
       </main>
 
-      {!isPosView && !isApplicationsView && !isFaceTrackView && (
+      {!isPosView && !isApplicationsView && !isFaceTrackView && !isMarketingView && (
         <>
           <MobileBottomNavigation
             activeModule={activeModule}
