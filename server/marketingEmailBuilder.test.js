@@ -34,3 +34,26 @@ test("visual Marketing block content is escaped before HTML export", () => {
 test("HTML email source has a plain-text fallback", () => {
   assert.equal(emailHtmlToPlainText("<h1>Hello</h1><p>Book today.</p>"), "Hello Book today.");
 });
+
+test("column layouts export as responsive email-safe tables", () => {
+  const html = buildVisualEmailHtml({
+    name: "Column campaign",
+    blocks: [{
+      id: "layout-1",
+      type: "layout",
+      background: "#f8f4ef",
+      gap: 12,
+      padding: 8,
+      columns: [
+        [{ id: "heading-1", type: "heading", content: "Left", align: "left", color: "#432b1d", fontSize: 22, padding: 8 }],
+        [{ id: "text-1", type: "text", content: "Right", align: "left", color: "#432b1d", fontSize: 14, padding: 8 }],
+      ],
+    }],
+  });
+
+  assert.match(html, /class="mace-stack-column"/);
+  assert.match(html, /width="50%"/);
+  assert.match(html, /display:block!important;width:100%!important/);
+  assert.match(html, />Left</);
+  assert.match(html, />Right</);
+});
