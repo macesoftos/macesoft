@@ -47,6 +47,11 @@ import {
   serializeTreatmentWithPhotos,
   treatmentPhotoKinds,
 } from "./treatmentPhotos.js";
+import {
+  normalizeNotificationBranches,
+  notificationIsUnread,
+  notificationWhereForActor,
+} from "./notifications.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -712,6 +717,85 @@ async function writeAudit(tx, request, details) {
   return tx.auditLog.create({
     data: auditData(request, details),
   });
+}
+
+const notificationTitles = {
+  appointment: "New appointment",
+  client: "New client",
+  clinicPackage: "New package",
+  discount: "New discount",
+  expense: "New expense",
+  giftCertificate: "New gift certificate",
+  inventoryItem: "New inventory item",
+  lead: "New lead",
+  marketingCampaign: "New campaign",
+  service: "New service",
+  smsTemplate: "New SMS template",
+  staffMember: "New staff member",
+  treatment: "New treatment record",
+};
+
+async function createAppNotification(tx, {
+  actor = "System",
+  branches = ["All branches"],
+  message,
+  module,
+  recordId = "",
+  title,
+}) {
+  return tx.appNotification.create({
+    data: {
+      actor: clean(actor) || "System",
+      branches: normalizeNotificationBranches(branches),
+      message: requireText(message, "Notification message"),
+      module: requireText(module, "Notification module"),
+      recordId: clean(recordId),
+      title: requireText(title, "Notification title"),
+    },
+  });
+}
+
+async function notificationBranchesForResource(tx, config, record) {
+  if (config.serviceBranches) return normalizeNotificationBranches(record.branches);
+  if (config.branchField) return normalizeNotificationBranches([record[config.branchField]]);
+  if (config.clientBranch && record.clientId) {
+    const client = await tx.client.findUnique({ where: { id: record.clientId }, select: { branch: true } });
+    return normalizeNotificationBranches([client?.branch]);
+  }
+  return ["All branches"];
+}
+
+async function writeResourceNotification(tx, request, config, record) {
+  const actor = actorFromRequest(request);
+  return createAppNotification(tx, {
+    actor: actor.name,
+    branches: await notificationBranchesForResource(tx, config, record),
+    message: `${config.label(record)} was created by ${actor.name || "System"}.`,
+    module: config.module,
+    recordId: record.id,
+    title: notificationTitles[config.delegate] || `New ${config.area.toLowerCase()} record`,
+  });
+}
+
+async function loadNotificationFeed(account, limit = 30) {
+  const actor = publicAccount(account);
+  const where = notificationWhereForActor(actor, roleAccess[actor.role] || []);
+  const readAt = account.notificationsReadAt || null;
+  const take = Math.min(50, Math.max(1, Number(limit) || 30));
+  const [notifications, unreadCount] = await prisma.$transaction([
+    prisma.appNotification.findMany({ where, orderBy: [{ createdAt: "desc" }], take }),
+    prisma.appNotification.count({
+      where: readAt ? { AND: [where, { createdAt: { gt: readAt } }] } : where,
+    }),
+  ]);
+  return {
+    notifications: notifications.map((notification) => ({
+      ...notification,
+      unread: notificationIsUnread(notification, readAt),
+    })),
+    readAt,
+    unreadCount,
+  };
 }
 
 function normalizeClientPayload(payload, existingId = "") {
@@ -2037,6 +2121,14 @@ async function processLeadWebhook(provider, request, options = {}) {
 
       const lead = await tx.lead.create({ data: stripMeta(leadData) });
       await writeLeadSideRecords(tx, null, lead, leadData, null);
+      await createAppNotification(tx, {
+        actor: "Lead Ingestion",
+        branches: [lead.branch],
+        message: `${lead.name} submitted an inquiry via ${integration.label || provider}.`,
+        module: "leads",
+        recordId: lead.id,
+        title: "New lead",
+      });
       if (clean(leadData.externalLeadId)) {
         await tx.externalLeadIdentity.create({
           data: {
@@ -3655,6 +3747,20 @@ app.get("/api/bootstrap", asyncRoute(async (request, response) => {
   response.json(await buildBootstrapPayload(requireAuthenticatedAccount(request)));
 }));
 
+app.get("/api/notifications", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  response.json(await loadNotificationFeed(account, request.query.limit));
+}));
+
+app.post("/api/notifications/read", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  const updated = await prisma.account.update({
+    where: { id: account.id },
+    data: { notificationsReadAt: new Date() },
+  });
+  response.json(await loadNotificationFeed(updated, request.body?.limit));
+}));
+
 app.get("/api/modules", (request, response) => {
   const actor = requireAuthenticatedAccount(request);
   const allowedModules = new Set(roleAccess[actor.role] || []);
@@ -4088,7 +4194,8 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
       action: `${config.area} created`,
       details: `${config.label(record)} created.`,
     });
-    return { record, auditLog };
+    const notification = await writeResourceNotification(tx, request, config, record);
+    return { record, auditLog, notification };
   });
   const responseRecord = await resourceRecordForResponse(config, result.record);
 
@@ -4384,6 +4491,15 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
         action: "Online booking submitted",
         details: `${appointment.client} requested ${appointment.service}.`,
       },
+    });
+
+    await createAppNotification(tx, {
+      actor: "Online Booking",
+      branches: [appointment.branch],
+      message: `${appointment.client} requested ${appointment.service} on ${appointment.date} at ${appointment.time}.`,
+      module: "appointments",
+      recordId: appointment.id,
+      title: "New online booking",
     });
 
     return { client, lead: linkedLead, appointment, auditLog };

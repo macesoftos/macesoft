@@ -116,6 +116,26 @@ try {
     aftercare: "",
   });
   assert(createdService.response.status === 201, "service create failed");
+  assert(createdService.payload.notification?.title === "New service", "service create did not emit a notification");
+
+  const notificationFeed = await request("/api/notifications", { headers: ownerHeaders });
+  assert(notificationFeed.response.ok, "notification feed failed");
+  assert(
+    notificationFeed.payload.notifications.some((notification) => notification.id === createdService.payload.notification.id),
+    "new service notification was not present in the feed",
+  );
+  assert(notificationFeed.payload.unreadCount >= 1, "new service notification was not unread");
+
+  const notificationAccounts = await request("/api/accounts", { headers: ownerHeaders });
+  const notificationOwner = notificationAccounts.payload.accounts.find((account) => account.role === "Owner");
+  assert(notificationOwner?.id, "notification read test could not find an owner account");
+  const markedNotifications = await request("/api/notifications/read", {
+    method: "POST",
+    headers: { ...ownerHeaders, "X-Mace-User-Id": notificationOwner.id },
+    body: JSON.stringify({}),
+  });
+  assert(markedNotifications.response.ok, "mark notifications read failed");
+  assert(markedNotifications.payload.unreadCount === 0, "mark notifications read did not clear the unread count");
 
   const createdClient = await jsonRequest("/api/resources/clients", {
     id: clientId,

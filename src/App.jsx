@@ -99,6 +99,7 @@ import {
   loadLeadIntegrations,
   loadLeadWebhookEvents,
   loadMyWorkspace,
+  loadNotifications,
   loadPublicLeadConfig,
   loadInvitations,
   loadOrganizationAccounts,
@@ -106,6 +107,7 @@ import {
   loginAccount,
   logoutAccount,
   mergeLeadDuplicate,
+  markNotificationsRead,
   postInventoryMovement,
   redeemPackageRecord,
   recordAttendance,
@@ -128,6 +130,7 @@ import {
   uploadImageAsset,
   voidTransactionRecord,
   apiAuthenticationRequiredEvent,
+  apiNotificationCreatedEvent,
 } from "./lib/api.js";
 
 const storageKey = (key) => `mace-clinicos-${key}`;
@@ -501,6 +504,17 @@ function formatDateTime(value) {
   }).format(parsed);
 }
 
+function formatNotificationTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Just now";
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
 function leadFollowUpDisplay(value) {
   if (!value) return { date: "Not scheduled", time: "", relative: "No follow-up", tone: "none" };
   const dueAt = new Date(value);
@@ -698,6 +712,8 @@ function App() {
   const [leadIntegrations, setLeadIntegrations] = useState([]);
   const [webhookEvents, setWebhookEvents] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [notificationFeed, setNotificationFeed] = useState({ notifications: [], readAt: null, unreadCount: 0 });
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [inventoryMovements, setInventoryMovements] = useState([]);
   const [organizationAccounts, setOrganizationAccounts] = useState([]);
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -743,6 +759,8 @@ function App() {
     setLeadIntegrations([]);
     setWebhookEvents([]);
     setAuditLogs([]);
+    setNotificationFeed({ notifications: [], readAt: null, unreadCount: 0 });
+    setNotificationsLoading(false);
     setInventoryMovements([]);
     setOrganizationAccounts([]);
     setSelectedClientId("");
@@ -751,6 +769,24 @@ function App() {
     setModal(null);
     setConfirm(null);
   }, []);
+
+  const refreshNotifications = useCallback(async ({ silent = true } = {}) => {
+    if (!session) return null;
+    if (!silent) setNotificationsLoading(true);
+    try {
+      const nextFeed = await loadNotifications();
+      setNotificationFeed({
+        notifications: Array.isArray(nextFeed.notifications) ? nextFeed.notifications : [],
+        readAt: nextFeed.readAt || null,
+        unreadCount: Number(nextFeed.unreadCount || 0),
+      });
+      return nextFeed;
+    } catch {
+      return null;
+    } finally {
+      if (!silent) setNotificationsLoading(false);
+    }
+  }, [session]);
 
   useEffect(() => {
     try {
@@ -790,6 +826,34 @@ function App() {
   useEffect(() => {
     setApiSessionContext(session);
   }, [session]);
+
+  useEffect(() => {
+    if (!session || typeof window === "undefined") return undefined;
+
+    void refreshNotifications({ silent: false });
+    const pollTimer = window.setInterval(() => {
+      void refreshNotifications();
+    }, 30_000);
+    const handleNewNotification = () => {
+      void refreshNotifications();
+    };
+    const handleFocus = () => {
+      void refreshNotifications();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refreshNotifications();
+    };
+
+    window.addEventListener(apiNotificationCreatedEvent, handleNewNotification);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.clearInterval(pollTimer);
+      window.removeEventListener(apiNotificationCreatedEvent, handleNewNotification);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshNotifications, session]);
 
   useEffect(() => {
     function handleAuthenticationRequired() {
@@ -1226,6 +1290,23 @@ function App() {
 
   function notify(message, tone = "success") {
     setToast({ id: createId("toast"), message, tone });
+  }
+
+  async function markAllNotificationsAsRead() {
+    if (!notificationFeed.unreadCount) return;
+    setNotificationsLoading(true);
+    try {
+      const nextFeed = await markNotificationsRead();
+      setNotificationFeed({
+        notifications: Array.isArray(nextFeed.notifications) ? nextFeed.notifications : [],
+        readAt: nextFeed.readAt || null,
+        unreadCount: Number(nextFeed.unreadCount || 0),
+      });
+    } catch (error) {
+      notify(error.message || "Unable to update notifications.", "error");
+    } finally {
+      setNotificationsLoading(false);
+    }
   }
 
   function printReceipt(receipt) {
@@ -2194,10 +2275,14 @@ function App() {
                   POS
                 </button>
               )}
-              <button className="icon-button" type="button" title="Notifications" onClick={() => notify("No unread critical alerts.")}>
-                <Bell size={19} aria-hidden="true" />
-                <span className="dot" />
-              </button>
+              <NotificationCenter
+                loading={notificationsLoading}
+                notifications={notificationFeed.notifications}
+                onMarkAllRead={markAllNotificationsAsRead}
+                onNavigate={setActiveModule}
+                onRefresh={refreshNotifications}
+                unreadCount={notificationFeed.unreadCount}
+              />
               <label className="branch-select">
                 <Store size={17} aria-hidden="true" />
                 <select
@@ -2941,6 +3026,113 @@ function MobileMoreMenu({
           </button>
         </footer>
       </aside>
+    </div>
+  );
+}
+
+function NotificationCenter({ loading, notifications, onMarkAllRead, onNavigate, onRefresh, unreadCount }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const badgeLabel = unreadCount > 99 ? "99+" : String(unreadCount);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return undefined;
+
+    function closeOnOutsideClick(event) {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    window.addEventListener("pointerdown", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function toggleNotifications() {
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    if (nextOpen) void onRefresh({ silent: false });
+  }
+
+  function openNotification(notification) {
+    setOpen(false);
+    onNavigate(notification.module);
+  }
+
+  return (
+    <div className="notification-center" ref={rootRef}>
+      <button
+        className={`icon-button notification-trigger ${unreadCount ? "has-unread" : ""}`}
+        type="button"
+        title={unreadCount ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}` : "Notifications"}
+        aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={toggleNotifications}
+      >
+        <Bell size={19} aria-hidden="true" />
+        {unreadCount > 0 && <span className="notification-badge" aria-hidden="true">{badgeLabel}</span>}
+      </button>
+
+      {open && (
+        <section className="notification-panel" role="dialog" aria-label="Notifications">
+          <header className="notification-panel-header">
+            <div>
+              <strong>Notifications</strong>
+              <small>{unreadCount ? `${unreadCount} unread` : "You're all caught up"}</small>
+            </div>
+            <div className="notification-panel-actions">
+              <button
+                type="button"
+                title="Refresh notifications"
+                aria-label="Refresh notifications"
+                disabled={loading}
+                onClick={() => void onRefresh({ silent: false })}
+              >
+                <RefreshCw className={loading ? "is-spinning" : ""} size={16} aria-hidden="true" />
+              </button>
+              <button type="button" disabled={!unreadCount || loading} onClick={() => void onMarkAllRead()}>
+                <Check size={16} aria-hidden="true" />
+                Mark all read
+              </button>
+            </div>
+          </header>
+
+          <div className="notification-list">
+            {notifications.length ? notifications.map((notification) => (
+              <button
+                className={`notification-item ${notification.unread ? "is-unread" : ""}`}
+                type="button"
+                key={notification.id}
+                onClick={() => openNotification(notification)}
+              >
+                <span className="notification-item-icon" aria-hidden="true">
+                  <Bell size={15} />
+                </span>
+                <span className="notification-item-copy">
+                  <span className="notification-item-heading">
+                    <strong>{notification.title}</strong>
+                    {notification.unread && <i aria-label="Unread" />}
+                  </span>
+                  <span>{notification.message}</span>
+                  <small>{formatNotificationTime(notification.createdAt)}</small>
+                </span>
+              </button>
+            )) : (
+              <div className="notification-empty">
+                <Bell size={24} aria-hidden="true" />
+                <strong>No notifications yet</strong>
+                <span>New leads, bookings, services, and other records will appear here.</span>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

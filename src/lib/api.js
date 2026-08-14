@@ -1,5 +1,6 @@
 const apiBase = "";
 export const apiAuthenticationRequiredEvent = "macesoft:authentication-required";
+export const apiNotificationCreatedEvent = "macesoft:notification-created";
 
 let apiSessionActive = false;
 
@@ -36,6 +37,10 @@ async function requestJson(path, options = {}) {
 
   if (!isJson) {
     throw new Error("The clinic API did not return JSON.");
+  }
+
+  if (payload?.notification && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(apiNotificationCreatedEvent, { detail: payload.notification }));
   }
 
   return payload;
@@ -262,6 +267,17 @@ export function checkApiHealth() {
 
 export function loadBootstrap() {
   return requestJson("/api/bootstrap");
+}
+
+export function loadNotifications(limit = 30) {
+  return requestJson(`/api/notifications?limit=${encodeURIComponent(limit)}`);
+}
+
+export function markNotificationsRead(limit = 30) {
+  return requestJson("/api/notifications/read", {
+    method: "POST",
+    body: JSON.stringify({ limit }),
+  });
 }
 
 export function loadClients() {

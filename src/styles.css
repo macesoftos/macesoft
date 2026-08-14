@@ -1075,6 +1075,218 @@ img { max-width: 100%; }
   background: var(--gold);
 }
 
+.notification-center {
+  position: relative;
+  z-index: 90;
+  flex: 0 0 auto;
+}
+
+.notification-trigger.has-unread {
+  border-color: rgba(132, 106, 85, 0.52);
+  background: #fffaf5;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--wine);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.notification-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 220;
+  width: min(400px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 22px 52px rgba(63, 51, 41, 0.2);
+}
+
+.notification-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fffdf9;
+}
+
+.notification-panel-header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.notification-panel-header strong {
+  color: var(--ink);
+}
+
+.notification-panel-header small {
+  color: var(--muted);
+}
+
+.notification-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.notification-panel-actions button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--wine);
+  padding: 0 7px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.notification-panel-actions button:hover:not(:disabled),
+.notification-panel-actions button:focus-visible {
+  background: var(--rose-soft);
+}
+
+.notification-panel-actions button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.notification-list {
+  max-height: min(520px, calc(100vh - 170px));
+  overflow-y: auto;
+}
+
+.notification-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px 15px;
+  border: 0;
+  border-bottom: 1px solid rgba(222, 213, 200, 0.72);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.notification-item:last-child {
+  border-bottom: 0;
+}
+
+.notification-item:hover,
+.notification-item:focus-visible {
+  background: #faf6f0;
+}
+
+.notification-item.is-unread {
+  background: #fff9f2;
+}
+
+.notification-item.is-unread:hover,
+.notification-item.is-unread:focus-visible {
+  background: #f8eee3;
+}
+
+.notification-item-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--rose-soft);
+  color: var(--wine);
+}
+
+.notification-item-copy,
+.notification-item-heading {
+  min-width: 0;
+  display: flex;
+}
+
+.notification-item-copy {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notification-item-heading {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notification-item-heading i {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--wine);
+}
+
+.notification-item-copy > span:not(.notification-item-heading) {
+  color: #64584f;
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
+.notification-item-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.notification-empty {
+  min-height: 190px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.notification-empty strong {
+  color: var(--ink);
+}
+
+.notification-empty span {
+  max-width: 280px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.notification-panel .is-spinning {
+  animation: notification-spin 750ms linear infinite;
+}
+
+@keyframes notification-spin {
+  to { transform: rotate(360deg); }
+}
+
 .account-menu {
   position: relative;
   z-index: 30;
@@ -6788,6 +7000,23 @@ body:has(.public-lead-page-embedded) #root {
 }
 
 @media (max-width: 720px) {
+  .notification-panel {
+    position: fixed;
+    top: 70px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .notification-panel-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notification-panel-actions {
+    justify-content: space-between;
+  }
+
   .room-availability-toolbar {
     align-items: stretch;
     flex-direction: column;
