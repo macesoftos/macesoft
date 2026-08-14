@@ -1027,6 +1027,32 @@
 .marketing-builder-actions { display: flex; align-items: center; gap: 8px; }
 .marketing-builder-actions > span { margin-right: 5px; color: var(--marketing-muted); font-size: 10px; white-space: nowrap; }
 .marketing-builder-actions > button:not(.marketing-primary-button) { min-height: 42px; padding: 9px 15px; border: 1px solid var(--marketing-border); border-radius: 7px; background: #fff; color: var(--marketing-espresso); font-weight: 700; white-space: nowrap; }
+.marketing-builder-actions > .marketing-preview-email-button { display: inline-flex; align-items: center; gap: 7px; border-color: #baa491; background: #faf6f1; }
+
+.marketing-email-preview-dialog { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; }
+.marketing-email-preview-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgba(32, 24, 19, 0.6); backdrop-filter: blur(2px); }
+.marketing-email-preview-dialog > section { position: relative; z-index: 1; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: min(1180px, 96vw); height: min(900px, 94vh); overflow: hidden; border-radius: 11px; background: #f4f1ed; box-shadow: 0 30px 90px rgba(31, 22, 16, 0.34); }
+.marketing-email-preview-dialog > section > header { display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--marketing-border); background: #fff; }
+.marketing-email-preview-dialog > section > header div { display: grid; gap: 2px; min-width: 0; }
+.marketing-email-preview-dialog > section > header span { color: var(--marketing-muted); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; }
+.marketing-email-preview-dialog > section > header h2 { overflow: hidden; margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 24px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.marketing-email-preview-dialog > section > header button { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 1px solid var(--marketing-border); border-radius: 50%; background: #fff; color: var(--marketing-espresso); }
+.marketing-email-preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 20px; border-bottom: 1px solid var(--marketing-border); background: #fff; }
+.marketing-email-preview-toolbar dl { display: grid; min-width: 0; flex: 1 1 auto; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.marketing-email-preview-toolbar dl > div { display: grid; min-width: 0; gap: 3px; }
+.marketing-email-preview-toolbar dt { color: var(--marketing-muted); font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.05em; }
+.marketing-email-preview-toolbar dd { overflow: hidden; margin: 0; font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.marketing-email-preview-toolbar .marketing-preview-toggle { display: flex; flex: 0 0 auto; gap: 4px; padding: 3px; border: 1px solid var(--marketing-border); border-radius: 7px; background: #f7f3ee; }
+.marketing-email-preview-toolbar .marketing-preview-toggle button { display: inline-flex; min-height: 35px; align-items: center; gap: 6px; padding: 7px 11px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--marketing-muted); font-size: 9px; font-weight: 750; }
+.marketing-email-preview-toolbar .marketing-preview-toggle button.active { border-color: #cbb9aa; background: #fff; color: var(--marketing-espresso); box-shadow: 0 2px 7px rgba(67, 43, 29, 0.07); }
+.marketing-email-preview-stage { min-height: 0; overflow: auto; padding: 22px; background: #ebe7e2; }
+.marketing-email-preview-device { width: min(760px, 100%); height: 100%; min-height: 560px; margin: 0 auto; overflow: hidden; border: 1px solid #d2c9c0; border-radius: 7px; background: #fff; box-shadow: 0 12px 36px rgba(57, 42, 31, 0.12); transition: width 180ms ease; }
+.marketing-email-preview-device.mobile { width: min(390px, 100%); }
+.marketing-email-preview-device iframe { display: block; width: 100%; height: 100%; min-height: 560px; border: 0; background: #fff; }
+.marketing-email-preview-stage > .marketing-empty { min-height: 100%; background: #fff; }
+.marketing-email-preview-dialog > section > footer { display: flex; min-height: 60px; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 20px; border-top: 1px solid var(--marketing-border); background: #fff; }
+.marketing-email-preview-dialog > section > footer span { color: var(--marketing-muted); font-size: 9px; }
+.marketing-email-preview-dialog > section > footer button { min-height: 38px; padding: 8px 14px; border: 1px solid var(--marketing-espresso); border-radius: 6px; background: var(--marketing-espresso); color: #fff; font-size: 9px; font-weight: 800; }
 
 .marketing-stepper {
   display: grid;
@@ -1711,6 +1737,14 @@
 }
 
 @media (max-width: 760px) {
+  .marketing-email-preview-dialog { padding: 7px; }
+  .marketing-email-preview-dialog > section { width: 100%; height: calc(100vh - 14px); height: calc(100dvh - 14px); }
+  .marketing-email-preview-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .marketing-email-preview-toolbar dl { grid-template-columns: 1fr; gap: 7px; }
+  .marketing-email-preview-toolbar .marketing-preview-toggle { align-self: flex-start; }
+  .marketing-email-preview-stage { padding: 10px; }
+  .marketing-email-preview-dialog > section > footer span { display: none; }
+  .marketing-email-preview-dialog > section > footer { justify-content: flex-end; }
   .marketing-page-shell { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
   .marketing-workspace-host { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
   .marketing-content-area { height: auto; }
@@ -1823,7 +1857,7 @@
   .marketing-automation-list article > button { grid-column: 2; justify-self: start; }
   .marketing-stepper button > b { display: none; }
   .marketing-stepper button { grid-template-columns: 1fr; justify-items: center; }
-  .marketing-builder-actions > button:nth-of-type(2) { display: none; }
+  .marketing-builder-actions > .marketing-send-test-button { display: none; }
   .marketing-review-card dl > div { grid-template-columns: 1fr; gap: 4px; }
   .marketing-final-confirmation dl div { align-items: flex-start; flex-direction: column; }
   .marketing-final-confirmation dd { text-align: left; }
