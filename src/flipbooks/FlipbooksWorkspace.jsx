@@ -360,20 +360,25 @@ function FlipbookReader({
   );
 }
 
-function WorkspaceChrome({ path, navigate, children }) {
+function WorkspaceChrome({ path, navigate, children, onExit, session }) {
   const selected = workspaceNav.find((item) => item.path === path)?.path || (path.match(/^\/flipbooks\/[^/]+$/) ? "/flipbooks" : path);
+  const initials = session?.name?.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "MA";
   return (
     <div className="flipbook-workspace-shell">
-      <nav className="flipbook-subnav" aria-label="Flipbooks workspace">
+      <aside className="flipbook-subnav">
         <div className="flipbook-subnav-brand"><BookOpen size={18} /><strong>Flipbook Workspace</strong></div>
-        <div className="flipbook-subnav-links">
+        <nav className="flipbook-subnav-links" aria-label="Flipbooks workspace">
           {workspaceNav.map(({ label, path: itemPath, icon: Icon }) => (
             <button className={selected === itemPath ? "active" : ""} type="button" key={itemPath} onClick={() => navigate(itemPath)}>
               <Icon size={16} /> {label}
             </button>
           ))}
+        </nav>
+        <div className="flipbook-subnav-footer">
+          <button className="flipbook-exit-workspace" type="button" onClick={onExit}><ArrowLeft size={16} /><span>Back to MACE</span></button>
+          <div className="flipbook-workspace-account"><span>{initials}</span><div><strong>{session?.name || "MACE User"}</strong><small>{session?.role || "Account"}</small></div></div>
         </div>
-      </nav>
+      </aside>
       <div className="flipbook-workspace-main">{children}</div>
     </div>
   );
@@ -780,7 +785,7 @@ function FlipbookPreviewPage({ id, navigate, notify }) {
   );
 }
 
-export default function FlipbooksWorkspace({ notify, session }) {
+export default function FlipbooksWorkspace({ notify, session, onExit }) {
   const [path, navigate] = useWorkspacePath();
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -825,7 +830,7 @@ export default function FlipbooksWorkspace({ notify, session }) {
   else content = loading ? <LoadingState label="Loading flipbooks…" /> : <div><WorkspaceHeader title="Flipbooks" copy="Create, publish and share interactive documents." action={<button className="flipbook-primary" type="button" onClick={() => navigate("/flipbooks/new")}><Plus size={17} /> New Flipbook</button>} /><FlipbooksTable books={books} navigate={navigate} onAction={action} /></div>;
 
   return (
-    <WorkspaceChrome path={path} navigate={navigate}>
+    <WorkspaceChrome path={path} navigate={navigate} onExit={onExit} session={session}>
       {content}
       {share && <ShareDialog book={share} onClose={() => setShare(null)} onUpdated={(next) => { setShare(next); void refresh(); }} notify={notify} />}
     </WorkspaceChrome>

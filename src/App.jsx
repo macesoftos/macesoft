@@ -2185,6 +2185,19 @@ function App() {
     );
   }
 
+  if (isFlipbooksView) {
+    return (
+      <>
+        <FlipbooksWorkspace
+          notify={notify}
+          onExit={() => setActiveModule("overview")}
+          session={session}
+        />
+        {toast && <Toast toast={toast} />}
+      </>
+    );
+  }
+
   const activeLabel =
     activeModule === "overview"
       ? "Dashboard"
@@ -2560,9 +2573,6 @@ function App() {
               isLoading={isBooting}
               notify={notify}
             />
-          )}
-          {activeModule === "flipbooks" && (
-            <FlipbooksWorkspace notify={notify} session={session} />
           )}
           {activeModule === "staff" && (
             <StaffModule
