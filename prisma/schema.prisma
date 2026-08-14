@@ -841,6 +841,8 @@ model MarketingCampaign {
   templateId String   @default("")
   subject    String   @default("")
   message    String   @default("")
+  html       String   @default("")
+  design     Json?
   sent       Int      @default(0)
   booked     Int      @default(0)
   credits    Int      @default(0)
