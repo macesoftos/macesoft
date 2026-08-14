@@ -32,6 +32,8 @@ import {
   Trash2,
   UploadCloud,
   Users,
+  Volume2,
+  VolumeX,
   X,
   ZoomIn,
   ZoomOut,
@@ -62,6 +64,68 @@ import {
 import "./flipbooks.css";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
+
+const mainPageRenderCaches = new WeakMap();
+const MAIN_PAGE_SCALE = 1.55;
+const MAIN_PAGE_CACHE_LIMIT = 10;
+
+function trimMainPageCache(cache) {
+  while (cache.size > MAIN_PAGE_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value;
+    const oldestEntry = cache.get(oldestKey);
+    cache.delete(oldestKey);
+    if (oldestEntry?.canvas) {
+      oldestEntry.canvas.width = 0;
+      oldestEntry.canvas.height = 0;
+    }
+  }
+}
+
+function getMainPageRender(pdfDocument, pageNumber) {
+  let cache = mainPageRenderCaches.get(pdfDocument);
+  if (!cache) {
+    cache = new Map();
+    mainPageRenderCaches.set(pdfDocument, cache);
+  }
+
+  const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+  const cacheKey = `${pageNumber}:${pixelRatio}`;
+  const cachedEntry = cache.get(cacheKey);
+  if (cachedEntry) {
+    cache.delete(cacheKey);
+    cache.set(cacheKey, cachedEntry);
+    return cachedEntry.promise;
+  }
+
+  const entry = { canvas: null, promise: null };
+  entry.promise = pdfDocument.getPage(pageNumber).then(async (pdfPage) => {
+    const viewport = pdfPage.getViewport({ scale: MAIN_PAGE_SCALE });
+    const canvas = window.document.createElement("canvas");
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("PDF canvas is unavailable");
+    canvas.width = Math.floor(viewport.width * pixelRatio);
+    canvas.height = Math.floor(viewport.height * pixelRatio);
+    await pdfPage.render({
+      canvasContext: context,
+      viewport,
+      transform: pixelRatio === 1 ? null : [pixelRatio, 0, 0, pixelRatio, 0, 0],
+    }).promise;
+    entry.canvas = canvas;
+    return {
+      canvas,
+      width: canvas.width,
+      height: canvas.height,
+      aspectRatio: viewport.width / viewport.height,
+    };
+  }).catch((renderError) => {
+    if (cache.get(cacheKey) === entry) cache.delete(cacheKey);
+    throw renderError;
+  });
+
+  cache.set(cacheKey, entry);
+  trimMainPageCache(cache);
+  return entry.promise;
+}
 
 const MAX_PDF_BYTES = 30 * 1024 * 1024;
 const workspaceNav = [
@@ -174,9 +238,33 @@ function PdfPageCanvas({ document, pageNumber, thumbnail = false, aspectRatio = 
     let renderTask;
     setRendering(true);
     setError("");
+
+    if (!thumbnail) {
+      void getMainPageRender(document, pageNumber).then((renderedPage) => {
+        if (cancelled || !canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) throw new Error("PDF canvas is unavailable");
+        canvas.width = renderedPage.width;
+        canvas.height = renderedPage.height;
+        canvas.style.aspectRatio = `${renderedPage.aspectRatio} / 1`;
+        if (hostRef.current) hostRef.current.style.aspectRatio = `${renderedPage.aspectRatio} / 1`;
+        context.drawImage(renderedPage.canvas, 0, 0);
+        setRendering(false);
+      }).catch((renderError) => {
+        if (!cancelled && renderError?.name !== "RenderingCancelledException") {
+          setRendering(false);
+          setError("Page unavailable");
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     void document.getPage(pageNumber).then((page) => {
       if (cancelled || !canvasRef.current) return;
-      const viewport = page.getViewport({ scale: thumbnail ? 0.28 : 1.55 });
+      const viewport = page.getViewport({ scale: 0.28 });
       const ratio = Math.min(2, window.devicePixelRatio || 1);
       const canvas = canvasRef.current;
       const context = canvas.getContext("2d", { alpha: false });
@@ -256,12 +344,15 @@ function FlipbookReader({
   const [zoom, setZoom] = useState(1);
   const [pageAspectRatio, setPageAspectRatio] = useState(0.77);
   const [thumbnailsOpen, setThumbnailsOpen] = useState(showThumbnails);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [turn, setTurn] = useState("");
   const readerRef = useRef(null);
   const canvasScrollRef = useRef(null);
   const touchRef = useRef(null);
   const turnFrameRef = useRef(null);
   const turnTimerRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const pageTurnSourceRef = useRef(null);
   const effectivePages = document?.numPages || pageCount || 1;
   const step = singlePage ? 1 : 2;
   const visiblePages = singlePage ? [page] : [page, page + 1].filter((number) => number <= effectivePages);
@@ -289,7 +380,98 @@ function FlipbookReader({
   useEffect(() => () => {
     if (turnFrameRef.current) window.cancelAnimationFrame(turnFrameRef.current);
     if (turnTimerRef.current) window.clearTimeout(turnTimerRef.current);
+    try {
+      pageTurnSourceRef.current?.stop();
+    } catch {
+      // The source may already have ended.
+    }
+    void audioContextRef.current?.close();
   }, []);
+
+  const warmSpread = useCallback((direction) => {
+    if (!document) return;
+    const spreadStart = page + direction * step;
+    const pageNumbers = Array.from({ length: step }, (_, index) => spreadStart + index)
+      .filter((number) => number >= 1 && number <= effectivePages);
+    for (const pageNumber of pageNumbers) void getMainPageRender(document, pageNumber).catch(() => {});
+  }, [document, effectivePages, page, step]);
+
+  useEffect(() => {
+    if (!document) return undefined;
+    const preloadNeighbors = () => {
+      warmSpread(1);
+      warmSpread(-1);
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const idleHandle = window.requestIdleCallback(preloadNeighbors, { timeout: 900 });
+      return () => window.cancelIdleCallback(idleHandle);
+    }
+    const timer = window.setTimeout(preloadNeighbors, 180);
+    return () => window.clearTimeout(timer);
+  }, [document, warmSpread]);
+
+  const playPageTurnSound = useCallback((direction) => {
+    if (!soundEnabled) return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    try {
+      const audioContext = audioContextRef.current || new AudioContextClass();
+      audioContextRef.current = audioContext;
+      const playSound = () => {
+        const duration = 0.24;
+        const frameCount = Math.floor(audioContext.sampleRate * duration);
+        const buffer = audioContext.createBuffer(1, frameCount, audioContext.sampleRate);
+        const samples = buffer.getChannelData(0);
+        let smoothedNoise = 0;
+        for (let index = 0; index < frameCount; index += 1) {
+          const progress = index / frameCount;
+          smoothedNoise = smoothedNoise * 0.48 + (Math.random() * 2 - 1) * 0.52;
+          const envelope = Math.sin(Math.PI * Math.min(1, progress * 1.45)) * ((1 - progress) ** 1.35);
+          samples[index] = smoothedNoise * envelope;
+        }
+
+        try {
+          pageTurnSourceRef.current?.stop();
+        } catch {
+          // The previous source may already have ended.
+        }
+
+        const source = audioContext.createBufferSource();
+        const filter = audioContext.createBiquadFilter();
+        const gain = audioContext.createGain();
+        source.buffer = buffer;
+        source.playbackRate.value = direction > 0 ? 1.04 : 0.96;
+        filter.type = "bandpass";
+        filter.frequency.value = direction > 0 ? 1650 : 1350;
+        filter.Q.value = 0.55;
+        const now = audioContext.currentTime;
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.075, now + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        source.connect(filter);
+        filter.connect(gain);
+        if (typeof audioContext.createStereoPanner === "function") {
+          const panner = audioContext.createStereoPanner();
+          panner.pan.value = direction > 0 ? 0.16 : -0.16;
+          gain.connect(panner);
+          panner.connect(audioContext.destination);
+        } else {
+          gain.connect(audioContext.destination);
+        }
+        pageTurnSourceRef.current = source;
+        source.addEventListener("ended", () => {
+          if (pageTurnSourceRef.current === source) pageTurnSourceRef.current = null;
+        }, { once: true });
+        source.start(now);
+      };
+
+      if (audioContext.state === "suspended") void audioContext.resume().then(playSound).catch(() => {});
+      else playSound();
+    } catch {
+      // Audio is optional; navigation should never fail if playback is blocked.
+    }
+  }, [soundEnabled]);
 
   const move = useCallback((direction) => {
     const nextPage = Math.max(1, Math.min(effectivePages, page + direction * step));
@@ -297,14 +479,16 @@ function FlipbookReader({
 
     if (turnFrameRef.current) window.cancelAnimationFrame(turnFrameRef.current);
     if (turnTimerRef.current) window.clearTimeout(turnTimerRef.current);
+    warmSpread(direction);
+    playPageTurnSound(direction);
     setTurn("");
     setPage(nextPage);
     turnFrameRef.current = window.requestAnimationFrame(() => {
       canvasScrollRef.current?.scrollTo({ top: 0, left: 0 });
       setTurn(direction > 0 ? "next" : "previous");
-      turnTimerRef.current = window.setTimeout(() => setTurn(""), 190);
+      turnTimerRef.current = window.setTimeout(() => setTurn(""), 430);
     });
-  }, [effectivePages, page, step]);
+  }, [effectivePages, page, playPageTurnSound, step, warmSpread]);
 
   useEffect(() => {
     const keyboard = (event) => {
@@ -384,6 +568,14 @@ function FlipbookReader({
         <button type="button" onClick={() => updateZoom(zoom - 0.1)} disabled={zoom <= 0.5} aria-label="Zoom out" title="Zoom out"><ZoomOut size={17} /></button>
         <button type="button" onClick={() => updateZoom(zoom + 0.1)} disabled={zoom >= 1.8} aria-label="Zoom in" title="Zoom in"><ZoomIn size={17} /></button>
         <button type="button" onClick={fitPages} aria-label="Fit pages to viewer">Fit</button>
+        <button
+          type="button"
+          onClick={() => setSoundEnabled((enabled) => !enabled)}
+          aria-label={soundEnabled ? "Mute page turn sound" : "Enable page turn sound"}
+          title={soundEnabled ? "Mute page turn sound" : "Enable page turn sound"}
+        >
+          {soundEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
+        </button>
         <button type="button" onClick={enterFullscreen} aria-label="Fullscreen"><Fullscreen size={17} /></button>
       </div>
 
@@ -415,7 +607,7 @@ function FlipbookReader({
           )}
           {document && (
             <>
-              <button className="flipbook-page-arrow previous" type="button" onClick={() => move(-1)} disabled={page <= 1} aria-label="Previous page"><ChevronLeft size={24} /></button>
+              <button className="flipbook-page-arrow previous" type="button" onPointerEnter={() => warmSpread(-1)} onFocus={() => warmSpread(-1)} onClick={() => move(-1)} disabled={page <= 1} aria-label="Previous page"><ChevronLeft size={24} /></button>
               <div
                 className={`flipbook-pages turn-${turn}`}
                 style={{ width: `${Math.round(zoom * 100)}%` }}
@@ -424,15 +616,16 @@ function FlipbookReader({
                 {visiblePages.map((number) => (
                   <PdfPageCanvas document={document} pageNumber={number} aspectRatio={pageAspectRatio} key={number} />
                 ))}
+                <span className="flipbook-page-turn-sheet" aria-hidden="true" />
               </div>
-              <button className="flipbook-page-arrow next" type="button" onClick={() => move(1)} disabled={page + step > effectivePages} aria-label="Next page"><ChevronRight size={24} /></button>
+              <button className="flipbook-page-arrow next" type="button" onPointerEnter={() => warmSpread(1)} onFocus={() => warmSpread(1)} onClick={() => move(1)} disabled={page + step > effectivePages} aria-label="Next page"><ChevronRight size={24} /></button>
             </>
           )}
         </div>
       </div>
 
       <div className="flipbook-reader-footer">
-        <button type="button" onClick={() => move(-1)} disabled={page <= 1}><ChevronLeft size={17} /> Previous</button>
+        <button type="button" onPointerEnter={() => warmSpread(-1)} onFocus={() => warmSpread(-1)} onClick={() => move(-1)} disabled={page <= 1}><ChevronLeft size={17} /> Previous</button>
         <strong>{rangeLabel}</strong>
         <input
           aria-label="Flipbook page position"
@@ -443,7 +636,7 @@ function FlipbookReader({
           value={page}
           onChange={(event) => setPage(Number(event.target.value))}
         />
-        <button type="button" onClick={() => move(1)} disabled={page + step > effectivePages}>Next <ChevronRight size={17} /></button>
+        <button type="button" onPointerEnter={() => warmSpread(1)} onFocus={() => warmSpread(1)} onClick={() => move(1)} disabled={page + step > effectivePages}>Next <ChevronRight size={17} /></button>
       </div>
     </section>
   );
