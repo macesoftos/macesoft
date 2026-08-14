@@ -724,9 +724,14 @@ function App() {
   const isApplicationsView = activeModule === "applications";
   const isFaceTrackView = activeModule === "facetrack-attendance";
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
-  const isPublicLeadCaptureView = typeof window !== "undefined" && (
-    normalizedPathname(window.location.pathname) === "/inquire"
-    || window.location.hash.toLowerCase() === "#/inquire"
+  const publicFormMode = typeof window !== "undefined" && (
+    normalizedPathname(window.location.pathname) === "/book"
+    || window.location.hash.toLowerCase() === "#/book"
+    || new URLSearchParams(window.location.search).get("form") === "appointment"
+  ) ? "appointment" : "inquiry";
+  const isPublicFormView = typeof window !== "undefined" && (
+    ["/inquire", "/book"].includes(normalizedPathname(window.location.pathname))
+    || ["#/inquire", "#/book"].includes(window.location.hash.toLowerCase())
   );
   const posTouchStartRef = useRef(null);
   const posChromeHideTimerRef = useRef(0);
@@ -1025,12 +1030,12 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (isPublicLeadCaptureView) return;
+    if (isPublicFormView) return;
     if (moduleFromPath(window.location.pathname)) return;
     if (!moduleFromHash(window.location.hash)) {
       setActiveModule(activeModule, { replace: true, keepDrawerOpen: true });
     }
-  }, [activeModule, isPublicLeadCaptureView, setActiveModule]);
+  }, [activeModule, isPublicFormView, setActiveModule]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsBooting(false), 350);
@@ -2095,8 +2100,8 @@ function App() {
     });
   }
 
-  if (isPublicLeadCaptureView) {
-    return <PublicLeadCapturePage />;
+  if (isPublicFormView) {
+    return <PublicLeadCapturePage initialMode={publicFormMode} />;
   }
 
   if (authChecking) {
@@ -3187,8 +3192,9 @@ function publicLeadAttribution() {
   };
 }
 
-function PublicLeadCapturePage() {
+function PublicLeadCapturePage({ initialMode = "inquiry" }) {
   const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
+  const [formMode, setFormMode] = useState(initialMode);
   const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
   const [form, setForm] = useState({
     fullName: "",
@@ -3330,20 +3336,31 @@ function PublicLeadCapturePage() {
           <div className="public-lead-brand">
             <img className="public-lead-logo" src={assets.logo} alt={config.company} />
             <div>
-              <p className="eyebrow">Private consultation request</p>
-              <h1>Let&apos;s talk about the care that feels right for you.</h1>
-              <p>{config.tagline} Share what you&apos;re interested in and the clinic team will personally follow up.</p>
+              <p className="eyebrow">{formMode === "appointment" ? "Online appointment request" : "Private consultation request"}</p>
+              <h1>{formMode === "appointment" ? "Choose a visit time that works for you." : "Let’s talk about the care that feels right for you."}</h1>
+              <p>{formMode === "appointment" ? "Request your preferred branch, service, date, and time. The clinic team will confirm the final schedule with you." : `${config.tagline} Share what you’re interested in and the clinic team will personally follow up.`}</p>
             </div>
             <div className="public-lead-promises" aria-label="What happens next">
               <span><ShieldCheck size={18} /> Your details stay with the clinic</span>
-              <span><PhoneCall size={18} /> Choose how you prefer to be contacted</span>
-              <span><Sparkles size={18} /> No treatment commitment required</span>
+              <span>{formMode === "appointment" ? <CalendarDays size={18} /> : <PhoneCall size={18} />} {formMode === "appointment" ? "Your request goes into Appointments" : "Choose how you prefer to be contacted"}</span>
+              <span><Sparkles size={18} /> {formMode === "appointment" ? "The clinic confirms availability" : "No treatment commitment required"}</span>
             </div>
           </div>
         )}
 
         <div className="public-lead-card">
-          {submitted ? (
+          <div className="public-form-mode-switch" aria-label="Choose contact form">
+            <button className={formMode === "inquiry" ? "active" : ""} type="button" aria-pressed={formMode === "inquiry"} onClick={() => setFormMode("inquiry")}>
+              <MessageSquareText size={16} /> Inquire
+            </button>
+            <button className={formMode === "appointment" ? "active" : ""} type="button" aria-pressed={formMode === "appointment"} onClick={() => setFormMode("appointment")}>
+              <CalendarDays size={16} /> Book an appointment
+            </button>
+          </div>
+
+          {formMode === "appointment" ? (
+            <PublicAppointmentBookingForm config={config} loadingConfig={loadingConfig} />
+          ) : submitted ? (
             <div className="public-lead-success" role="status">
               <span className="public-lead-success-icon"><Check size={28} /></span>
               <p className="eyebrow">Inquiry received</p>
@@ -3387,6 +3404,160 @@ function PublicLeadCapturePage() {
       </section>
       {!isContactEmbed && <a className="public-lead-staff-link" href="/">Clinic staff sign in</a>}
     </main>
+  );
+}
+
+function PublicAppointmentBookingForm({ config, loadingConfig }) {
+  const [form, setForm] = useState({
+    fullName: "",
+    mobile: "",
+    email: "",
+    branch: "",
+    serviceId: "",
+    date: todayDate(),
+    time: "",
+    concern: "",
+    marketingConsent: false,
+    privacyConsent: false,
+    clinicWebsite: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(null);
+
+  const availableServices = useMemo(() => config.services.filter((service) => {
+    const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
+    return !form.branch || !serviceBranches.length || serviceBranches.includes("All branches") || serviceBranches.includes(form.branch);
+  }), [config.services, form.branch]);
+
+  const selectedService = availableServices.find((service) => service.id === form.serviceId);
+  const timeOptions = useMemo(() => {
+    const duration = Math.max(15, Number(selectedService?.duration || 60));
+    const options = [];
+    for (let minutes = scheduleStartMinutes; minutes + duration <= scheduleEndMinutes; minutes += 30) {
+      if (minutes < 13 * 60 && minutes + duration > 12 * 60) continue;
+      options.push({ value: formatTimeInput(minutes), label: formatScheduleTime(minutes) });
+    }
+    return options;
+  }, [selectedService?.duration]);
+
+  useEffect(() => {
+    const defaultBranch = form.branch || config.branches[0]?.name || "";
+    const validServices = config.services.filter((service) => {
+      const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
+      return !defaultBranch || !serviceBranches.length || serviceBranches.includes("All branches") || serviceBranches.includes(defaultBranch);
+    });
+    setForm((current) => ({
+      ...current,
+      branch: current.branch || defaultBranch,
+      serviceId: validServices.some((service) => service.id === current.serviceId) ? current.serviceId : validServices[0]?.id || "",
+    }));
+  }, [config.branches, config.services, form.branch]);
+
+  useEffect(() => {
+    if (!timeOptions.some((option) => option.value === form.time)) {
+      setForm((current) => ({ ...current, time: timeOptions[0]?.value || "" }));
+    }
+  }, [form.time, timeOptions]);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function chooseBranch(branch) {
+    const validServices = config.services.filter((service) => {
+      const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
+      return !serviceBranches.length || serviceBranches.includes("All branches") || serviceBranches.includes(branch);
+    });
+    setForm((current) => ({
+      ...current,
+      branch,
+      serviceId: validServices.some((service) => service.id === current.serviceId) ? current.serviceId : validServices[0]?.id || "",
+    }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!form.fullName.trim() || !form.mobile.trim() || !form.branch || !form.serviceId || !form.date || !form.time || !form.privacyConsent) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await submitPublicBooking(form);
+      setSubmitted(result);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (submitError) {
+      setError(submitError.message || "We could not request this appointment. Please try another time.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function bookAnother() {
+    setSubmitted(null);
+    setError("");
+    setForm((current) => ({
+      ...current,
+      fullName: "",
+      mobile: "",
+      email: "",
+      concern: "",
+      marketingConsent: false,
+      privacyConsent: false,
+      clinicWebsite: "",
+    }));
+  }
+
+  if (submitted) {
+    return (
+      <div className="public-lead-success public-booking-success" role="status">
+        <span className="public-lead-success-icon"><Check size={28} /></span>
+        <p className="eyebrow">Appointment requested</p>
+        <h2>Thank you — your request is in the clinic schedule.</h2>
+        <p>The appointment is listed as Pending Confirmation. The MACE team will contact you to confirm the final schedule.</p>
+        <div className="public-booking-summary">
+          <span><CalendarDays size={16} /><strong>{submitted.appointment?.date}</strong></span>
+          <span><Clock size={16} /><strong>{formatScheduleTime(parseTimeToMinutes(submitted.appointment?.time))}</strong></span>
+          <span><Sparkles size={16} /><strong>{submitted.appointment?.service}</strong></span>
+          <span><MapPin size={16} /><strong>{submitted.appointment?.branch}</strong></span>
+        </div>
+        <small>Booking reference: {submitted.bookingReference}</small>
+        <button className="secondary-button" type="button" onClick={bookAnother}>Book another appointment</button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <div className="public-lead-card-heading public-booking-card-heading">
+        <p className="eyebrow">Request an appointment</p>
+        <h2>Choose your preferred schedule.</h2>
+        <p>The clinic will confirm availability after your request is received. Fields marked with * are required.</p>
+      </div>
+
+      {error && <div className="inline-state danger" role="alert"><AlertCircle size={17} /><span>{error}</span></div>}
+
+      <div className="public-lead-form-grid">
+        <label className="span-2"><span>Full name *</span><input autoComplete="name" maxLength={120} value={form.fullName} onChange={(event) => updateField("fullName", event.target.value)} required /></label>
+        <label><span>Mobile number *</span><input autoComplete="tel" inputMode="tel" maxLength={30} pattern="[+()0-9 .-]{7,30}" value={form.mobile} onChange={(event) => updateField("mobile", event.target.value)} placeholder="09XX XXX XXXX" required /></label>
+        <label><span>Email</span><input autoComplete="email" maxLength={160} type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} /></label>
+
+        <label><span>Clinic branch *</span><select disabled={loadingConfig || !config.branches.length} value={form.branch} onChange={(event) => chooseBranch(event.target.value)} required>{config.branches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label>
+        <label><span>Service *</span><select disabled={loadingConfig || !availableServices.length} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)} required>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+        <label><span>Preferred date *</span><input type="date" min={todayDate()} value={form.date} onChange={(event) => updateField("date", event.target.value)} required /></label>
+        <label><span>Preferred time *</span><select disabled={!timeOptions.length} value={form.time} onChange={(event) => updateField("time", event.target.value)} required>{timeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+        <small className="span-2 public-lead-contact-help">Available request times are within clinic hours and exclude the 12:00–1:00 PM lunch break.</small>
+
+        <label className="span-2"><span>Concern or notes</span><textarea rows={4} maxLength={1000} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder="Tell us what you would like to address during your visit." /></label>
+        <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
+        <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>I consent to the collection and use of my information to request this appointment. *</span></label>
+        <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} autoComplete="off" value={form.clinicWebsite} onChange={(event) => updateField("clinicWebsite", event.target.value)} /></label>
+      </div>
+
+      <button className="primary-button full public-lead-submit" type="submit" disabled={saving || loadingConfig || !form.fullName.trim() || !form.mobile.trim() || !form.branch || !form.serviceId || !form.date || !form.time || !form.privacyConsent}>
+        <CalendarDays size={17} /> {saving ? "Requesting appointment..." : "Request appointment"}
+      </button>
+      <p className="public-lead-footnote"><ShieldCheck size={14} /> Your request will appear in MACE Appointments as Pending Confirmation.</p>
+    </form>
   );
 }
 

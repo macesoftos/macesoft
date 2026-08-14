@@ -52,6 +52,7 @@ import {
   notificationIsUnread,
   notificationWhereForActor,
 } from "./notifications.js";
+import { normalizePublicBookingRequest } from "./publicBooking.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -85,7 +86,7 @@ app.use(helmet({
   referrerPolicy: { policy: "no-referrer" },
 }));
 app.use((request, response, next) => {
-  if (request.path !== "/inquire") return next();
+  if (!["/inquire", "/book"].includes(request.path)) return next();
 
   response.removeHeader("X-Frame-Options");
   response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
@@ -4269,7 +4270,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
     prisma.service.findMany({
       where: { active: true },
       orderBy: [{ name: "asc" }],
-      select: { id: true, name: true, category: true, branches: true },
+      select: { id: true, name: true, category: true, branches: true, duration: true },
     }),
   ]);
   const publicServices = [];
@@ -4284,6 +4285,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
         name: service.name,
         category: service.category,
         branches: parseJsonList(service.branches),
+        duration: service.duration,
       });
     }
   }
@@ -4381,65 +4383,58 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/public-bookings", asyncRoute(async (request, response) => {
-  const values = request.body ?? {};
-  const serviceId = requireText(values.serviceId, "Service");
-  const mobile = requireText(values.mobile, "Mobile number");
-  const fullName = requireText(values.fullName, "Full name");
-  const bookingBranch = requireText(values.branch, "Branch");
-  if (values.privacyConsent !== true) throw apiError("Privacy consent is required before booking.", 400);
-  const requestedDate = requireText(values.date, "Appointment date");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || requestedDate < new Date().toISOString().slice(0, 10)) {
-    throw apiError("Choose a valid current or future appointment date.", 400);
+  const booking = normalizePublicBookingRequest(request.body ?? {});
+  if (booking.spam) {
+    response.status(202).json({ submitted: true, bookingReference: request.requestId });
+    return;
   }
-  if (!/^\d{2}:\d{2}$/.test(requireText(values.time, "Appointment time"))) {
-    throw apiError("Choose a valid appointment time.", 400);
-  }
-  const service = await prisma.service.findUnique({ where: { id: serviceId } });
+  const mobile = normalizePhone(booking.mobile);
+  const service = await prisma.service.findUnique({ where: { id: booking.serviceId } });
   if (!service || !service.active) {
     throw apiError("Selected service is unavailable.", 404);
   }
-  const branch = await prisma.branch.findUnique({ where: { name: bookingBranch } });
+  const branch = await prisma.branch.findUnique({ where: { name: booking.branch } });
   if (!branch) throw apiError("Selected branch is unavailable.", 404);
   const serviceBranches = parseJsonList(service.branches);
-  if (serviceBranches.length && !serviceBranches.includes(bookingBranch) && !serviceBranches.includes("All branches")) {
+  if (serviceBranches.length && !serviceBranches.includes(booking.branch) && !serviceBranches.includes("All branches")) {
     throw apiError("Selected service is not offered at this branch.", 409);
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    let client = await tx.client.findFirst({ where: { mobile, branch: bookingBranch } });
+    let client = await tx.client.findFirst({ where: { mobile, branch: booking.branch } });
     if (!client) {
       client = await tx.client.create({
         data: normalizeClientPayload({
-          fullName,
+          fullName: booking.fullName,
           mobile,
-          email: values.email,
-          branch: bookingBranch,
+          email: booking.email,
+          branch: booking.branch,
           source: "Online Booking",
           referral: "Public portal",
-          skinConcerns: values.concern,
+          skinConcerns: booking.concern,
           treatmentGoals: "Consultation request",
-          marketingOptIn: Boolean(values.marketingOptIn),
-          preferredStaff: values.staff,
+          marketingOptIn: booking.marketingConsent,
+          preferredStaff: "Any available",
           tag: "Online",
           retention: "New",
-          nextVisit: values.date,
+          nextVisit: booking.date,
         }),
       });
     }
 
     const appointmentData = {
-      date: requestedDate,
-      time: requireText(values.time, "Appointment time"),
+      date: booking.date,
+      time: booking.time,
       clientId: client.id,
       client: client.fullName,
-      serviceId,
+      serviceId: booking.serviceId,
       service: service.name,
-      branch: bookingBranch,
+      branch: booking.branch,
       room: "To assign",
-      staff: clean(values.staff) || "Any available",
+      staff: "Any available",
       status: "Pending Confirmation",
       deposit: 0,
-      notes: clean(values.concern),
+      notes: booking.concern,
       internalNotes: "Created from public online booking.",
     };
     appointmentData.duration = await appointmentDurationFor(appointmentData);
@@ -4447,10 +4442,15 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
 
     const lead = await tx.lead.create({
       data: {
-        name: fullName,
+        name: booking.fullName,
         mobile,
+        email: booking.email,
         source: "Online Booking",
+        firstTouchSource: "Online Booking",
+        latestTouchSource: "Online Booking",
+        formId: "mace-public-booking-v1",
         interest: service.name,
+        concern: booking.concern,
         status: "New Inquiry",
         owner: "Front Desk",
         branch: appointmentData.branch,
@@ -4460,11 +4460,14 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
         nextAction: "Confirm online request",
         preferredDate: appointmentData.date,
         preferredTime: appointmentData.time,
+        preferredChannel: "Phone",
         permissionToContact: true,
-        marketingConsent: Boolean(values.marketingOptIn),
+        marketingConsent: booking.marketingConsent,
         privacyConsent: true,
         consentSource: "Online booking",
         consentTimestamp: new Date().toISOString(),
+        consentVersion: "v1",
+        consentText: "I consent to the collection and use of my information to request this appointment.",
       },
     });
     const appointment = await tx.appointment.create({ data: { ...appointmentData, leadId: lead.id } });
