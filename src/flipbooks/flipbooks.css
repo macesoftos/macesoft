@@ -706,6 +706,7 @@
 .flipbook-pages.turn-previous { animation: flipbook-spread-previous .4s cubic-bezier(.22, .7, .2, 1); }
 .flipbook-pages.turn-next .flipbook-page-turn-sheet { left: 50%; display: block; transform-origin: left center; animation: flipbook-sheet-next .42s cubic-bezier(.3, .65, .2, 1); }
 .flipbook-pages.turn-previous .flipbook-page-turn-sheet { left: 0; display: block; transform-origin: right center; animation: flipbook-sheet-previous .42s cubic-bezier(.3, .65, .2, 1); }
+.flipbook-pages.is-cover.turn-previous .flipbook-page-turn-sheet { left: 25%; width: 50%; }
 @keyframes flipbook-spread-next { from { transform: translateX(4px) scale(.998); } to { transform: translateX(0) scale(1); } }
 @keyframes flipbook-spread-previous { from { transform: translateX(-4px) scale(.998); } to { transform: translateX(0) scale(1); } }
 @keyframes flipbook-sheet-next {

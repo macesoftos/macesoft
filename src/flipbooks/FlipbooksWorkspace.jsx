@@ -127,6 +127,25 @@ function getMainPageRender(pdfDocument, pageNumber) {
   return entry.promise;
 }
 
+function getLastDesktopSpreadStart(totalPages) {
+  if (totalPages <= 1) return 1;
+  return totalPages % 2 === 0 ? totalPages : totalPages - 1;
+}
+
+function getDesktopSpreadStart(pageNumber, totalPages) {
+  const boundedPage = Math.max(1, Math.min(totalPages, pageNumber));
+  if (boundedPage <= 1) return 1;
+  const spreadStart = boundedPage % 2 === 0 ? boundedPage : boundedPage - 1;
+  return Math.min(spreadStart, getLastDesktopSpreadStart(totalPages));
+}
+
+function getAdjacentSpreadStart(currentPage, direction, singlePage, totalPages) {
+  if (singlePage) return Math.max(1, Math.min(totalPages, currentPage + direction));
+  const lastSpreadStart = getLastDesktopSpreadStart(totalPages);
+  if (direction > 0) return currentPage === 1 ? Math.min(2, lastSpreadStart) : Math.min(lastSpreadStart, currentPage + 2);
+  return currentPage <= 2 ? 1 : Math.max(2, currentPage - 2);
+}
+
 const MAX_PDF_BYTES = 30 * 1024 * 1024;
 const workspaceNav = [
   { label: "Overview", path: "/flipbooks/overview", icon: BookOpen },
@@ -354,14 +373,17 @@ function FlipbookReader({
   const audioContextRef = useRef(null);
   const pageTurnSourceRef = useRef(null);
   const effectivePages = document?.numPages || pageCount || 1;
-  const step = singlePage ? 1 : 2;
-  const visiblePages = singlePage ? [page] : [page, page + 1].filter((number) => number <= effectivePages);
+  const pagesInSpread = singlePage || page === 1 ? 1 : 2;
+  const visiblePages = Array.from({ length: pagesInSpread }, (_, index) => page + index)
+    .filter((number) => number <= effectivePages);
+  const previousPageStart = getAdjacentSpreadStart(page, -1, singlePage, effectivePages);
+  const nextPageStart = getAdjacentSpreadStart(page, 1, singlePage, effectivePages);
 
   useEffect(() => {
     setPage((current) => {
       const boundedPage = Math.min(current, effectivePages);
-      if (singlePage || boundedPage <= 1) return boundedPage;
-      return boundedPage % 2 === 0 ? boundedPage - 1 : boundedPage;
+      if (singlePage) return boundedPage;
+      return getDesktopSpreadStart(boundedPage, effectivePages);
     });
   }, [effectivePages, singlePage]);
 
@@ -390,11 +412,13 @@ function FlipbookReader({
 
   const warmSpread = useCallback((direction) => {
     if (!document) return;
-    const spreadStart = page + direction * step;
-    const pageNumbers = Array.from({ length: step }, (_, index) => spreadStart + index)
+    const spreadStart = getAdjacentSpreadStart(page, direction, singlePage, effectivePages);
+    if (spreadStart === page) return;
+    const spreadLength = singlePage || spreadStart === 1 ? 1 : 2;
+    const pageNumbers = Array.from({ length: spreadLength }, (_, index) => spreadStart + index)
       .filter((number) => number >= 1 && number <= effectivePages);
     for (const pageNumber of pageNumbers) void getMainPageRender(document, pageNumber).catch(() => {});
-  }, [document, effectivePages, page, step]);
+  }, [document, effectivePages, page, singlePage]);
 
   useEffect(() => {
     if (!document) return undefined;
@@ -474,21 +498,21 @@ function FlipbookReader({
   }, [soundEnabled]);
 
   const move = useCallback((direction) => {
-    const nextPage = Math.max(1, Math.min(effectivePages, page + direction * step));
-    if (nextPage === page) return;
+    const targetPage = getAdjacentSpreadStart(page, direction, singlePage, effectivePages);
+    if (targetPage === page) return;
 
     if (turnFrameRef.current) window.cancelAnimationFrame(turnFrameRef.current);
     if (turnTimerRef.current) window.clearTimeout(turnTimerRef.current);
     warmSpread(direction);
     playPageTurnSound(direction);
     setTurn("");
-    setPage(nextPage);
+    setPage(targetPage);
     turnFrameRef.current = window.requestAnimationFrame(() => {
       canvasScrollRef.current?.scrollTo({ top: 0, left: 0 });
       setTurn(direction > 0 ? "next" : "previous");
       turnTimerRef.current = window.setTimeout(() => setTurn(""), 430);
     });
-  }, [effectivePages, page, playPageTurnSound, step, warmSpread]);
+  }, [effectivePages, page, playPageTurnSound, singlePage, warmSpread]);
 
   useEffect(() => {
     const keyboard = (event) => {
@@ -587,7 +611,7 @@ function FlipbookReader({
                 className={visiblePages.includes(number) ? "active" : ""}
                 type="button"
                 key={number}
-                onClick={() => setPage(singlePage || number <= 1 ? number : number % 2 === 0 ? number - 1 : number)}
+                onClick={() => setPage(singlePage ? number : getDesktopSpreadStart(number, effectivePages))}
               >
                 <PdfPageCanvas document={document} pageNumber={number} thumbnail />
                 <span>{number}</span>
@@ -607,9 +631,9 @@ function FlipbookReader({
           )}
           {document && (
             <>
-              <button className="flipbook-page-arrow previous" type="button" onPointerEnter={() => warmSpread(-1)} onFocus={() => warmSpread(-1)} onClick={() => move(-1)} disabled={page <= 1} aria-label="Previous page"><ChevronLeft size={24} /></button>
+              <button className="flipbook-page-arrow previous" type="button" onPointerEnter={() => warmSpread(-1)} onFocus={() => warmSpread(-1)} onClick={() => move(-1)} disabled={previousPageStart === page} aria-label="Previous page"><ChevronLeft size={24} /></button>
               <div
-                className={`flipbook-pages turn-${turn}`}
+                className={`flipbook-pages${!singlePage && page === 1 ? " is-cover" : ""}${turn ? ` turn-${turn}` : ""}`}
                 style={{ width: `${Math.round(zoom * 100)}%` }}
                 aria-label={`${title}, ${rangeLabel}`}
               >
@@ -618,25 +642,28 @@ function FlipbookReader({
                 ))}
                 <span className="flipbook-page-turn-sheet" aria-hidden="true" />
               </div>
-              <button className="flipbook-page-arrow next" type="button" onPointerEnter={() => warmSpread(1)} onFocus={() => warmSpread(1)} onClick={() => move(1)} disabled={page + step > effectivePages} aria-label="Next page"><ChevronRight size={24} /></button>
+              <button className="flipbook-page-arrow next" type="button" onPointerEnter={() => warmSpread(1)} onFocus={() => warmSpread(1)} onClick={() => move(1)} disabled={nextPageStart === page} aria-label="Next page"><ChevronRight size={24} /></button>
             </>
           )}
         </div>
       </div>
 
       <div className="flipbook-reader-footer">
-        <button type="button" onPointerEnter={() => warmSpread(-1)} onFocus={() => warmSpread(-1)} onClick={() => move(-1)} disabled={page <= 1}><ChevronLeft size={17} /> Previous</button>
+        <button type="button" onPointerEnter={() => warmSpread(-1)} onFocus={() => warmSpread(-1)} onClick={() => move(-1)} disabled={previousPageStart === page}><ChevronLeft size={17} /> Previous</button>
         <strong>{rangeLabel}</strong>
         <input
           aria-label="Flipbook page position"
           type="range"
           min="1"
           max={effectivePages}
-          step={step}
+          step="1"
           value={page}
-          onChange={(event) => setPage(Number(event.target.value))}
+          onChange={(event) => {
+            const requestedPage = Number(event.target.value);
+            setPage(singlePage ? requestedPage : getDesktopSpreadStart(requestedPage, effectivePages));
+          }}
         />
-        <button type="button" onPointerEnter={() => warmSpread(1)} onFocus={() => warmSpread(1)} onClick={() => move(1)} disabled={page + step > effectivePages}>Next <ChevronRight size={17} /></button>
+        <button type="button" onPointerEnter={() => warmSpread(1)} onFocus={() => warmSpread(1)} onClick={() => move(1)} disabled={nextPageStart === page}>Next <ChevronRight size={17} /></button>
       </div>
     </section>
   );
