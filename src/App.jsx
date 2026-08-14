@@ -2944,6 +2944,7 @@ function publicLeadAttribution() {
 }
 
 function PublicLeadCapturePage() {
+  const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
   const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
   const [form, setForm] = useState({
     fullName: "",
@@ -3055,21 +3056,23 @@ function PublicLeadCapturePage() {
   }
 
   return (
-    <main className="public-lead-page">
+    <main className={`public-lead-page${isContactEmbed ? " public-lead-page-embedded" : ""}`}>
       <section className="public-lead-shell">
-        <div className="public-lead-brand">
-          <img className="public-lead-logo" src={assets.logo} alt={config.company} />
-          <div>
-            <p className="eyebrow">Private consultation request</p>
-            <h1>Let&apos;s talk about the care that feels right for you.</h1>
-            <p>{config.tagline} Share what you&apos;re interested in and the clinic team will personally follow up.</p>
+        {!isContactEmbed && (
+          <div className="public-lead-brand">
+            <img className="public-lead-logo" src={assets.logo} alt={config.company} />
+            <div>
+              <p className="eyebrow">Private consultation request</p>
+              <h1>Let&apos;s talk about the care that feels right for you.</h1>
+              <p>{config.tagline} Share what you&apos;re interested in and the clinic team will personally follow up.</p>
+            </div>
+            <div className="public-lead-promises" aria-label="What happens next">
+              <span><ShieldCheck size={18} /> Your details stay with the clinic</span>
+              <span><PhoneCall size={18} /> Choose how you prefer to be contacted</span>
+              <span><Sparkles size={18} /> No treatment commitment required</span>
+            </div>
           </div>
-          <div className="public-lead-promises" aria-label="What happens next">
-            <span><ShieldCheck size={18} /> Your details stay with the clinic</span>
-            <span><PhoneCall size={18} /> Choose how you prefer to be contacted</span>
-            <span><Sparkles size={18} /> No treatment commitment required</span>
-          </div>
-        </div>
+        )}
 
         <div className="public-lead-card">
           {submitted ? (
@@ -3114,7 +3117,7 @@ function PublicLeadCapturePage() {
           )}
         </div>
       </section>
-      <a className="public-lead-staff-link" href="/">Clinic staff sign in</a>
+      {!isContactEmbed && <a className="public-lead-staff-link" href="/">Clinic staff sign in</a>}
     </main>
   );
 }

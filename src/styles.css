@@ -5179,6 +5179,26 @@ td .inline-actions { flex-wrap: nowrap; }
   box-shadow: 0 28px 80px rgba(67, 43, 45, 0.16);
 }
 
+.public-lead-page.public-lead-page-embedded {
+  min-height: 0;
+  align-content: start;
+  padding: 0;
+  background: #fff;
+}
+
+.public-lead-page-embedded .public-lead-shell {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.public-lead-page-embedded .public-lead-card {
+  align-items: start;
+  padding: 36px clamp(24px, 6vw, 50px);
+}
+
 .public-lead-brand {
   min-height: 720px;
   display: flex;
