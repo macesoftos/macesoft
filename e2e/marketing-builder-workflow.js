@@ -47,6 +47,28 @@ export async function verifyMarketingBuilder(page, expect) {
 
   if (!hasRealObjectStorage) {
     let uploadedDataUrl = "";
+    await page.route("**/api/marketing/media", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          assets: [{
+            id: "canvas-drop-ci-asset",
+            name: "canvas-drop-e2e.png",
+            originalName: "canvas-drop-e2e.png",
+            url: "/api/uploads/canvas-drop-ci-asset",
+            mimeType: "image/png",
+            byteSize: 1024,
+            branch: "Mace Davao",
+            createdAt: new Date().toISOString(),
+          }],
+        },
+        status: 200,
+      });
+    });
     await page.route("**/api/uploads/canvas-drop-ci-asset", async (route) => {
       const encoded = uploadedDataUrl.split(",")[1] || "";
       await route.fulfill({ body: Buffer.from(encoded, "base64"), contentType: "image/png", status: 200 });
@@ -117,6 +139,28 @@ export async function verifyMarketingBuilder(page, expect) {
     expect(publicAsset.cacheControl).toContain("public");
     expect(publicAsset.crossOriginResourcePolicy).toBe("cross-origin");
   }
+  await imageSettings.getByRole("button", { name: "Replace", exact: true }).click();
+  await imageSettings.getByRole("button", { name: "Browse Library" }).click();
+  const mediaDialog = page.getByRole("dialog", { name: "Content studio" });
+  await expect(mediaDialog.getByRole("heading", { name: "Content studio", exact: true })).toBeVisible();
+  await expect(mediaDialog.getByRole("button", { name: /canvas-drop-e2e\.png/i }).first()).toBeVisible();
+  await expect(mediaDialog.getByRole("button", { name: "Insert image", exact: true })).toBeEnabled();
+  const mediaStacking = await page.evaluate(() => {
+    const dialog = document.querySelector(".marketing-media-dialog");
+    const stepper = document.querySelector(".marketing-stepper");
+    const insertButton = dialog?.querySelector(".marketing-primary-button");
+    return {
+      dialogInWorkspace: dialog?.parentElement?.classList.contains("marketing-workspace"),
+      dialogZIndex: Number.parseInt(getComputedStyle(dialog).zIndex, 10) || 0,
+      insertButtonBackground: insertButton ? getComputedStyle(insertButton).backgroundColor : "",
+      stepperZIndex: Number.parseInt(getComputedStyle(stepper).zIndex, 10) || 0,
+    };
+  });
+  expect(mediaStacking.dialogInWorkspace).toBe(true);
+  expect(mediaStacking.dialogZIndex).toBeGreaterThan(mediaStacking.stepperZIndex);
+  expect(mediaStacking.insertButtonBackground).not.toBe("rgba(0, 0, 0, 0)");
+  await page.screenshot({ path: `${artifactDirectory}/content-studio-media-library.png`, fullPage: false });
+  await mediaDialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.screenshot({ path: `${artifactDirectory}/canvas-image-drop-uploaded.png`, fullPage: false });
 
   await page.getByRole("button", { name: "Drag or click to add Product", exact: true }).click();
