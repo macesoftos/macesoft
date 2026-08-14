@@ -8160,11 +8160,12 @@ function ServicesModule({ services, openModal, toggleService }) {
             />
           </label>
           <label className="service-category-filter">
-            <Filter size={15} aria-hidden="true" />
+            <Filter className="service-category-filter-icon" size={15} aria-hidden="true" />
             <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter services by category">
               <option>All</option>
               {serviceCategories.map((item) => <option key={item}>{item}</option>)}
             </select>
+            <ChevronDown className="service-category-filter-chevron" size={15} aria-hidden="true" />
           </label>
           <div className="segmented-control service-view-toggle" aria-label="Service catalog view">
             <button
