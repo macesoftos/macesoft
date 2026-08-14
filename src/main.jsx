@@ -7,6 +7,7 @@ import "./enhancements.css";
 import "./treatments-redesign.css";
 import "./responsive-app.css";
 import "./vercel-typography.css";
+import "./marketing/marketing.css";
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
