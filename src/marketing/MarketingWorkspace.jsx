@@ -84,25 +84,64 @@ const workspaceNavigation = [
 const campaignSteps = ["Audience", "Design", "Review", "Schedule"];
 
 const blockDefinitions = [
-  { type: "logo", label: "Logo", icon: PanelLeft },
   { type: "image", label: "Image", icon: ImageIcon },
   { type: "heading", label: "Heading", icon: Columns2 },
-  { type: "text", label: "Text", icon: AlignLeft },
+  { type: "text", label: "Paragraph", icon: AlignLeft },
   { type: "button", label: "Button", icon: MousePointerClick },
-  { type: "treatment", label: "Treatments", icon: Sparkles },
-  { type: "offer", label: "Offer", icon: BellRing },
   { type: "divider", label: "Divider", icon: Minus },
   { type: "spacer", label: "Spacer", icon: MoveDown },
+  { type: "video", label: "Video", icon: Monitor },
   { type: "social", label: "Social", icon: Users },
-  { type: "contact", label: "Contact", icon: Mail },
+  { type: "logo", label: "Logo", icon: PanelLeft },
+  { type: "survey", label: "Survey", icon: Check },
+  { type: "code", label: "Code", icon: Code2 },
+  { type: "apps", label: "Apps", icon: LayoutDashboard },
+  { type: "product", label: "Product", icon: BookOpen },
+  { type: "productRecommendation", label: "Product Rec", icon: Sparkles },
+  { type: "footer", label: "Footer", icon: Mail },
 ];
 
 const layoutDefinitions = [
-  { type: "layout-1", label: "1 column", columns: 1 },
-  { type: "layout-2", label: "2 columns", columns: 2 },
-  { type: "layout-3", label: "3 columns", columns: 3 },
-  { type: "layout-4", label: "4 columns", columns: 4 },
+  { type: "layout-1", label: "1", widths: [1] },
+  { type: "layout-2", label: "2", widths: [1, 1] },
+  { type: "layout-3", label: "3", widths: [1, 1, 1] },
+  { type: "layout-4", label: "4", widths: [1, 1, 1, 1] },
+  { type: "layout-1-2", label: "1:2", widths: [1, 2] },
+  { type: "layout-2-1", label: "2:1", widths: [2, 1] },
+  { type: "layout-1-3", label: "1:3", widths: [1, 3] },
+  { type: "layout-3-1", label: "3:1", widths: [3, 1] },
 ];
+
+const sectionDefinitions = [
+  { type: "header", label: "Header", preset: "Header banner", description: "Logo and an optional opening link", icon: PanelLeft },
+  { type: "hero", label: "Hero", preset: "Hero center", description: "Image, headline, copy and a primary action", icon: ImageIcon },
+  { type: "promotion", label: "Promo", preset: "Promo banner", description: "A focused offer with one clear action", icon: BellRing },
+  { type: "features", label: "Features", preset: "Feature cards", description: "Three compact treatment or benefit cards", icon: Sparkles },
+  { type: "article", label: "Editorial", preset: "Editorial text", description: "Educational content with a read-more action", icon: BookOpen },
+  { type: "products", label: "Products", preset: "Product 2-grid", description: "A responsive two-product showcase", icon: LayoutDashboard },
+  { type: "reviews", label: "Reviews", preset: "Review cards", description: "Two client experience highlights", icon: MessageSquareText },
+  { type: "gallery", label: "Image gallery", preset: "Gallery grid", description: "A responsive treatment image gallery", icon: ImageIcon },
+  { type: "footer", label: "Footer", preset: "Footer 2-col", description: "Clinic details, social links and unsubscribe copy", icon: Mail },
+];
+
+const aiSectionDefinitions = [
+  { type: "article", label: "Article summary", icon: BookOpen },
+  { type: "event", label: "Upcoming event", icon: CalendarClock },
+  { type: "promotion", label: "Product or service promotion", icon: BellRing },
+  { type: "people", label: "People update", icon: Users },
+];
+
+const defaultEmailTheme = {
+  canvasBackground: "#f4f1ed",
+  contentBackground: "#ffffff",
+  textColor: "#4a3324",
+  linkColor: "#4a3324",
+  buttonBackground: "#4a2d1c",
+  buttonTextColor: "#ffffff",
+  fontFamily: "Arial",
+  contentWidth: 640,
+  mobilePadding: 16,
+};
 
 const starterTemplates = [
   { id: "monthly-newsletter", name: "Monthly newsletter", category: "Newsletter", description: "Clinic news, featured treatments and helpful care guidance." },
@@ -200,18 +239,19 @@ function createBlockId(type) {
 function newBlock(type) {
   const base = { id: createBlockId(type), type, align: "center", color: "#4a3324", padding: 16 };
   if (type.startsWith("layout-")) {
-    const columnCount = Math.min(4, Math.max(1, Number(type.split("-")[1]) || 1));
+    const definition = layoutDefinitions.find((layout) => layout.type === type) || layoutDefinitions[0];
     return {
       ...base,
       type: "layout",
-      columns: Array.from({ length: columnCount }, () => []),
+      columns: definition.widths.map(() => []),
+      columnWidths: definition.widths,
       background: "#ffffff",
       gap: 12,
       padding: 8,
     };
   }
   const blocks = {
-    logo: { ...base, content: "MACE", alt: "MACE Signature Wellness" },
+    logo: { ...base, content: "MACE", alt: "MACE Signature Wellness", link: "https://macebydrmace.com/" },
     image: { ...base, src: "/brand/result-1.jpg", alt: "MACE skincare client", link: "" },
     heading: { ...base, content: "Your summer glow starts here", fontSize: 32, fontFamily: "Georgia" },
     text: { ...base, content: "Refresh, restore and reveal brighter-looking skin with treatments selected for the season.", fontSize: 15 },
@@ -220,10 +260,53 @@ function newBlock(type) {
     offer: { ...base, content: "Seasonal skin consultation\nReserve your preferred schedule this month." },
     divider: { ...base, content: "" },
     spacer: { ...base, content: "", padding: 28 },
+    video: { ...base, content: "Watch our treatment story", src: "/brand/result-1.jpg", link: "https://macebydrmace.com/" },
     social: { ...base, content: "Instagram · Facebook · Website", link: "https://macebydrmace.com/" },
+    survey: { ...base, content: "How was your MACE experience?", link: "https://macebydrmace.com/", background: "#4a2d1c" },
+    code: { ...base, content: "<div style=\"padding:20px;text-align:center\">Custom email-safe HTML</div>", align: "left" },
+    apps: { ...base, content: "Connect an app-powered content source", link: "" },
+    product: { ...base, content: "MACE Signature Treatment\nPersonalised care selected for you.", src: "/brand/result-1.jpg", link: "https://macebydrmace.com/" },
+    productRecommendation: { ...base, content: "Recommended for you\nExplore a treatment chosen around your goals.", src: "/brand/result-2.jpg", link: "https://macebydrmace.com/" },
+    footer: { ...base, content: "MACE Signature Wellness\nDavao City, Philippines\nhello@macebydrmace.com\n\nYou are receiving this because you opted in to MACE marketing. Unsubscribe at any time.", fontSize: 12 },
     contact: { ...base, content: "MACE Signature Wellness\nDavao City, Philippines\nhello@macebydrmace.com" },
   };
   return blocks[type] ?? blocks.text;
+}
+
+function newSection(type) {
+  const section = newBlock(type === "products" || type === "reviews" || type === "gallery" ? "layout-2" : type === "features" ? "layout-3" : type === "footer" ? "layout-2-1" : "layout-1");
+  const withPatch = (blockType, patch) => ({ ...newBlock(blockType), ...patch });
+  const presets = {
+    header: [[withPatch("logo", { padding: 12 }), withPatch("text", { content: "Signature wellness, thoughtfully delivered.", fontSize: 12, padding: 6 })]],
+    hero: [[newBlock("logo"), newBlock("image"), newBlock("heading"), newBlock("text"), newBlock("button")]],
+    promotion: [[withPatch("offer", { content: "A considered seasonal offer\nReserve your preferred consultation time this month." }), withPatch("button", { content: "View the offer" })]],
+    features: [
+      [withPatch("heading", { content: "Refresh", fontSize: 20 }), withPatch("text", { content: "Thoughtful care for brighter-looking skin.", fontSize: 13 })],
+      [withPatch("heading", { content: "Restore", fontSize: 20 }), withPatch("text", { content: "Personalised options selected around your goals.", fontSize: 13 })],
+      [withPatch("heading", { content: "Reveal", fontSize: 20 }), withPatch("text", { content: "A calm, clinician-led experience from start to finish.", fontSize: 13 })],
+    ],
+    article: [[withPatch("heading", { content: "A guide to your seasonal skin reset", fontSize: 28 }), withPatch("text", { content: "Discover practical, clinician-led ways to refresh your routine while keeping your individual needs in focus." }), withPatch("button", { content: "Read the guide" })]],
+    products: [
+      [withPatch("product", { content: "Hydrodermabrasion\nDeep cleansing and hydration for smoother-looking skin." })],
+      [withPatch("product", { content: "Pico-Rejuvenation\nSupport clarity, tone and texture with minimal downtime.", src: "/brand/result-2.jpg" })],
+    ],
+    reviews: [
+      [withPatch("text", { content: "“The whole experience felt calm, considered and completely personal.”\n— MACE client", fontFamily: "Georgia", fontSize: 17 })],
+      [withPatch("text", { content: "“I understood every option and never felt rushed.”\n— MACE client", fontFamily: "Georgia", fontSize: 17 })],
+    ],
+    gallery: [
+      [withPatch("image", { src: "/brand/result-1.jpg", alt: "MACE treatment result" })],
+      [withPatch("image", { src: "/brand/result-2.jpg", alt: "MACE skincare consultation" })],
+    ],
+    footer: [
+      [withPatch("footer", { align: "left", padding: 10 })],
+      [withPatch("social", { align: "left", padding: 10 })],
+    ],
+    event: [[withPatch("heading", { content: "You’re invited to MACE", fontSize: 28 }), withPatch("text", { content: "Join us for an evening of personalised skin education and one-to-one consultation guidance." }), withPatch("button", { content: "Reserve a place" })]],
+    people: [[withPatch("image", { alt: "MACE clinic team member" }), withPatch("heading", { content: "Meet your MACE care team", fontSize: 28 }), withPatch("text", { content: "Get to know the clinicians behind your considered, personalised treatment plan." }), withPatch("button", { content: "Meet the team" })]],
+  };
+  section.columns = presets[type] || presets.hero;
+  return section;
 }
 
 function cloneEmailBlock(block) {
@@ -241,6 +324,9 @@ function normalizedDesignBlock(block) {
   return {
     ...block,
     columns: (columns.length ? columns : [[]]).map((column) => (Array.isArray(column) ? column.map(normalizedDesignBlock).filter(Boolean) : [])),
+    columnWidths: Array.isArray(block.columnWidths) && block.columnWidths.length === (columns.length || 1)
+      ? block.columnWidths.map((width) => Math.max(1, Number(width) || 1))
+      : Array.from({ length: columns.length || 1 }, () => 1),
   };
 }
 
@@ -263,6 +349,7 @@ function createDefaultDraft() {
     editorMode: "visual",
     html: "",
     blocks: createDefaultBlocks(),
+    theme: { ...defaultEmailTheme },
     step: 2,
     updatedAt: new Date().toISOString(),
   };
@@ -278,6 +365,7 @@ function normalizedDraft(value) {
     editorMode: value.editorMode === "html" ? "html" : "visual",
     html: typeof value.html === "string" ? value.html : "",
     blocks: savedBlocks.length ? savedBlocks : fallback.blocks,
+    theme: { ...defaultEmailTheme, ...(value.theme && typeof value.theme === "object" ? value.theme : {}) },
     step: Math.min(4, Math.max(1, Number(value.step) || 1)),
   };
 }
@@ -417,6 +505,7 @@ export default function MarketingWorkspace({
       editorMode: template.html ? "html" : "visual",
       html: template.html || "",
       blocks: Array.isArray(template.blocks) && template.blocks.length ? template.blocks : createDefaultBlocks(),
+      theme: { ...defaultEmailTheme, ...(template.theme || {}) },
     });
   }
 
@@ -749,8 +838,8 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [settingsTab, setSettingsTab] = useState("content");
-  const [blockQuery, setBlockQuery] = useState("");
-  const [libraryTab, setLibraryTab] = useState("content");
+  const [libraryTab, setLibraryTab] = useState("blocks");
+  const [sectionTab, setSectionTab] = useState("prebuilt");
   const [dragState, setDragState] = useState(null);
   const [insertTarget, setInsertTarget] = useState(null);
   const [dragAnnouncement, setDragAnnouncement] = useState("");
@@ -761,6 +850,9 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
   const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
   const estimate = audienceEstimate(clients, draft.segment, draft.channel);
   const warnings = campaignWarnings(draft);
+  const contentBlocks = flattenEmailBlocks(draft.blocks);
+  const linkCount = contentBlocks.filter((block) => String(block.link || "").trim()).length;
+  const mergeTagCount = (JSON.stringify(contentBlocks).match(/{{\s*[a-zA-Z0-9_]+\s*}}/g) || []).length;
   const visualEmailHtml = useMemo(
     () => buildVisualEmailHtml(draft, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin),
     [draft, settings],
@@ -773,6 +865,23 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
 
   function updateDraft(patch) {
     setDraft((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
+  }
+
+  function updateTheme(patch) {
+    function applyThemeToBlocks(blocks) {
+      return blocks.map((block) => {
+        if (block.type === "layout") return { ...block, columns: block.columns.map(applyThemeToBlocks) };
+        const next = { ...block };
+        if (patch.textColor) next.color = patch.textColor;
+        if (patch.fontFamily && ["heading", "text", "footer", "contact"].includes(block.type)) next.fontFamily = patch.fontFamily;
+        if (patch.buttonBackground && ["button", "survey"].includes(block.type)) next.background = patch.buttonBackground;
+        return next;
+      });
+    }
+    updateDraft({
+      theme: { ...defaultEmailTheme, ...draft.theme, ...patch },
+      blocks: patch.textColor || patch.fontFamily || patch.buttonBackground ? applyThemeToBlocks(draft.blocks) : draft.blocks,
+    });
   }
 
   function selectEditorMode(editorMode) {
@@ -855,6 +964,20 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
     setDragAnnouncement(`${block.type === "layout" ? `${block.columns.length}-column layout` : blockDefinitions.find((item) => item.type === type)?.label || "Block"} added.`);
   }
 
+  function addSection(type, target = insertTarget) {
+    const section = newSection(type);
+    const containerId = target?.containerId || ROOT_EMAIL_CONTAINER;
+    if (containerId !== ROOT_EMAIL_CONTAINER) {
+      setDragAnnouncement("Sections can only be added to the main email canvas.");
+      return;
+    }
+    const targetIndex = target?.index ?? draft.blocks.length;
+    commitBlocks(insertEmailBlock(draft.blocks, ROOT_EMAIL_CONTAINER, targetIndex, section));
+    setSelectedId(section.id);
+    setInsertTarget(null);
+    setDragAnnouncement(`${sectionDefinitions.find((item) => item.type === type)?.label || "Section"} added.`);
+  }
+
   function duplicateBlock(id) {
     const location = findEmailBlockLocation(draft.blocks, id);
     if (!location) return;
@@ -908,7 +1031,13 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
     event.preventDefault();
     event.stopPropagation();
     const definitionType = event.dataTransfer.getData("application/x-marketing-block-type");
+    const sectionType = event.dataTransfer.getData("application/x-marketing-section-type");
     const blockId = event.dataTransfer.getData("application/x-marketing-block-id");
+    if (sectionType) {
+      addSection(sectionType, target);
+      setDragState(null);
+      return;
+    }
     if (definitionType) {
       addBlock(definitionType, target);
       setDragState(null);
@@ -937,6 +1066,13 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
     event.dataTransfer.setData("application/x-marketing-block-type", type);
     setDragState({ kind: "library", type, over: null });
     setDragAnnouncement(`Dragging ${type.startsWith("layout-") ? "layout" : blockDefinitions.find((item) => item.type === type)?.label || "block"}.`);
+  }
+
+  function startSectionDrag(event, type) {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("application/x-marketing-section-type", type);
+    setDragState({ kind: "library", type, over: null });
+    setDragAnnouncement(`Dragging ${sectionDefinitions.find((item) => item.type === type)?.label || "section"}.`);
   }
 
   function startCanvasDrag(event, blockId) {
@@ -976,6 +1112,7 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
           editorMode: draft.editorMode,
           previewText: draft.previewText,
           blocks: draft.blocks,
+          theme: draft.theme,
         },
         sent: 0,
         booked: 0,
@@ -1041,35 +1178,75 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
       {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode !== "html" && (
         <div className="marketing-builder-grid">
           <aside className={`marketing-block-library ${insertTarget ? "choosing-insert" : ""}`}>
-            <div className="marketing-library-tabs" role="tablist" aria-label="Builder elements">
-              <button aria-selected={libraryTab === "content"} className={libraryTab === "content" ? "active" : ""} onClick={() => setLibraryTab("content")} role="tab" type="button">Content</button>
-              <button aria-selected={libraryTab === "layouts"} className={libraryTab === "layouts" ? "active" : ""} onClick={() => setLibraryTab("layouts")} role="tab" type="button">Layouts</button>
+            <nav className="marketing-builder-rail" aria-label="Email builder tools">
+              {[
+                { id: "blocks", label: "Blocks", icon: LayoutDashboard },
+                { id: "sections", label: "Sections", icon: PanelLeft },
+                { id: "styles", label: "Styles", icon: Settings },
+                { id: "optimize", label: "Optimize", icon: Sparkles },
+              ].map(({ id, label, icon: Icon }) => <button aria-pressed={libraryTab === id} className={libraryTab === id ? "active" : ""} key={id} onClick={() => setLibraryTab(id)} type="button"><Icon size={21} /><span>{label}</span>{id === "optimize" && warnings.length > 0 && <i>{warnings.length}</i>}</button>)}
+            </nav>
+            <div className="marketing-library-panel">
+              {insertTarget && <div className="marketing-insert-notice"><span><strong>Choose content</strong><small>It will be inserted at the selected line.</small></span><button onClick={() => setInsertTarget(null)} type="button" aria-label="Cancel insertion"><X size={15} /></button></div>}
+              {libraryTab === "blocks" && <>
+                <span className="marketing-builder-help"><CircleAlert size={13} /> How to use this builder</span>
+                <div className="marketing-library-heading"><h2>Content blocks</h2><p>Drag to add content to your email</p></div>
+                <div className="marketing-block-grid">
+                  {blockDefinitions.map(({ type, label, icon: Icon }) => <button draggable key={type} onClick={() => addBlock(type)} onDragEnd={endDrag} onDragStart={(event) => startLibraryDrag(event, type)} type="button" aria-label={`Drag or click to add ${label}`}><Icon size={20} /><span>{label}</span></button>)}
+                </div>
+                <section className="marketing-library-section">
+                  <div className="marketing-library-heading with-badge"><div><h2>AI-Generated columns</h2><p>Drag to add layouts to your email</p></div><span>New</span></div>
+                  <div className="marketing-ai-layouts">
+                    {aiSectionDefinitions.map(({ type, label, icon: Icon }) => <button draggable key={type} onClick={() => addSection(type)} onDragEnd={endDrag} onDragStart={(event) => startSectionDrag(event, type)} type="button"><Icon size={15} /><span>{label}</span></button>)}
+                  </div>
+                </section>
+                <section className="marketing-library-section">
+                  <div className="marketing-library-heading"><h2>Columns</h2><p>Drag to add a column container to your email</p></div>
+                  <div className="marketing-layout-grid">
+                    {layoutDefinitions.map((layout) => <button draggable key={layout.type} onClick={() => addBlock(layout.type)} onDragEnd={endDrag} onDragStart={(event) => startLibraryDrag(event, layout.type)} type="button" aria-label={`Drag or click to add ${layout.label}`}><span style={{ gridTemplateColumns: layout.widths.map((width) => `${width}fr`).join(" ") }}>{layout.widths.map((_width, index) => <i key={index} />)}</span><strong>{layout.label}</strong></button>)}
+                  </div>
+                </section>
+              </>}
+              {libraryTab === "sections" && <>
+                <div className="marketing-library-heading"><h2>Email Sections</h2><p>Create and edit your email structure, or insert pre-built sections.</p></div>
+                <div className="marketing-section-tabs" role="tablist" aria-label="Section library">
+                  {["manage", "prebuilt", "saved"].map((tab) => <button aria-selected={sectionTab === tab} className={sectionTab === tab ? "active" : ""} key={tab} onClick={() => setSectionTab(tab)} role="tab" type="button">{tab === "prebuilt" ? "Pre-built" : `${tab[0].toUpperCase()}${tab.slice(1)}`}</button>)}
+                </div>
+                {sectionTab === "manage" && <div className="marketing-manage-sections">
+                  {draft.blocks.map((block, index) => <button className={selectedId === block.id ? "active" : ""} key={block.id} onClick={() => setSelectedId(block.id)} type="button"><GripVertical size={15} /><span><strong>{block.type === "layout" ? `Section ${index + 1}` : blockDefinitions.find((item) => item.type === block.type)?.label || "Section"}</strong><small>{block.type === "layout" ? `${block.columns.length} column${block.columns.length === 1 ? "" : "s"}` : "Content block"}</small></span><ChevronRight size={15} /></button>)}
+                  <button className="add" onClick={() => addBlock("layout-1")} type="button"><Plus size={16} /><span><strong>Add blank section</strong><small>Start with one empty column</small></span></button>
+                </div>}
+                {sectionTab === "prebuilt" && <div className="marketing-prebuilt-sections">
+                  {sectionDefinitions.map(({ type, label, preset, description, icon: Icon }) => <article key={type}><div><span><Icon size={16} /></span><p><strong>{label}</strong><small>{description}</small></p></div><button draggable onClick={() => addSection(type)} onDragEnd={endDrag} onDragStart={(event) => startSectionDrag(event, type)} type="button"><span>{preset}</span><Plus size={15} /></button></article>)}
+                </div>}
+                {sectionTab === "saved" && <div className="marketing-saved-library"><Sparkles size={23} /><h3>Reusable MACE sections</h3><p>Select a section on the canvas, then save it for another campaign.</p><button disabled={!selectedBlock} onClick={() => { if (!selectedBlock) return; onSaveTemplate({ id: createBlockId("section"), name: `Saved ${selectedBlock.type} section`, category: "Saved section", editorMode: "visual", html: "", blocks: [cloneEmailBlock(selectedBlock)] }); notify?.("Section saved to Templates on this device."); }} type="button">Save selected section</button></div>}
+              </>}
+              {libraryTab === "styles" && <>
+                <div className="marketing-library-heading"><h2>Email styles</h2><p>Edit the look of your entire email</p></div>
+                <div className="marketing-global-styles">
+                  <details open><summary><span>Background</span><ChevronDown size={15} /></summary><div className="marketing-style-fields"><ColorField label="Content color" value={draft.theme?.contentBackground || defaultEmailTheme.contentBackground} onChange={(contentBackground) => updateTheme({ contentBackground })} /><ColorField label="Background color" value={draft.theme?.canvasBackground || defaultEmailTheme.canvasBackground} onChange={(canvasBackground) => updateTheme({ canvasBackground })} /><label><span>Content width</span><div className="marketing-input-suffix"><input max="760" min="480" onChange={(event) => updateTheme({ contentWidth: Number(event.target.value) })} type="number" value={draft.theme?.contentWidth || defaultEmailTheme.contentWidth} /><span>px</span></div></label><label><span>Mobile padding</span><div className="marketing-input-suffix"><input max="40" min="0" onChange={(event) => updateTheme({ mobilePadding: Number(event.target.value) })} type="number" value={draft.theme?.mobilePadding ?? defaultEmailTheme.mobilePadding} /><span>px</span></div></label></div></details>
+                  <details><summary><span>Text</span><ChevronDown size={15} /></summary><div className="marketing-style-fields"><label><span>Font</span><select onChange={(event) => updateTheme({ fontFamily: event.target.value })} value={draft.theme?.fontFamily || defaultEmailTheme.fontFamily}><option>Arial</option><option>Georgia</option><option>Inter</option></select></label><ColorField label="Text color" value={draft.theme?.textColor || defaultEmailTheme.textColor} onChange={(textColor) => updateTheme({ textColor })} /></div></details>
+                  <details><summary><span>Link</span><ChevronDown size={15} /></summary><div className="marketing-style-fields"><ColorField label="Link color" value={draft.theme?.linkColor || defaultEmailTheme.linkColor} onChange={(linkColor) => updateTheme({ linkColor })} /></div></details>
+                  <details><summary><span>Button</span><ChevronDown size={15} /></summary><div className="marketing-style-fields"><ColorField label="Button color" value={draft.theme?.buttonBackground || defaultEmailTheme.buttonBackground} onChange={(buttonBackground) => updateTheme({ buttonBackground })} /><ColorField label="Button text" value={draft.theme?.buttonTextColor || defaultEmailTheme.buttonTextColor} onChange={(buttonTextColor) => updateTheme({ buttonTextColor })} /></div></details>
+                  {[["Divider", "Set divider color and spacing on an individual divider block."], ["Image", "Set links and alternative text on each image block."], ["Logo", "Edit your logo destination and spacing on the canvas."]].map(([label, copy]) => <details key={label}><summary><span>{label}</span><ChevronDown size={15} /></summary><p>{copy}</p></details>)}
+                </div>
+              </>}
+              {libraryTab === "optimize" && <>
+                <div className="marketing-library-heading with-badge"><div><h2>Optimize</h2><p>Help improve click rates with these email best practices.</p></div><span>New</span></div>
+                <div className="marketing-optimization-summary"><button className="active" type="button"><strong>{warnings.length}</strong><span>Errors</span></button><button type="button"><strong>{linkCount}</strong><span>Links</span></button><button type="button"><strong>{mergeTagCount}</strong><span>Merge tags</span></button></div>
+                <div className="marketing-optimization-list">
+                  {warnings.length ? warnings.map((warning) => <article key={warning}><span><CircleAlert size={16} /></span><div><strong>{warning}</strong><p>Review this item before continuing to campaign review.</p></div></article>) : <article className="success"><span><Check size={16} /></span><div><strong>No blocking errors</strong><p>Your subject, content, links and required footer are ready.</p></div></article>}
+                  <article><span><Link size={16} /></span><div><strong>Make key images clickable</strong><p>Linked images give clients another clear path to your booking or information page.</p></div></article>
+                  <article><span><ImageIcon size={16} /></span><div><strong>Use useful alternative text</strong><p>Describe every image so the message remains understandable when images are unavailable.</p></div></article>
+                  <article><span><Smartphone size={16} /></span><div><strong>Check the mobile preview</strong><p>Columns automatically stack, but copy length and buttons should still be reviewed.</p><button onClick={() => setPreview("mobile")} type="button">Open mobile preview</button></div></article>
+                </div>
+              </>}
+              {draft.channel === "Email + SMS" && <label className="marketing-companion-message"><span>Companion text message</span><textarea maxLength="480" onChange={(event) => updateDraft({ message: event.target.value })} placeholder="Write the coordinated text message…" rows="6" value={draft.message} /><small>{draft.message.length}/480 characters</small></label>}
             </div>
-            {insertTarget && <div className="marketing-insert-notice"><span><strong>Choose a block</strong><small>It will be inserted at the selected line.</small></span><button onClick={() => setInsertTarget(null)} type="button" aria-label="Cancel insertion"><X size={15} /></button></div>}
-            {libraryTab === "content" ? <>
-              <div className="marketing-panel-title"><strong>Content blocks</strong><span>Drag to the canvas</span></div>
-              <label className="marketing-builder-search"><Search size={15} /><input placeholder="Search blocks" value={blockQuery} onChange={(event) => setBlockQuery(event.target.value)} /></label>
-              <div className="marketing-block-grid">
-                {blockDefinitions.filter((block) => block.label.toLowerCase().includes(blockQuery.toLowerCase())).map(({ type, label, icon: Icon }) => <button draggable key={type} onClick={() => addBlock(type)} onDragEnd={endDrag} onDragStart={(event) => startLibraryDrag(event, type)} type="button" aria-label={`Drag or click to add ${label}`}><span className="marketing-library-grip"><GripVertical size={13} /></span><Icon size={23} /><span>{label}</span></button>)}
-              </div>
-            </> : <>
-              <div className="marketing-panel-title"><strong>Column layouts</strong><span>Stack on mobile</span></div>
-              <p className="marketing-library-copy">Add a responsive row, then drag content blocks into each column.</p>
-              <div className="marketing-layout-grid">
-                {layoutDefinitions.map((layout) => <button draggable key={layout.type} onClick={() => addBlock(layout.type)} onDragEnd={endDrag} onDragStart={(event) => startLibraryDrag(event, layout.type)} type="button" aria-label={`Drag or click to add ${layout.label}`}><span>{Array.from({ length: layout.columns }, (_, index) => <i key={index} />)}</span><strong>{layout.label}</strong></button>)}
-              </div>
-            </>}
-            {draft.channel === "Email + SMS" ? (
-              <label className="marketing-companion-message">
-                <span>Companion text message</span>
-                <textarea maxLength="480" onChange={(event) => updateDraft({ message: event.target.value })} placeholder="Write the coordinated text message…" rows="6" value={draft.message} />
-                <small>{draft.message.length}/480 characters</small>
-              </label>
-            ) : <div className="marketing-saved-sections"><div className="marketing-panel-title"><strong>Saved sections</strong><ChevronDown size={16} /></div><p>Drag and drop your reusable clinic sections here.</p></div>}
           </aside>
-          <section className={`marketing-canvas-panel ${dragState ? "is-dragging" : ""}`}>
+          <section className={`marketing-canvas-panel ${dragState ? "is-dragging" : ""}`} style={{ background: draft.theme?.canvasBackground || defaultEmailTheme.canvasBackground }}>
             <div className="marketing-canvas-toolbar"><div className="marketing-preview-toggle"><button className={preview === "desktop" ? "active" : ""} onClick={() => setPreview("desktop")} type="button"><Monitor size={16} /> Desktop</button><button className={preview === "mobile" ? "active" : ""} onClick={() => setPreview("mobile")} type="button"><Smartphone size={16} /> Mobile</button></div><div><button disabled={!undoStack.current.length} onClick={undo} type="button"><Undo2 size={17} /> Undo</button><button disabled={!redoStack.current.length} onClick={redo} type="button"><Redo2 size={17} /> Redo</button></div></div>
-            <div className={`marketing-email-frame ${preview}`}>
+            <div className={`marketing-email-frame ${preview}`} style={{ "--marketing-email-button-text": draft.theme?.buttonTextColor || defaultEmailTheme.buttonTextColor, "--marketing-email-link": draft.theme?.linkColor || defaultEmailTheme.linkColor, "--marketing-email-mobile-pad": `${draft.theme?.mobilePadding ?? defaultEmailTheme.mobilePadding}px`, background: draft.theme?.contentBackground || defaultEmailTheme.contentBackground, color: draft.theme?.textColor || defaultEmailTheme.textColor, fontFamily: draft.theme?.fontFamily || defaultEmailTheme.fontFamily, maxWidth: "100%", width: preview === "mobile" ? 390 : draft.theme?.contentWidth || defaultEmailTheme.contentWidth }}>
               <div className="marketing-email-preheader">{draft.previewText}</div>
               <EmailCanvasList
                 blocks={draft.blocks}
@@ -1080,7 +1257,7 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
                 onDragStart={startCanvasDrag}
                 onDrop={dropOnCanvas}
                 onDuplicate={duplicateBlock}
-                onInsert={(target) => { setInsertTarget(target); setLibraryTab("content"); }}
+                onInsert={(target) => { setInsertTarget(target); setLibraryTab("blocks"); }}
                 onMove={moveBlock}
                 onOver={(over) => setDragState((current) => current ? { ...current, over } : current)}
                 onSelect={setSelectedId}
@@ -1108,7 +1285,7 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
       {draft.step === 3 && <ReviewStep draft={draft} estimate={estimate} warnings={warnings} updateDraft={updateDraft} />}
       {draft.step === 4 && <ScheduleStep draft={draft} estimate={estimate} updateDraft={updateDraft} />}
       {draft.step > 1 && <div className="marketing-builder-mobile-footer"><button onClick={() => updateDraft({ step: Math.max(1, draft.step - 1) })} type="button">Back</button><button className="marketing-primary-button" onClick={continueStep} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>}
-      {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => { const result = sanitizeImportedEmailHtml(draft.editorMode === "html" ? draft.html : visualEmailHtml); if (result.error || result.removed) { notify?.(result.error || "Clean the imported HTML before saving it as a template.", "error"); return; } onSaveTemplate({ id: createBlockId("template"), name: draft.name, category: draft.editorMode === "html" ? "Imported HTML" : "Saved design", editorMode: draft.editorMode, html: result.html, blocks: draft.blocks }); notify?.("Design saved to Templates on this device."); }} type="button"><Save size={15} /> Save as template</button>}
+      {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => { const result = sanitizeImportedEmailHtml(draft.editorMode === "html" ? draft.html : visualEmailHtml); if (result.error || result.removed) { notify?.(result.error || "Clean the imported HTML before saving it as a template.", "error"); return; } onSaveTemplate({ id: createBlockId("template"), name: draft.name, category: draft.editorMode === "html" ? "Imported HTML" : "Saved design", editorMode: draft.editorMode, html: result.html, blocks: draft.blocks, theme: draft.theme }); notify?.("Design saved to Templates on this device."); }} type="button"><Save size={15} /> Save as template</button>}
     </div>
   );
 }
@@ -1272,7 +1449,7 @@ function EmailLayoutBlock({ block, dragState, isSelected, onDelete, onDragEnd, o
     >
       <span className="marketing-block-grip"><GripVertical size={16} /></span>
       {isSelected && <BlockActions blockId={block.id} onDelete={onDelete} onDuplicate={onDuplicate} onMove={onMove} />}
-      <div className="marketing-layout-columns" style={{ gap: block.gap ?? 12, gridTemplateColumns: `repeat(${block.columns.length}, minmax(0, 1fr))` }}>
+      <div className="marketing-layout-columns" style={{ gap: block.gap ?? 12, gridTemplateColumns: (block.columnWidths || block.columns.map(() => 1)).map((width) => `minmax(0, ${Math.max(1, Number(width) || 1)}fr)`).join(" ") }}>
         {block.columns.map((column, columnIndex) => (
           <div className="marketing-layout-column" key={emailColumnId(block.id, columnIndex)} onClick={(event) => event.stopPropagation()}>
             <EmailCanvasList
@@ -1313,7 +1490,7 @@ function EmailBlock({ block, dragState, isSelected, onDelete, onDragEnd, onDragS
 }
 
 function RenderedBlock({ block, style }) {
-  if (block.type === "logo") return <div className="marketing-email-logo" style={style}><img src="/brand/mace-logo.png" alt={block.alt || "MACE"} /></div>;
+  if (block.type === "logo") return <div className="marketing-email-logo" style={style}><a href={block.link || "#logo"} onClick={(event) => event.preventDefault()}><img src="/brand/mace-logo.png" alt={block.alt || "MACE"} /></a></div>;
   if (block.type === "image") return <div className="marketing-email-image" style={style}><img src={block.src || "/brand/result-1.jpg"} alt={block.alt || ""} /></div>;
   if (block.type === "heading") return <h2 style={style}>{block.content}</h2>;
   if (block.type === "text") return <p style={style}>{block.content}</p>;
@@ -1325,9 +1502,22 @@ function RenderedBlock({ block, style }) {
   if (block.type === "offer") return <div className="marketing-offer-block" style={style}><BellRing size={20} /><p>{block.content}</p></div>;
   if (block.type === "divider") return <div className="marketing-divider" style={style}><i /></div>;
   if (block.type === "spacer") return <div style={{ height: Math.max(16, Number(block.padding || 24)) }} aria-label="Spacer" />;
+  if (block.type === "video") return <div className="marketing-video-block" style={style}><div><img src={block.src || "/brand/result-1.jpg"} alt="Video preview" /><span><Monitor size={22} /></span></div><strong>{block.content}</strong></div>;
   if (block.type === "social") return <div className="marketing-social-block" style={style}>{block.content}</div>;
+  if (block.type === "survey") return <div className="marketing-survey-block" style={style}><strong>{block.content}</strong><a href={block.link || "#survey"} onClick={(event) => event.preventDefault()} style={{ background: block.background }}>Answer survey</a></div>;
+  if (block.type === "code") return <pre className="marketing-code-block" style={style}><code>{block.content}</code></pre>;
+  if (block.type === "apps") return <div className="marketing-app-block" style={style}><LayoutDashboard size={22} /><div><strong>Connected app content</strong><span>{block.content}</span></div></div>;
+  if (["product", "productRecommendation"].includes(block.type)) {
+    const [title, ...copy] = String(block.content || "").split("\n");
+    return <div className="marketing-product-block" style={style}><img src={block.src || "/brand/result-1.jpg"} alt={title || "MACE treatment"} /><div><small>{block.type === "productRecommendation" ? "Recommended for you" : "MACE treatment"}</small><strong>{title}</strong><p>{copy.join(" ")}</p><a href={block.link || "#product"} onClick={(event) => event.preventDefault()}>Explore</a></div></div>;
+  }
+  if (block.type === "footer") return <div className="marketing-custom-footer" style={style}>{String(block.content).split("\n").map((line, index) => line ? <span key={`${line}-${index}`}>{line}</span> : <br key={`break-${index}`} />)}</div>;
   if (block.type === "contact") return <div className="marketing-contact-block" style={style}>{String(block.content).split("\n").map((line) => <span key={line}>{line}</span>)}</div>;
   return null;
+}
+
+function ColorField({ label, onChange, value }) {
+  return <label><span>{label}</span><div className="marketing-color-input"><input aria-label={`${label} picker`} onChange={(event) => onChange(event.target.value)} type="color" value={value} /><input aria-label={`${label} hex value`} onChange={(event) => onChange(event.target.value)} value={value} /></div></label>;
 }
 
 function BlockSettings({ block, settingsTab, setSettingsTab, updateBlock }) {
@@ -1337,10 +1527,11 @@ function BlockSettings({ block, settingsTab, setSettingsTab, updateBlock }) {
     <aside className="marketing-block-settings">
       <div className="marketing-panel-title"><strong>{block.type === "layout" ? `${block.columns.length}-column layout` : definition?.label || "Block"}</strong><ChevronDown size={16} /></div>
       <div className="marketing-settings-tabs"><button className={settingsTab === "content" ? "active" : ""} onClick={() => setSettingsTab("content")} type="button">Content</button><button className={settingsTab === "style" ? "active" : ""} onClick={() => setSettingsTab("style")} type="button">Style</button></div>
-      {settingsTab === "content" ? block.type === "layout" ? <div className="marketing-layout-guidance"><Columns2 size={22} /><strong>Fill each column</strong><p>Drag content blocks from the left panel into a column. You can reorder content within a column or move it between columns.</p><small>Columns automatically stack on mobile.</small></div> : <div className="marketing-settings-fields">
-        {!['divider', 'spacer', 'image', 'logo'].includes(block.type) && <label><span>Text <button onClick={() => updateBlock({ content: `${block.content} {{first_name}}` })} type="button">Personalize</button></span><textarea rows="6" value={block.content || ""} onChange={(event) => updateBlock({ content: event.target.value })} /><small>Available token: {'{{first_name}}'}</small></label>}
-        {block.type === "image" && <><label><span>Image URL</span><input value={block.src || ""} onChange={(event) => updateBlock({ src: event.target.value })} /></label><label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label></>}
-        {["button", "image", "social"].includes(block.type) && <label><span>Link</span><div className="marketing-input-with-icon"><Link size={15} /><input placeholder="https://" value={block.link || ""} onChange={(event) => updateBlock({ link: event.target.value })} /></div></label>}
+      {settingsTab === "content" ? block.type === "layout" ? <div className="marketing-layout-guidance"><Columns2 size={22} /><strong>Fill each column</strong><p>Drag content blocks from the left panel into a column. You can reorder content within a column or move it between columns.</p><small>{(block.columnWidths || block.columns.map(() => 1)).join(":")} ratio · columns automatically stack on mobile.</small></div> : <div className="marketing-settings-fields">
+        {!['divider', 'spacer', 'image', 'logo'].includes(block.type) && <label><span>{block.type === "code" ? "Email-safe HTML" : "Text"} <button onClick={() => updateBlock({ content: `${block.content} {{first_name}}` })} type="button">Personalize</button></span><textarea rows={block.type === "code" ? 10 : 6} value={block.content || ""} onChange={(event) => updateBlock({ content: event.target.value })} /><small>Available token: {'{{first_name}}'}</small></label>}
+        {["image", "video", "product", "productRecommendation"].includes(block.type) && <><label><span>Image URL</span><input value={block.src || ""} onChange={(event) => updateBlock({ src: event.target.value })} /></label>{block.type === "image" && <label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}</>}
+        {block.type === "logo" && <label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}
+        {["button", "image", "logo", "video", "social", "survey", "apps", "product", "productRecommendation"].includes(block.type) && <label><span>Link</span><div className="marketing-input-with-icon"><Link size={15} /><input placeholder="https://" value={block.link || ""} onChange={(event) => updateBlock({ link: event.target.value })} /></div></label>}
       </div> : block.type === "layout" ? <div className="marketing-settings-fields">
         <label><span>Background</span><div className="marketing-color-input"><input type="color" value={block.background || "#ffffff"} onChange={(event) => updateBlock({ background: event.target.value })} /><input value={block.background || "#ffffff"} onChange={(event) => updateBlock({ background: event.target.value })} /></div></label>
         <label><span>Column gap</span><div className="marketing-input-suffix"><input min="0" max="40" type="number" value={block.gap ?? 12} onChange={(event) => updateBlock({ gap: Number(event.target.value) })} /><span>px</span></div></label>
