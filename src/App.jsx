@@ -8555,14 +8555,13 @@ function LeadsModule({
                 <th aria-sort={sort.key === "source" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("source", "Source")}</th>
                 <th aria-sort={sort.key === "status" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("status", "Status")}</th>
                 <th aria-sort={sort.key === "followUp" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("followUp", "Next Follow-up")}</th>
-                <th aria-sort={sort.key === "owner" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortButton("owner", "Owner")}</th>
                 <th className="leads-actions-column">Actions</th>
               </tr>
             </thead>
             <tbody>
               {(isBooting || isImporting) && Array.from({ length: 5 }, (_, rowIndex) => (
                 <tr className="lead-skeleton-row" key={`lead-skeleton-${rowIndex}`} aria-hidden="true">
-                  {Array.from({ length: 8 }, (_, cellIndex) => <td key={cellIndex}><span className="lead-skeleton-line" /></td>)}
+                  {Array.from({ length: 7 }, (_, cellIndex) => <td key={cellIndex}><span className="lead-skeleton-line" /></td>)}
                 </tr>
               ))}
               {!isBooting && !isImporting && visibleLeads.map((lead) => {
@@ -8617,12 +8616,6 @@ function LeadsModule({
                       <span className="lead-follow-up-cell">
                         <span><CalendarDays size={14} aria-hidden="true" /><strong>{followUp.date}</strong>{followUp.time && <b>{followUp.time}</b>}</span>
                         <small className={followUp.tone}>{followUp.relative}</small>
-                      </span>
-                    </td>
-                    <td data-label="Owner">
-                      <span className="lead-owner-cell">
-                        <span className="lead-owner-avatar" aria-hidden="true">{initialsFor(lead.owner || "Unassigned")}</span>
-                        <strong>{lead.owner || "Unassigned"}</strong>
                       </span>
                     </td>
                     <td className="leads-actions-column" data-label="Actions" onClick={(event) => event.stopPropagation()}>
