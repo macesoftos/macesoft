@@ -5595,7 +5595,7 @@ function AvailabilityTimeline({ resourceLabel, resources, appointments, services
         <div className="availability-table">
           <div className="availability-corner">{resourceLabel}</div>
           <div className="timeline-axis">
-            {scheduleHours.map((minutes) => <span key={minutes}>{formatScheduleTime(minutes)}</span>)}
+            {scheduleHours.slice(0, -1).map((minutes) => <span key={minutes}>{formatScheduleTime(minutes)}</span>)}
           </div>
           {resources.map((resource) => {
             const resourceKey = getResourceKey(resource);
