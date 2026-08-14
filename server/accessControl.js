@@ -6,6 +6,8 @@ const PUBLIC_API_RULES = [
   ["GET", /^\/api\/invitations\/accept\/[^/]+$/],
   ["POST", /^\/api\/invitations\/accept\/[^/]+$/],
   ["GET", /^\/api\/health(?:\/(?:live|ready))?$/],
+  ["GET", /^\/api\/public-leads\/config$/],
+  ["POST", /^\/api\/public-leads$/],
   ["POST", /^\/api\/public-bookings$/],
   ["GET", /^\/api\/leads\/webhooks\/meta-facebook$/],
   ["POST", /^\/api\/leads\/webhooks\/[^/]+$/],

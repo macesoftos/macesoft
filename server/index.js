@@ -142,6 +142,7 @@ app.use("/api", apiLimiter);
 app.use("/api/auth/login", loginLimiter);
 app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
+app.use("/api/public-leads", publicWriteLimiter);
 app.use("/api/public-bookings", publicWriteLimiter);
 app.use("/api/invitations/accept", publicWriteLimiter);
 app.use("/api/leads/webhooks", publicWriteLimiter);
@@ -276,6 +277,14 @@ function requireText(value, label) {
   const text = clean(value);
   if (!text) {
     throw apiError(`${label} is required.`);
+  }
+  return text;
+}
+
+function boundedPublicText(value, label, maximum = 500) {
+  const text = clean(value);
+  if (text.length > maximum) {
+    throw apiError(`${label} must be ${maximum} characters or fewer.`);
   }
   return text;
 }
@@ -1501,7 +1510,16 @@ function providerEnvStatus(provider) {
   if (provider === "offline") {
     return { status: "Connected", summary: "Manual phone, walk-in, referral, and event lead entry is available." };
   }
-  if (["website", "third-party"].includes(provider)) {
+  if (provider === "website") {
+    const externalWebhookReady = Boolean(clean(process.env.LEADS_WEBHOOK_SECRET) || clean(process.env.LEADS_API_KEY));
+    return {
+      status: "Connected",
+      summary: externalWebhookReady
+        ? "The built-in inquiry form and authenticated website webhook are ready."
+        : "The built-in inquiry form is ready. Add a webhook secret or API key for external website forms.",
+    };
+  }
+  if (provider === "third-party") {
     const configured = Boolean(clean(process.env.LEADS_WEBHOOK_SECRET) || clean(process.env.LEADS_API_KEY));
     return {
       status: configured ? "Connected" : "Needs Configuration",
@@ -1832,9 +1850,9 @@ async function routeIncomingLead(tx, normalized) {
   return { branch, owner };
 }
 
-async function processLeadWebhook(provider, request) {
+async function processLeadWebhook(provider, request, options = {}) {
   rateLimitWebhook(request, provider);
-  const authMethod = verifyLeadWebhookAuth(request, provider);
+  const authMethod = clean(options.authMethod) || verifyLeadWebhookAuth(request, provider);
   const integration = await prisma.leadIntegration.findUnique({ where: { provider } })
     ?? await prisma.leadIntegration.create({
       data: {
@@ -3970,6 +3988,127 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
     });
   });
   response.status(204).end();
+}));
+
+app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
+  const [settings, branchRows, serviceRows] = await Promise.all([
+    getPersistedSettings(),
+    prisma.branch.findMany({
+      orderBy: [{ name: "asc" }],
+      select: { id: true, name: true },
+    }),
+    prisma.service.findMany({
+      where: { active: true },
+      orderBy: [{ name: "asc" }],
+      select: { id: true, name: true, category: true, branches: true },
+    }),
+  ]);
+  const publicServices = [];
+  for (const service of serviceRows) {
+    const key = clean(service.name).toLowerCase();
+    const existing = publicServices.find((item) => clean(item.name).toLowerCase() === key);
+    if (existing) {
+      existing.branches = [...new Set([...existing.branches, ...parseJsonList(service.branches)])];
+    } else {
+      publicServices.push({
+        id: service.id,
+        name: service.name,
+        category: service.category,
+        branches: parseJsonList(service.branches),
+      });
+    }
+  }
+
+  response.json({
+    company: settings.company,
+    tagline: settings.receiptFooter,
+    branches: branchRows,
+    services: publicServices,
+  });
+}));
+
+app.post("/api/public-leads", asyncRoute(async (request, response) => {
+  const values = request.body ?? {};
+  if (clean(values.clinicWebsite)) {
+    response.status(202).json({ submitted: true, reference: request.requestId });
+    return;
+  }
+
+  const name = boundedPublicText(values.fullName || values.name, "Full name", 120);
+  if (name.length < 2) throw apiError("Full name is required.");
+  const mobile = boundedPublicText(values.mobile, "Mobile number", 30);
+  const email = boundedPublicText(values.email, "Email", 160).toLowerCase();
+  if (!mobile && !email) throw apiError("Enter a mobile number or email so the clinic can respond.");
+  if (mobile && !/^[+()0-9\s.-]{7,30}$/.test(mobile)) throw apiError("Enter a valid mobile number.");
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw apiError("Enter a valid email address.");
+  if (values.privacyConsent !== true) throw apiError("Consent is required before sending an inquiry.");
+
+  const requestedBranch = boundedPublicText(values.branch, "Branch", 120);
+  const branch = requestedBranch
+    ? await prisma.branch.findFirst({ where: { name: requestedBranch }, select: { name: true } })
+    : await prisma.branch.findFirst({ orderBy: [{ name: "asc" }], select: { name: true } });
+  if (!branch) throw apiError(requestedBranch ? "Selected branch is unavailable." : "No clinic branch is available for inquiries.", requestedBranch ? 400 : 503);
+
+  const requestedServiceId = boundedPublicText(values.serviceId, "Service", 120);
+  const requestedInterest = boundedPublicText(values.interest, "Service interest", 160);
+  const service = requestedServiceId
+    ? await prisma.service.findFirst({ where: { id: requestedServiceId, active: true }, select: { name: true, branches: true } })
+    : requestedInterest
+      ? await prisma.service.findFirst({ where: { name: requestedInterest, active: true }, select: { name: true, branches: true } })
+      : null;
+  if (requestedServiceId && !service) throw apiError("Selected service is unavailable.");
+  const serviceBranches = parseJsonList(service?.branches);
+  if (service && serviceBranches.length && !serviceBranches.includes("All branches") && !serviceBranches.includes(branch.name)) {
+    throw apiError("Selected service is unavailable at this branch.", 409);
+  }
+
+  const submittedAt = new Date().toISOString();
+  const publicPayload = {
+    full_name: name,
+    phone_number: mobile,
+    email_address: email,
+    preferred_service: service?.name || requestedInterest || "General consultation",
+    branch: branch.name,
+    source: "Website",
+    preferred_channel: boundedPublicText(values.preferredChannel, "Preferred contact method", 40) || (mobile ? "Phone" : "Email"),
+    main_concern: boundedPublicText(values.concern, "Main concern", 1000),
+    message: boundedPublicText(values.message, "Inquiry message", 1500),
+    preferred_date: boundedPublicText(values.preferredDate, "Preferred date", 20),
+    preferred_time: boundedPublicText(values.preferredTime, "Preferred time", 20),
+    landing_page: boundedPublicText(values.landingPage, "Landing page", 500),
+    referrer: boundedPublicText(values.referrerUrl, "Referrer", 500),
+    utm_source: boundedPublicText(values.utmSource, "UTM source", 160),
+    utm_medium: boundedPublicText(values.utmMedium, "UTM medium", 160),
+    utm_campaign: boundedPublicText(values.utmCampaign, "UTM campaign", 160),
+    utm_content: boundedPublicText(values.utmContent, "UTM content", 160),
+    utm_term: boundedPublicText(values.utmTerm, "UTM term", 160),
+    click_id: boundedPublicText(values.clickId, "Click ID", 240),
+    form_id: "mace-public-inquiry-v1",
+    external_lead_id: boundedPublicText(values.submissionId, "Submission ID", 120) || request.requestId,
+    permission_to_contact: true,
+    privacy_consent: true,
+    marketing_consent: values.marketingConsent === true,
+    consent_source: "Public inquiry form",
+    consent_timestamp: submittedAt,
+    consent_version: "v1",
+    consent_text: "I consent to the collection and use of my information so MACE can respond to this inquiry.",
+    submitted_at: submittedAt,
+  };
+
+  const originalBody = request.body;
+  const originalRawBody = request.rawBody;
+  request.body = publicPayload;
+  request.rawBody = JSON.stringify(publicPayload);
+  try {
+    const result = await processLeadWebhook("website", request, { authMethod: "public-form" });
+    response.status(result.duplicateEvent ? 200 : 201).json({
+      submitted: true,
+      reference: result.event?.providerEventId || request.requestId,
+    });
+  } finally {
+    request.body = originalBody;
+    request.rawBody = originalRawBody;
+  }
 }));
 
 app.post("/api/public-bookings", asyncRoute(async (request, response) => {

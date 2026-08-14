@@ -34,6 +34,7 @@ import {
   Inbox,
   LayoutDashboard,
   LayoutGrid,
+  Link,
   List,
   LockKeyhole,
   LogOut,
@@ -98,6 +99,7 @@ import {
   loadLeadIntegrations,
   loadLeadWebhookEvents,
   loadMyWorkspace,
+  loadPublicLeadConfig,
   loadInvitations,
   loadOrganizationAccounts,
   linkStaffAccount,
@@ -119,6 +121,7 @@ import {
   sendMarketingCampaign,
   setApiSessionContext,
   submitPublicBooking,
+  submitPublicLead,
   updateLeadStage,
   uploadImageAsset,
   voidTransactionRecord,
@@ -701,6 +704,10 @@ function App() {
   const isApplicationsView = activeModule === "applications";
   const isFaceTrackView = activeModule === "facetrack-attendance";
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
+  const isPublicLeadCaptureView = typeof window !== "undefined" && (
+    normalizedPathname(window.location.pathname) === "/inquire"
+    || window.location.hash.toLowerCase() === "#/inquire"
+  );
   const posTouchStartRef = useRef(null);
   const posChromeHideTimerRef = useRef(0);
   const globalCreateActions = useMemo(
@@ -911,11 +918,12 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (isPublicLeadCaptureView) return;
     if (moduleFromPath(window.location.pathname)) return;
     if (!moduleFromHash(window.location.hash)) {
       setActiveModule(activeModule, { replace: true, keepDrawerOpen: true });
     }
-  }, [activeModule, setActiveModule]);
+  }, [activeModule, isPublicLeadCaptureView, setActiveModule]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsBooting(false), 350);
@@ -1958,6 +1966,10 @@ function App() {
     });
   }
 
+  if (isPublicLeadCaptureView) {
+    return <PublicLeadCapturePage />;
+  }
+
   if (authChecking) {
     return (
       <main className="login-page">
@@ -2913,6 +2925,197 @@ function AccountMenu({ session, onLogout }) {
         </button>
       </div>
     </details>
+  );
+}
+
+function publicLeadAttribution() {
+  if (typeof window === "undefined") return {};
+  const params = new URLSearchParams(window.location.search);
+  return {
+    utmSource: params.get("utm_source") || "",
+    utmMedium: params.get("utm_medium") || "",
+    utmCampaign: params.get("utm_campaign") || "",
+    utmContent: params.get("utm_content") || "",
+    utmTerm: params.get("utm_term") || "",
+    clickId: params.get("gclid") || params.get("fbclid") || params.get("ttclid") || "",
+    landingPage: window.location.href,
+    referrerUrl: document.referrer || "",
+  };
+}
+
+function PublicLeadCapturePage() {
+  const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
+  const [form, setForm] = useState({
+    fullName: "",
+    mobile: "",
+    email: "",
+    serviceId: "",
+    branch: "",
+    preferredChannel: "Phone",
+    concern: "",
+    marketingConsent: false,
+    privacyConsent: false,
+    clinicWebsite: "",
+  });
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPublicLeadConfig()
+      .then((result) => {
+        if (cancelled) return;
+        const branches = Array.isArray(result.branches) ? result.branches : [];
+        const services = Array.isArray(result.services) ? result.services : [];
+        setConfig({
+          company: result.company || "MACE by Dr. Mace",
+          tagline: result.tagline || "The brand behind beautiful faces.",
+          branches,
+          services,
+        });
+        const defaultBranch = branches[0]?.name || "";
+        const defaultService = services.find((service) => {
+          const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
+          return !defaultBranch || !serviceBranches.length || serviceBranches.includes("All branches") || serviceBranches.includes(defaultBranch);
+        });
+        setForm((current) => ({
+          ...current,
+          branch: current.branch || defaultBranch,
+          serviceId: current.serviceId || defaultService?.id || "",
+        }));
+      })
+      .catch((loadError) => {
+        if (!cancelled) setError(loadError.message || "Some form choices could not be loaded. You can still send a general inquiry.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingConfig(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const availableServices = useMemo(() => config.services.filter((service) => {
+    const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
+    return !form.branch || !serviceBranches.length || serviceBranches.includes("All branches") || serviceBranches.includes(form.branch);
+  }), [config.services, form.branch]);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function chooseBranch(branch) {
+    const validServices = config.services.filter((service) => {
+      const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
+      return !serviceBranches.length || serviceBranches.includes("All branches") || serviceBranches.includes(branch);
+    });
+    setForm((current) => ({
+      ...current,
+      branch,
+      serviceId: validServices.some((service) => service.id === current.serviceId) ? current.serviceId : validServices[0]?.id || "",
+    }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!form.fullName.trim() || (!form.mobile.trim() && !form.email.trim()) || !form.privacyConsent) return;
+    setSaving(true);
+    setError("");
+    try {
+      const submissionId = globalThis.crypto?.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const result = await submitPublicLead({
+        ...form,
+        ...publicLeadAttribution(),
+        submissionId,
+      });
+      setSubmitted(result);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (submitError) {
+      setError(submitError.message || "We could not send your inquiry. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function sendAnother() {
+    setSubmitted(null);
+    setError("");
+    setForm((current) => ({
+      ...current,
+      fullName: "",
+      mobile: "",
+      email: "",
+      concern: "",
+      marketingConsent: false,
+      privacyConsent: false,
+      clinicWebsite: "",
+    }));
+  }
+
+  return (
+    <main className="public-lead-page">
+      <section className="public-lead-shell">
+        <div className="public-lead-brand">
+          <img className="public-lead-logo" src={assets.logo} alt={config.company} />
+          <div>
+            <p className="eyebrow">Private consultation request</p>
+            <h1>Let&apos;s talk about the care that feels right for you.</h1>
+            <p>{config.tagline} Share what you&apos;re interested in and the clinic team will personally follow up.</p>
+          </div>
+          <div className="public-lead-promises" aria-label="What happens next">
+            <span><ShieldCheck size={18} /> Your details stay with the clinic</span>
+            <span><PhoneCall size={18} /> Choose how you prefer to be contacted</span>
+            <span><Sparkles size={18} /> No treatment commitment required</span>
+          </div>
+        </div>
+
+        <div className="public-lead-card">
+          {submitted ? (
+            <div className="public-lead-success" role="status">
+              <span className="public-lead-success-icon"><Check size={28} /></span>
+              <p className="eyebrow">Inquiry received</p>
+              <h2>Thank you — the MACE team will be in touch.</h2>
+              <p>Your request is now in the clinic&apos;s Leads inbox for a personal follow-up.</p>
+              <button className="secondary-button" type="button" onClick={sendAnother}>Send another inquiry</button>
+            </div>
+          ) : (
+            <form onSubmit={submit}>
+              <div className="public-lead-card-heading">
+                <p className="eyebrow">Start your inquiry</p>
+                <h2>How can we help?</h2>
+                <p>Fields marked with * are required.</p>
+              </div>
+
+              {error && <div className="inline-state danger" role="alert"><AlertCircle size={17} /><span>{error}</span></div>}
+
+              <div className="public-lead-form-grid">
+                <label className="span-2"><span>Full name *</span><input autoComplete="name" value={form.fullName} onChange={(event) => updateField("fullName", event.target.value)} required /></label>
+                <label><span>Mobile number</span><input autoComplete="tel" inputMode="tel" value={form.mobile} onChange={(event) => updateField("mobile", event.target.value)} placeholder="09XX XXX XXXX" /></label>
+                <label><span>Email</span><input autoComplete="email" type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} /></label>
+                <small className="span-2 public-lead-contact-help">Please provide at least a mobile number or email.</small>
+
+                <label><span>Preferred branch</span><select disabled={loadingConfig || !config.branches.length} value={form.branch} onChange={(event) => chooseBranch(event.target.value)}>{config.branches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label>
+                <label><span>Interested service</span><select disabled={loadingConfig} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)}><option value="">General consultation</option>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+                <label className="span-2"><span>What would you like help with?</span><textarea rows={5} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder="Tell us about your concern, goal, or question." /></label>
+                <label><span>Preferred contact</span><select value={form.preferredChannel} onChange={(event) => updateField("preferredChannel", event.target.value)}><option>Phone</option><option>SMS</option><option>Messenger</option><option>WhatsApp</option><option>Email</option></select></label>
+
+                <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
+                <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>I consent to the collection and use of my information so MACE can respond to this inquiry. *</span></label>
+                <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} autoComplete="off" value={form.clinicWebsite} onChange={(event) => updateField("clinicWebsite", event.target.value)} /></label>
+              </div>
+
+              <button className="primary-button full public-lead-submit" type="submit" disabled={saving || !form.fullName.trim() || (!form.mobile.trim() && !form.email.trim()) || !form.privacyConsent}>
+                <Send size={17} /> {saving ? "Sending inquiry..." : "Send inquiry"}
+              </button>
+              <p className="public-lead-footnote"><ShieldCheck size={14} /> Your information is used only for this inquiry unless you opt in to updates.</p>
+            </form>
+          )}
+        </div>
+      </section>
+      <a className="public-lead-staff-link" href="/">Clinic staff sign in</a>
+    </main>
   );
 }
 
@@ -7916,6 +8119,8 @@ function LeadsModule({
   services,
   staff,
   branches,
+  integrations,
+  webhookEvents,
   openModal,
   importLeads,
   deleteLead,
@@ -7925,6 +8130,7 @@ function LeadsModule({
   bookAppointment,
   convertLead,
   mergeLead,
+  refreshOperations,
   globalSearch,
   isBooting,
   notify,
@@ -7933,6 +8139,7 @@ function LeadsModule({
   const [leadQuery, setLeadQuery] = useState("");
   const [filters, setFilters] = useState({ source: "All", branch: "All", owner: "All", priority: "All", followUp: "All" });
   const [showFilters, setShowFilters] = useState(false);
+  const [showCaptureSources, setShowCaptureSources] = useState(false);
   const [sort, setSort] = useState({ key: "created", direction: "desc" });
   const [page, setPage] = useState(1);
   const [selectedLeadId, setSelectedLeadId] = useStoredState("selected-lead", leads[0]?.id ?? "");
@@ -8213,6 +8420,16 @@ function LeadsModule({
     );
   }
 
+  async function copyCaptureLink() {
+    const captureUrl = `${window.location.origin}/inquire`;
+    try {
+      await navigator.clipboard.writeText(captureUrl);
+      notify("Public inquiry link copied.");
+    } catch {
+      notify(`Copy this inquiry link: ${captureUrl}`, "warning");
+    }
+  }
+
   return (
     <section className="leads-directory-page">
       <div className="leads-directory-navigation">
@@ -8231,6 +8448,15 @@ function LeadsModule({
           ))}
         </div>
         <div className="leads-header-actions">
+          <a className="secondary-button" href="/inquire" target="_blank" rel="noreferrer">
+            <Globe2 size={16} aria-hidden="true" /> Preview form
+          </a>
+          <button className="secondary-button" type="button" onClick={copyCaptureLink}>
+            <Link size={16} aria-hidden="true" /> Copy form link
+          </button>
+          <button className={`secondary-button ${showCaptureSources ? "active" : ""}`} type="button" aria-expanded={showCaptureSources} onClick={() => setShowCaptureSources((current) => !current)}>
+            <SlidersHorizontal size={16} aria-hidden="true" /> Capture sources
+          </button>
           <input
             ref={importInputRef}
             className="client-import-input"
@@ -8247,6 +8473,12 @@ function LeadsModule({
           </button>
         </div>
       </div>
+
+      {showCaptureSources && (
+        <div className="surface-panel leads-capture-sources-panel">
+          <LeadIntegrationsPanel integrations={integrations} webhookEvents={webhookEvents} refreshOperations={refreshOperations} />
+        </div>
+      )}
 
       <div className="surface-panel leads-directory-panel">
         <div className="leads-directory-toolbar">

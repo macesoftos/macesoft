@@ -958,6 +958,24 @@
   }
 }
 
+@media (max-width: 900px) {
+  .public-lead-page { align-content: start; padding: 14px; }
+  .public-lead-shell { grid-template-columns: 1fr; border-radius: 16px; }
+  .public-lead-brand { min-height: 440px; padding: 32px; }
+  .public-lead-card { padding: 32px; }
+}
+
+@media (max-width: 599px) {
+  .public-lead-page { padding: 0; background: #fff; }
+  .public-lead-shell { border: 0; border-radius: 0; box-shadow: none; }
+  .public-lead-brand { min-height: 390px; padding: 26px 22px; }
+  .public-lead-brand h1 { font-size: clamp(2.2rem, 13vw, 3.35rem); }
+  .public-lead-card { padding: 28px 20px 36px; }
+  .public-lead-form-grid { grid-template-columns: 1fr; }
+  .public-lead-form-grid .span-2 { grid-column: auto; }
+  .public-lead-staff-link { padding-bottom: 18px; }
+}
+
 /* Clients directory redesign ------------------------------------------------ */
 .clients-directory-page {
   display: grid;

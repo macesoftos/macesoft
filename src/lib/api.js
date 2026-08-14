@@ -304,6 +304,17 @@ export function submitPublicBooking(payload) {
   });
 }
 
+export function loadPublicLeadConfig() {
+  return requestJson("/api/public-leads/config");
+}
+
+export function submitPublicLead(payload) {
+  return requestJson("/api/public-leads", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function postInventoryMovement(id, movement) {
   return requestJson(`/api/inventory/${encodeURIComponent(id)}/movements`, {
     method: "POST",
