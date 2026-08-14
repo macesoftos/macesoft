@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   Camera,
   Boxes,
   BriefcaseBusiness,
@@ -45,6 +46,7 @@ export const navItems = [
   { id: "expenses", label: "Expenses", icon: ReceiptText, section: "inventory-finance" },
   { id: "reports", label: "Reports", icon: BarChart3, section: "inventory-finance" },
   { id: "sms", label: "Marketing", icon: MessageSquareText, section: "marketing" },
+  { id: "flipbooks", label: "Flipbooks", icon: BookOpen, section: "marketing" },
   { id: "settings", label: "Settings", icon: Settings, section: "system" },
   { id: "support", label: "Support", icon: ShieldCheck, section: "support" },
 ];

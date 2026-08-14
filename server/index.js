@@ -53,6 +53,7 @@ import {
   notificationWhereForActor,
 } from "./notifications.js";
 import { normalizePublicBookingRequest } from "./publicBooking.js";
+import { createFlipbookRouters } from "./flipbooks.js";
 import {
   marketingHtmlToText,
   normalizeMarketingDesign,
@@ -183,6 +184,7 @@ app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
 app.use("/api/public-bookings", publicWriteLimiter);
+app.use("/api/public/flipbooks", publicWriteLimiter);
 app.use("/api/invitations/accept", publicWriteLimiter);
 app.use("/api/leads/webhooks", publicWriteLimiter);
 
@@ -269,6 +271,8 @@ const uploadCategories = {
   "branch-photo": { readModule: null, writeModule: "branches" },
   "expense-receipt": { readModule: "expenses", writeModule: "expenses" },
   "treatment-photo": { readModule: "treatments", writeModule: "treatments" },
+  "flipbook-logo": { readModule: null, writeModule: "flipbooks" },
+  "flipbook-pdf": { readModule: "flipbooks", writeModule: "flipbooks" },
 };
 
 function storageConfig() {
@@ -2945,6 +2949,21 @@ app.use("/api", (request, response, next) => {
   return next();
 });
 
+const flipbookRouters = createFlipbookRouters({
+  prisma,
+  storageRequest,
+  assertReadAllowed,
+  assertMutationAllowed,
+  branchWhere,
+  canAccessBranch,
+  hashPassword,
+  verifyPassword,
+  writeAudit,
+  canManageOrganization,
+});
+app.use("/api/flipbooks", flipbookRouters.internal);
+app.use("/api/public/flipbooks", flipbookRouters.public);
+
 app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
 
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
@@ -3600,6 +3619,7 @@ app.post("/api/uploads", asyncRoute(async (request, response) => {
   const categoryAccess = uploadCategories[category];
   if (!categoryAccess) throw apiError("Unsupported upload category.", 400);
   if (category === "treatment-photo") throw apiError("Upload treatment photos from their treatment record.", 400);
+  if (category === "flipbook-pdf") throw apiError("Upload PDFs from the Flipbooks workspace.", 400);
   const branch = requireText(request.body?.branch, "Upload branch");
   const actor = assertMutationAllowed(request, categoryAccess.writeModule, branch);
   const stored = await storeImageObject(request.body?.dataUrl, category);

@@ -121,6 +121,7 @@ model Account {
   faceTrackChallenges  FaceTrackChallenge[]
   sentInvitations      UserInvitation[]             @relation("InvitationSender")
   passwordResetTokens  PasswordResetToken[]
+  flipbooks            Flipbook[]
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
@@ -929,8 +930,72 @@ model UploadAsset {
   uploadedById   String
   createdAt      DateTime        @default(now())
   treatmentPhoto TreatmentPhoto?
+  flipbook       Flipbook?
 
   @@index([branch])
   @@index([category])
   @@index([uploadedById])
+}
+
+model Flipbook {
+  id            String                @id @default(cuid())
+  title         String
+  description   String                @default("")
+  pageCount     Int
+  status        String                @default("Draft")
+  branch        String                @default("All branches")
+  assetId       String                @unique
+  asset         UploadAsset           @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  createdById   String
+  createdBy     Account               @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  publicToken   String?               @unique
+  publicEnabled Boolean               @default(false)
+  passwordHash  String                @default("")
+  allowDownload Boolean               @default(false)
+  expiresAt     DateTime?
+  publishedAt   DateTime?
+  views         FlipbookView[]
+  accessGrants  FlipbookAccessGrant[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([branch, updatedAt])
+  @@index([status, publicEnabled])
+  @@index([createdById])
+}
+
+model FlipbookView {
+  id         String   @id @default(cuid())
+  flipbookId String
+  flipbook   Flipbook @relation(fields: [flipbookId], references: [id], onDelete: Cascade)
+  viewerKey  String
+  userAgent  String   @default("")
+  viewedAt   DateTime @default(now())
+
+  @@index([flipbookId, viewedAt])
+  @@index([flipbookId, viewerKey])
+}
+
+model FlipbookAccessGrant {
+  id         String   @id @default(cuid())
+  flipbookId String
+  flipbook   Flipbook @relation(fields: [flipbookId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([flipbookId, expiresAt])
+  @@index([expiresAt])
+}
+
+model FlipbookWorkspaceSetting {
+  id                    String   @id @default("workspace")
+  logo                  String   @default("")
+  businessName          String   @default("MACE")
+  viewerBackground      String   @default("#f4f1ed")
+  defaultAccess         String   @default("Anyone with the link")
+  defaultAllowDownload  Boolean  @default(false)
+  defaultExpirationDays Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
