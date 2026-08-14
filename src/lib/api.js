@@ -464,6 +464,20 @@ export function sendMarketingTestEmail(payload) {
   });
 }
 
+export function scheduleMarketingCampaign(id, payload) {
+  return requestJson(`/api/marketing/campaigns/${encodeURIComponent(id)}/schedule`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function approveMarketingCampaign(id) {
+  return requestJson(`/api/marketing/campaigns/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function moveMarketingCampaignToDeleted(id) {
   return requestJson(`/api/marketing/campaigns/${encodeURIComponent(id)}`, {
     method: "DELETE",

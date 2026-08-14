@@ -851,6 +851,12 @@ model MarketingCampaign {
   status     String    @default("Draft")
   scheduledAt DateTime?
   managerApproval Boolean @default(true)
+  deliveryStatus String @default("")
+  scheduledById String @default("")
+  approvedById String @default("")
+  approvedAt DateTime?
+  sentAt DateTime?
+  lastDeliveryError String @default("")
   deletedAt  DateTime?
   surveyResponses MarketingSurveyResponse[]
   createdAt  DateTime  @default(now())
@@ -858,6 +864,7 @@ model MarketingCampaign {
 
   @@index([deletedAt])
   @@index([branch])
+  @@index([deliveryStatus, scheduledAt])
 }
 
 model MarketingEmailTemplate {
