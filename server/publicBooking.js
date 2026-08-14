@@ -50,6 +50,8 @@ export function normalizePublicBookingRequest(values = {}, { today = manilaDate(
 
   const time = bounded(values.time, "Appointment time", 5);
   if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) bookingError("Choose a valid appointment time.");
+  const submissionId = bounded(values.submissionId, "Booking submission identifier", 100);
+  if (!/^[a-zA-Z0-9_-]{16,100}$/.test(submissionId)) bookingError("Start a fresh booking request and try again.");
 
   return {
     spam: false,
@@ -60,6 +62,7 @@ export function normalizePublicBookingRequest(values = {}, { today = manilaDate(
     branch,
     date,
     time,
+    submissionId,
     concern: bounded(values.concern, "Concern or notes", 1000),
     marketingConsent: values.marketingConsent === true || values.marketingOptIn === true,
   };

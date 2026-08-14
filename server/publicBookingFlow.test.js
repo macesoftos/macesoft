@@ -24,4 +24,7 @@ test("a public booking creates an appointment linked to a lead and notifies Appo
   assert.match(serverSource, /linkedAppointmentId: appointment\.id/);
   assert.match(serverSource, /module: "appointments"/);
   assert.match(serverSource, /status: "Pending Confirmation"/);
+  assert.match(serverSource, /clientId: null/);
+  assert.match(serverSource, /publicBookingKey/);
+  assert.doesNotMatch(serverSource.match(/app\.post\("\/api\/public-bookings"[\s\S]*?response\.status\(result\.replayed \? 200 : 201\)/)?.[0] ?? "", /tx\.client\.(?:findFirst|create)/);
 });

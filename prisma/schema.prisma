@@ -403,6 +403,7 @@ model Appointment {
   leadId          String   @default("")
   notes           String   @default("")
   internalNotes   String   @default("")
+  publicBookingKey String? @unique
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -509,6 +510,7 @@ model Sale {
   payments  String     @default("[]")
   status    String     @default("Paid")
   leadId    String     @default("")
+  appointmentId String? @unique
   notes     String     @default("")
   items     SaleItem[]
   createdAt DateTime   @default(now())

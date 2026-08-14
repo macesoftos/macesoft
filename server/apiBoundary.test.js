@@ -31,6 +31,10 @@ test("real API denies private data reads before touching the database", async ()
       DATABASE_URL: "postgresql://boundary:boundary@127.0.0.1:1/boundary",
       DIRECT_URL: "postgresql://boundary:boundary@127.0.0.1:1/boundary",
       API_ALLOW_TRUSTED_HEADERS: "false",
+      SMTP_HOST: "",
+      SMTP_FROM: "",
+      SMTP_USER: "",
+      SMTP_PASS: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

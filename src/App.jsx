@@ -6364,6 +6364,7 @@ function LegacyAppointmentsModule({
     const price = appointmentServicePrice(appointment, services);
     const depositCredit = Math.min(Number(appointment.deposit || 0), price);
     return {
+      appointmentId: appointment.id,
       clientId: appointment.clientId,
       clientName: appointment.client,
       branch: appointment.branch,
@@ -7314,6 +7315,7 @@ function AppointmentsModule({
     const price = appointmentServicePrice(appointment, services);
     const depositCredit = Math.min(Number(appointment.deposit || 0), price);
     return {
+      appointmentId: appointment.id,
       clientId: appointment.clientId,
       clientName: appointment.client,
       branch: appointment.branch,
@@ -10717,6 +10719,7 @@ function BookingPortal({ services, staff, onSubmit }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
+    submissionId: globalThis.crypto?.randomUUID?.() || createId("booking"),
     serviceId: services[0]?.id ?? "",
     branch: branches[0].name,
     date: todayDate(),

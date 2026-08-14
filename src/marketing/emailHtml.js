@@ -167,7 +167,7 @@ function surveyChoiceUrl(draft, block, choice, origin) {
     try {
       const url = new URL(safeEmailUrl(block.responseUrl, origin));
       url.searchParams.set("answer", choice.value || choice.label);
-      return `${url.href}${url.search ? "&" : "?"}recipient={{email|anonymous}}`;
+      return `${url.href}${url.search ? "&" : "?"}token={{survey_token}}`;
     } catch {
       return "";
     }
@@ -175,7 +175,7 @@ function surveyChoiceUrl(draft, block, choice, origin) {
   if (!draft?.id) return "";
   const url = new URL(`/api/public/marketing/survey/${encodeURIComponent(draft.id)}/${encodeURIComponent(block.id)}`, origin);
   url.searchParams.set("answer", choice.value || choice.label);
-  return `${url.href}&recipient={{email|anonymous}}`;
+  return `${url.href}&token={{survey_token}}`;
 }
 
 function blockEmailHtmlContent(block, origin, theme, draft) {
