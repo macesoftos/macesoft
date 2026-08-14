@@ -1,6 +1,11 @@
 const apiBase = "";
+export const apiAuthenticationRequiredEvent = "macesoft:authentication-required";
 
-export function setApiSessionContext() {}
+let apiSessionActive = false;
+
+export function setApiSessionContext(session) {
+  apiSessionActive = Boolean(session);
+}
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${apiBase}${path}`, {
@@ -23,6 +28,9 @@ async function requestJson(path, options = {}) {
   const payload = isJson ? await response.json().catch(() => ({})) : null;
 
   if (!response.ok) {
+    if (response.status === 401 && apiSessionActive && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(apiAuthenticationRequiredEvent));
+    }
     throw new Error(payload?.error || "The clinic API request failed.");
   }
 
