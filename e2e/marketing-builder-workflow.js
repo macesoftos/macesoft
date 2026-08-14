@@ -195,6 +195,31 @@ export async function verifyMarketingBuilder(page, expect) {
   await expect(socialBlock.getByRole("link", { name: "Visit the MACE website" }).locator("svg")).toHaveCount(1);
   await expect(socialBlock.getByText(/^[IW]$/)).toHaveCount(0);
 
+  const visualBlocksBeforeHtml = await page.locator(".marketing-email-block").count();
+  await page.getByRole("tab", { name: "HTML", exact: true }).click();
+  const htmlSource = page.getByLabel("Email HTML source");
+  await expect(htmlSource).toHaveValue(/E2E Brightening Treatment/);
+  const generatedSource = await htmlSource.inputValue();
+  await htmlSource.fill(`${generatedSource}\n<!-- release-test-custom-html -->`);
+  await page.getByRole("tab", { name: "Design", exact: true }).click();
+  await expect(page.getByText("E2E Brightening Treatment", { exact: true })).toBeVisible();
+  await expect(page.locator(".marketing-email-block")).toHaveCount(visualBlocksBeforeHtml);
+  await page.getByRole("tab", { name: "HTML", exact: true }).click();
+  await expect(htmlSource).toHaveValue(/release-test-custom-html/);
+  await page.getByRole("tab", { name: "Design", exact: true }).click();
+
+  await page.getByRole("button", { name: "Sections", exact: true }).click();
+  await page.getByRole("tab", { name: "Manage", exact: true }).click();
+  const managedSections = page.locator(".marketing-manage-section-row");
+  await expect(managedSections).toHaveCount(visualBlocksBeforeHtml);
+  const firstManagedId = await managedSections.nth(0).getAttribute("data-block-id");
+  const secondManagedId = await managedSections.nth(1).getAttribute("data-block-id");
+  await managedSections.nth(0).dragTo(managedSections.nth(1), { targetPosition: { x: 12, y: 48 } });
+  await expect(managedSections.nth(0)).toHaveAttribute("data-block-id", secondManagedId);
+  await expect(managedSections.nth(1)).toHaveAttribute("data-block-id", firstManagedId);
+  await managedSections.nth(1).locator(".marketing-manage-section-actions button").first().click();
+  await expect(managedSections.nth(0)).toHaveAttribute("data-block-id", firstManagedId);
+
   const campaignSave = page.waitForResponse((response) => response.url().includes("/api/resources/campaigns") && ["POST", "PUT"].includes(response.request().method()));
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   expect((await campaignSave).status()).toBeLessThan(300);
