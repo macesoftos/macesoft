@@ -105,7 +105,7 @@ export function normalizeMarketingDesign(value) {
 
 export function renderMarketingHtml(value, mergeValues = {}) {
   const html = sanitizeMarketingHtml(value);
-  return html.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key) => sanitizeHtmlLibrary(String(mergeValues[key] ?? ""), {
+  return html.replace(/{{\s*([a-zA-Z0-9_]+)(?:\s*\|\s*([^{}]*))?\s*}}/g, (_match, key, fallback = "") => sanitizeHtmlLibrary(String(mergeValues[key] ?? fallback), {
     allowedTags: [],
     allowedAttributes: {},
   }));

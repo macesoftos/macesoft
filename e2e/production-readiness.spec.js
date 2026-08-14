@@ -1,4 +1,5 @@
 import { test, expect } from "playwright/test";
+import { verifyMarketingBuilder } from "./marketing-builder-workflow.js";
 
 const ownerEmail = process.env.BOOTSTRAP_OWNER_EMAIL;
 const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD;
@@ -15,6 +16,7 @@ test("anonymous users cannot read clinic data", async ({ request }) => {
 });
 
 test("an authenticated owner can open a scoped workspace and sign out", async ({ page }) => {
+  test.setTimeout(180_000);
   await page.goto("/");
   await page.getByLabel("Email").fill(ownerEmail);
   await page.getByLabel("Password").fill(ownerPassword);
@@ -38,12 +40,23 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   }
   await expect(accountMenu).toBeVisible();
 
-  const authorization = await page.evaluate(async () => {
-    const response = await fetch("/api/bootstrap", { credentials: "include" });
-    const payload = await response.json();
-    return { status: response.status, hasClients: Array.isArray(payload.clients) };
-  });
+  let authorization = { status: 0, hasClients: false };
+  let bootstrapAttempts = 0;
+  for (; bootstrapAttempts < 5; bootstrapAttempts += 1) {
+    authorization = await page.evaluate(async () => {
+      const response = await fetch("/api/bootstrap", { credentials: "include" });
+      const payload = await response.json();
+      return { status: response.status, hasClients: Array.isArray(payload.clients) };
+    });
+    if (authorization.status === 200) break;
+    if (authorization.status !== 503) break;
+    await page.waitForTimeout(750 * (bootstrapAttempts + 1));
+  }
   expect(authorization).toEqual({ status: 200, hasClients: true });
+  if (bootstrapAttempts > 0) {
+    await page.reload();
+    await expect(accountMenu).toBeVisible();
+  }
 
   await page.goto("/#/appointments");
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
@@ -295,6 +308,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     return response.status;
   }, serviceId);
   expect(serviceDeletion).toBe(204);
+  await verifyMarketingBuilder(page, expect);
   await accountMenu.click();
   const logoutResponse = page.waitForResponse((response) => response.url().endsWith("/api/auth/logout") && response.request().method() === "POST");
   await page.getByRole("menuitem", { name: /sign out/i }).click();

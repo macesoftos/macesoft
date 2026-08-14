@@ -2019,7 +2019,7 @@ function App() {
     }
   }
 
-  async function saveCampaign(values) {
+  async function saveCampaign(values, { existing, silent = false } = {}) {
     const record = {
       ...values,
       id: values.id || createId("cmp"),
@@ -2028,11 +2028,13 @@ function App() {
       booked: Number(values.booked || 0),
       credits: Number(values.credits || 0),
     };
-    const result = await saveResourceRecord("campaigns", record, { existing: Boolean(values.id) });
+    const result = await saveResourceRecord("campaigns", record, { existing: existing ?? campaigns.some((campaign) => campaign.id === record.id) });
     upsertById(setCampaigns, result.record);
     applyAuditLog(result.auditLog);
-    closeModal();
-    notify("Campaign saved.");
+    if (!silent) {
+      closeModal();
+      notify("Campaign saved.");
+    }
     return result.record;
   }
 
