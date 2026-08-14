@@ -17,6 +17,8 @@ const PUBLIC_API_RULES = [
   ["HEAD", /^\/api\/public\/flipbooks\/[^/]+\/file$/],
   ["GET", /^\/api\/public\/flipbooks\/[^/]+\/logo$/],
   ["GET", /^\/api\/public\/marketing\/survey\/[^/]+\/[^/]+$/],
+  ["GET", /^\/api\/public\/marketing-assets\/[^/]+$/],
+  ["HEAD", /^\/api\/public\/marketing-assets\/[^/]+$/],
   ["GET", /^\/api\/leads\/webhooks\/meta-facebook$/],
   ["POST", /^\/api\/leads\/webhooks\/[^/]+$/],
   ["GET", /^\/api\/facetrack-attendance\/kiosk\/status$/],

@@ -47,6 +47,8 @@ function safeEmailUrl(value, origin = "https://app.macebydrmace.com") {
   if (/^(?:https?:|mailto:|tel:|cid:|#)/i.test(url)) return url;
   if (/^(?:\/|\.\/|\.\.\/)/.test(url)) {
     try {
+      const marketingAsset = url.match(/^\/api\/uploads\/([^/?#]+)$/);
+      if (marketingAsset) return new URL(`/api/public/marketing-assets/${encodeURIComponent(decodeURIComponent(marketingAsset[1]))}`, origin).href;
       return new URL(url, origin).href;
     } catch {
       return "";

@@ -3824,6 +3824,24 @@ app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
   response.send(buffer);
 }));
 
+app.get("/api/public/marketing-assets/:id", asyncRoute(async (request, response) => {
+  const asset = await prisma.uploadAsset.findFirst({
+    where: { id: clean(request.params.id), category: "marketing-image" },
+  });
+  if (!asset) throw apiError("Marketing image was not found.", 404);
+  const stored = await storageRequest(asset.objectPath);
+  if (!stored.ok) throw apiError("Marketing image is unavailable.", stored.status === 404 ? 404 : 502);
+  const buffer = Buffer.from(await stored.arrayBuffer());
+  response.set({
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Disposition": "inline",
+    "Content-Length": String(buffer.length),
+    "Content-Type": asset.mimeType,
+    "Cross-Origin-Resource-Policy": "cross-origin",
+  });
+  response.send(buffer);
+}));
+
 app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
   const asset = await prisma.uploadAsset.findUnique({ where: { id: clean(request.params.id) } });
   if (!asset) throw apiError("Uploaded asset was not found.", 404);
