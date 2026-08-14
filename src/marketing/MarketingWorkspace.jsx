@@ -17,6 +17,7 @@ import {
   Code2,
   Copy,
   Download,
+  Eye,
   FileCode2,
   GripVertical,
   Image as ImageIcon,
@@ -1002,6 +1003,7 @@ function MarketingSettingsPage({ notify, openModal, settings }) {
 function CampaignBuilder({ clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
+  const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("content");
   const [libraryTab, setLibraryTab] = useState("blocks");
   const [sectionTab, setSectionTab] = useState("prebuilt");
@@ -1023,6 +1025,10 @@ function CampaignBuilder({ clients, draft, loadMedia, notify, onBack, onOpenGlob
     [draft, settings],
   );
   const importedHtmlResult = useMemo(() => sanitizeImportedEmailHtml(draft.html), [draft.html]);
+  const emailPreviewHtml = useMemo(
+    () => previewPersonalizedHtml(draft.editorMode === "html" ? importedHtmlResult.html : visualEmailHtml),
+    [draft.editorMode, importedHtmlResult.html, visualEmailHtml],
+  );
 
   useEffect(() => {
     setSaveState("Changes saved locally");
@@ -1316,7 +1322,7 @@ function CampaignBuilder({ clients, draft, loadMedia, notify, onBack, onOpenGlob
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
           <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value="Draft" /></h1></div>
         </div>
-        <div className="marketing-builder-actions"><span>{saveState}</span><button onClick={saveDraft} type="button">Save draft</button><button onClick={() => notify?.("A test delivery endpoint is required before test emails can be sent.", "warning")} type="button">Send test</button><button className="marketing-primary-button" onClick={continueStep} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>
+        <div className="marketing-builder-actions"><span>{saveState}</span>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-preview-email-button" onClick={() => setEmailPreviewOpen(true)} type="button"><Eye size={16} aria-hidden="true" /> Preview email</button> : null}<button onClick={saveDraft} type="button">Save draft</button><button className="marketing-send-test-button" onClick={() => notify?.("A test delivery endpoint is required before test emails can be sent.", "warning")} type="button">Send test</button><button className="marketing-primary-button" onClick={continueStep} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>
       </header>
       <nav className="marketing-stepper" aria-label="Campaign progress">
         {campaignSteps.map((step, index) => {
@@ -1451,6 +1457,44 @@ function CampaignBuilder({ clients, draft, loadMedia, notify, onBack, onOpenGlob
       {draft.step === 4 && <ScheduleStep draft={draft} estimate={estimate} updateDraft={updateDraft} />}
       {draft.step > 1 && <div className="marketing-builder-mobile-footer"><button onClick={() => updateDraft({ step: Math.max(1, draft.step - 1) })} type="button">Back</button><button className="marketing-primary-button" onClick={continueStep} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>}
       {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => { const result = sanitizeImportedEmailHtml(draft.editorMode === "html" ? draft.html : visualEmailHtml); if (result.error || result.removed) { notify?.(result.error || "Clean the imported HTML before saving it as a template.", "error"); return; } onSaveTemplate({ id: createBlockId("template"), name: draft.name, category: draft.editorMode === "html" ? "Imported HTML" : "Saved design", editorMode: draft.editorMode, html: result.html, blocks: draft.blocks, theme: draft.theme }); notify?.("Design saved to Templates on this device."); }} type="button"><Save size={15} /> Save as template</button>}
+      {emailPreviewOpen ? <EmailPreviewDialog error={draft.editorMode === "html" ? importedHtmlResult.error : ""} html={emailPreviewHtml} name={draft.name} onClose={() => setEmailPreviewOpen(false)} previewText={draft.previewText} subject={draft.subject} /> : null}
+    </div>
+  );
+}
+
+function EmailPreviewDialog({ error, html, name, onClose, previewText, subject }) {
+  const [device, setDevice] = useState("desktop");
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    function closeWithEscape(event) {
+      if (event.key === "Escape") onClose();
+    }
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeWithEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [onClose]);
+
+  return (
+    <div aria-label={`Preview ${name || "email campaign"}`} aria-modal="true" className="marketing-email-preview-dialog" role="dialog">
+      <button aria-label="Close email preview" className="marketing-email-preview-backdrop" onClick={onClose} type="button" />
+      <section>
+        <header>
+          <div><span>Email preview</span><h2>{name || "Untitled campaign"}</h2></div>
+          <button aria-label="Close email preview" onClick={onClose} type="button"><X size={19} aria-hidden="true" /></button>
+        </header>
+        <div className="marketing-email-preview-toolbar">
+          <dl><div><dt>From</dt><dd>MACE Signature Wellness</dd></div><div><dt>Subject</dt><dd>{subject || "No subject"}</dd></div><div><dt>Preview text</dt><dd>{previewText || "No preview text"}</dd></div></dl>
+          <div aria-label="Email preview device" className="marketing-preview-toggle" role="group"><button aria-pressed={device === "desktop"} className={device === "desktop" ? "active" : ""} onClick={() => setDevice("desktop")} type="button"><Monitor size={16} aria-hidden="true" /> Desktop</button><button aria-pressed={device === "mobile"} className={device === "mobile" ? "active" : ""} onClick={() => setDevice("mobile")} type="button"><Smartphone size={16} aria-hidden="true" /> Mobile</button></div>
+        </div>
+        <div className="marketing-email-preview-stage">
+          {error ? <MarketingEmpty title="Email preview unavailable" copy={error} /> : <div className={`marketing-email-preview-device ${device}`}><iframe sandbox="" srcDoc={html} title={`${name || "Campaign"} email preview`} /></div>}
+        </div>
+        <footer><span>Personalization uses sample client details in preview.</span><button onClick={onClose} type="button">Close preview</button></footer>
+      </section>
     </div>
   );
 }
