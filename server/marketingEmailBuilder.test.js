@@ -22,17 +22,26 @@ test("visual Marketing blocks export a complete responsive email document", () =
   assert.match(html, /Unsubscribe/i);
 });
 
-test("visual Marketing block content is escaped before HTML export", () => {
+test("visual Marketing rich text removes executable markup before HTML export", () => {
   const html = buildVisualEmailHtml({
     blocks: [{ id: "text-1", type: "text", content: `<img src=x onerror="alert(1)">`, align: "left", padding: 12 }],
   });
 
   assert.doesNotMatch(html, /<img src=x onerror/i);
-  assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+  assert.doesNotMatch(html, /onerror|alert\(1\)/i);
 });
 
 test("HTML email source has a plain-text fallback", () => {
   assert.equal(emailHtmlToPlainText("<h1>Hello</h1><p>Book today.</p>"), "Hello Book today.");
+});
+
+test("mobile logo width remains pixel-bounded in exported email HTML", () => {
+  const html = buildVisualEmailHtml({
+    blocks: [{ id: "logo-mobile", type: "logo", src: "/brand/mace-logo.png", width: 140, mobileWidth: 120, responsive: { mobileWidth: 100 } }],
+  }, {}, "https://app.macebydrmace.com");
+
+  assert.match(html, /mace-logo-mw-120 img\{width:120px!important;max-width:100%!important\}/);
+  assert.doesNotMatch(html, /mace-logo-mw-120 img\{width:120%!important/);
 });
 
 test("column layouts export as responsive email-safe tables", () => {

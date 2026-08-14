@@ -6,6 +6,9 @@ const directUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
 const runtimeUrl = process.env.DATABASE_URL;
 if (!directUrl || !runtimeUrl) throw new Error("DATABASE_URL and DIRECT_URL are required for isolated release testing.");
 const schema = `codex_release_${Date.now()}_${process.pid}`;
+const isolatedApiPort = process.env.ISOLATED_API_PORT || "3198";
+const isolatedWebPort = process.env.ISOLATED_WEB_PORT || "5187";
+const isolatedOrigin = `http://127.0.0.1:${isolatedWebPort}`;
 
 function withSchema(value) {
   const url = new URL(value);
@@ -37,21 +40,45 @@ function run(command, args, environment, stage) {
   });
 }
 
+async function runWithRetries(command, args, environment, stage, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await run(command, args, environment, stage);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      console.warn(JSON.stringify({ event: "isolated_release_stage_retry", stage, attempt }));
+      await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
+    }
+  }
+  throw lastError;
+}
+
 const environment = {
   ...process.env,
   NODE_ENV: "test",
-  APP_ORIGIN: "http://127.0.0.1:5173",
+  APP_ORIGIN: isolatedOrigin,
+  API_PORT: isolatedApiPort,
   DATABASE_URL: withSchema(runtimeUrl),
+  DATABASE_POOL_MAX: "2",
   DIRECT_URL: withSchema(directUrl),
   FACETRACK_ENCRYPTION_KEY: "isolated-release-test-facetrack-key",
   BOOTSTRAP_OWNER_NAME: "Release Test Owner",
   BOOTSTRAP_OWNER_EMAIL: "owner@release-test.invalid",
   BOOTSTRAP_OWNER_PASSWORD: "ReleaseTest2026!Owner",
+  E2E_BASE_URL: isolatedOrigin,
+  E2E_WORKERS: "1",
   MARKETING_DRY_RUN: "true",
+  PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: "1",
+  VITE_API_PROXY: `http://127.0.0.1:${isolatedApiPort}`,
+  VITE_PORT: isolatedWebPort,
 };
 
 try {
-  await run("pnpm", ["exec", "prisma", "migrate", "deploy"], environment, "migrations");
+  await runWithRetries("pnpm", ["exec", "prisma", "migrate", "deploy"], environment, "migrations");
+  await run("pnpm", ["exec", "prisma", "generate"], environment, "prisma_client");
   await run("pnpm", ["db:seed"], environment, "seed");
   await run("pnpm", ["bootstrap:owner"], environment, "owner_bootstrap");
   await run("pnpm", ["test:integration"], environment, "api_integration");

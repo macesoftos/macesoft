@@ -160,6 +160,22 @@ export function loadMarketingMedia() {
   return requestJson("/api/marketing/media");
 }
 
+export function loadMarketingEmailTemplates() {
+  return requestJson("/api/marketing/templates");
+}
+
+export function saveMarketingEmailTemplate(template, { existing = false } = {}) {
+  const path = existing ? `/api/marketing/templates/${encodeURIComponent(template.id)}` : "/api/marketing/templates";
+  return requestJson(path, {
+    method: existing ? "PUT" : "POST",
+    body: JSON.stringify(template),
+  });
+}
+
+export function deleteMarketingEmailTemplate(id) {
+  return requestJson(`/api/marketing/templates/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 async function requestPublicJson(path, options = {}) {
   const { accessToken = "", viewerId = "", headers = {}, ...fetchOptions } = options;
   const response = await fetch(`${apiBase}${path}`, {
@@ -436,6 +452,13 @@ export function deleteClientRecord(id) {
 
 export function sendMarketingCampaign(payload) {
   return requestJson("/api/marketing/send", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendMarketingTestEmail(payload) {
+  return requestJson("/api/marketing/send-test", {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -43,7 +43,9 @@ async function clearDatabase() {
   await prisma.uploadAsset.deleteMany();
   await prisma.discount.deleteMany();
   await prisma.expense.deleteMany();
+  await prisma.marketingSurveyResponse.deleteMany();
   await prisma.marketingCampaign.deleteMany();
+  await prisma.marketingEmailTemplate.deleteMany();
   await prisma.smsTemplate.deleteMany();
   await prisma.webhookEvent.deleteMany();
   await prisma.leadConversion.deleteMany();

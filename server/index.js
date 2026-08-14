@@ -188,6 +188,7 @@ app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
 app.use("/api/public-bookings", publicWriteLimiter);
 app.use("/api/public/flipbooks", publicWriteLimiter);
+app.use("/api/public/marketing/survey", publicWriteLimiter);
 app.use("/api/invitations/accept", publicWriteLimiter);
 app.use("/api/leads/webhooks", publicWriteLimiter);
 
@@ -1175,6 +1176,9 @@ function normalizeSmsTemplatePayload(payload, existingId = "") {
 }
 
 function normalizeCampaignPayload(payload, existingId = "") {
+  const scheduledAtValue = clean(payload.scheduledAt);
+  const scheduledAt = scheduledAtValue ? new Date(scheduledAtValue) : null;
+  if (scheduledAtValue && Number.isNaN(scheduledAt.getTime())) throw apiError("Campaign schedule is invalid.");
   const data = {
     name: requireText(payload.name, "Campaign name"),
     branch: requireText(payload.branch, "Campaign branch"),
@@ -1187,12 +1191,34 @@ function normalizeCampaignPayload(payload, existingId = "") {
     booked: numberValue(payload.booked, "Booked count", { min: 0, integer: true }),
     credits: numberValue(payload.credits, "Credits", { min: 0, integer: true }),
     status: clean(payload.status) || "Draft",
+    scheduledAt,
+    managerApproval: parseBoolean(payload.managerApproval, true),
   };
 
   if (Object.hasOwn(payload, "html")) data.html = sanitizeMarketingHtml(payload.html);
   if (Object.hasOwn(payload, "design")) data.design = normalizeMarketingDesign(payload.design);
 
   if (payload.id && !existingId) data.id = String(payload.id);
+  return data;
+}
+
+function normalizeMarketingTemplatePayload(payload, actor, existingId = "") {
+  const name = requireText(payload.name, "Template name");
+  const branch = clean(payload.branch) || clean(actor.branch) || "All branches";
+  const editorMode = clean(payload.editorMode).toLowerCase() === "html" ? "html" : "visual";
+  const design = normalizeMarketingDesign(payload.design);
+  if (!design) throw apiError("Template design is required.");
+  const data = {
+    name,
+    description: clean(payload.description).slice(0, 500),
+    thumbnail: assetReference(payload.thumbnail, "Template thumbnail"),
+    editorMode,
+    html: sanitizeMarketingHtml(payload.html),
+    design,
+    branch,
+    createdById: existingId ? undefined : actor.id,
+  };
+  if (existingId) delete data.createdById;
   return data;
 }
 
@@ -2344,6 +2370,19 @@ function marketingChannel(campaign) {
   return channel.includes("mail") ? "email" : "sms";
 }
 
+function findMarketingDesignBlock(blocks, blockId) {
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (clean(block?.id) === blockId) return block;
+    if (clean(block?.type) === "layout") {
+      for (const column of Array.isArray(block.columns) ? block.columns : []) {
+        const nested = findMarketingDesignBlock(column, blockId);
+        if (nested) return nested;
+      }
+    }
+  }
+  return null;
+}
+
 function normalizePhone(value) {
   const raw = clean(value);
   if (!raw) return "";
@@ -2450,12 +2489,15 @@ function marketingMergeValues({ client, campaign, settings }) {
     date: new Date().toLocaleDateString("en-PH"),
     time: "",
     service: campaign.service || campaign.name,
+    current_year: String(new Date().getFullYear()),
+    unsubscribe_url: "#unsubscribe",
+    preferences_url: "#preferences",
   };
 }
 
 function renderMarketingText(text, context) {
   const values = marketingMergeValues(context);
-  return clean(text).replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key) => clean(values[key] ?? ""));
+  return clean(text).replace(/{{\s*([a-zA-Z0-9_]+)(?:\s*\|\s*([^{}]*))?\s*}}/g, (_match, key, fallback = "") => clean(values[key] ?? fallback));
 }
 
 function escapeHtml(value) {
@@ -4943,6 +4985,99 @@ app.get("/api/marketing/media", asyncRoute(async (request, response) => {
   response.json({ assets: assets.map(serializeMarketingMediaAsset) });
 }));
 
+app.get("/api/marketing/templates", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "sms");
+  const templates = await prisma.marketingEmailTemplate.findMany({
+    where: branchWhere(actor),
+    orderBy: [{ updatedAt: "desc" }],
+    take: 250,
+  });
+  response.json({ templates });
+}));
+
+app.post("/api/marketing/templates", asyncRoute(async (request, response) => {
+  const actor = assertMutationAllowed(request, "sms", clean(request.body?.branch) || undefined);
+  const data = normalizeMarketingTemplatePayload(request.body ?? {}, actor);
+  assertMutationAllowed(request, "sms", data.branch);
+  const duplicate = await prisma.marketingEmailTemplate.findFirst({
+    where: { branch: data.branch, name: { equals: data.name, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (duplicate) throw apiError("A Marketing template with this name already exists.", 409);
+  const result = await prisma.$transaction(async (tx) => {
+    const template = await tx.marketingEmailTemplate.create({ data });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Email template created",
+      details: `${template.name} saved as a reusable Marketing template.`,
+    });
+    return { template, auditLog };
+  });
+  response.status(201).json(result);
+}));
+
+app.put("/api/marketing/templates/:id", asyncRoute(async (request, response) => {
+  const actor = assertMutationAllowed(request, "sms");
+  const id = clean(request.params.id);
+  const existing = await prisma.marketingEmailTemplate.findUnique({ where: { id } });
+  if (!existing) throw apiError("Marketing template not found.", 404);
+  assertMutationAllowed(request, "sms", existing.branch);
+  const data = normalizeMarketingTemplatePayload(request.body ?? {}, actor, id);
+  assertMutationAllowed(request, "sms", data.branch);
+  const duplicate = await prisma.marketingEmailTemplate.findFirst({
+    where: { id: { not: id }, branch: data.branch, name: { equals: data.name, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (duplicate) throw apiError("A Marketing template with this name already exists.", 409);
+  const result = await prisma.$transaction(async (tx) => {
+    const template = await tx.marketingEmailTemplate.update({ where: { id }, data });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Email template updated",
+      details: `${template.name} updated.`,
+    });
+    return { template, auditLog };
+  });
+  response.json(result);
+}));
+
+app.delete("/api/marketing/templates/:id", asyncRoute(async (request, response) => {
+  assertMutationAllowed(request, "sms");
+  const id = clean(request.params.id);
+  const existing = await prisma.marketingEmailTemplate.findUnique({ where: { id } });
+  if (!existing) throw apiError("Marketing template not found.", 404);
+  assertMutationAllowed(request, "sms", existing.branch);
+  const result = await prisma.$transaction(async (tx) => {
+    const template = await tx.marketingEmailTemplate.delete({ where: { id } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Email template deleted",
+      details: `${template.name} deleted.`,
+    });
+    return { id: template.id, auditLog };
+  });
+  response.json(result);
+}));
+
+app.get("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (request, response) => {
+  const campaignId = boundedPublicText(request.params.campaignId, "Campaign", 100);
+  const blockId = boundedPublicText(request.params.blockId, "Survey block", 140);
+  const answer = boundedPublicText(request.query.answer, "Survey answer", 200);
+  const recipient = boundedPublicText(request.query.recipient, "Survey recipient", 320);
+  const campaign = await prisma.marketingCampaign.findFirst({ where: { id: campaignId, deletedAt: null } });
+  if (!campaign) throw apiError("This survey campaign is no longer available.", 404);
+  const block = findMarketingDesignBlock(campaign.design?.blocks, blockId);
+  if (!block || clean(block.type) !== "survey") throw apiError("This survey is no longer available.", 404);
+  const choices = Array.isArray(block.choices) ? block.choices : [];
+  const selected = choices.find((choice) => clean(choice.value || choice.label) === answer);
+  if (!selected) throw apiError("Choose one of the available survey answers.");
+  await prisma.marketingSurveyResponse.create({
+    data: { campaignId, blockId, answer, recipient },
+  });
+  const confirmation = clean(block.confirmationMessage) || "Thank you for sharing your feedback.";
+  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Thank you — MACE</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}a{color:#4a2d1c}</style></head><body><main class="card"><h1>Thank you</h1><p>${escapeHtml(confirmation)}</p><p>Your response has been recorded for ${escapeHtml(campaign.name)}.</p><a href="https://macebydrmace.com/">Return to MACE</a></main></body></html>`);
+}));
+
 app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
   const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
@@ -4986,6 +5121,45 @@ app.delete("/api/marketing/campaigns/:id/permanent", asyncRoute(async (request, 
   });
 
   response.json(result);
+}));
+
+app.post("/api/marketing/send-test", asyncRoute(async (request, response) => {
+  assertMutationAllowed(request, "sms");
+  const campaign = request.body?.campaign ?? {};
+  const addresses = [...new Set((Array.isArray(request.body?.emails) ? request.body.emails : []).map(normalizeEmail).filter(Boolean))];
+  if (!addresses.length) throw apiError("Enter at least one valid test email address.");
+  if (addresses.length > 5) throw apiError("Send a test to no more than five email addresses at once.", 413);
+  const html = sanitizeMarketingHtml(campaign.html);
+  if (!html) throw apiError("Save or finish the email content before sending a test.");
+  const subject = `[TEST] ${clean(campaign.subject) || clean(campaign.name) || "MACE campaign"}`;
+  const text = marketingHtmlToText(html);
+  const dryRun = envFlag(process.env.MARKETING_DRY_RUN);
+  if (!dryRun && !emailReady()) throw apiError("Email is not configured. Add SMTP settings before sending a test.", 503);
+  const settings = await getPersistedSettings();
+  const transporter = dryRun ? null : createEmailTransport();
+  const failures = [];
+  let sent = 0;
+  for (const address of addresses) {
+    const client = { fullName: "Alex Test Client", email: address, mobile: "", branch: "MACE Signature Wellness" };
+    const renderedHtml = renderMarketingHtml(html, marketingMergeValues({ client, campaign, settings }));
+    try {
+      if (dryRun) console.log(`[marketing dry-run] TEST EMAIL to ${address}: ${subject}`);
+      else await sendSmtpEmail({ transporter, to: address, subject, text: renderMarketingText(text, { client, campaign, settings }), html: renderedHtml });
+      sent += 1;
+    } catch (error) {
+      failures.push({ email: address, error: clean(error.message) || "Delivery failed." });
+    }
+  }
+  transporter?.close();
+  if (!sent) throw apiError(failures[0]?.error || "The test email could not be sent.", 502);
+  const auditLog = await prisma.auditLog.create({
+    data: auditData(request, {
+      area: "Marketing",
+      action: "Test email sent",
+      details: `${campaign.name || "Campaign"} test sent to ${sent} address${sent === 1 ? "" : "es"}${failures.length ? `; ${failures.length} failed` : ""}.`,
+    }),
+  });
+  response.json({ sent, failed: failures.length, failures, provider: dryRun ? "dry-run" : "smtp", auditLog });
 }));
 
 app.post("/api/marketing/send", asyncRoute(async (request, response) => {

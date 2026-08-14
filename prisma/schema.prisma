@@ -849,12 +849,44 @@ model MarketingCampaign {
   booked     Int       @default(0)
   credits    Int       @default(0)
   status     String    @default("Draft")
+  scheduledAt DateTime?
+  managerApproval Boolean @default(true)
   deletedAt  DateTime?
+  surveyResponses MarketingSurveyResponse[]
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
   @@index([deletedAt])
   @@index([branch])
+}
+
+model MarketingEmailTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  thumbnail   String   @default("")
+  editorMode  String   @default("visual")
+  html        String   @default("")
+  design      Json
+  branch      String   @default("All branches")
+  createdById String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+  @@index([branch, updatedAt])
+}
+
+model MarketingSurveyResponse {
+  id         String            @id @default(cuid())
+  campaignId String
+  campaign   MarketingCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  blockId    String
+  answer     String
+  recipient  String            @default("")
+  createdAt  DateTime          @default(now())
+
+  @@index([campaignId, blockId, createdAt])
 }
 
 model Expense {

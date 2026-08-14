@@ -14,12 +14,14 @@ if (!connectionString) {
 const databaseUrl = new URL(connectionString);
 const sslMode = databaseUrl.searchParams.get("sslmode");
 const databaseSchema = databaseUrl.searchParams.get("schema") || "public";
+const poolMaximum = Math.max(1, Math.min(20, Number(process.env.DATABASE_POOL_MAX || 5)));
 databaseUrl.searchParams.delete("sslmode");
 databaseUrl.searchParams.delete("schema");
 const sslCa = normalizePemCertificates(process.env.DATABASE_SSL_CA);
 
 const adapter = new PrismaPg({
   connectionString: databaseUrl.toString(),
+  max: poolMaximum,
   ssl: sslMode ? {
     rejectUnauthorized: process.env.NODE_ENV === "test"
       ? false
