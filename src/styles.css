@@ -5325,7 +5325,9 @@ td .inline-actions { flex-wrap: nowrap; }
 }
 
 .public-lead-form-grid .checkbox-field {
-  align-items: flex-start;
+  display: flex;
+  align-items: flex-start !important;
+  gap: 10px;
   padding: 11px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -5335,7 +5337,14 @@ td .inline-actions { flex-wrap: nowrap; }
   line-height: 1.45;
 }
 
-.public-lead-form-grid .checkbox-field input { margin-top: 2px; }
+.public-lead-form-grid .checkbox-field input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+}
+
+.public-lead-form-grid .checkbox-field span { flex: 1 1 auto; }
 
 .public-lead-honeypot {
   position: absolute !important;
