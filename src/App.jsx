@@ -2966,19 +2966,17 @@ function PublicLeadCapturePage() {
   useEffect(() => {
     if (!isContactEmbed || window.parent === window) return undefined;
 
+    const embeddedPage = document.querySelector(".public-lead-page-embedded");
     let animationFrame = 0;
     const publishHeight = () => {
       cancelAnimationFrame(animationFrame);
       animationFrame = requestAnimationFrame(() => {
-        const height = Math.ceil(Math.max(
-          document.body?.scrollHeight || 0,
-          document.documentElement.scrollHeight || 0,
-        ));
+        const height = Math.ceil(embeddedPage?.getBoundingClientRect().height || document.body?.scrollHeight || 0);
         window.parent.postMessage({ type: "mace-inquiry-height", height }, "*");
       });
     };
     const resizeObserver = new ResizeObserver(publishHeight);
-    resizeObserver.observe(document.documentElement);
+    resizeObserver.observe(embeddedPage || document.documentElement);
     window.addEventListener("load", publishHeight);
     publishHeight();
 
