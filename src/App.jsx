@@ -79,6 +79,13 @@ import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
+import MarketingWorkspace from "./marketing/MarketingWorkspace.jsx";
+import {
+  hashRouteSegments,
+  isLegacySmsHash,
+  isMarketingHash,
+  marketingHash,
+} from "./marketing/routes.js";
 import {
   checkApiHealth,
   changeAccountPassword,
@@ -598,10 +605,10 @@ const mobileMoreSectionLabels = {
 };
 
 function moduleFromHash(hash) {
-  const moduleId = String(hash ?? "")
-    .replace(/^#\/?/, "")
-    .trim();
-  return moduleIdSet.has(moduleId) ? moduleId : "";
+  const segments = hashRouteSegments(hash);
+  if (isMarketingHash(hash) || isLegacySmsHash(hash)) return "sms";
+  if (segments.length !== 1) return "";
+  return moduleIdSet.has(segments[0]) ? segments[0] : "";
 }
 
 function normalizedPathname(pathname) {
@@ -723,6 +730,7 @@ function App() {
   const isPosView = activeModule === "pos";
   const isApplicationsView = activeModule === "applications";
   const isFaceTrackView = activeModule === "facetrack-attendance";
+  const isMarketingView = activeModule === "sms";
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
   const publicFormMode = typeof window !== "undefined" && (
     normalizedPathname(window.location.pathname) === "/book"
@@ -967,7 +975,9 @@ function App() {
           ? "/pos"
           : nextModule === "facetrack-attendance"
             ? "/attendance"
-            : `/#/${nextModule}`;
+            : nextModule === "sms"
+              ? `/${marketingHash()}`
+              : `/#/${nextModule}`;
         const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
         if (currentUrl !== nextUrl) {
           if (options.replace) {
@@ -1012,6 +1022,10 @@ function App() {
     function syncModuleFromLocation() {
       const routeModule = moduleFromPath(window.location.pathname) || moduleFromHash(window.location.hash);
       if (routeModule) {
+        if (routeModule === "sms" && isMarketingHash(window.location.hash)) {
+          setActiveModuleState("sms");
+          return;
+        }
         if (routeModule === "pos" && moduleFromHash(window.location.hash) === "pos" && moduleFromPath(window.location.pathname) !== "pos") {
           window.history.replaceState(null, "", "/pos");
         }
@@ -1026,7 +1040,7 @@ function App() {
       window.removeEventListener("hashchange", syncModuleFromLocation);
       window.removeEventListener("popstate", syncModuleFromLocation);
     };
-  }, [setActiveModule]);
+  }, [setActiveModule, setActiveModuleState]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1991,6 +2005,7 @@ function App() {
     applyAuditLog(result.auditLog);
     closeModal();
     notify("Campaign saved.");
+    return result.record;
   }
 
   async function sendCampaign(id) {
@@ -2165,6 +2180,7 @@ function App() {
     isPosView ? "pos-page-shell" : "",
     isApplicationsView ? "applications-page-shell" : "",
     isFaceTrackView ? "facetrack-page-shell" : "",
+    isMarketingView ? "marketing-page-shell" : "",
     isPosView && isPosChromeRevealed ? "pos-chrome-revealed" : "",
     "has-mobile-navigation",
   ].filter(Boolean).join(" ");
@@ -2197,7 +2213,7 @@ function App() {
           />
         )}
 
-        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""}`}>
+        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
           {isPosView && (
             <div
               aria-label="Show POS header"
@@ -2219,7 +2235,7 @@ function App() {
           )}
 
           <div
-            className={isApplicationsView || isFaceTrackView ? "app-top-chrome applications-hidden-chrome" : isPosView ? `pos-top-chrome ${isPosChromeRevealed ? "is-revealed" : ""}` : "app-top-chrome"}
+            className={isApplicationsView || isFaceTrackView || isMarketingView ? "app-top-chrome applications-hidden-chrome" : isPosView ? `pos-top-chrome ${isPosChromeRevealed ? "is-revealed" : ""}` : "app-top-chrome"}
             {...posChromeHandlers}
           >
             <header className="topbar" id={isPosView ? "pos-system-chrome" : undefined}>
@@ -2313,7 +2329,7 @@ function App() {
             </header>
           </div>
 
-        <section className="content-area">
+        <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""}`}>
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
           {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
@@ -2507,14 +2523,19 @@ function App() {
             />
           )}
           {activeModule === "sms" && (
-            <MarketingModule
+            <MarketingWorkspace
+              clients={scopedClients}
               templates={smsTemplates}
               campaigns={campaigns}
               settings={settings}
               openModal={openModal}
+              onOpenGlobalNavigation={() => setIsSidebarDrawerOpen(true)}
+              saveCampaign={saveCampaign}
               sendCampaign={sendCampaign}
               sendingCampaignId={sendingCampaignId}
               globalSearch={globalSearch}
+              isLoading={isBooting}
+              notify={notify}
             />
           )}
           {activeModule === "staff" && (
@@ -9744,49 +9765,6 @@ function toDateTimeLocalValue(value) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function MarketingModule({ templates, campaigns, settings, openModal, sendCampaign, sendingCampaignId, globalSearch }) {
-  return (
-    <section className="module-grid two">
-      <div className="surface-panel wide">
-        <SectionHeader icon={MessageSquareText} title="SMS Marketing and Reminders" action={`${settings.smsCredits} credits`} />
-        <SmartTable
-          rows={campaigns}
-          globalSearch={globalSearch}
-          columns={[
-            { key: "name", label: "Campaign" },
-            { key: "segment", label: "Segment" },
-            { key: "channel", label: "Channel" },
-            { key: "sent", label: "Sent" },
-            { key: "booked", label: "Booked" },
-            { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-            {
-              key: "actions",
-              label: "Actions",
-              render: (row) => (
-                <div className="inline-actions">
-                  <button type="button" onClick={() => sendCampaign(row.id)} disabled={sendingCampaignId === row.id}>
-                    <Send size={15} /> {sendingCampaignId === row.id ? "Sending..." : "Send"}
-                  </button>
-                  <button type="button" onClick={() => openModal("campaign", row)}><Edit3 size={15} /> Edit</button>
-                </div>
-              ),
-              exportValue: () => "",
-            },
-          ]}
-        />
-      </div>
-      <div className="surface-panel">
-        <SectionHeader icon={BookOpen} title="Template Library" action={`${templates.length} active`} />
-        <div className="message-list">
-          {templates.map((template) => (
-            <MessageItem key={template.id} title={template.name} copy={template.text} />
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 const attendanceActionLabels = {
   CLOCK_IN: "Time in",
   BREAK_START: "Start break",
@@ -11302,7 +11280,7 @@ function ModalHost({
       fields: [
         field("name", "Campaign name"),
         field("segment", "Segment", "select", ["Birthday month", "Last visit date", "Service category", "VIP", "Inactive clients", "New clients", "Package holders"]),
-        field("channel", "Channel", "select", ["SMS", "Email", "Email-ready"]),
+        field("channel", "Channel", "select", ["Email", "SMS", "Email + SMS"]),
         field("templateId", "Template", "select", templateOptions),
         field("subject", "Email subject"),
         field("message", "Message", "textarea", null, "span-2"),
