@@ -80,6 +80,7 @@ import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
 import MarketingWorkspace from "./marketing/MarketingWorkspace.jsx";
+import FlipbooksWorkspace, { PublicFlipbookViewer } from "./flipbooks/FlipbooksWorkspace.jsx";
 import {
   hashRouteSegments,
   isLegacySmsHash,
@@ -620,7 +621,18 @@ function moduleFromPath(pathname) {
   const path = normalizedPathname(pathname);
   if (path === "/pos") return "pos";
   if (path === "/attendance" || path === "/attendance/kiosk") return "facetrack-attendance";
+  if (path === "/flipbooks" || path.startsWith("/flipbooks/")) return "flipbooks";
   return "";
+}
+
+function publicFlipbookTokenFromPath(pathname) {
+  const match = normalizedPathname(pathname).match(/^\/flipbook\/view\/([^/]+)$/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return "";
+  }
 }
 
 function downloadCsv(filename, rows, columns) {
@@ -731,7 +743,9 @@ function App() {
   const isApplicationsView = activeModule === "applications";
   const isFaceTrackView = activeModule === "facetrack-attendance";
   const isMarketingView = activeModule === "sms";
+  const isFlipbooksView = activeModule === "flipbooks";
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
+  const publicFlipbookToken = typeof window === "undefined" ? "" : publicFlipbookTokenFromPath(window.location.pathname);
   const publicFormMode = typeof window !== "undefined" && (
     normalizedPathname(window.location.pathname) === "/book"
     || window.location.hash.toLowerCase() === "#/book"
@@ -975,6 +989,10 @@ function App() {
           ? "/pos"
           : nextModule === "facetrack-attendance"
             ? "/attendance"
+            : nextModule === "flipbooks"
+              ? (normalizedPathname(window.location.pathname).startsWith("/flipbooks")
+                ? `${window.location.pathname}${window.location.search}`
+                : "/flipbooks")
             : nextModule === "sms"
               ? `/${marketingHash()}`
               : `/#/${nextModule}`;
@@ -1045,11 +1063,12 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isPublicFormView) return;
+    if (publicFlipbookToken) return;
     if (moduleFromPath(window.location.pathname)) return;
     if (!moduleFromHash(window.location.hash)) {
       setActiveModule(activeModule, { replace: true, keepDrawerOpen: true });
     }
-  }, [activeModule, isPublicFormView, setActiveModule]);
+  }, [activeModule, isPublicFormView, publicFlipbookToken, setActiveModule]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsBooting(false), 350);
@@ -2119,6 +2138,10 @@ function App() {
     return <PublicLeadCapturePage initialMode={publicFormMode} />;
   }
 
+  if (publicFlipbookToken) {
+    return <PublicFlipbookViewer token={publicFlipbookToken} />;
+  }
+
   if (authChecking) {
     return (
       <main className="login-page">
@@ -2329,7 +2352,7 @@ function App() {
             </header>
           </div>
 
-        <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""}`}>
+        <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""} ${isFlipbooksView ? "flipbooks-content-area" : ""}`}>
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
           {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
@@ -2537,6 +2560,9 @@ function App() {
               isLoading={isBooting}
               notify={notify}
             />
+          )}
+          {activeModule === "flipbooks" && (
+            <FlipbooksWorkspace notify={notify} session={session} />
           )}
           {activeModule === "staff" && (
             <StaffModule

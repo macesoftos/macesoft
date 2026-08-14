@@ -18,6 +18,7 @@ export const sidebarModules = [
   { id: "expenses", label: "Expenses", table: "Expense", phase: "finance", section: "Inventory & Finance" },
   { id: "reports", label: "Reports", table: null, phase: "insights", section: "Inventory & Finance" },
   { id: "sms", label: "Marketing", table: "MarketingCampaign", phase: "growth", section: "Marketing" },
+  { id: "flipbooks", label: "Flipbooks", table: "Flipbook", phase: "growth", section: "Marketing" },
   { id: "settings", label: "Settings", table: null, phase: "admin", section: "System" },
   { id: "support", label: "Support", table: null, phase: "support", section: "Support" },
 ];

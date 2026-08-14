@@ -24,6 +24,11 @@ test("only explicitly public API methods and paths bypass session authentication
   assert.equal(isPublicApiRequest("POST", "/api/public-leads"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public-leads"), false);
   assert.equal(isPublicApiRequest("POST", "/api/public-bookings"), true);
+  assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123"), true);
+  assert.equal(isPublicApiRequest("POST", "/api/public/flipbooks/token-123/access"), true);
+  assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123/file"), true);
+  assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123/logo"), true);
+  assert.equal(isPublicApiRequest("PATCH", "/api/public/flipbooks/token-123"), false);
   assert.equal(isPublicApiRequest("POST", "/api/facetrack-attendance/kiosk/clock"), true);
   assert.equal(isPublicApiRequest("POST", "/api/facetrack-attendance/kiosks"), false);
   assert.equal(isPublicApiRequest("GET", "/api/bootstrap"), false);
@@ -58,6 +63,7 @@ test("protected API families resolve to their required workspace modules", () =>
   assert.equal(requiredModuleForApiRequest("/api/pos/checkout"), "pos");
   assert.equal(requiredModuleForApiRequest("/api/rooms/room-1"), "room-view");
   assert.equal(requiredModuleForApiRequest("/api/treatments/treatment-1/photos"), "treatments");
+  assert.equal(requiredModuleForApiRequest("/api/flipbooks/book-1/publish"), "flipbooks");
   assert.equal(requiredModuleForApiRequest("/api/auth/session"), "");
   assert.equal(requiredModuleForApiRequest("/api/resources/clients"), "");
 });

@@ -156,6 +156,26 @@ export function uploadImageAsset(dataUrl, category, branch) {
   });
 }
 
+async function requestPublicJson(path, options = {}) {
+  const { accessToken = "", viewerId = "", headers = {}, ...fetchOptions } = options;
+  const response = await fetch(`${apiBase}${path}`, {
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { "X-Flipbook-Access": accessToken } : {}),
+      ...(viewerId ? { "X-Flipbook-Viewer": viewerId } : {}),
+      ...headers,
+    },
+    ...fetchOptions,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = Object.assign(new Error(payload?.error || "This flipbook is not available."), { status: response.status });
+    throw error;
+  }
+  return payload;
+}
+
 export function uploadTreatmentPhoto(treatmentId, dataUrl, kind) {
   return requestJson(`/api/treatments/${encodeURIComponent(treatmentId)}/photos`, {
     method: "POST",
@@ -167,6 +187,106 @@ export function deleteTreatmentPhoto(treatmentId, photoId) {
   return requestJson(`/api/treatments/${encodeURIComponent(treatmentId)}/photos/${encodeURIComponent(photoId)}`, {
     method: "DELETE",
   });
+}
+
+export function listFlipbooks() {
+  return requestJson("/api/flipbooks");
+}
+
+export function getFlipbook(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}`);
+}
+
+export function uploadFlipbookPdf(file, { title, description, pageCount }, onProgress = (_value) => {}) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${apiBase}/api/flipbooks`);
+    request.withCredentials = true;
+    request.responseType = "json";
+    request.setRequestHeader("Content-Type", "application/pdf");
+    request.setRequestHeader("X-Mace-Request", "app");
+    request.setRequestHeader("X-Flipbook-Title", encodeURIComponent(title));
+    request.setRequestHeader("X-Flipbook-Description", encodeURIComponent(description || ""));
+    request.setRequestHeader("X-Flipbook-Pages", String(pageCount));
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    request.addEventListener("load", () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve(request.response);
+        return;
+      }
+      reject(new Error(request.response?.error || "The PDF could not be uploaded."));
+    });
+    request.addEventListener("error", () => reject(new Error("The PDF upload was interrupted.")));
+    request.addEventListener("abort", () => reject(new Error("The PDF upload was cancelled.")));
+    request.send(file);
+  });
+}
+
+export function updateFlipbook(id, values) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(values) });
+}
+
+export function publishFlipbook(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}/publish`, { method: "POST", body: "{}" });
+}
+
+export function unpublishFlipbook(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}/unpublish`, { method: "POST", body: "{}" });
+}
+
+export function duplicateFlipbook(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}/duplicate`, { method: "POST", body: "{}" });
+}
+
+export function deleteFlipbook(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function loadFlipbookLinks() {
+  return requestJson("/api/flipbooks/shared");
+}
+
+export function loadFlipbookAnalytics() {
+  return requestJson("/api/flipbooks/analytics");
+}
+
+export function loadFlipbookSettings() {
+  return requestJson("/api/flipbooks/settings");
+}
+
+export function saveFlipbookSettings(values) {
+  return requestJson("/api/flipbooks/settings", { method: "PUT", body: JSON.stringify(values) });
+}
+
+export function loadPublicFlipbook(token, accessToken, viewerId) {
+  return requestPublicJson(`/api/public/flipbooks/${encodeURIComponent(token)}`, { accessToken, viewerId });
+}
+
+export function unlockPublicFlipbook(token, password) {
+  return requestPublicJson(`/api/public/flipbooks/${encodeURIComponent(token)}/access`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export async function downloadPublicFlipbook(token, accessToken, title = "flipbook") {
+  const response = await fetch(`/api/public/flipbooks/${encodeURIComponent(token)}/file?download=1`, {
+    cache: "no-store",
+    headers: accessToken ? { "X-Flipbook-Access": accessToken } : {},
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error || "The PDF could not be downloaded.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${String(title).replace(/[^a-z0-9 _.-]+/gi, "").trim() || "flipbook"}.pdf`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function recordAttendance(type, note = "") {
