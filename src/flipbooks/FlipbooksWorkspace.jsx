@@ -149,10 +149,11 @@ function LoadingState({ label = "Loading flipbook…" }) {
   );
 }
 
-function PdfPageCanvas({ document, pageNumber, thumbnail = false }) {
+function PdfPageCanvas({ document, pageNumber, thumbnail = false, aspectRatio = 0.77 }) {
   const canvasRef = useRef(null);
   const hostRef = useRef(null);
   const [visible, setVisible] = useState(!thumbnail);
+  const [rendering, setRendering] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -171,6 +172,8 @@ function PdfPageCanvas({ document, pageNumber, thumbnail = false }) {
     if (!document || !visible || !canvasRef.current) return undefined;
     let cancelled = false;
     let renderTask;
+    setRendering(true);
+    setError("");
     void document.getPage(pageNumber).then((page) => {
       if (cancelled || !canvasRef.current) return;
       const viewport = page.getViewport({ scale: thumbnail ? 0.28 : 1.55 });
@@ -180,6 +183,7 @@ function PdfPageCanvas({ document, pageNumber, thumbnail = false }) {
       canvas.width = Math.floor(viewport.width * ratio);
       canvas.height = Math.floor(viewport.height * ratio);
       canvas.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
+      if (hostRef.current) hostRef.current.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
       renderTask = page.render({
         canvasContext: context,
         viewport,
@@ -187,9 +191,12 @@ function PdfPageCanvas({ document, pageNumber, thumbnail = false }) {
       });
       return renderTask.promise;
     }).then(() => {
-      if (!cancelled) setError("");
+      if (!cancelled) setRendering(false);
     }).catch((renderError) => {
-      if (!cancelled && renderError?.name !== "RenderingCancelledException") setError("Page unavailable");
+      if (!cancelled && renderError?.name !== "RenderingCancelledException") {
+        setRendering(false);
+        setError("Page unavailable");
+      }
     });
     return () => {
       cancelled = true;
@@ -198,8 +205,12 @@ function PdfPageCanvas({ document, pageNumber, thumbnail = false }) {
   }, [document, pageNumber, thumbnail, visible]);
 
   return (
-    <div className={`pdf-page-canvas ${thumbnail ? "is-thumbnail" : ""}`} ref={hostRef}>
-      {!visible && <span className="pdf-page-placeholder" />}
+    <div
+      className={`pdf-page-canvas ${thumbnail ? "is-thumbnail" : ""}`}
+      ref={hostRef}
+      style={{ aspectRatio: `${aspectRatio} / 1` }}
+    >
+      {(!visible || rendering) && <span className="pdf-page-placeholder" />}
       <canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} />
       {error && <small>{error}</small>}
     </div>
@@ -243,24 +254,57 @@ function FlipbookReader({
   const singlePage = useMedia("(max-width: 760px)");
   const [page, setPage] = useState(1);
   const [zoom, setZoom] = useState(1);
+  const [pageAspectRatio, setPageAspectRatio] = useState(0.77);
   const [thumbnailsOpen, setThumbnailsOpen] = useState(showThumbnails);
   const [turn, setTurn] = useState("");
   const readerRef = useRef(null);
   const canvasScrollRef = useRef(null);
   const touchRef = useRef(null);
+  const turnFrameRef = useRef(null);
+  const turnTimerRef = useRef(null);
   const effectivePages = document?.numPages || pageCount || 1;
   const step = singlePage ? 1 : 2;
   const visiblePages = singlePage ? [page] : [page, page + 1].filter((number) => number <= effectivePages);
 
   useEffect(() => {
-    setPage((current) => Math.min(current, effectivePages));
-  }, [effectivePages]);
+    setPage((current) => {
+      const boundedPage = Math.min(current, effectivePages);
+      if (singlePage || boundedPage <= 1) return boundedPage;
+      return boundedPage % 2 === 0 ? boundedPage - 1 : boundedPage;
+    });
+  }, [effectivePages, singlePage]);
+
+  useEffect(() => {
+    if (!document) return undefined;
+    let cancelled = false;
+    void document.getPage(1).then((firstPage) => {
+      const viewport = firstPage.getViewport({ scale: 1 });
+      if (!cancelled && viewport.height > 0) setPageAspectRatio(viewport.width / viewport.height);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [document]);
+
+  useEffect(() => () => {
+    if (turnFrameRef.current) window.cancelAnimationFrame(turnFrameRef.current);
+    if (turnTimerRef.current) window.clearTimeout(turnTimerRef.current);
+  }, []);
 
   const move = useCallback((direction) => {
-    setTurn(direction > 0 ? "next" : "previous");
-    setPage((current) => Math.max(1, Math.min(effectivePages, current + direction * step)));
-    window.setTimeout(() => setTurn(""), 260);
-  }, [effectivePages, step]);
+    const nextPage = Math.max(1, Math.min(effectivePages, page + direction * step));
+    if (nextPage === page) return;
+
+    if (turnFrameRef.current) window.cancelAnimationFrame(turnFrameRef.current);
+    if (turnTimerRef.current) window.clearTimeout(turnTimerRef.current);
+    setTurn("");
+    setPage(nextPage);
+    turnFrameRef.current = window.requestAnimationFrame(() => {
+      canvasScrollRef.current?.scrollTo({ top: 0, left: 0 });
+      setTurn(direction > 0 ? "next" : "previous");
+      turnTimerRef.current = window.setTimeout(() => setTurn(""), 190);
+    });
+  }, [effectivePages, page, step]);
 
   useEffect(() => {
     const keyboard = (event) => {
@@ -278,7 +322,7 @@ function FlipbookReader({
   }
 
   function updateZoom(nextValue) {
-    const nextZoom = Math.min(1.8, Math.max(0.7, Number(nextValue.toFixed(1))));
+    const nextZoom = Math.min(1.8, Math.max(0.5, Number(nextValue.toFixed(1))));
     if (nextZoom === zoom) return;
     const scroller = canvasScrollRef.current;
     const centerX = scroller ? scroller.scrollLeft + scroller.clientWidth / 2 : 0;
@@ -293,9 +337,19 @@ function FlipbookReader({
   }
 
   function fitPages() {
-    setZoom(1);
+    const scroller = canvasScrollRef.current;
+    if (!scroller) return;
+    const styles = window.getComputedStyle(scroller);
+    const horizontalPadding = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
+    const verticalPadding = Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom);
+    const availableWidth = Math.max(1, scroller.clientWidth - horizontalPadding);
+    const availableHeight = Math.max(1, scroller.clientHeight - verticalPadding);
+    const spreadAspectRatio = pageAspectRatio * (singlePage ? 1 : 2);
+    const heightAtFullWidth = availableWidth / spreadAspectRatio;
+    const fittedZoom = Math.min(1, availableHeight / heightAtFullWidth);
+    setZoom(Math.max(0.5, Number(fittedZoom.toFixed(2))));
     window.requestAnimationFrame(() => {
-      canvasScrollRef.current?.scrollTo({ top: 0, left: 0 });
+      scroller.scrollTo({ top: 0, left: 0 });
     });
   }
 
@@ -327,7 +381,7 @@ function FlipbookReader({
           </button>
         )}
         <span className="flipbook-zoom-value">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => updateZoom(zoom - 0.1)} disabled={zoom <= 0.7} aria-label="Zoom out" title="Zoom out"><ZoomOut size={17} /></button>
+        <button type="button" onClick={() => updateZoom(zoom - 0.1)} disabled={zoom <= 0.5} aria-label="Zoom out" title="Zoom out"><ZoomOut size={17} /></button>
         <button type="button" onClick={() => updateZoom(zoom + 0.1)} disabled={zoom >= 1.8} aria-label="Zoom in" title="Zoom in"><ZoomIn size={17} /></button>
         <button type="button" onClick={fitPages} aria-label="Fit pages to viewer">Fit</button>
         <button type="button" onClick={enterFullscreen} aria-label="Fullscreen"><Fullscreen size={17} /></button>
@@ -341,7 +395,7 @@ function FlipbookReader({
                 className={visiblePages.includes(number) ? "active" : ""}
                 type="button"
                 key={number}
-                onClick={() => setPage(singlePage ? number : Math.max(1, number % 2 === 0 ? number : number - 1))}
+                onClick={() => setPage(singlePage || number <= 1 ? number : number % 2 === 0 ? number - 1 : number)}
               >
                 <PdfPageCanvas document={document} pageNumber={number} thumbnail />
                 <span>{number}</span>
@@ -364,10 +418,12 @@ function FlipbookReader({
               <button className="flipbook-page-arrow previous" type="button" onClick={() => move(-1)} disabled={page <= 1} aria-label="Previous page"><ChevronLeft size={24} /></button>
               <div
                 className={`flipbook-pages turn-${turn}`}
-                style={{ width: `${Math.round(zoom * 100)}%`, maxWidth: `${Math.round(1080 * zoom)}px` }}
+                style={{ width: `${Math.round(zoom * 100)}%` }}
                 aria-label={`${title}, ${rangeLabel}`}
               >
-                {visiblePages.map((number) => <PdfPageCanvas document={document} pageNumber={number} key={number} />)}
+                {visiblePages.map((number) => (
+                  <PdfPageCanvas document={document} pageNumber={number} aspectRatio={pageAspectRatio} key={number} />
+                ))}
               </div>
               <button className="flipbook-page-arrow next" type="button" onClick={() => move(1)} disabled={page + step > effectivePages} aria-label="Next page"><ChevronRight size={24} /></button>
             </>
