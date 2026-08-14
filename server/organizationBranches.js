@@ -16,6 +16,7 @@ const branchReferenceFields = Object.freeze([
   ["lead", "assignedBranch"],
   ["expense", "branch"],
   ["uploadAsset", "branch"],
+  ["marketingCampaign", "branch"],
 ]);
 
 function parseBranchList(value) {

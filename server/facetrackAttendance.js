@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, 
 import express from "express";
 
 import { ORGANIZATION_MANAGER_ROLES } from "../src/organizationRoles.js";
-import { accountMatchesStaffIdentity } from "./accessControl.js";
+import { accountMatchesStaffIdentity, hasOrganizationWideAccess } from "./accessControl.js";
 
 const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Branch Manager"]);
 const MODULE_ID = "facetrack-attendance";
@@ -315,17 +315,18 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const account = requireAccount(request);
     const policy = await policyFor(prisma);
     const admin = ADMIN_ROLES.has(account.role);
+    const organizationWide = hasOrganizationWideAccess(account);
     const personalStaff = admin ? null : await matchingStaffForAccount(prisma, account);
     if (!admin && !personalStaff) throw apiError("This account is not linked to its matching employee profile.", 409);
     const personalStaffId = personalStaff?.id;
-    const branchWhere = admin && account.branch !== "All branches" ? { branch: account.branch } : {};
+    const branchWhere = admin && !organizationWide ? { branch: account.branch } : {};
     const recordWhere = admin ? branchWhere : { staffId: personalStaffId };
     const requestWhere = admin ? { attendanceRecord: branchWhere } : { requestedById: account.id };
     const [records, requests, staff, profiles, auditEntries] = await Promise.all([
       prisma.faceTrackAttendanceRecord.findMany({ where: recordWhere, include: { staff: true, correctionRequests: { orderBy: { createdAt: "desc" } } }, orderBy: { workDate: "desc" }, take: 150 }),
       prisma.faceTrackCorrectionRequest.findMany({ where: requestWhere, include: { attendanceRecord: { include: { staff: true } }, requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
-      admin ? prisma.staffMember.findMany({ where: account.branch !== "All branches" ? { branch: account.branch } : {}, orderBy: { name: "asc" } }) : Promise.resolve([]),
-      admin ? prisma.faceTrackProfile.findMany({ where: { active: true, staff: account.branch !== "All branches" ? { branch: account.branch } : {} }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }) : prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
+      admin ? prisma.staffMember.findMany({ where: organizationWide ? {} : { branch: account.branch }, orderBy: { name: "asc" } }) : Promise.resolve([]),
+      admin ? prisma.faceTrackProfile.findMany({ where: { active: true, staff: organizationWide ? {} : { branch: account.branch } }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }) : prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
       admin ? prisma.faceTrackAuditEntry.findMany({ where: { attendanceRecord: branchWhere }, include: { attendanceRecord: { include: { staff: { select: { name: true } } } } }, orderBy: { createdAt: "desc" }, take: 250 }) : Promise.resolve([]),
     ]);
     const today = zonedWorkDate(new Date(), policy.timezone);
@@ -370,7 +371,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const descriptor = averageDescriptors(request.body?.descriptors);
     const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
     if (!staff) throw apiError("Employee profile was not found.", 404);
-    if (account.branch !== "All branches" && staff.branch !== account.branch) throw apiError("You cannot enroll an employee from another branch.", 403);
+    if (!hasOrganizationWideAccess(account) && staff.branch !== account.branch) throw apiError("You cannot enroll an employee from another branch.", 403);
     const profile = await prisma.$transaction(async (tx) => {
       await consumeChallenge(tx, account.id, request.body?.challengeId, "ENROLL");
       return tx.faceTrackProfile.upsert({
@@ -434,7 +435,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
   router.get("/kiosks", asyncRoute(async (request, response) => {
     const admin = requireAdmin(request);
     const devices = await prisma.faceTrackKioskDevice.findMany({
-      where: admin.branch === "All branches" ? {} : { branch: admin.branch },
+      where: hasOrganizationWideAccess(admin) ? {} : { branch: admin.branch },
       orderBy: { createdAt: "desc" },
       select: { id: true, name: true, branch: true, active: true, lastSeenAt: true, createdByName: true, createdAt: true, updatedAt: true },
     });
@@ -448,7 +449,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const pin = clean(request.body?.pin);
     if (name.length < 3 || name.length > 80) throw apiError("Enter a kiosk name between 3 and 80 characters.");
     if (!branch || branch === "All branches") throw apiError("Assign the kiosk to one clinic branch.");
-    if (admin.branch !== "All branches" && branch !== admin.branch) throw apiError("You can only register a kiosk for your branch.", 403);
+    if (!hasOrganizationWideAccess(admin) && branch !== admin.branch) throw apiError("You can only register a kiosk for your branch.", 403);
     if (!/^\d{6}$/.test(pin)) throw apiError("Create a 6-digit administrator PIN for this kiosk.");
     const branchStaff = await prisma.staffMember.count({ where: { branch } });
     if (!branchStaff) throw apiError("The selected branch does not have any employees.", 409);
@@ -477,7 +478,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const admin = requireAdmin(request);
     const device = await prisma.faceTrackKioskDevice.findUnique({ where: { id: request.params.id } });
     if (!device) throw apiError("Kiosk device was not found.", 404);
-    if (admin.branch !== "All branches" && device.branch !== admin.branch) throw apiError("You cannot manage another branch's kiosk.", 403);
+    if (!hasOrganizationWideAccess(admin) && device.branch !== admin.branch) throw apiError("You cannot manage another branch's kiosk.", 403);
     await prisma.faceTrackKioskDevice.update({ where: { id: device.id }, data: { active: false } });
     response.status(204).end();
   }));
@@ -599,7 +600,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const correction = await prisma.$transaction(async (tx) => {
       const current = await tx.faceTrackCorrectionRequest.findUnique({ where: { id: request.params.id }, include: { attendanceRecord: true } });
       if (!current || current.status !== "PENDING") throw apiError("This correction request is no longer pending.", 409);
-      if (admin.branch !== "All branches" && current.attendanceRecord.branch !== admin.branch) throw apiError("You cannot review another branch’s request.", 403);
+      if (!hasOrganizationWideAccess(admin) && current.attendanceRecord.branch !== admin.branch) throw apiError("You cannot review another branch’s request.", 403);
       if (current.requestedById === admin.id) throw apiError("You cannot approve your own correction request.", 403);
       const now = new Date();
       let finalRecord = current.attendanceRecord;
@@ -639,7 +640,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     if (!["APPROVED", "REJECTED"].includes(status)) throw apiError("Choose Approved or Rejected.");
     const current = await prisma.faceTrackAttendanceRecord.findUnique({ where: { id: request.params.id } });
     if (!current) throw apiError("Attendance record was not found.", 404);
-    if (admin.branch !== "All branches" && current.branch !== admin.branch) throw apiError("You cannot review another branch’s overtime.", 403);
+    if (!hasOrganizationWideAccess(admin) && current.branch !== admin.branch) throw apiError("You cannot review another branch’s overtime.", 403);
     const approvedMinutes = status === "APPROVED" ? Math.max(0, Math.min(current.calculatedOvertimeMinutes, Number(request.body?.approvedMinutes ?? current.calculatedOvertimeMinutes))) : 0;
     const record = await prisma.$transaction(async (tx) => {
       const updated = await tx.faceTrackAttendanceRecord.update({ where: { id: current.id }, data: { overtimeStatus: status, approvedOvertimeMinutes: approvedMinutes } });
@@ -654,7 +655,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
     if (request.body?.confirm !== true) throw apiError("Confirm biometric profile deletion.");
     const profile = await prisma.faceTrackProfile.findUnique({ where: { staffId: request.params.staffId }, include: { staff: true } });
     if (!profile) throw apiError("Face profile was not found.", 404);
-    if (admin.branch !== "All branches" && profile.staff.branch !== admin.branch) throw apiError("You cannot remove another branch’s face profile.", 403);
+    if (!hasOrganizationWideAccess(admin) && profile.staff.branch !== admin.branch) throw apiError("You cannot remove another branch’s face profile.", 403);
     await prisma.faceTrackProfile.delete({ where: { id: profile.id } });
     response.status(204).end();
   }));

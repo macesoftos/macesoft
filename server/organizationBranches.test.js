@@ -44,6 +44,7 @@ test("renaming a branch migrates every direct assignment and service list", asyn
     lead: model("lead"),
     expense: model("expense"),
     uploadAsset: model("uploadAsset"),
+    marketingCampaign: model("marketingCampaign"),
     service: {
       findMany: async () => [
         { id: "svc-1", branches: JSON.stringify(["Mace Cebu", "Mace Davao"]) },
@@ -55,7 +56,7 @@ test("renaming a branch migrates every direct assignment and service list", asyn
 
   await renameBranchReferences(database, "Mace Cebu", "Mace Makati");
 
-  assert.equal(calls.filter((call) => call.method === "updateMany").length, 17);
+  assert.equal(calls.filter((call) => call.method === "updateMany").length, 18);
   assert.deepEqual(calls.find((call) => call.name === "client").args, {
     where: { branch: "Mace Cebu" },
     data: { branch: "Mace Makati" },

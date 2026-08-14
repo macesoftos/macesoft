@@ -837,6 +837,7 @@ model SmsTemplate {
 model MarketingCampaign {
   id         String    @id @default(cuid())
   name       String
+  branch     String    @default("All branches")
   segment    String
   channel    String
   templateId String    @default("")
@@ -853,6 +854,7 @@ model MarketingCampaign {
   updatedAt  DateTime  @updatedAt
 
   @@index([deletedAt])
+  @@index([branch])
 }
 
 model Expense {

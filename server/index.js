@@ -29,6 +29,8 @@ import {
   canAccessBranch,
   canMutateBranch,
   filterServiceBranches,
+  hasOrganizationWideAccess,
+  hasValidBranchAssignment,
   isAllBranches,
   isPublicApiRequest,
   moduleAllowed,
@@ -1175,6 +1177,7 @@ function normalizeSmsTemplatePayload(payload, existingId = "") {
 function normalizeCampaignPayload(payload, existingId = "") {
   const data = {
     name: requireText(payload.name, "Campaign name"),
+    branch: requireText(payload.branch, "Campaign branch"),
     segment: requireText(payload.segment, "Campaign segment"),
     channel: requireText(payload.channel, "Campaign channel"),
     templateId: clean(payload.templateId),
@@ -1528,6 +1531,7 @@ const resourceConfigs = {
     label: (record) => record.name,
     orderBy: [{ updatedAt: "desc" }],
     normalize: normalizeCampaignPayload,
+    branchField: "branch",
   },
   transactions: {
     delegate: "sale",
@@ -1572,7 +1576,7 @@ async function listResource(resource, actor = null) {
   const config = configForResource(resource);
   if (actor && !moduleAllowed(actor, config.module, roleAccess)) return [];
   let where = {};
-  if (actor && !isAllBranches(actor.branch)) {
+  if (actor) {
     if (config.branchField) where = branchWhere(actor, config.branchField);
     if (config.clientBranch) {
       where = { clientRecord: { is: branchWhere(actor) } };
@@ -1608,7 +1612,7 @@ async function resourceBranch(config, record) {
 }
 
 function assertServiceBranchChangeAllowed(actor, config, data) {
-  if (!config.serviceBranches || isAllBranches(actor.branch)) return;
+  if (!config.serviceBranches || hasOrganizationWideAccess(actor)) return;
   const branches = parseJsonList(data.branches);
   if (branches.some((branch) => branch !== actor.branch)) {
     throw apiError("You can only manage services assigned exclusively to your branch.", 403);
@@ -2599,7 +2603,7 @@ async function buildBootstrapPayload(actor) {
     listResource("auditLogs", actor),
     listResource("inventoryMovements", actor),
     prisma.branch.findMany({
-      where: isAllBranches(actor.branch) ? {} : { name: actor.branch },
+      where: hasOrganizationWideAccess(actor) ? {} : { name: actor.branch },
       orderBy: [{ name: "asc" }],
       include: { rooms: true },
     }),
@@ -2607,7 +2611,7 @@ async function buildBootstrapPayload(actor) {
     moduleAllowed(actor, "leads", roleAccess) ? listLeadIntegrations() : [],
     moduleAllowed(actor, "leads", roleAccess)
       ? prisma.webhookEvent.findMany({
-        where: isAllBranches(actor.branch) ? {} : { lead: { is: { branch: actor.branch } } },
+        where: hasOrganizationWideAccess(actor) ? {} : { lead: { is: { branch: actor.branch } } },
         orderBy: [{ receivedAt: "desc" }],
         take: 50,
       })
@@ -2819,7 +2823,7 @@ function publicAccount(account) {
     mustChangePassword: safeAccount.mustChangePassword,
     access: {
       active: account.status === "Active" && modules.length > 0,
-      branchScoped: !isAllBranches(account.branch),
+      branchScoped: !hasOrganizationWideAccess(account),
       modules,
     },
   };
@@ -2848,7 +2852,7 @@ async function accountFromSession(request) {
     where: { tokenHash: sessionTokenHash(token) },
     include: { account: { include: { staff: true } } },
   });
-  if (!session || session.expiresAt <= new Date() || session.account.status !== "Active" || !clean(session.account.branch)) {
+  if (!session || session.expiresAt <= new Date() || session.account.status !== "Active" || !hasValidBranchAssignment(session.account)) {
     if (session) await prisma.authSession.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
@@ -2883,6 +2887,17 @@ function invitationRole(value, actor) {
     throw apiError("Only a Business Owner can invite another Business Owner.", 403);
   }
   return role;
+}
+
+async function invitationBranch(value, role) {
+  if (canManageOrganization(role)) return "All branches";
+  const branch = requireText(value, "Branch");
+  if (isAllBranches(branch)) {
+    throw apiError("Choose one clinic branch for this role.");
+  }
+  const existing = await prisma.branch.findUnique({ where: { name: branch }, select: { id: true } });
+  if (!existing) throw apiError("Choose an active clinic branch.");
+  return branch;
 }
 
 function publicInvitation(invitation) {
@@ -2974,10 +2989,6 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const account = await prisma.account.findUnique({ where: { email }, include: { staff: true } });
   const now = new Date();
 
-  if (account?.status === "Active" && !clean(account.branch)) {
-    throw apiError("This account does not have a branch assignment. Contact an administrator.", 403);
-  }
-
   if (!account || account.status !== "Active" || (account.lockedUntil && account.lockedUntil > now) || !verifyPassword(password, account.passwordHash)) {
     if (account) {
       const attempts = account.failedLoginCount + 1;
@@ -2990,6 +3001,14 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
       });
     }
     throw apiError("Incorrect email or password.", 401);
+  }
+
+  if (!hasValidBranchAssignment(account)) {
+    throw apiError("This account must be assigned to one clinic branch. Contact an administrator.", 403);
+  }
+  if (!hasOrganizationWideAccess(account)) {
+    const assignedBranch = await prisma.branch.findUnique({ where: { name: clean(account.branch) }, select: { id: true } });
+    if (!assignedBranch) throw apiError("This account is assigned to an inactive clinic branch. Contact an administrator.", 403);
   }
 
   const token = randomBytes(32).toString("base64url");
@@ -3114,6 +3133,7 @@ app.post("/api/invitations", asyncRoute(async (request, response) => {
   if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.");
   const name = requireText(request.body?.name, "Name");
   const role = invitationRole(request.body?.role, actor);
+  const branch = await invitationBranch(request.body?.branch, role);
   await expireInvitations();
   if (await prisma.account.findUnique({ where: { email } })) throw apiError("This user already belongs to the organization.", 409);
   if (await prisma.userInvitation.findFirst({ where: { email, status: "Pending", expiresAt: { gt: new Date() } } })) {
@@ -3125,7 +3145,7 @@ app.post("/api/invitations", asyncRoute(async (request, response) => {
     email,
     name,
     role,
-    branch: clean(request.body?.branch) || actor.branch || "All branches",
+    branch,
     department: clean(request.body?.department),
     specialty: clean(request.body?.specialty),
     message: clean(request.body?.message),
@@ -3149,6 +3169,7 @@ app.post("/api/invitations/:id/resend", asyncRoute(async (request, response) => 
   const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
   if (!current || !["Pending", "Expired", "Failed"].includes(current.status)) throw apiError("This invitation cannot be resent.", 409);
   if (isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) throw apiError("Only a Business Owner can resend a Business Owner invitation.", 403);
+  await invitationBranch(current.branch, current.role);
   const token = randomBytes(32).toString("base64url");
   let invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { tokenHash: sessionTokenHash(token), status: "Pending", expiresAt: new Date(Date.now() + invitationLifetimeMs), failedReason: "", revokedAt: null } });
   try {
@@ -3188,6 +3209,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
     await prisma.userInvitation.update({ where: { id: invitation.id }, data: { status: "Expired" } });
     throw apiError("This invitation has expired.", 410);
   }
+  await invitationBranch(invitation.branch, invitation.role);
   const result = await prisma.$transaction(async (tx) => {
     let account = await tx.account.findUnique({ where: { email: invitation.email } });
     if (account && !verifyPassword(password, account.passwordHash)) throw apiError("Use the password for the existing account.", 401);
@@ -3555,6 +3577,7 @@ async function branchDeletionBlockers(database, branchName) {
     ["gift certificates", database.giftCertificate.count({ where: { branch: branchName } })],
     ["leads", database.lead.count({ where: { OR: [{ branch: branchName }, { assignedBranch: branchName }] } })],
     ["expenses", database.expense.count({ where: { branch: branchName } })],
+    ["marketing campaigns", database.marketingCampaign.count({ where: { branch: branchName } })],
     ["uploaded assets", database.uploadAsset.count({ where: { branch: branchName, category: { not: "branch-photo" } } })],
   ];
   const [counts, services] = await Promise.all([
@@ -3853,7 +3876,7 @@ app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
 app.get("/api/leads/webhook-events", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "leads");
   const events = await prisma.webhookEvent.findMany({
-    where: isAllBranches(actor.branch) ? {} : { lead: { is: { branch: actor.branch } } },
+    where: hasOrganizationWideAccess(actor) ? {} : { lead: { is: { branch: actor.branch } } },
     orderBy: [{ receivedAt: "desc" }],
     take: 100,
   });
@@ -4888,10 +4911,10 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 }));
 
 app.delete("/api/marketing/campaigns/:id", asyncRoute(async (request, response) => {
-  assertMutationAllowed(request, "sms");
   const id = String(request.params.id);
   const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
   if (!existing) throw apiError("Campaign not found.", 404);
+  assertMutationAllowed(request, "sms", existing.branch);
   if (existing.deletedAt) throw apiError("Campaign is already in Deleted.", 409);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -4921,10 +4944,10 @@ app.get("/api/marketing/media", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, response) => {
-  assertMutationAllowed(request, "sms");
   const id = String(request.params.id);
   const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
   if (!existing) throw apiError("Campaign not found.", 404);
+  assertMutationAllowed(request, "sms", existing.branch);
   if (!existing.deletedAt) throw apiError("Campaign is not in Deleted.", 409);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -4944,10 +4967,10 @@ app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, resp
 }));
 
 app.delete("/api/marketing/campaigns/:id/permanent", asyncRoute(async (request, response) => {
-  assertMutationAllowed(request, "sms");
   const id = String(request.params.id);
   const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
   if (!existing) throw apiError("Campaign not found.", 404);
+  assertMutationAllowed(request, "sms", existing.branch);
   if (!existing.deletedAt) {
     throw apiError("Move this campaign to Deleted before deleting it forever.", 409);
   }
@@ -4971,10 +4994,13 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
   if (clean(campaign.id)) {
     const storedCampaign = await prisma.marketingCampaign.findUnique({
       where: { id: clean(campaign.id) },
-      select: { deletedAt: true },
+      select: { branch: true, deletedAt: true },
     });
     if (!storedCampaign) throw apiError("Campaign not found.", 404);
+    assertMutationAllowed(request, "sms", storedCampaign.branch);
     if (storedCampaign.deletedAt) throw apiError("Restore this campaign before sending it.", 409);
+  } else {
+    assertMutationAllowed(request, "sms", requireText(campaign.branch, "Campaign branch"));
   }
   const settings = await getPersistedSettings();
   const channel = marketingChannel(campaign);
