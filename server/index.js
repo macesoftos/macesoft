@@ -48,6 +48,11 @@ const allowedOrigins = clean(process.env.APP_ORIGIN)
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const inquiryEmbedFrameAncestors = [
+  "'self'",
+  "https://macebydrmace.com",
+  "https://www.macebydrmace.com",
+];
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -68,6 +73,22 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "same-origin" },
   referrerPolicy: { policy: "no-referrer" },
 }));
+app.use((request, response, next) => {
+  if (request.path !== "/inquire") return next();
+
+  response.removeHeader("X-Frame-Options");
+  response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+
+  const contentSecurityPolicy = String(response.getHeader("Content-Security-Policy") || "");
+  const directives = contentSecurityPolicy
+    .split(";")
+    .map((directive) => directive.trim())
+    .filter(Boolean)
+    .filter((directive) => !directive.toLowerCase().startsWith("frame-ancestors "));
+  directives.push(`frame-ancestors ${inquiryEmbedFrameAncestors.join(" ")}`);
+  response.setHeader("Content-Security-Policy", `${directives.join("; ")};`);
+  next();
+});
 app.use(cors({
   credentials: true,
   origin(origin, callback) {
