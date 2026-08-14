@@ -6645,10 +6645,10 @@ function AppointmentsModule({
   const calendarMonthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonth);
   const roomOptions = [...new Set(uniqueRoomsFromBranches().concat(appointments.map((item) => item.room)).filter(Boolean))];
   const appointmentPractitioners = staff.filter((person) => /doctor|nurse|aesthetician/i.test(person.role || ""));
-  const activePractitionerNames = new Set(appointmentPractitioners.map((person) => person.name));
-  const appointmentStaffLabel = (appointment) => activePractitionerNames.has(appointment.staff) ? appointment.staff : "Unassigned";
+  const knownStaffNames = new Set(staff.map((person) => person.name));
+  const appointmentStaffLabel = (appointment) => knownStaffNames.has(appointment.staff) ? appointment.staff : "Unassigned";
   const hasUnassignedAppointments = appointments.some((appointment) => appointmentStaffLabel(appointment) === "Unassigned");
-  const doctorOptions = [...new Set(appointmentPractitioners.map((person) => person.name))];
+  const doctorOptions = [...knownStaffNames];
   if (hasUnassignedAppointments) doctorOptions.push("Unassigned");
   const serviceOptions = [...new Set(services.map((service) => service.name).concat(appointments.map((item) => item.service)).filter(Boolean))];
   const branchOptions = [...new Set(
@@ -7090,7 +7090,7 @@ function AppointmentsModule({
 
       {contextMenu && <div className="appointment-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} role="menu"><button type="button" onClick={() => { setSelectedId(contextMenu.appointment.id); setContextMenu(null); }}><Eye size={15} /> View details</button><button type="button" onClick={() => openModal("appointment", contextMenu.appointment)}><Edit3 size={15} /> Edit appointment</button><button type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Checked In")}><UserCheck size={15} /> Check in</button><button type="button" onClick={() => openPayment(paymentDraftForAppointment(contextMenu.appointment))}><CreditCard size={15} /> Collect payment</button><button className="danger" type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button></div>}
 
-      <AppointmentDetailsDrawer appointment={selectedAppointment} staffLabel={selectedAppointment ? appointmentStaffLabel(selectedAppointment) : ""} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
+      <AppointmentDetailsDrawer appointment={selectedAppointment} staffLabel={selectedAppointment ? appointmentStaffLabel(selectedAppointment) : ""} staff={staff} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onAssign={(appointment, staffName) => onUpdateAppointment({ ...appointment, staff: staffName || "Any available" }, { silent: true })} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
 
       <div className="appointment-data-toggle"><button className="secondary-button" type="button" onClick={() => setShowDataTable((value) => !value)}><FileText size={16} /> {showDataTable ? "Hide data table" : "Show data table"}</button></div>
       {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${displayedRows.length} records`} /><SmartTable rows={displayedRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff", render: appointmentStaffLabel }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
@@ -7101,6 +7101,7 @@ function AppointmentsModule({
 function AppointmentDetailsDrawer({
   appointment,
   staffLabel,
+  staff = [],
   client,
   services,
   transactions,
@@ -7110,11 +7111,27 @@ function AppointmentDetailsDrawer({
   onClose,
   onEdit,
   onStatus,
+  onAssign,
   onPayment,
   onPrint,
   onReminder,
   onEmail,
 }) {
+  const [assignmentValue, setAssignmentValue] = useState("");
+  const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [assignmentFeedback, setAssignmentFeedback] = useState(null);
+
+  useEffect(() => {
+    const assignedStaff = String(appointment?.staff || "").trim();
+    const isKnownStaff = staff.some((person) => person.name === assignedStaff);
+    setAssignmentValue(isKnownStaff && !["", "Any available", "To assign", "Unassigned"].includes(assignedStaff) ? assignedStaff : "");
+  }, [appointment?.id, appointment?.staff, staff]);
+
+  useEffect(() => {
+    setAssignmentSaving(false);
+    setAssignmentFeedback(null);
+  }, [appointment?.id]);
+
   if (!appointment) return null;
   const service = serviceForAppointment(appointment, services);
   const payment = appointmentPaymentSummary(appointment, services, transactions);
@@ -7163,6 +7180,31 @@ function AppointmentDetailsDrawer({
       detail: log.details,
     })),
   ].filter((item) => item.title);
+  const assignmentOptions = staff
+    .filter((person) => person?.name)
+    .filter((person) => person.name === appointment.staff || !appointment.branch || !person.branch || person.branch === "All branches" || person.branch === appointment.branch)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  async function reassignAppointment(event) {
+    const nextStaff = event.target.value;
+    const previousStaff = assignmentValue;
+    setAssignmentValue(nextStaff);
+    setAssignmentSaving(true);
+    setAssignmentFeedback(null);
+
+    try {
+      await Promise.resolve(onAssign(appointment, nextStaff));
+      setAssignmentFeedback({
+        type: "success",
+        message: nextStaff ? `Assigned to ${nextStaff}.` : "Appointment is now unassigned.",
+      });
+    } catch (error) {
+      setAssignmentValue(previousStaff);
+      setAssignmentFeedback({ type: "error", message: error.message || "Unable to update the assigned staff." });
+    } finally {
+      setAssignmentSaving(false);
+    }
+  }
 
   return (
     <>
@@ -7205,7 +7247,28 @@ function AppointmentDetailsDrawer({
             </div>
           </div>
           <AppointmentDetailRow label="Branch and room" value={`${appointment.branch || "Branch not assigned"} · ${appointment.room || "Room not assigned"}`} />
-          <AppointmentDetailRow label="Doctor / Staff" value={staffLabel || "Not assigned"} />
+          {onAssign ? (
+            <div className="appointment-summary-assignment-row">
+              <span>Doctor / Staff</span>
+              <div>
+                <select aria-label="Reassign doctor or staff" value={assignmentValue} onChange={reassignAppointment} disabled={assignmentSaving}>
+                  <option value="">Unassigned</option>
+                  {assignmentOptions.map((person) => {
+                    const unavailable = /inactive|on leave|off duty|unavailable/i.test(person.status || "");
+                    return (
+                      <option key={person.id || person.name} value={person.name} disabled={unavailable && person.name !== assignmentValue}>
+                        {person.name}{person.role ? ` · ${person.role}` : ""}{unavailable ? ` · ${person.status}` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                {assignmentSaving && <small className="appointment-assignment-feedback">Saving assignment…</small>}
+                {!assignmentSaving && assignmentFeedback && <small className={`appointment-assignment-feedback ${assignmentFeedback.type}`}>{assignmentFeedback.message}</small>}
+              </div>
+            </div>
+          ) : (
+            <AppointmentDetailRow label="Doctor / Staff" value={staffLabel || "Not assigned"} />
+          )}
           <div className="appointment-summary-payment-row">
             <span>Payment</span>
             <div><strong className={payment.due <= 0 ? `appointment-payment-badge ${payment.price > 0 ? "paid" : "neutral"}` : ""}>{paymentLabel}</strong><small>{money.format(payment.applied)} applied</small></div>

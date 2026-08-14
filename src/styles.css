@@ -2585,6 +2585,7 @@ img { max-width: 100%; }
 
 .appointment-detail-row,
 .appointment-summary-status-row,
+.appointment-summary-assignment-row,
 .appointment-summary-payment-row {
   min-width: 0;
   display: grid;
@@ -2600,6 +2601,7 @@ img { max-width: 100%; }
 
 .appointment-detail-row > span,
 .appointment-summary-status-row > span,
+.appointment-summary-assignment-row > span,
 .appointment-summary-payment-row > span {
   color: var(--muted);
   font-size: 0.76rem;
@@ -2623,6 +2625,36 @@ img { max-width: 100%; }
   justify-content: space-between;
   gap: 8px;
 }
+
+.appointment-summary-assignment-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.appointment-summary-assignment-row select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 34px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.appointment-summary-assignment-row select:focus {
+  border-color: var(--wine);
+  outline: 2px solid color-mix(in srgb, var(--wine) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.appointment-summary-assignment-row select:disabled { cursor: wait; opacity: 0.72; }
+.appointment-assignment-feedback { color: var(--muted); font-size: 0.7rem; font-weight: 700; }
+.appointment-assignment-feedback.success { color: var(--green); }
+.appointment-assignment-feedback.error { color: var(--danger); }
 
 .appointment-summary-payment-row small { color: var(--muted); font-size: 0.72rem; font-weight: 700; }
 .appointment-payment-badge { display: inline-flex; align-items: center; width: fit-content; min-height: 24px; padding: 3px 8px; border-radius: 999px; font-size: 0.72rem !important; }

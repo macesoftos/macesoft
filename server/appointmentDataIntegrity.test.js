@@ -16,6 +16,13 @@ test("appointment history contains only persisted payments and audit records", (
   assert.doesNotMatch(appSource, /Latest appointment state/);
 });
 
+test("appointment details allow persisted doctor or staff reassignment", () => {
+  assert.match(appSource, /aria-label="Reassign doctor or staff"/);
+  assert.match(appSource, /onAssign=\{\(appointment, staffName\) => onUpdateAppointment/);
+  assert.match(appSource, /staff: staffName \|\| "Any available"/);
+  assert.match(appSource, /<option value="">Unassigned<\/option>/);
+});
+
 test("card view opens directly on API-backed filters and appointment records", () => {
   assert.doesNotMatch(cardViewSource, /card-view-kpi/);
   assert.doesNotMatch(cardViewSource, />Completion rate</);
