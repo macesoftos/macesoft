@@ -46,6 +46,18 @@ function textLines(value) {
 }
 
 function blockEmailHtml(block, origin) {
+  if (block.type === "layout") {
+    const columns = Array.isArray(block.columns) && block.columns.length ? block.columns.slice(0, 4) : [[]];
+    const width = Math.floor(100 / columns.length);
+    const gap = safeNumber(block.gap, 0, 40, 12);
+    const padding = safeNumber(block.padding, 0, 60, 8);
+    const background = safeColor(block.background, "#ffffff");
+    const cells = columns.map((column) => {
+      const content = (Array.isArray(column) ? column : []).map((child) => blockEmailHtml(child, origin)).join("\n") || "&nbsp;";
+      return `<td class="mace-stack-column" width="${width}%" valign="top" style="width:${width}%;padding:${padding}px ${gap / 2}px;background:${background}">${content}</td>`;
+    }).join("");
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:${background}"><tr>${cells}</tr></table>`;
+  }
   const align = safeAlign(block.align);
   const color = safeColor(block.color);
   const padding = safeNumber(block.padding, 0, 80, 16);
@@ -102,7 +114,7 @@ export function buildVisualEmailHtml(draft, settings = {}, origin = "https://app
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${escapeEmailHtml(draft?.subject || draft?.name || company)}</title>
-  <style>body{margin:0;background:#f4f1ed;color:#2d241f}table{border-collapse:collapse}img{max-width:100%}@media(max-width:680px){.mace-email{width:100%!important}.mace-pad{padding-left:18px!important;padding-right:18px!important}}</style>
+  <style>body{margin:0;background:#f4f1ed;color:#2d241f}table{border-collapse:collapse}img{max-width:100%}@media(max-width:680px){.mace-email{width:100%!important}.mace-pad{padding-left:18px!important;padding-right:18px!important}.mace-stack-column{display:block!important;width:100%!important;box-sizing:border-box!important}}</style>
 </head>
 <body>
   <div style="display:none;max-height:0;overflow:hidden;opacity:0">${previewText}</div>

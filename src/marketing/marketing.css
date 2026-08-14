@@ -1000,6 +1000,25 @@
 .marketing-block-library { border-right: 1px solid var(--marketing-border); }
 .marketing-block-settings { border-left: 1px solid var(--marketing-border); }
 
+.marketing-library-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: -3px 0 16px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #f3efea;
+}
+
+.marketing-library-tabs button { min-height: 34px; border: 0; border-radius: 6px; background: transparent; color: var(--marketing-muted); font-size: 10px; font-weight: 750; }
+.marketing-library-tabs button.active { background: #fff; color: var(--marketing-espresso); box-shadow: 0 2px 7px rgba(52, 37, 27, 0.08); }
+.marketing-insert-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; padding: 10px; border: 1px solid #bda58f; border-radius: 7px; background: #faf5ef; }
+.marketing-insert-notice > span { display: grid; gap: 2px; }
+.marketing-insert-notice strong { color: var(--marketing-espresso); font-size: 10px; }
+.marketing-insert-notice small { color: var(--marketing-muted); font-size: 8px; }
+.marketing-insert-notice button { display: inline-flex; width: 25px; height: 25px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--marketing-muted); }
+.marketing-block-library.choosing-insert { box-shadow: inset 3px 0 0 #75513b; }
+
 .marketing-panel-title {
   display: flex;
   align-items: center;
@@ -1010,6 +1029,7 @@
 }
 
 .marketing-panel-title strong { font-size: 14px; }
+.marketing-panel-title > span { color: var(--marketing-muted); font-size: 8px; font-weight: 700; }
 
 .marketing-builder-search {
   position: relative;
@@ -1028,6 +1048,7 @@
 }
 
 .marketing-block-grid button {
+  position: relative;
   display: grid;
   min-height: 80px;
   place-items: center;
@@ -1038,10 +1059,21 @@
   border-radius: 7px;
   background: #fff;
   color: #443d37;
+  cursor: grab;
   font-size: 10px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
-.marketing-block-grid button:hover { border-color: #9d8675; background: #faf7f2; }
+.marketing-block-grid button:hover { border-color: #9d8675; background: #faf7f2; box-shadow: 0 5px 14px rgba(56, 39, 29, 0.07); transform: translateY(-1px); }
+.marketing-block-grid button:active { cursor: grabbing; }
+.marketing-library-grip { position: absolute; left: 5px; top: 7px; color: #b2a79d; opacity: 0; transition: opacity 140ms ease; }
+.marketing-block-grid button:hover .marketing-library-grip { opacity: 1; }
+.marketing-library-copy { margin: -5px 0 13px; color: var(--marketing-muted); font-size: 9px; line-height: 1.5; }
+.marketing-layout-grid { display: grid; gap: 8px; }
+.marketing-layout-grid > button { display: grid; grid-template-columns: minmax(0, 1fr) 64px; min-height: 58px; align-items: center; gap: 12px; padding: 10px; border: 1px solid #e3dbd2; border-radius: 7px; background: #fff; color: #443d37; cursor: grab; font-size: 9px; text-align: left; }
+.marketing-layout-grid > button:hover { border-color: #9d8675; background: #faf7f2; }
+.marketing-layout-grid > button > span { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 30px; padding: 4px; border: 1px solid #d8cec4; border-radius: 4px; background: #faf8f5; }
+.marketing-layout-grid > button i { display: block; border-radius: 2px; background: #d8c8ba; }
 .marketing-saved-sections { margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--marketing-border); }
 .marketing-saved-sections p { margin: 0; color: var(--marketing-muted); font-size: 10px; line-height: 1.5; }
 .marketing-companion-message { display: grid; gap: 7px; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--marketing-border); color: #5f5851; font-size: 10px; font-weight: 750; }
@@ -1072,6 +1104,7 @@
 .marketing-canvas-toolbar button:disabled { opacity: 0.35; }
 
 .marketing-email-frame {
+  box-sizing: border-box;
   width: min(610px, 100%);
   min-height: 720px;
   margin: 0 auto;
@@ -1087,20 +1120,66 @@
 .marketing-email-preheader { height: 0; overflow: hidden; font-size: 0; }
 .marketing-email-frame > footer { display: grid; justify-items: center; gap: 3px; margin-top: 8px; padding: 14px 10px 0; border-top: 1px solid #e2dcd5; color: #504a45; font-size: 9px; text-align: center; }
 .marketing-email-frame > footer a { margin-top: 7px; color: #504a45; text-decoration: underline; }
+.marketing-email-stack { min-width: 0; }
+.marketing-email-stack.root-stack { display: block; }
+.marketing-email-stack.column-stack { min-height: 100%; }
+
+.marketing-drop-zone {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  height: 10px;
+  align-items: center;
+  justify-content: center;
+  margin: -1px 0;
+  transition: height 120ms ease, margin 120ms ease;
+}
+
+.marketing-drop-zone > i { position: absolute; right: 0; left: 0; height: 2px; border-radius: 2px; background: #825b42; opacity: 0; transform: scaleX(0.9); transition: opacity 120ms ease, transform 120ms ease; }
+.marketing-drop-zone > button { position: relative; z-index: 2; display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; padding: 0; border: 1px solid #8d6a52; border-radius: 50%; background: #fff; color: #67452f; opacity: 0; box-shadow: 0 2px 6px rgba(58, 38, 25, 0.14); transform: scale(0.82); transition: opacity 120ms ease, transform 120ms ease; }
+.marketing-drop-zone > span { position: absolute; top: 23px; z-index: 3; padding: 4px 7px; border-radius: 4px; background: #67452f; color: #fff; font-size: 8px; font-weight: 750; pointer-events: none; white-space: nowrap; }
+.marketing-drop-zone:hover > i,
+.marketing-drop-zone:hover > button,
+.marketing-drop-zone.drag-visible > i { opacity: 1; transform: scale(1); }
+.marketing-drop-zone.drag-visible { height: 18px; margin: 1px 0; }
+.marketing-drop-zone.drag-visible > button { opacity: 0; pointer-events: none; }
+.marketing-drop-zone.active { height: 42px; margin: 3px 0; border-radius: 5px; background: rgba(130, 91, 66, 0.08); }
+.marketing-drop-zone.active > i { opacity: 1; transform: scaleX(1); }
+
+.marketing-empty-column { display: grid; min-height: 72px; place-items: center; align-content: center; gap: 5px; border: 1px dashed #cbbcaf; border-radius: 5px; color: #9b8878; font-size: 8px; pointer-events: none; }
 
 .marketing-email-block {
   position: relative;
   border: 1px solid transparent;
   border-radius: 5px;
-  cursor: pointer;
+  cursor: grab;
+  transition: border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease, transform 120ms ease;
 }
 
 .marketing-email-block:hover { border-color: #cdbdaf; }
 .marketing-email-block.selected { border-color: var(--marketing-espresso); box-shadow: 0 0 0 1px rgba(67, 43, 29, 0.16); }
-.marketing-block-grip { position: absolute; left: 5px; top: 50%; z-index: 2; display: inline-flex; transform: translateY(-50%); color: var(--marketing-espresso); }
+.marketing-email-block.dragging { opacity: 0.34; transform: scale(0.985); }
+.marketing-email-block:active { cursor: grabbing; }
+.marketing-block-grip { position: absolute; left: 5px; top: 50%; z-index: 4; display: inline-flex; opacity: 0; transform: translateY(-50%); color: var(--marketing-espresso); transition: opacity 120ms ease; }
+.marketing-email-block:hover > .marketing-block-grip,
+.marketing-email-block.selected > .marketing-block-grip { opacity: 1; }
 .marketing-block-actions { position: absolute; right: 5px; top: 5px; z-index: 3; display: flex; overflow: hidden; border: 1px solid #d8d0c8; border-radius: 5px; background: #fff; box-shadow: 0 3px 9px rgba(42, 30, 22, 0.08); }
 .marketing-block-actions button { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; padding: 0; border: 0; border-right: 1px solid #eee8e1; background: #fff; color: #4e433b; }
 .marketing-block-actions button:last-child { border-right: 0; }
+.marketing-layout-block { padding: 8px; }
+.marketing-layout-columns { display: grid; align-items: stretch; }
+.marketing-layout-column { min-width: 0; padding: 5px; border: 1px dashed transparent; border-radius: 5px; background: rgba(255, 255, 255, 0.42); transition: border-color 120ms ease, background 120ms ease; }
+.marketing-layout-block:hover .marketing-layout-column,
+.marketing-layout-block.selected .marketing-layout-column,
+.marketing-canvas-panel.is-dragging .marketing-layout-column { border-color: #d6c9bd; background: rgba(255, 255, 255, 0.72); }
+.marketing-layout-column .marketing-email-block { font-size: 0.88em; }
+.marketing-layout-column .marketing-email-image img { height: 120px; }
+.marketing-email-frame.mobile .marketing-layout-columns { grid-template-columns: 1fr !important; }
+.marketing-layout-guidance { display: grid; justify-items: start; gap: 8px; padding: 14px; border-radius: 7px; background: #f7f2ec; color: var(--marketing-espresso); }
+.marketing-layout-guidance strong { font-size: 11px; }
+.marketing-layout-guidance p { margin: 0; color: var(--marketing-muted); font-size: 9px; line-height: 1.5; }
+.marketing-layout-guidance small { color: #765d4c; font-size: 8px; font-weight: 750; }
+.marketing-drag-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .marketing-email-logo { display: grid; place-items: center; }
 .marketing-email-logo img { width: 110px; max-height: 42px; object-fit: contain; }

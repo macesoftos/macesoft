@@ -56,6 +56,17 @@ import {
   previewPersonalizedHtml,
   sanitizeImportedEmailHtml,
 } from "./emailHtml.js";
+import {
+  emailColumnId,
+  findEmailBlock,
+  findEmailBlockLocation,
+  flattenEmailBlocks,
+  insertEmailBlock,
+  moveEmailBlock,
+  removeEmailBlock,
+  ROOT_EMAIL_CONTAINER,
+  updateEmailBlock,
+} from "./emailDesigner.js";
 
 const draftStorageKey = "mace-marketing-campaign-draft-v1";
 const templateStorageKey = "mace-marketing-design-templates-v1";
@@ -84,6 +95,13 @@ const blockDefinitions = [
   { type: "spacer", label: "Spacer", icon: MoveDown },
   { type: "social", label: "Social", icon: Users },
   { type: "contact", label: "Contact", icon: Mail },
+];
+
+const layoutDefinitions = [
+  { type: "layout-1", label: "1 column", columns: 1 },
+  { type: "layout-2", label: "2 columns", columns: 2 },
+  { type: "layout-3", label: "3 columns", columns: 3 },
+  { type: "layout-4", label: "4 columns", columns: 4 },
 ];
 
 const starterTemplates = [
@@ -181,6 +199,17 @@ function createBlockId(type) {
 
 function newBlock(type) {
   const base = { id: createBlockId(type), type, align: "center", color: "#4a3324", padding: 16 };
+  if (type.startsWith("layout-")) {
+    const columnCount = Math.min(4, Math.max(1, Number(type.split("-")[1]) || 1));
+    return {
+      ...base,
+      type: "layout",
+      columns: Array.from({ length: columnCount }, () => []),
+      background: "#ffffff",
+      gap: 12,
+      padding: 8,
+    };
+  }
   const blocks = {
     logo: { ...base, content: "MACE", alt: "MACE Signature Wellness" },
     image: { ...base, src: "/brand/result-1.jpg", alt: "MACE skincare client", link: "" },
@@ -195,6 +224,24 @@ function newBlock(type) {
     contact: { ...base, content: "MACE Signature Wellness\nDavao City, Philippines\nhello@macebydrmace.com" },
   };
   return blocks[type] ?? blocks.text;
+}
+
+function cloneEmailBlock(block) {
+  const copy = { ...block, id: createBlockId(block.type) };
+  if (block.type === "layout") {
+    copy.columns = (block.columns || []).map((column) => column.map(cloneEmailBlock));
+  }
+  return copy;
+}
+
+function normalizedDesignBlock(block) {
+  if (!block || typeof block !== "object" || typeof block.id !== "string" || typeof block.type !== "string") return null;
+  if (block.type !== "layout") return { ...block };
+  const columns = Array.isArray(block.columns) ? block.columns.slice(0, 4) : [];
+  return {
+    ...block,
+    columns: (columns.length ? columns : [[]]).map((column) => (Array.isArray(column) ? column.map(normalizedDesignBlock).filter(Boolean) : [])),
+  };
 }
 
 function createDefaultBlocks() {
@@ -224,12 +271,13 @@ function createDefaultDraft() {
 function normalizedDraft(value) {
   const fallback = createDefaultDraft();
   if (!value || typeof value !== "object") return fallback;
+  const savedBlocks = Array.isArray(value.blocks) ? value.blocks.map(normalizedDesignBlock).filter(Boolean) : [];
   return {
     ...fallback,
     ...value,
     editorMode: value.editorMode === "html" ? "html" : "visual",
     html: typeof value.html === "string" ? value.html : "",
-    blocks: Array.isArray(value.blocks) && value.blocks.length ? value.blocks : fallback.blocks,
+    blocks: savedBlocks.length ? savedBlocks : fallback.blocks,
     step: Math.min(4, Math.max(1, Number(value.step) || 1)),
   };
 }
@@ -292,9 +340,10 @@ function campaignWarnings(draft) {
       if (htmlResult.removed) warnings.push("Clean the HTML to remove unsupported or unsafe code before review.");
       if (htmlResult.html && !/unsubscribe/i.test(htmlResult.html)) warnings.push("Add a visible unsubscribe link or instruction to the HTML.");
     } else {
-      if (draft.blocks.some((block) => !String(block.content ?? block.src ?? "").trim() && !["divider", "spacer"].includes(block.type))) warnings.push("Complete or remove empty content blocks.");
-      if (draft.blocks.some((block) => block.type === "button" && !block.link)) warnings.push("Add a destination link to every button.");
-      if (draft.blocks.some((block) => block.type === "image" && !block.alt)) warnings.push("Add alternative text to every image.");
+      const contentBlocks = flattenEmailBlocks(draft.blocks);
+      if (contentBlocks.some((block) => !String(block.content ?? block.src ?? "").trim() && !["divider", "spacer"].includes(block.type))) warnings.push("Complete or remove empty content blocks.");
+      if (contentBlocks.some((block) => block.type === "button" && !block.link)) warnings.push("Add a destination link to every button.");
+      if (contentBlocks.some((block) => block.type === "image" && !block.alt)) warnings.push("Add alternative text to every image.");
     }
   }
   if (draft.channel !== "Email" && !draft.message.trim()) warnings.push("Add text message content.");
@@ -701,11 +750,15 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
   const [preview, setPreview] = useState("desktop");
   const [settingsTab, setSettingsTab] = useState("content");
   const [blockQuery, setBlockQuery] = useState("");
+  const [libraryTab, setLibraryTab] = useState("content");
+  const [dragState, setDragState] = useState(null);
+  const [insertTarget, setInsertTarget] = useState(null);
+  const [dragAnnouncement, setDragAnnouncement] = useState("");
   const [saveState, setSaveState] = useState("Saved locally");
   const undoStack = useRef([]);
   const redoStack = useRef([]);
   const htmlFileInput = useRef(null);
-  const selectedBlock = draft.blocks.find((block) => block.id === selectedId) ?? draft.blocks[0];
+  const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
   const estimate = audienceEstimate(clients, draft.segment, draft.channel);
   const warnings = campaignWarnings(draft);
   const visualEmailHtml = useMemo(
@@ -784,42 +837,57 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
   }
 
   function updateSelected(patch) {
-    commitBlocks(draft.blocks.map((block) => block.id === selectedId ? { ...block, ...patch } : block));
+    commitBlocks(updateEmailBlock(draft.blocks, selectedId, patch));
   }
 
-  function addBlock(type, atIndex = draft.blocks.length) {
+  function addBlock(type, target = insertTarget) {
     const block = newBlock(type);
-    const next = [...draft.blocks];
-    next.splice(atIndex, 0, block);
+    const containerId = target?.containerId || ROOT_EMAIL_CONTAINER;
+    const targetIndex = target?.index ?? draft.blocks.length;
+    if (block.type === "layout" && containerId !== ROOT_EMAIL_CONTAINER) {
+      setDragAnnouncement("Layouts can only be added to the main email canvas.");
+      return;
+    }
+    const next = insertEmailBlock(draft.blocks, containerId, targetIndex, block);
     commitBlocks(next);
     setSelectedId(block.id);
+    setInsertTarget(null);
+    setDragAnnouncement(`${block.type === "layout" ? `${block.columns.length}-column layout` : blockDefinitions.find((item) => item.type === type)?.label || "Block"} added.`);
   }
 
   function duplicateBlock(id) {
-    const index = draft.blocks.findIndex((block) => block.id === id);
-    if (index < 0) return;
-    const copy = { ...draft.blocks[index], id: createBlockId(draft.blocks[index].type) };
-    const next = [...draft.blocks];
-    next.splice(index + 1, 0, copy);
+    const location = findEmailBlockLocation(draft.blocks, id);
+    if (!location) return;
+    const copy = cloneEmailBlock(location.block);
+    const next = insertEmailBlock(draft.blocks, location.containerId, location.index + 1, copy);
     commitBlocks(next);
     setSelectedId(copy.id);
+    setDragAnnouncement("Block duplicated.");
   }
 
   function deleteBlock(id) {
-    if (draft.blocks.length === 1) return;
-    const index = draft.blocks.findIndex((block) => block.id === id);
-    const next = draft.blocks.filter((block) => block.id !== id);
-    commitBlocks(next);
-    setSelectedId(next[Math.max(0, index - 1)]?.id || "");
+    const location = findEmailBlockLocation(draft.blocks, id);
+    if (!location || (location.containerId === ROOT_EMAIL_CONTAINER && draft.blocks.length === 1)) return;
+    const removed = removeEmailBlock(draft.blocks, id);
+    commitBlocks(removed.blocks);
+    const nextSelection = findEmailBlock(removed.blocks, removed.blocks[Math.max(0, location.index - 1)]?.id)
+      || (location.containerId !== ROOT_EMAIL_CONTAINER ? findEmailBlock(removed.blocks, String(location.containerId).split("::column::")[0]) : null)
+      || flattenEmailBlocks(removed.blocks, true)[0];
+    setSelectedId(nextSelection?.id || "");
+    setDragAnnouncement("Block deleted.");
   }
 
   function moveBlock(id, direction) {
-    const index = draft.blocks.findIndex((block) => block.id === id);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= draft.blocks.length) return;
-    const next = [...draft.blocks];
-    [next[index], next[target]] = [next[target], next[index]];
+    const location = findEmailBlockLocation(draft.blocks, id);
+    if (!location) return;
+    const target = location.index + direction;
+    const containerLength = location.containerId === ROOT_EMAIL_CONTAINER
+      ? draft.blocks.length
+      : (findEmailBlock(draft.blocks, String(location.containerId).split("::column::")[0])?.columns?.[Number(String(location.containerId).split("::column::")[1])]?.length || 0);
+    if (target < 0 || target >= containerLength) return;
+    const next = moveEmailBlock(draft.blocks, id, location.containerId, target + (direction > 0 ? 1 : 0));
     commitBlocks(next);
+    setDragAnnouncement(`Block moved ${direction < 0 ? "up" : "down"}.`);
   }
 
   function undo() {
@@ -836,22 +904,52 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
     updateDraft({ blocks: next });
   }
 
-  function dropOnCanvas(event, targetIndex = draft.blocks.length) {
+  function dropOnCanvas(event, target = { containerId: ROOT_EMAIL_CONTAINER, index: draft.blocks.length }) {
     event.preventDefault();
+    event.stopPropagation();
     const definitionType = event.dataTransfer.getData("application/x-marketing-block-type");
     const blockId = event.dataTransfer.getData("application/x-marketing-block-id");
     if (definitionType) {
-      addBlock(definitionType, targetIndex);
+      addBlock(definitionType, target);
+      setDragState(null);
       return;
     }
     if (!blockId) return;
-    const fromIndex = draft.blocks.findIndex((block) => block.id === blockId);
-    if (fromIndex < 0 || fromIndex === targetIndex) return;
-    const next = [...draft.blocks];
-    const [moved] = next.splice(fromIndex, 1);
-    const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    next.splice(adjustedTarget, 0, moved);
+    const movingBlock = findEmailBlock(draft.blocks, blockId);
+    if (movingBlock?.type === "layout" && target.containerId !== ROOT_EMAIL_CONTAINER) {
+      setDragAnnouncement("Layouts stay on the main canvas and cannot be nested inside columns.");
+      setDragState(null);
+      return;
+    }
+    const next = moveEmailBlock(draft.blocks, blockId, target.containerId, target.index);
+    if (next === draft.blocks) {
+      setDragState(null);
+      return;
+    }
     commitBlocks(next);
+    setSelectedId(blockId);
+    setDragAnnouncement("Block moved to its new position.");
+    setDragState(null);
+  }
+
+  function startLibraryDrag(event, type) {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("application/x-marketing-block-type", type);
+    setDragState({ kind: "library", type, over: null });
+    setDragAnnouncement(`Dragging ${type.startsWith("layout-") ? "layout" : blockDefinitions.find((item) => item.type === type)?.label || "block"}.`);
+  }
+
+  function startCanvasDrag(event, blockId) {
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-marketing-block-id", blockId);
+    setSelectedId(blockId);
+    setDragState({ kind: "canvas", blockId, over: null });
+    setDragAnnouncement("Dragging selected block. Move to an insertion line and drop.");
+  }
+
+  function endDrag() {
+    setDragState(null);
   }
 
   async function saveDraft() {
@@ -942,12 +1040,25 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
       )}
       {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode !== "html" && (
         <div className="marketing-builder-grid">
-          <aside className="marketing-block-library">
-            <div className="marketing-panel-title"><strong>Content blocks</strong><ChevronDown size={16} /></div>
-            <label className="marketing-builder-search"><Search size={15} /><input placeholder="Search blocks" value={blockQuery} onChange={(event) => setBlockQuery(event.target.value)} /></label>
-            <div className="marketing-block-grid">
-              {blockDefinitions.filter((block) => block.label.toLowerCase().includes(blockQuery.toLowerCase())).map(({ type, label, icon: Icon }) => <button draggable key={type} onClick={() => addBlock(type)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-marketing-block-type", type); }} type="button"><Icon size={23} /><span>{label}</span></button>)}
+          <aside className={`marketing-block-library ${insertTarget ? "choosing-insert" : ""}`}>
+            <div className="marketing-library-tabs" role="tablist" aria-label="Builder elements">
+              <button aria-selected={libraryTab === "content"} className={libraryTab === "content" ? "active" : ""} onClick={() => setLibraryTab("content")} role="tab" type="button">Content</button>
+              <button aria-selected={libraryTab === "layouts"} className={libraryTab === "layouts" ? "active" : ""} onClick={() => setLibraryTab("layouts")} role="tab" type="button">Layouts</button>
             </div>
+            {insertTarget && <div className="marketing-insert-notice"><span><strong>Choose a block</strong><small>It will be inserted at the selected line.</small></span><button onClick={() => setInsertTarget(null)} type="button" aria-label="Cancel insertion"><X size={15} /></button></div>}
+            {libraryTab === "content" ? <>
+              <div className="marketing-panel-title"><strong>Content blocks</strong><span>Drag to the canvas</span></div>
+              <label className="marketing-builder-search"><Search size={15} /><input placeholder="Search blocks" value={blockQuery} onChange={(event) => setBlockQuery(event.target.value)} /></label>
+              <div className="marketing-block-grid">
+                {blockDefinitions.filter((block) => block.label.toLowerCase().includes(blockQuery.toLowerCase())).map(({ type, label, icon: Icon }) => <button draggable key={type} onClick={() => addBlock(type)} onDragEnd={endDrag} onDragStart={(event) => startLibraryDrag(event, type)} type="button" aria-label={`Drag or click to add ${label}`}><span className="marketing-library-grip"><GripVertical size={13} /></span><Icon size={23} /><span>{label}</span></button>)}
+              </div>
+            </> : <>
+              <div className="marketing-panel-title"><strong>Column layouts</strong><span>Stack on mobile</span></div>
+              <p className="marketing-library-copy">Add a responsive row, then drag content blocks into each column.</p>
+              <div className="marketing-layout-grid">
+                {layoutDefinitions.map((layout) => <button draggable key={layout.type} onClick={() => addBlock(layout.type)} onDragEnd={endDrag} onDragStart={(event) => startLibraryDrag(event, layout.type)} type="button" aria-label={`Drag or click to add ${layout.label}`}><span>{Array.from({ length: layout.columns }, (_, index) => <i key={index} />)}</span><strong>{layout.label}</strong></button>)}
+              </div>
+            </>}
             {draft.channel === "Email + SMS" ? (
               <label className="marketing-companion-message">
                 <span>Companion text message</span>
@@ -956,13 +1067,28 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
               </label>
             ) : <div className="marketing-saved-sections"><div className="marketing-panel-title"><strong>Saved sections</strong><ChevronDown size={16} /></div><p>Drag and drop your reusable clinic sections here.</p></div>}
           </aside>
-          <section className="marketing-canvas-panel">
+          <section className={`marketing-canvas-panel ${dragState ? "is-dragging" : ""}`}>
             <div className="marketing-canvas-toolbar"><div className="marketing-preview-toggle"><button className={preview === "desktop" ? "active" : ""} onClick={() => setPreview("desktop")} type="button"><Monitor size={16} /> Desktop</button><button className={preview === "mobile" ? "active" : ""} onClick={() => setPreview("mobile")} type="button"><Smartphone size={16} /> Mobile</button></div><div><button disabled={!undoStack.current.length} onClick={undo} type="button"><Undo2 size={17} /> Undo</button><button disabled={!redoStack.current.length} onClick={redo} type="button"><Redo2 size={17} /> Redo</button></div></div>
-            <div className={`marketing-email-frame ${preview}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropOnCanvas(event)}>
+            <div className={`marketing-email-frame ${preview}`}>
               <div className="marketing-email-preheader">{draft.previewText}</div>
-              {draft.blocks.map((block, index) => <EmailBlock block={block} index={index} isSelected={block.id === selectedId} key={block.id} onDelete={deleteBlock} onDrop={dropOnCanvas} onDuplicate={duplicateBlock} onMove={moveBlock} onSelect={setSelectedId} />)}
+              <EmailCanvasList
+                blocks={draft.blocks}
+                containerId={ROOT_EMAIL_CONTAINER}
+                dragState={dragState}
+                onDelete={deleteBlock}
+                onDragEnd={endDrag}
+                onDragStart={startCanvasDrag}
+                onDrop={dropOnCanvas}
+                onDuplicate={duplicateBlock}
+                onInsert={(target) => { setInsertTarget(target); setLibraryTab("content"); }}
+                onMove={moveBlock}
+                onOver={(over) => setDragState((current) => current ? { ...current, over } : current)}
+                onSelect={setSelectedId}
+                selectedId={selectedId}
+              />
               <footer><strong>{settings.company || "MACE Signature Wellness"}</strong><span>Davao City, Philippines · hello@macebydrmace.com</span><a href="#unsubscribe" onClick={(event) => event.preventDefault()}>Unsubscribe</a></footer>
             </div>
+            <span className="marketing-drag-announcement" aria-live="polite">{dragAnnouncement}</span>
             {warnings.length > 0 && <div className="marketing-builder-warning"><CircleAlert size={17} /><span>{warnings.length} campaign check{warnings.length === 1 ? "" : "s"} remaining</span></div>}
           </section>
           <BlockSettings block={selectedBlock} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} />
@@ -1072,13 +1198,116 @@ function AudienceStep({ clients, draft, estimate, updateDraft }) {
   );
 }
 
-function EmailBlock({ block, index, isSelected, onDelete, onDrop, onDuplicate, onMove, onSelect }) {
+function EmailDropZone({ containerId, dragState, index, onDrop, onInsert, onOver }) {
+  const key = `${containerId}:${index}`;
+  const isActive = dragState?.over === key;
+  return (
+    <div
+      className={`marketing-drop-zone ${isActive ? "active" : ""} ${dragState ? "drag-visible" : ""}`}
+      onDragEnter={(event) => { event.preventDefault(); onOver(key); }}
+      onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = dragState?.kind === "library" ? "copy" : "move"; onOver(key); }}
+      onDrop={(event) => onDrop(event, { containerId, index })}
+    >
+      <i />
+      <button onClick={() => onInsert({ containerId, index })} type="button" aria-label={`Insert content at position ${index + 1}`}><Plus size={14} /></button>
+      {isActive && <span>Drop content here</span>}
+    </div>
+  );
+}
+
+function EmailCanvasList({ blocks, containerId, dragState, onDelete, onDragEnd, onDragStart, onDrop, onDuplicate, onInsert, onMove, onOver, onSelect, selectedId }) {
+  const isColumn = containerId !== ROOT_EMAIL_CONTAINER;
+  return (
+    <div className={`marketing-email-stack ${isColumn ? "column-stack" : "root-stack"}`}>
+      <EmailDropZone containerId={containerId} dragState={dragState} index={0} onDrop={onDrop} onInsert={onInsert} onOver={onOver} />
+      {!blocks.length && <div className="marketing-empty-column"><Plus size={16} /><span>Drag content here</span></div>}
+      {blocks.map((block, index) => (
+        <React.Fragment key={block.id}>
+          {block.type === "layout" ? (
+            <EmailLayoutBlock
+              block={block}
+              dragState={dragState}
+              isSelected={block.id === selectedId}
+              onDelete={onDelete}
+              onDragEnd={onDragEnd}
+              onDragStart={onDragStart}
+              onDrop={onDrop}
+              onDuplicate={onDuplicate}
+              onInsert={onInsert}
+              onMove={onMove}
+              onOver={onOver}
+              onSelect={onSelect}
+              selectedId={selectedId}
+            />
+          ) : (
+            <EmailBlock block={block} dragState={dragState} isSelected={block.id === selectedId} onDelete={onDelete} onDragEnd={onDragEnd} onDragStart={onDragStart} onDuplicate={onDuplicate} onMove={onMove} onSelect={onSelect} />
+          )}
+          <EmailDropZone containerId={containerId} dragState={dragState} index={index + 1} onDrop={onDrop} onInsert={onInsert} onOver={onOver} />
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function BlockActions({ blockId, onDelete, onDuplicate, onMove }) {
+  return <div className="marketing-block-actions"><button onClick={(event) => { event.stopPropagation(); onMove(blockId, -1); }} type="button" aria-label="Move block up"><MoveUp size={15} /></button><button onClick={(event) => { event.stopPropagation(); onMove(blockId, 1); }} type="button" aria-label="Move block down"><MoveDown size={15} /></button><button onClick={(event) => { event.stopPropagation(); onDuplicate(blockId); }} type="button" aria-label="Duplicate block"><Copy size={15} /></button><button onClick={(event) => { event.stopPropagation(); onDelete(blockId); }} type="button" aria-label="Delete block"><Trash2 size={15} /></button></div>;
+}
+
+function EmailLayoutBlock({ block, dragState, isSelected, onDelete, onDragEnd, onDragStart, onDrop, onDuplicate, onInsert, onMove, onOver, onSelect, selectedId }) {
+  return (
+    <section
+      aria-label={`${block.columns.length}-column layout`}
+      className={`marketing-email-block marketing-layout-block ${isSelected ? "selected" : ""} ${dragState?.blockId === block.id ? "dragging" : ""}`}
+      draggable
+      onClick={() => onSelect(block.id)}
+      onDragEnd={onDragEnd}
+      onDragStart={(event) => onDragStart(event, block.id)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onSelect(block.id);
+        if (event.altKey && event.key === "ArrowUp") { event.preventDefault(); onMove(block.id, -1); }
+        if (event.altKey && event.key === "ArrowDown") { event.preventDefault(); onMove(block.id, 1); }
+      }}
+      style={{ background: block.background || "#ffffff", padding: block.padding ?? 8 }}
+      tabIndex={0}
+    >
+      <span className="marketing-block-grip"><GripVertical size={16} /></span>
+      {isSelected && <BlockActions blockId={block.id} onDelete={onDelete} onDuplicate={onDuplicate} onMove={onMove} />}
+      <div className="marketing-layout-columns" style={{ gap: block.gap ?? 12, gridTemplateColumns: `repeat(${block.columns.length}, minmax(0, 1fr))` }}>
+        {block.columns.map((column, columnIndex) => (
+          <div className="marketing-layout-column" key={emailColumnId(block.id, columnIndex)} onClick={(event) => event.stopPropagation()}>
+            <EmailCanvasList
+              blocks={column}
+              containerId={emailColumnId(block.id, columnIndex)}
+              dragState={dragState}
+              onDelete={onDelete}
+              onDragEnd={onDragEnd}
+              onDragStart={onDragStart}
+              onDrop={onDrop}
+              onDuplicate={onDuplicate}
+              onInsert={onInsert}
+              onMove={onMove}
+              onOver={onOver}
+              onSelect={onSelect}
+              selectedId={selectedId}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EmailBlock({ block, dragState, isSelected, onDelete, onDragEnd, onDragStart, onDuplicate, onMove, onSelect }) {
   const style = { color: block.color, textAlign: block.align, paddingTop: block.padding, paddingBottom: block.padding, fontSize: block.fontSize, fontFamily: block.fontFamily };
   return (
-    <div className={`marketing-email-block ${isSelected ? "selected" : ""} type-${block.type}`} draggable onClick={() => onSelect(block.id)} onDragOver={(event) => event.preventDefault()} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-marketing-block-id", block.id); }} onDrop={(event) => { event.stopPropagation(); onDrop(event, index); }} role="button" tabIndex={0} onKeyDown={(event) => event.key === "Enter" && onSelect(block.id)}>
-      {isSelected && <span className="marketing-block-grip"><GripVertical size={16} /></span>}
+    <div className={`marketing-email-block ${isSelected ? "selected" : ""} ${dragState?.blockId === block.id ? "dragging" : ""} type-${block.type}`} draggable onClick={() => onSelect(block.id)} onDragEnd={onDragEnd} onDragStart={(event) => onDragStart(event, block.id)} role="button" tabIndex={0} onKeyDown={(event) => {
+      if (event.key === "Enter") onSelect(block.id);
+      if (event.altKey && event.key === "ArrowUp") { event.preventDefault(); onMove(block.id, -1); }
+      if (event.altKey && event.key === "ArrowDown") { event.preventDefault(); onMove(block.id, 1); }
+    }}>
+      <span className="marketing-block-grip"><GripVertical size={16} /></span>
       <RenderedBlock block={block} style={style} />
-      {isSelected && <div className="marketing-block-actions"><button onClick={(event) => { event.stopPropagation(); onMove(block.id, -1); }} type="button" aria-label="Move block up"><MoveUp size={15} /></button><button onClick={(event) => { event.stopPropagation(); onMove(block.id, 1); }} type="button" aria-label="Move block down"><MoveDown size={15} /></button><button onClick={(event) => { event.stopPropagation(); onDuplicate(block.id); }} type="button" aria-label="Duplicate block"><Copy size={15} /></button><button onClick={(event) => { event.stopPropagation(); onDelete(block.id); }} type="button" aria-label="Delete block"><Trash2 size={15} /></button></div>}
+      {isSelected && <BlockActions blockId={block.id} onDelete={onDelete} onDuplicate={onDuplicate} onMove={onMove} />}
     </div>
   );
 }
@@ -1106,12 +1335,16 @@ function BlockSettings({ block, settingsTab, setSettingsTab, updateBlock }) {
   const definition = blockDefinitions.find((item) => item.type === block.type);
   return (
     <aside className="marketing-block-settings">
-      <div className="marketing-panel-title"><strong>{definition?.label || "Block"}</strong><ChevronDown size={16} /></div>
+      <div className="marketing-panel-title"><strong>{block.type === "layout" ? `${block.columns.length}-column layout` : definition?.label || "Block"}</strong><ChevronDown size={16} /></div>
       <div className="marketing-settings-tabs"><button className={settingsTab === "content" ? "active" : ""} onClick={() => setSettingsTab("content")} type="button">Content</button><button className={settingsTab === "style" ? "active" : ""} onClick={() => setSettingsTab("style")} type="button">Style</button></div>
-      {settingsTab === "content" ? <div className="marketing-settings-fields">
+      {settingsTab === "content" ? block.type === "layout" ? <div className="marketing-layout-guidance"><Columns2 size={22} /><strong>Fill each column</strong><p>Drag content blocks from the left panel into a column. You can reorder content within a column or move it between columns.</p><small>Columns automatically stack on mobile.</small></div> : <div className="marketing-settings-fields">
         {!['divider', 'spacer', 'image', 'logo'].includes(block.type) && <label><span>Text <button onClick={() => updateBlock({ content: `${block.content} {{first_name}}` })} type="button">Personalize</button></span><textarea rows="6" value={block.content || ""} onChange={(event) => updateBlock({ content: event.target.value })} /><small>Available token: {'{{first_name}}'}</small></label>}
         {block.type === "image" && <><label><span>Image URL</span><input value={block.src || ""} onChange={(event) => updateBlock({ src: event.target.value })} /></label><label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label></>}
         {["button", "image", "social"].includes(block.type) && <label><span>Link</span><div className="marketing-input-with-icon"><Link size={15} /><input placeholder="https://" value={block.link || ""} onChange={(event) => updateBlock({ link: event.target.value })} /></div></label>}
+      </div> : block.type === "layout" ? <div className="marketing-settings-fields">
+        <label><span>Background</span><div className="marketing-color-input"><input type="color" value={block.background || "#ffffff"} onChange={(event) => updateBlock({ background: event.target.value })} /><input value={block.background || "#ffffff"} onChange={(event) => updateBlock({ background: event.target.value })} /></div></label>
+        <label><span>Column gap</span><div className="marketing-input-suffix"><input min="0" max="40" type="number" value={block.gap ?? 12} onChange={(event) => updateBlock({ gap: Number(event.target.value) })} /><span>px</span></div></label>
+        <label><span>Row padding</span><div className="marketing-input-suffix"><input min="0" max="60" type="number" value={block.padding ?? 8} onChange={(event) => updateBlock({ padding: Number(event.target.value) })} /><span>px</span></div></label>
       </div> : <div className="marketing-settings-fields">
         <label><span>Font</span><select value={block.fontFamily || "Inter"} onChange={(event) => updateBlock({ fontFamily: event.target.value })}><option>Inter</option><option>Georgia</option><option>Arial</option></select></label>
         <label><span>Size</span><div className="marketing-input-suffix"><input min="10" max="64" type="number" value={block.fontSize || 15} onChange={(event) => updateBlock({ fontSize: Number(event.target.value) })} /><span>px</span></div></label>
