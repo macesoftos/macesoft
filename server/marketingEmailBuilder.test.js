@@ -57,3 +57,47 @@ test("column layouts export as responsive email-safe tables", () => {
   assert.match(html, />Left</);
   assert.match(html, />Right</);
 });
+
+test("unequal column ratios and global email styles survive export", () => {
+  const html = buildVisualEmailHtml({
+    theme: {
+      canvasBackground: "#efe8e1",
+      contentBackground: "#fffaf6",
+      textColor: "#302019",
+      linkColor: "#7a402d",
+      buttonBackground: "#5c2e1f",
+      buttonTextColor: "#fffdf9",
+      contentWidth: 680,
+      mobilePadding: 20,
+    },
+    blocks: [{
+      id: "layout-ratio",
+      type: "layout",
+      columnWidths: [1, 2],
+      columns: [
+        [{ id: "text-left", type: "text", content: "One third", align: "left" }],
+        [{ id: "text-right", type: "text", content: "Two thirds", align: "left" }],
+      ],
+    }],
+  });
+
+  assert.match(html, /width="33\.33%"/);
+  assert.match(html, /width="66\.67%"/);
+  assert.match(html, /width="680"/);
+  assert.match(html, /background:#efe8e1/);
+  assert.match(html, /padding-left:20px!important/);
+});
+
+test("custom code blocks remove executable markup while preserving email HTML", () => {
+  const html = buildVisualEmailHtml({
+    blocks: [{
+      id: "code-1",
+      type: "code",
+      content: '<table><tr><td onclick="alert(1)">Safe offer</td></tr></table><script>alert(1)</script>',
+      align: "left",
+    }],
+  });
+
+  assert.match(html, /<table><tr><td>Safe offer<\/td><\/tr><\/table>/);
+  assert.doesNotMatch(html, /onclick|<script/i);
+});
