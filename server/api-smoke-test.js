@@ -102,6 +102,41 @@ try {
   assert(Array.isArray(bootstrap.payload.appointments), "bootstrap appointments missing");
   assert(Array.isArray(bootstrap.payload.transactions), "bootstrap transactions missing");
 
+  const missingPublicMarketingImage = await fetch(`${baseUrl}/api/public/marketing-assets/missing-smoke-asset`);
+  assert(missingPublicMarketingImage.status === 404, "public Marketing asset route was not reachable without a session");
+  const privateWithoutSession = await fetch(`${baseUrl}/api/uploads/missing-smoke-asset`);
+  assert(privateWithoutSession.status === 401, "private image route bypassed session authentication");
+
+  const hasObjectStorage = Boolean(process.env.STORAGE_BASE_URL && process.env.STORAGE_BUCKET && process.env.STORAGE_SERVICE_KEY);
+  if (hasObjectStorage) {
+    const smokeImageDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlcyYoAAAAASUVORK5CYII=";
+    const marketingImageUpload = await jsonRequest("/api/uploads", {
+      category: "marketing-image",
+      branch: "Mace Davao",
+      dataUrl: smokeImageDataUrl,
+      originalName: "public-marketing-smoke.png",
+    });
+    assert(marketingImageUpload.response.status === 201, "marketing image upload failed");
+    const marketingAssetId = marketingImageUpload.payload.asset.id;
+    const publicMarketingImage = await fetch(`${baseUrl}/api/public/marketing-assets/${encodeURIComponent(marketingAssetId)}`);
+    assert(publicMarketingImage.status === 200, "marketing image was not publicly readable");
+    assert(publicMarketingImage.headers.get("cross-origin-resource-policy") === "cross-origin", "marketing image blocked cross-origin email rendering");
+    assert((await publicMarketingImage.arrayBuffer()).byteLength > 0, "public marketing image was empty");
+
+    const privateImageUpload = await jsonRequest("/api/uploads", {
+      category: "client-photo",
+      branch: "Mace Davao",
+      dataUrl: smokeImageDataUrl,
+      originalName: "private-client-smoke.png",
+    });
+    assert(privateImageUpload.response.status === 201, "private image upload failed");
+    const privateAssetId = privateImageUpload.payload.asset.id;
+    const privateViaPublicRoute = await fetch(`${baseUrl}/api/public/marketing-assets/${encodeURIComponent(privateAssetId)}`);
+    assert(privateViaPublicRoute.status === 404, "private image was exposed through the public Marketing route");
+    await request(`/api/uploads/${encodeURIComponent(marketingAssetId)}`, { method: "DELETE", headers: ownerHeaders });
+    await request(`/api/uploads/${encodeURIComponent(privateAssetId)}`, { method: "DELETE", headers: ownerHeaders });
+  }
+
   const unauthorized = await request("/api/resources/clients", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

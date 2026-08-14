@@ -103,6 +103,19 @@ export async function verifyMarketingBuilder(page, expect) {
     expect(mediaResponse.status()).toBe(200);
     const mediaBody = await mediaResponse.json();
     expect(mediaBody.assets.some((asset) => asset.id === canvasAssetId && asset.name === "canvas-drop-e2e.png")).toBe(true);
+    const publicAsset = await page.evaluate(async (assetId) => {
+      const response = await fetch(`/api/public/marketing-assets/${encodeURIComponent(assetId)}`, { credentials: "omit" });
+      return {
+        byteLength: (await response.arrayBuffer()).byteLength,
+        cacheControl: response.headers.get("cache-control"),
+        crossOriginResourcePolicy: response.headers.get("cross-origin-resource-policy"),
+        status: response.status,
+      };
+    }, canvasAssetId);
+    expect(publicAsset.status).toBe(200);
+    expect(publicAsset.byteLength).toBeGreaterThan(0);
+    expect(publicAsset.cacheControl).toContain("public");
+    expect(publicAsset.crossOriginResourcePolicy).toBe("cross-origin");
   }
   await page.screenshot({ path: `${artifactDirectory}/canvas-image-drop-uploaded.png`, fullPage: false });
 
@@ -147,6 +160,11 @@ export async function verifyMarketingBuilder(page, expect) {
   await expect(previewDialog).toBeVisible();
   const previewFrame = previewDialog.locator("iframe").contentFrame();
   await expect(previewFrame.getByText("E2E Brightening Treatment", { exact: true })).toBeVisible();
+  if (hasRealObjectStorage) {
+    const previewUpload = previewFrame.locator(`img[src*="/api/public/marketing-assets/${canvasAssetId}"]`);
+    await expect(previewUpload).toHaveCount(1);
+    await expect.poll(() => previewUpload.evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  }
   await page.screenshot({ path: `${artifactDirectory}/email-preview-desktop.png`, fullPage: false });
   await previewDialog.getByRole("button", { name: "Mobile", exact: true }).click();
   await page.screenshot({ path: `${artifactDirectory}/email-preview-mobile.png`, fullPage: false });

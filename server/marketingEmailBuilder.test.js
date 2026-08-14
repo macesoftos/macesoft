@@ -31,6 +31,15 @@ test("visual Marketing rich text removes executable markup before HTML export", 
   assert.doesNotMatch(html, /onerror|alert\(1\)/i);
 });
 
+test("uploaded Marketing images export through the public email asset route", () => {
+  const html = buildVisualEmailHtml({
+    blocks: [{ id: "image-public", type: "image", src: "/api/uploads/asset-public-1", alt: "Campaign visual" }],
+  }, {}, "https://app.macebydrmace.com");
+
+  assert.match(html, /src="https:\/\/app\.macebydrmace\.com\/api\/public\/marketing-assets\/asset-public-1"/);
+  assert.doesNotMatch(html, /src="https:\/\/app\.macebydrmace\.com\/api\/uploads\//);
+});
+
 test("HTML email source has a plain-text fallback", () => {
   assert.equal(emailHtmlToPlainText("<h1>Hello</h1><p>Book today.</p>"), "Hello Book today.");
 });
@@ -125,8 +134,8 @@ test("treatment rows export their own uploaded icons", () => {
     }],
   }, {}, "https://app.macebydrmace.com");
 
-  assert.equal((html.match(/https:\/\/app\.macebydrmace\.com\/api\/uploads\/hydro-icon/g) || []).length, 1);
-  assert.equal((html.match(/https:\/\/app\.macebydrmace\.com\/api\/uploads\/pico-icon/g) || []).length, 1);
+  assert.equal((html.match(/https:\/\/app\.macebydrmace\.com\/api\/public\/marketing-assets\/hydro-icon/g) || []).length, 1);
+  assert.equal((html.match(/https:\/\/app\.macebydrmace\.com\/api\/public\/marketing-assets\/pico-icon/g) || []).length, 1);
   assert.match(html, /alt="Hydrodermabrasion icon"/);
   assert.match(html, /alt="Pico-Rejuvenation icon"/);
   assert.match(html, /Hydrodermabrasion/);

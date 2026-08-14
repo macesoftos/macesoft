@@ -32,6 +32,9 @@ test("only explicitly public API methods and paths bypass session authentication
   assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123/file"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123/logo"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public/marketing/survey/campaign-1/survey-1?answer=excellent"), true);
+  assert.equal(isPublicApiRequest("GET", "/api/public/marketing-assets/asset-123"), true);
+  assert.equal(isPublicApiRequest("HEAD", "/api/public/marketing-assets/asset-123"), true);
+  assert.equal(isPublicApiRequest("POST", "/api/public/marketing-assets/asset-123"), false);
   assert.equal(isPublicApiRequest("POST", "/api/public/marketing/survey/campaign-1/survey-1"), false);
   assert.equal(isPublicApiRequest("PATCH", "/api/public/flipbooks/token-123"), false);
   assert.equal(isPublicApiRequest("POST", "/api/facetrack-attendance/kiosk/clock"), true);
