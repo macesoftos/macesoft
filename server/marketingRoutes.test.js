@@ -16,6 +16,7 @@ test("Marketing routes expose the approved canonical workspace URLs", () => {
   assert.equal(marketingHash("templates"), "#/marketing/templates");
   assert.equal(marketingHash("audiences"), "#/marketing/audiences");
   assert.equal(marketingHash("automations"), "#/marketing/automations");
+  assert.equal(marketingHash("media"), "#/marketing/media");
   assert.equal(marketingHash("reports"), "#/marketing/reports");
   assert.equal(marketingHash("settings"), "#/marketing/settings");
 });
@@ -25,6 +26,7 @@ test("Marketing route parsing supports the workspace, campaign builder, and Dele
   assert.deepEqual(marketingRouteFromHash("#/marketing/campaigns"), { section: "campaigns", mode: "index" });
   assert.deepEqual(marketingRouteFromHash("#/marketing/campaigns/new"), { section: "campaigns", mode: "create" });
   assert.deepEqual(marketingRouteFromHash("#/marketing/campaigns/deleted"), { section: "campaigns", mode: "deleted" });
+  assert.deepEqual(marketingRouteFromHash("#/marketing/media"), { section: "media", mode: "index" });
   assert.equal(marketingSectionFromHash("#/marketing/reports"), "reports");
   assert.equal(isMarketingHash("#/marketing/settings"), true);
   assert.equal(isMarketingHash("#/sms"), false);

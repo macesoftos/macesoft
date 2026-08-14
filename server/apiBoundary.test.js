@@ -51,6 +51,9 @@ test("real API denies private data reads before touching the database", async ()
     const notifications = await fetch(`${baseUrl}/api/notifications`);
     assert.equal(notifications.status, 401);
 
+    const marketingMedia = await fetch(`${baseUrl}/api/marketing/media`);
+    assert.equal(marketingMedia.status, 401);
+
     const markNotificationsRead = await fetch(`${baseUrl}/api/notifications/read`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },

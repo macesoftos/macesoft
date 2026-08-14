@@ -6,6 +6,7 @@ export const marketingSections = [
   "templates",
   "audiences",
   "automations",
+  "media",
   "reports",
   "settings",
 ];

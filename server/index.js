@@ -60,6 +60,7 @@ import {
   renderMarketingHtml,
   sanitizeMarketingHtml,
 } from "./marketingHtml.js";
+import { normalizeMarketingMediaName, serializeMarketingMediaAsset } from "./marketingMedia.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -3626,7 +3627,12 @@ app.post("/api/uploads", asyncRoute(async (request, response) => {
   const stored = await storeImageObject(request.body?.dataUrl, category);
   try {
     const asset = await prisma.uploadAsset.create({
-      data: { ...stored, branch, uploadedById: actor.id },
+      data: {
+        ...stored,
+        branch,
+        uploadedById: actor.id,
+        originalName: normalizeMarketingMediaName(request.body?.originalName),
+      },
     });
     response.status(201).json({ asset: { ...asset, url: `/api/uploads/${asset.id}` } });
   } catch (error) {
@@ -4902,6 +4908,16 @@ app.delete("/api/marketing/campaigns/:id", asyncRoute(async (request, response) 
   });
 
   response.json(result);
+}));
+
+app.get("/api/marketing/media", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "sms");
+  const assets = await prisma.uploadAsset.findMany({
+    where: { category: "marketing-image", ...branchWhere(actor) },
+    orderBy: [{ createdAt: "desc" }],
+    take: 250,
+  });
+  response.json({ assets: assets.map(serializeMarketingMediaAsset) });
 }));
 
 app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, response) => {

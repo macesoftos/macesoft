@@ -149,11 +149,15 @@ export function deleteRoomRecord(id) {
   });
 }
 
-export function uploadImageAsset(dataUrl, category, branch) {
+export function uploadImageAsset(dataUrl, category, branch, originalName = "") {
   return requestJson("/api/uploads", {
     method: "POST",
-    body: JSON.stringify({ dataUrl, category, branch }),
+    body: JSON.stringify({ dataUrl, category, branch, originalName }),
   });
+}
+
+export function loadMarketingMedia() {
+  return requestJson("/api/marketing/media");
 }
 
 async function requestPublicJson(path, options = {}) {
