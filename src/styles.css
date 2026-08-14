@@ -5186,6 +5186,12 @@ td .inline-actions { flex-wrap: nowrap; }
   background: #fff;
 }
 
+body:has(.public-lead-page-embedded),
+body:has(.public-lead-page-embedded) #root {
+  min-height: 0;
+  background: #fff;
+}
+
 .public-lead-page-embedded .public-lead-shell {
   display: block;
   width: 100%;
@@ -5196,7 +5202,7 @@ td .inline-actions { flex-wrap: nowrap; }
 
 .public-lead-page-embedded .public-lead-card {
   align-items: start;
-  padding: 36px clamp(24px, 6vw, 50px);
+  padding: 36px clamp(24px, 6vw, 50px) 18px;
 }
 
 .public-lead-page-embedded .public-lead-card-heading { display: none; }
