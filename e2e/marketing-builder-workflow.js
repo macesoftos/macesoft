@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 
 const artifactDirectory = "test-results/marketing-builder";
 const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const hasRealObjectStorage = Boolean(process.env.STORAGE_BASE_URL && process.env.STORAGE_BUCKET && process.env.STORAGE_SERVICE_KEY);
 
 async function imageFileTransfer(page, name = "canvas-drop-e2e.png") {
   return page.evaluateHandle(({ base64, fileName }) => {
@@ -15,6 +16,25 @@ async function imageFileTransfer(page, name = "canvas-drop-e2e.png") {
 
 export async function verifyMarketingBuilder(page, expect) {
   await mkdir(artifactDirectory, { recursive: true });
+
+  if (!hasRealObjectStorage) {
+    await page.route("**/api/uploads", async (route) => {
+      const request = route.request();
+      if (request.method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      const payload = request.postDataJSON();
+      expect(payload.category).toBe("marketing-image");
+      expect(payload.originalName).toBe("canvas-drop-e2e.png");
+      expect(payload.dataUrl).toMatch(/^data:image\/png;base64,/);
+      await route.fulfill({
+        contentType: "application/json",
+        json: { asset: { id: "canvas-drop-ci-asset", name: payload.originalName, originalName: payload.originalName, url: "/api/uploads/canvas-drop-ci-asset" } },
+        status: 201,
+      });
+    });
+  }
 
   await page.goto("/#/marketing/campaigns/new");
   await expect(page.getByTestId("marketing-workspace")).toBeVisible();
@@ -33,10 +53,12 @@ export async function verifyMarketingBuilder(page, expect) {
   expect(canvasAssetId).toBeTruthy();
   await expect(canvasImage.locator("img")).toHaveAttribute("src", new RegExp(`/api/uploads/${canvasAssetId}$`));
   await expect(canvasImage.getByText("Uploading image…", { exact: true })).toBeHidden();
-  const mediaResponse = await page.request.get("/api/marketing/media");
-  expect(mediaResponse.status()).toBe(200);
-  const mediaBody = await mediaResponse.json();
-  expect(mediaBody.assets.some((asset) => asset.id === canvasAssetId && asset.name === "canvas-drop-e2e.png")).toBe(true);
+  if (hasRealObjectStorage) {
+    const mediaResponse = await page.request.get("/api/marketing/media");
+    expect(mediaResponse.status()).toBe(200);
+    const mediaBody = await mediaResponse.json();
+    expect(mediaBody.assets.some((asset) => asset.id === canvasAssetId && asset.name === "canvas-drop-e2e.png")).toBe(true);
+  }
   await page.screenshot({ path: `${artifactDirectory}/canvas-image-drop-uploaded.png`, fullPage: false });
 
   await page.getByRole("button", { name: "Drag or click to add Product", exact: true }).click();
@@ -122,6 +144,8 @@ export async function verifyMarketingBuilder(page, expect) {
   await page.getByRole("button", { name: "My Workspace", exact: true }).click();
   await expect(page.getByLabel(/open account menu for/i)).toBeVisible();
 
-  const cleanupResponse = await page.request.delete(`/api/uploads/${canvasAssetId}`, { headers: { "X-Mace-Request": "app" } });
-  expect(cleanupResponse.status()).toBe(204);
+  if (hasRealObjectStorage) {
+    const cleanupResponse = await page.request.delete(`/api/uploads/${canvasAssetId}`, { headers: { "X-Mace-Request": "app" } });
+    expect(cleanupResponse.status()).toBe(204);
+  }
 }
