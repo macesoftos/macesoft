@@ -928,6 +928,7 @@ model UploadAsset {
   objectPath     String          @unique
   category       String
   branch         String
+  originalName   String          @default("")
   mimeType       String
   byteSize       Int
   uploadedById   String
@@ -937,6 +938,7 @@ model UploadAsset {
 
   @@index([branch])
   @@index([category])
+  @@index([category, branch, createdAt])
   @@index([uploadedById])
 }
 

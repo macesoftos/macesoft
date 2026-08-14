@@ -70,6 +70,11 @@ import {
   ROOT_EMAIL_CONTAINER,
   updateEmailBlock,
 } from "./emailDesigner.js";
+import {
+  MarketingMediaPage,
+  MarketingMediaPicker,
+  readMarketingImageFile,
+} from "./MarketingMediaLibrary.jsx";
 
 const draftStorageKey = "mace-marketing-campaign-draft-v1";
 const templateStorageKey = "mace-marketing-design-templates-v1";
@@ -81,6 +86,7 @@ const workspaceNavigation = [
   { id: "templates", label: "Templates", icon: BookOpen },
   { id: "audiences", label: "Audiences", icon: Users },
   { id: "automations", label: "Automations", icon: Workflow },
+  { id: "media", label: "Media", icon: ImageIcon },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "settings", label: "Settings", icon: Settings },
 ];
@@ -450,6 +456,7 @@ export default function MarketingWorkspace({
   deleteCampaignForever,
   globalSearch = "",
   isLoading = false,
+  loadMarketingMedia,
   moveCampaignToDeleted,
   notify,
   onOpenGlobalNavigation,
@@ -593,6 +600,7 @@ export default function MarketingWorkspace({
             clients={clients}
             draft={draft}
             notify={notify}
+            loadMedia={loadMarketingMedia}
             onBack={() => navigate("campaigns")}
             onOpenGlobalNavigation={onOpenGlobalNavigation}
             onSaveCampaign={saveCampaign}
@@ -625,6 +633,7 @@ export default function MarketingWorkspace({
                   deletedCampaigns={deletedCampaigns}
                   deleteCampaignForever={deleteCampaignForever}
                   globalSearch={globalSearch}
+                  loadMedia={loadMarketingMedia}
                   mode={route.mode}
                   moveCampaignToDeleted={moveCampaignToDeleted}
                   navigate={navigate}
@@ -652,6 +661,7 @@ export default function MarketingWorkspace({
                   settings={settings}
                   templates={templates}
                   onUseTemplate={useTemplate}
+                  uploadImage={uploadMarketingImage}
                 />
               )}
             </div>
@@ -677,7 +687,7 @@ function MarketingHeader({ mode, onCreate, onOpenGlobalNavigation, section }) {
           <h1>{label}</h1>
         </div>
       </div>
-      {section !== "settings" && !isDeleted && (
+      {section !== "settings" && section !== "media" && !isDeleted && (
         <button className="marketing-primary-button" onClick={onCreate} type="button">
           <Plus size={17} aria-hidden="true" /> Create campaign
         </button>
@@ -692,6 +702,7 @@ function MarketingPage(props) {
     case "templates": return <TemplatesPage {...props} />;
     case "audiences": return <AudiencesPage {...props} />;
     case "automations": return <AutomationsPage {...props} />;
+    case "media": return <MarketingMediaPage {...props} />;
     case "reports": return <ReportsPage {...props} />;
     case "settings": return <MarketingSettingsPage {...props} />;
     default: return <MarketingOverview {...props} />;
@@ -988,7 +999,7 @@ function MarketingSettingsPage({ notify, openModal, settings }) {
   );
 }
 
-function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, setDraft, settings, templates, uploadImage }) {
+function CampaignBuilder({ clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [settingsTab, setSettingsTab] = useState("content");
@@ -1422,7 +1433,7 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
             <span className="marketing-drag-announcement" aria-live="polite">{dragAnnouncement}</span>
             {warnings.length > 0 && <div className="marketing-builder-warning"><CircleAlert size={17} /><span>{warnings.length} campaign check{warnings.length === 1 ? "" : "s"} remaining</span></div>}
           </section>
-          <BlockSettings block={selectedBlock} notify={notify} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} uploadImage={uploadImage} />
+          <BlockSettings block={selectedBlock} loadMedia={loadMedia} notify={notify} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} uploadImage={uploadImage} />
         </div>
       )}
       {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode === "html" && (
@@ -1725,7 +1736,7 @@ function TreatmentIconEditor({ icon, notify, onChange, title, uploadImage }) {
     }
     setUploadState({ error: "", uploading: true });
     try {
-      const result = await uploadImage(await marketingIconDataUrl(file));
+      const result = await uploadImage(await marketingIconDataUrl(file), file.name);
       const iconSrc = String(result?.asset?.url || "");
       if (!iconSrc) throw new Error("The upload did not return an image URL.");
       onChange({ src: iconSrc });
@@ -1755,7 +1766,54 @@ function TreatmentIconEditor({ icon, notify, onChange, title, uploadImage }) {
   );
 }
 
-function BlockSettings({ block, notify, settingsTab, setSettingsTab, updateBlock, uploadImage }) {
+function MarketingImageControl({ block, loadMedia, notify, updateBlock, uploadImage }) {
+  const input = useRef(null);
+  const [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  async function uploadFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setMenuOpen(false);
+    setUploading(true);
+    setError("");
+    try {
+      if (!uploadImage) throw new Error("Image uploads are not available right now.");
+      const result = await uploadImage(await readMarketingImageFile(file), file.name);
+      const src = String(result?.asset?.url || "");
+      if (!src) throw new Error("The upload did not return an image URL.");
+      updateBlock({ src });
+      notify?.(`${file.name} uploaded and added to this block.`);
+    } catch (uploadError) {
+      setError(uploadError?.message || "The image could not be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <section className="marketing-image-control">
+      <input accept="image/jpeg,image/png,image/webp" hidden onChange={uploadFile} ref={input} type="file" />
+      <div className="marketing-image-control-preview">{block.src ? <img src={block.src} alt="" /> : <span><ImageIcon size={24} /><small>No image selected</small></span>}</div>
+      <div className="marketing-image-control-actions">
+        <div>
+          <button aria-expanded={menuOpen} className="marketing-image-replace" disabled={uploading} onClick={() => setMenuOpen((current) => !current)} type="button">{uploading ? "Uploading…" : block.src ? "Replace" : "Add image"}<ChevronDown size={14} /></button>
+          {menuOpen ? <div className="marketing-image-replace-menu" aria-label="Replace image"><button onClick={() => input.current?.click()} type="button"><Upload size={15} /><span><strong>Upload Image</strong><small>Add a new file to Media</small></span></button><button onClick={() => { setMenuOpen(false); setPickerOpen(true); }} type="button"><ImageIcon size={15} /><span><strong>Browse Library</strong><small>Reuse an uploaded image</small></span></button></div> : null}
+        </div>
+        <button disabled={uploading} onClick={() => input.current?.click()} type="button">Choose File</button>
+      </div>
+      <small>JPG, PNG or WebP · maximum 3 MB.</small>
+      {error ? <small className="marketing-icon-error" role="alert">{error}</small> : null}
+      <details><summary>Use an image URL <ChevronDown size={14} /></summary><label><span>Image URL</span><input placeholder="https://" value={block.src || ""} onChange={(event) => updateBlock({ src: event.target.value })} /></label></details>
+      {pickerOpen ? <MarketingMediaPicker initialSelectedUrl={block.src || ""} loadMedia={loadMedia} notify={notify} onClose={() => setPickerOpen(false)} onSelect={(asset) => { updateBlock({ src: asset.url }); setPickerOpen(false); notify?.(`${asset.name} added to this block.`); }} uploadImage={uploadImage} /> : null}
+    </section>
+  );
+}
+
+function BlockSettings({ block, loadMedia, notify, settingsTab, setSettingsTab, updateBlock, uploadImage }) {
   if (!block) return <aside className="marketing-block-settings"><MarketingEmpty title="Select a block" copy="Choose a block on the canvas to edit it." /></aside>;
   const definition = blockDefinitions.find((item) => item.type === block.type);
   const treatmentRows = block.type === "treatment" ? String(block.content || "").split(/\n\s*\n/).filter(Boolean) : [];
@@ -1773,7 +1831,7 @@ function BlockSettings({ block, notify, settingsTab, setSettingsTab, updateBlock
       {settingsTab === "content" ? block.type === "layout" ? <div className="marketing-layout-guidance"><Columns2 size={22} /><strong>Fill each column</strong><p>Drag content blocks from the left panel into a column. You can reorder content within a column or move it between columns.</p><small>{(block.columnWidths || block.columns.map(() => 1)).join(":")} ratio · columns automatically stack on mobile.</small></div> : <div className="marketing-settings-fields">
         {!['divider', 'spacer', 'image', 'logo'].includes(block.type) && <label><span>{block.type === "code" ? "Email-safe HTML" : "Text"} <button onClick={() => updateBlock({ content: `${block.content} {{first_name}}` })} type="button">Personalize</button></span><textarea rows={block.type === "code" ? 10 : 6} value={block.content || ""} onChange={(event) => updateBlock({ content: event.target.value })} /><small>Available token: {'{{first_name}}'}</small></label>}
         {block.type === "treatment" && <div className="marketing-treatment-icon-list">{treatmentRows.map((row, index) => <TreatmentIconEditor icon={block.itemIcons?.[index] || {}} key={`${block.id}-icon-${index}`} notify={notify} onChange={(patch) => updateTreatmentIcon(index, patch)} title={row.split("\n")[0].trim()} uploadImage={uploadImage} />)}</div>}
-        {["image", "video", "product", "productRecommendation"].includes(block.type) && <><label><span>Image URL</span><input value={block.src || ""} onChange={(event) => updateBlock({ src: event.target.value })} /></label>{block.type === "image" && <label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}</>}
+        {["image", "video", "product", "productRecommendation"].includes(block.type) && <><MarketingImageControl block={block} loadMedia={loadMedia} notify={notify} updateBlock={updateBlock} uploadImage={uploadImage} />{block.type === "image" && <label><span>Alternative text</span><input placeholder="Describe what you see in the image" value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}</>}
         {block.type === "logo" && <label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}
         {["button", "image", "logo", "video", "social", "survey", "apps", "product", "productRecommendation"].includes(block.type) && <label><span>Link</span><div className="marketing-input-with-icon"><Link size={15} /><input placeholder="https://" value={block.link || ""} onChange={(event) => updateBlock({ link: event.target.value })} /></div></label>}
       </div> : block.type === "layout" ? <div className="marketing-settings-fields">

@@ -109,6 +109,7 @@ import {
   loadLeadWebhookEvents,
   loadMyWorkspace,
   loadNotifications,
+  loadMarketingMedia,
   loadPublicLeadConfig,
   loadInvitations,
   loadOrganizationAccounts,
@@ -704,7 +705,7 @@ function App() {
   const [activeModule, setActiveModuleState] = useStoredState("active-module", initialPathModule || initialHashModule || defaultModuleId);
   const [branchScope, setBranchScope] = useStoredState("branch-scope", "All branches");
   const uploadMarketingImage = useCallback(
-    (dataUrl) => uploadImageAsset(dataUrl, "marketing-image", branchScope === "All branches" ? session?.branch || "All branches" : branchScope),
+    (dataUrl, originalName = "") => uploadImageAsset(dataUrl, "marketing-image", branchScope === "All branches" ? session?.branch || "All branches" : branchScope, originalName),
     [branchScope, session?.branch],
   );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useStoredState("sidebar-collapsed", false);
@@ -2605,6 +2606,7 @@ function App() {
               sendingCampaignId={sendingCampaignId}
               globalSearch={globalSearch}
               isLoading={isBooting}
+              loadMarketingMedia={loadMarketingMedia}
               notify={notify}
               uploadMarketingImage={uploadMarketingImage}
             />
