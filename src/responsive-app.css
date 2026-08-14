@@ -1868,6 +1868,7 @@
   .appointment-details-body { padding: 14px 16px 20px; }
   .appointment-detail-row,
   .appointment-summary-status-row,
+  .appointment-summary-assignment-row,
   .appointment-summary-payment-row,
   .appointment-detail-rows .appointment-detail-row { grid-template-columns: 112px minmax(0, 1fr); }
   .appointment-disclosure-content { padding-left: 26px; }
