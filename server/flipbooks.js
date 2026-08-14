@@ -101,6 +101,7 @@ function serializeFlipbook(row, request, uniqueViewers = 0) {
     allowDownload: row.allowDownload,
     expiresAt: row.expiresAt,
     publishedAt: row.publishedAt,
+    deletedAt: row.deletedAt,
     publicLink: publicLinkFor(request, row.publicToken),
     sourceUrl: `/api/flipbooks/${encodeURIComponent(row.id)}/file`,
     byteSize: row.asset?.byteSize || 0,
@@ -134,7 +135,7 @@ export function validatePdfBuffer(buffer, maximumBytes = DEFAULT_MAX_PDF_BYTES) 
 }
 
 export function publicFlipbookState(flipbook, now = new Date()) {
-  if (!flipbook || flipbook.status !== "Published" || !flipbook.publicToken) return "not-found";
+  if (!flipbook || flipbook.deletedAt || flipbook.status !== "Published" || !flipbook.publicToken) return "not-found";
   if (!flipbook.publicEnabled) return "disabled";
   if (flipbook.expiresAt && flipbook.expiresAt <= now) return "expired";
   return "available";
@@ -165,13 +166,14 @@ async function uniqueCountsFor(prisma, ids) {
   return uniqueViewerCounts(rows);
 }
 
-function internalWhere(actor, branchWhere, id = "") {
-  return { ...(id ? { id } : {}), ...branchWhere(actor) };
+function internalWhere(actor, branchWhere, id = "", deletionState = "active") {
+  const deletedAt = deletionState === "deleted" ? { not: null } : deletionState === "any" ? undefined : null;
+  return { ...(id ? { id } : {}), ...branchWhere(actor), ...(deletedAt === undefined ? {} : { deletedAt }) };
 }
 
-async function findInternalFlipbook({ prisma, actor, branchWhere, id }) {
+async function findInternalFlipbook({ prisma, actor, branchWhere, id, deletionState = "active" }) {
   const flipbook = await prisma.flipbook.findFirst({
-    where: internalWhere(actor, branchWhere, clean(id)),
+    where: internalWhere(actor, branchWhere, clean(id), deletionState),
     include: flipbookInclude(),
   });
   if (!flipbook) throw httpError("Flipbook not found.", 404);
@@ -270,6 +272,16 @@ export function createFlipbookRouters({
         linkStatus: !row.publicEnabled ? "Disabled" : row.expiresAt && row.expiresAt <= new Date() ? "Expired" : "Active",
       })),
     });
+  }));
+
+  internal.get("/deleted", asyncRoute(async (request, response) => {
+    const actor = assertReadAllowed(request, "flipbooks");
+    const rows = await prisma.flipbook.findMany({
+      where: internalWhere(actor, branchWhere, "", "deleted"),
+      orderBy: { deletedAt: "desc" },
+      include: flipbookInclude(),
+    });
+    response.json({ flipbooks: rows.map((row) => serializeFlipbook(row, request)) });
   }));
 
   internal.get("/analytics", asyncRoute(async (request, response) => {
@@ -496,9 +508,9 @@ export function createFlipbookRouters({
     }
   }));
 
-  internal.delete("/:id", asyncRoute(async (request, response) => {
+  internal.delete("/:id/permanent", asyncRoute(async (request, response) => {
     const actor = assertMutationAllowed(request, "flipbooks");
-    const existing = await findInternalFlipbook({ prisma, actor, branchWhere, id: request.params.id });
+    const existing = await findInternalFlipbook({ prisma, actor, branchWhere, id: request.params.id, deletionState: "deleted" });
     const deleted = await storageRequest(existing.asset.objectPath, { method: "DELETE" });
     if (!deleted.ok && deleted.status !== 404) throw httpError("The PDF could not be removed from storage.", 502);
     await prisma.$transaction(async (tx) => {
@@ -507,6 +519,31 @@ export function createFlipbookRouters({
       await writeAudit(tx, request, { area: "Flipbooks", action: "Flipbook deleted", details: `${existing.title} was permanently deleted.` });
     });
     response.status(204).end();
+  }));
+
+  internal.post("/:id/restore", asyncRoute(async (request, response) => {
+    const actor = assertMutationAllowed(request, "flipbooks");
+    const existing = await findInternalFlipbook({ prisma, actor, branchWhere, id: request.params.id, deletionState: "deleted" });
+    if (!canAccessBranch(actor, existing.branch)) throw httpError("You do not have access to this flipbook.", 403);
+    const restored = await prisma.$transaction(async (tx) => {
+      const row = await tx.flipbook.update({ where: { id: existing.id }, data: { deletedAt: null }, include: flipbookInclude() });
+      await writeAudit(tx, request, { area: "Flipbooks", action: "Flipbook restored", details: `${existing.title} was restored from Deleted.` });
+      return row;
+    });
+    response.json({ flipbook: serializeFlipbook(restored, request) });
+  }));
+
+  internal.delete("/:id", asyncRoute(async (request, response) => {
+    const actor = assertMutationAllowed(request, "flipbooks");
+    const existing = await findInternalFlipbook({ prisma, actor, branchWhere, id: request.params.id });
+    if (!canAccessBranch(actor, existing.branch)) throw httpError("You do not have access to this flipbook.", 403);
+    const deleted = await prisma.$transaction(async (tx) => {
+      const row = await tx.flipbook.update({ where: { id: existing.id }, data: { deletedAt: new Date() }, include: flipbookInclude() });
+      await tx.flipbookAccessGrant.deleteMany({ where: { flipbookId: existing.id } });
+      await writeAudit(tx, request, { area: "Flipbooks", action: "Flipbook moved to Deleted", details: `${existing.title} can be restored until it is permanently deleted.` });
+      return row;
+    });
+    response.json({ flipbook: serializeFlipbook(deleted, request) });
   }));
 
   publicRouter.get("/:token", asyncRoute(async (request, response) => {

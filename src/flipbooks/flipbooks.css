@@ -297,11 +297,9 @@
 .shared-link-actions > a:hover { color: var(--flipbook-brown); background: #f1ece8; }
 
 .flipbook-actions-menu { position: relative; }
-.flipbook-actions-menu > div {
-  position: absolute;
-  z-index: 50;
-  top: 36px;
-  right: 0;
+.flipbook-actions-popover {
+  position: fixed;
+  z-index: 1200;
   width: 158px;
   padding: 6px;
   border: 1px solid var(--flipbook-line);
@@ -310,12 +308,15 @@
   box-shadow: 0 12px 30px rgb(48 33 24 / 14%);
 }
 
-.flipbook-actions-menu > div button {
+.flipbook-actions-popover button {
   width: 100%;
   height: 33px;
   padding: 0 9px;
   border: 0;
   border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: #4e4640;
   background: transparent;
   font-size: 12px;
@@ -323,9 +324,24 @@
   cursor: pointer;
 }
 
-.flipbook-actions-menu > div button:hover { background: #f6f2ef; }
-.flipbook-actions-menu > div button.danger { color: #a04338; }
+.flipbook-actions-popover button:hover { background: #f6f2ef; }
+.flipbook-actions-popover button.danger { color: #a04338; }
 .flipbook-no-results { padding: 30px; color: var(--flipbook-muted); text-align: center; }
+
+.flipbook-deleted-empty { min-height: 340px; display: grid; place-content: center; justify-items: center; color: var(--flipbook-muted); text-align: center; }
+.flipbook-deleted-empty h2 { margin: 14px 0 5px; color: var(--flipbook-ink); font-size: 19px; }
+.flipbook-deleted-empty p { max-width: 440px; margin: 0; font-size: 12px; line-height: 1.55; }
+.flipbook-deleted-title { min-width: 230px; display: flex; align-items: center; gap: 11px; }
+.flipbook-deleted-title > span { width: 34px; height: 42px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--flipbook-line); border-radius: 4px; color: var(--flipbook-brown); background: var(--flipbook-soft); }
+.flipbook-deleted-title > div { min-width: 0; display: grid; gap: 3px; }
+.flipbook-deleted-title strong,
+.flipbook-deleted-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flipbook-deleted-title small { color: var(--flipbook-muted); font-size: 10px; }
+.flipbook-deleted-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.flipbook-deleted-actions button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--flipbook-line); border-radius: 6px; color: #514842; background: #fff; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.flipbook-deleted-actions button:hover { border-color: #c9bbb0; background: #faf7f5; }
+.flipbook-deleted-actions button.danger { border-color: #ead3cf; color: #9b4035; }
+.flipbook-deleted-actions button:disabled { opacity: .5; cursor: wait; }
 
 .flipbook-empty {
   min-height: 350px;
@@ -635,8 +651,8 @@
   flex: 1;
   overflow: auto;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
   padding: 36px 52px;
   overscroll-behavior: contain;
 }
@@ -645,12 +661,13 @@
   width: 100%;
   max-width: 1080px;
   min-width: 300px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
   transform-origin: center;
-  transition: width .18s ease;
+  will-change: width, max-width;
 }
 
 .flipbook-pages .pdf-page-canvas {

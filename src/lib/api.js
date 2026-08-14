@@ -193,6 +193,10 @@ export function listFlipbooks() {
   return requestJson("/api/flipbooks");
 }
 
+export function listDeletedFlipbooks() {
+  return requestJson("/api/flipbooks/deleted");
+}
+
 export function getFlipbook(id) {
   return requestJson(`/api/flipbooks/${encodeURIComponent(id)}`);
 }
@@ -242,6 +246,14 @@ export function duplicateFlipbook(id) {
 
 export function deleteFlipbook(id) {
   return requestJson(`/api/flipbooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function restoreFlipbook(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}/restore`, { method: "POST", body: "{}" });
+}
+
+export function deleteFlipbookForever(id) {
+  return requestJson(`/api/flipbooks/${encodeURIComponent(id)}/permanent`, { method: "DELETE" });
 }
 
 export function loadFlipbookLinks() {

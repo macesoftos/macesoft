@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   BarChart3,
@@ -23,6 +24,7 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   Plus,
+  RotateCcw,
   Search,
   Settings,
   Share2,
@@ -38,15 +40,18 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   deleteFlipbook,
+  deleteFlipbookForever,
   downloadPublicFlipbook,
   duplicateFlipbook,
   getFlipbook,
   listFlipbooks,
+  listDeletedFlipbooks,
   loadFlipbookAnalytics,
   loadFlipbookLinks,
   loadFlipbookSettings,
   loadPublicFlipbook,
   publishFlipbook,
+  restoreFlipbook,
   saveFlipbookSettings,
   unlockPublicFlipbook,
   unpublishFlipbook,
@@ -65,6 +70,7 @@ const workspaceNav = [
   { label: "Create New", path: "/flipbooks/new", icon: Plus },
   { label: "Shared Links", path: "/flipbooks/shared", icon: Link2 },
   { label: "Analytics", path: "/flipbooks/analytics", icon: BarChart3 },
+  { label: "Deleted", path: "/flipbooks/deleted", icon: Trash2 },
   { label: "Settings", path: "/flipbooks/settings", icon: Settings },
 ];
 
@@ -240,6 +246,7 @@ function FlipbookReader({
   const [thumbnailsOpen, setThumbnailsOpen] = useState(showThumbnails);
   const [turn, setTurn] = useState("");
   const readerRef = useRef(null);
+  const canvasScrollRef = useRef(null);
   const touchRef = useRef(null);
   const effectivePages = document?.numPages || pageCount || 1;
   const step = singlePage ? 1 : 2;
@@ -270,6 +277,28 @@ function FlipbookReader({
     else void readerRef.current?.requestFullscreen?.();
   }
 
+  function updateZoom(nextValue) {
+    const nextZoom = Math.min(1.8, Math.max(0.7, Number(nextValue.toFixed(1))));
+    if (nextZoom === zoom) return;
+    const scroller = canvasScrollRef.current;
+    const centerX = scroller ? scroller.scrollLeft + scroller.clientWidth / 2 : 0;
+    const centerY = scroller ? scroller.scrollTop + scroller.clientHeight / 2 : 0;
+    const ratio = nextZoom / zoom;
+    setZoom(nextZoom);
+    window.requestAnimationFrame(() => {
+      if (!scroller) return;
+      scroller.scrollLeft = Math.max(0, centerX * ratio - scroller.clientWidth / 2);
+      scroller.scrollTop = Math.max(0, centerY * ratio - scroller.clientHeight / 2);
+    });
+  }
+
+  function fitPages() {
+    setZoom(1);
+    window.requestAnimationFrame(() => {
+      canvasScrollRef.current?.scrollTo({ top: 0, left: 0 });
+    });
+  }
+
   function onTouchStart(event) {
     const touch = event.touches?.[0];
     if (touch) touchRef.current = { x: touch.clientX, y: touch.clientY };
@@ -298,9 +327,9 @@ function FlipbookReader({
           </button>
         )}
         <span className="flipbook-zoom-value">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => setZoom((value) => Math.max(0.7, value - 0.1))} aria-label="Zoom out"><ZoomOut size={17} /></button>
-        <button type="button" onClick={() => setZoom((value) => Math.min(1.8, value + 0.1))} aria-label="Zoom in"><ZoomIn size={17} /></button>
-        <button type="button" onClick={() => setZoom(1)}>Fit</button>
+        <button type="button" onClick={() => updateZoom(zoom - 0.1)} disabled={zoom <= 0.7} aria-label="Zoom out" title="Zoom out"><ZoomOut size={17} /></button>
+        <button type="button" onClick={() => updateZoom(zoom + 0.1)} disabled={zoom >= 1.8} aria-label="Zoom in" title="Zoom in"><ZoomIn size={17} /></button>
+        <button type="button" onClick={fitPages} aria-label="Fit pages to viewer">Fit</button>
         <button type="button" onClick={enterFullscreen} aria-label="Fullscreen"><Fullscreen size={17} /></button>
       </div>
 
@@ -321,7 +350,7 @@ function FlipbookReader({
           </aside>
         )}
 
-        <div className="flipbook-canvas-scroll" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <div className="flipbook-canvas-scroll" ref={canvasScrollRef} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {loading && <LoadingState label="Preparing pages…" />}
           {error && (
             <div className="flipbook-reader-error">
@@ -333,7 +362,11 @@ function FlipbookReader({
           {document && (
             <>
               <button className="flipbook-page-arrow previous" type="button" onClick={() => move(-1)} disabled={page <= 1} aria-label="Previous page"><ChevronLeft size={24} /></button>
-              <div className={`flipbook-pages turn-${turn}`} style={{ width: `${Math.round(zoom * 100)}%` }} aria-label={`${title}, ${rangeLabel}`}>
+              <div
+                className={`flipbook-pages turn-${turn}`}
+                style={{ width: `${Math.round(zoom * 100)}%`, maxWidth: `${Math.round(1080 * zoom)}px` }}
+                aria-label={`${title}, ${rangeLabel}`}
+              >
                 {visiblePages.map((number) => <PdfPageCanvas document={document} pageNumber={number} key={number} />)}
               </div>
               <button className="flipbook-page-arrow next" type="button" onClick={() => move(1)} disabled={page + step > effectivePages} aria-label="Next page"><ChevronRight size={24} /></button>
@@ -395,6 +428,9 @@ function WorkspaceHeader({ title, copy, action }) {
 
 function ActionsMenu({ book, onAction }) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef(null);
+  const menuRef = useRef(null);
   const actions = [
     ["Preview", "preview"],
     ["Copy link", "copy"],
@@ -405,15 +441,51 @@ function ActionsMenu({ book, onAction }) {
     [book.status === "Published" ? "Unpublish" : "Publish", book.status === "Published" ? "unpublish" : "publish"],
     ["Delete", "delete"],
   ];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnOutsideClick(event) {
+      if (triggerRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) return;
+      setOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    const closeMenu = () => setOpen(false);
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [open]);
+
+  function toggleMenu() {
+    if (open) { setOpen(false); return; }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuHeight = actions.length * 33 + 12;
+    const top = rect.bottom + 6 + menuHeight <= window.innerHeight - 8
+      ? rect.bottom + 6
+      : Math.max(8, rect.top - menuHeight - 6);
+    setPosition({ top, left: Math.min(window.innerWidth - 166, Math.max(8, rect.right - 158)) });
+    setOpen(true);
+  }
+
   return (
     <div className="flipbook-actions-menu">
-      <button type="button" aria-label={`More actions for ${book.title}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}><EllipsisVertical size={18} /></button>
-      {open && (
-        <div role="menu">
+      <button ref={triggerRef} type="button" aria-label={`More actions for ${book.title}`} aria-expanded={open} onClick={toggleMenu}><EllipsisVertical size={18} /></button>
+      {open && createPortal(
+        <div className="flipbook-actions-popover" ref={menuRef} role="menu" style={position}>
           {actions.map(([label, action]) => (
-            <button className={action === "delete" ? "danger" : ""} role="menuitem" type="button" key={action} onClick={() => { setOpen(false); onAction(action, book); }}>{label}</button>
+            <button className={action === "delete" ? "danger" : ""} role="menuitem" type="button" key={action} onClick={() => { setOpen(false); onAction(action, book); }}>{action === "delete" && <Trash2 size={15} />}{label}</button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -654,6 +726,46 @@ function SharedLinksPage({ notify, navigate }) {
   );
 }
 
+function DeletedFlipbooksPage({ notify }) {
+  const [books, setBooks] = useState(null);
+  const [busyId, setBusyId] = useState("");
+  const refresh = useCallback(() => listDeletedFlipbooks().then((result) => setBooks(result.flipbooks)).catch((error) => notify(error.message, "error")), [notify]);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function restore(book) {
+    setBusyId(book.id);
+    try {
+      await restoreFlipbook(book.id);
+      notify("Flipbook restored.");
+      await refresh();
+    } catch (error) { notify(error.message, "error"); } finally { setBusyId(""); }
+  }
+
+  async function removeForever(book) {
+    if (!window.confirm(`Delete “${book.title}” forever? The PDF and its analytics will be permanently removed.`)) return;
+    setBusyId(book.id);
+    try {
+      await deleteFlipbookForever(book.id);
+      notify("Flipbook permanently deleted.");
+      await refresh();
+    } catch (error) { notify(error.message, "error"); } finally { setBusyId(""); }
+  }
+
+  if (!books) return <LoadingState label="Loading deleted flipbooks…" />;
+  return (
+    <div>
+      <WorkspaceHeader title="Deleted" copy="Restore a flipbook or permanently remove its PDF and analytics." />
+      {!books.length ? (
+        <div className="flipbook-deleted-empty"><Trash2 size={25} /><h2>No deleted flipbooks</h2><p>Flipbooks you delete will stay here until you restore or permanently remove them.</p></div>
+      ) : (
+        <div className="flipbook-table-wrap"><table className="flipbook-table deleted-flipbooks-table"><thead><tr><th>Flipbook</th><th>Pages</th><th>Deleted</th><th>Previous status</th><th>Actions</th></tr></thead><tbody>
+          {books.map((book) => <tr key={book.id}><td><div className="flipbook-deleted-title"><span><FileText size={19} /></span><div><strong>{book.title}</strong><small>{book.description || formatBytes(book.byteSize)}</small></div></div></td><td>{book.pageCount}</td><td>{formatDate(book.deletedAt)}</td><td><StatusPill status={book.status} /></td><td><div className="flipbook-deleted-actions"><button type="button" onClick={() => void restore(book)} disabled={busyId === book.id}><RotateCcw size={15} /> Restore</button><button className="danger" type="button" onClick={() => void removeForever(book)} disabled={busyId === book.id}><Trash2 size={15} /> Delete forever</button></div></td></tr>)}
+        </tbody></table></div>
+      )}
+    </div>
+  );
+}
+
 function SettingsPage({ session, notify }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -809,7 +921,7 @@ export default function FlipbooksWorkspace({ notify, session, onExit }) {
       if (type === "duplicate") { await duplicateFlipbook(book.id); notify("Draft duplicate created."); }
       if (type === "publish") { await publishFlipbook(book.id); notify("Flipbook published."); }
       if (type === "unpublish") { await unpublishFlipbook(book.id); notify("Flipbook returned to draft."); }
-      if (type === "delete" && window.confirm(`Delete “${book.title}”? This cannot be undone.`)) { await deleteFlipbook(book.id); notify("Flipbook deleted."); }
+      if (type === "delete" && window.confirm(`Move “${book.title}” to Deleted? You can restore it later.`)) { await deleteFlipbook(book.id); notify("Flipbook moved to Deleted."); }
       if (!["preview", "share", "copy", "analytics"].includes(type)) await refresh();
     } catch (error) { notify(error.message, "error"); }
   }
@@ -818,13 +930,14 @@ export default function FlipbooksWorkspace({ notify, session, onExit }) {
   if (previewMatch) return <FlipbookPreviewPage id={decodeURIComponent(previewMatch[1])} navigate={navigate} notify={notify} />;
 
   const editorMatch = path.match(/^\/flipbooks\/([^/]+)$/);
-  const isEditor = editorMatch && !["overview", "new", "shared", "analytics", "settings"].includes(editorMatch[1]);
+  const isEditor = editorMatch && !["overview", "new", "shared", "analytics", "deleted", "settings"].includes(editorMatch[1]);
   if (isEditor) return <FlipbookEditor id={decodeURIComponent(editorMatch[1])} navigate={navigate} notify={notify} onListChanged={refresh} />;
 
   let content;
   if (path === "/flipbooks/new") content = <CreateFlipbook navigate={navigate} notify={notify} />;
   else if (path === "/flipbooks/shared") content = <SharedLinksPage notify={notify} navigate={navigate} />;
   else if (path === "/flipbooks/analytics") content = <AnalyticsPage notify={notify} />;
+  else if (path === "/flipbooks/deleted") content = <DeletedFlipbooksPage notify={notify} />;
   else if (path === "/flipbooks/settings") content = <SettingsPage session={session} notify={notify} />;
   else if (path === "/flipbooks/overview") content = loading ? <LoadingState label="Loading overview…" /> : <OverviewPage books={books} navigate={navigate} />;
   else content = loading ? <LoadingState label="Loading flipbooks…" /> : <div><WorkspaceHeader title="Flipbooks" copy="Create, publish and share interactive documents." action={<button className="flipbook-primary" type="button" onClick={() => navigate("/flipbooks/new")}><Plus size={17} /> New Flipbook</button>} /><FlipbooksTable books={books} navigate={navigate} onAction={action} /></div>;
