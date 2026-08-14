@@ -361,6 +361,7 @@ function FlipbookReader({
   const singlePage = useMedia("(max-width: 760px)");
   const [page, setPage] = useState(1);
   const [zoom, setZoom] = useState(1);
+  const [fitMode, setFitMode] = useState(true);
   const [pageAspectRatio, setPageAspectRatio] = useState(0.77);
   const [thumbnailsOpen, setThumbnailsOpen] = useState(showThumbnails);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -389,6 +390,7 @@ function FlipbookReader({
 
   useEffect(() => {
     if (!document) return undefined;
+    setFitMode(true);
     let cancelled = false;
     void document.getPage(1).then((firstPage) => {
       const viewport = firstPage.getViewport({ scale: 1 });
@@ -471,7 +473,7 @@ function FlipbookReader({
         filter.Q.value = 0.55;
         const now = audioContext.currentTime;
         gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.075, now + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.14, now + 0.018);
         gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
         source.connect(filter);
         filter.connect(gain);
@@ -529,9 +531,45 @@ function FlipbookReader({
     else void readerRef.current?.requestFullscreen?.();
   }
 
+  const applyFit = useCallback(() => {
+    const scroller = canvasScrollRef.current;
+    if (!scroller) return;
+    const styles = window.getComputedStyle(scroller);
+    const horizontalPadding = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
+    const verticalPadding = Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom);
+    const availableWidth = Math.max(1, scroller.clientWidth - horizontalPadding);
+    const availableHeight = Math.max(1, scroller.clientHeight - verticalPadding);
+    const spreadAspectRatio = pageAspectRatio * (singlePage ? 1 : 2);
+    const heightAtFullWidth = availableWidth / spreadAspectRatio;
+    const fittedZoom = Math.max(0.5, Number(Math.min(1, availableHeight / heightAtFullWidth).toFixed(2)));
+    setZoom((currentZoom) => Math.abs(currentZoom - fittedZoom) < 0.005 ? currentZoom : fittedZoom);
+    scroller.scrollTo({ top: 0, left: 0 });
+  }, [pageAspectRatio, singlePage]);
+
+  useEffect(() => {
+    if (!document || !fitMode || !canvasScrollRef.current) return undefined;
+    const scroller = canvasScrollRef.current;
+    let animationFrame = window.requestAnimationFrame(applyFit);
+    const scheduleFit = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(applyFit);
+    };
+    const resizeObserver = typeof window.ResizeObserver === "function"
+      ? new window.ResizeObserver(scheduleFit)
+      : null;
+    if (resizeObserver) resizeObserver.observe(scroller);
+    else window.addEventListener("resize", scheduleFit);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+      if (!resizeObserver) window.removeEventListener("resize", scheduleFit);
+    };
+  }, [applyFit, document, fitMode, thumbnailsOpen]);
+
   function updateZoom(nextValue) {
     const nextZoom = Math.min(1.8, Math.max(0.5, Number(nextValue.toFixed(1))));
     if (nextZoom === zoom) return;
+    setFitMode(false);
     const scroller = canvasScrollRef.current;
     const centerX = scroller ? scroller.scrollLeft + scroller.clientWidth / 2 : 0;
     const centerY = scroller ? scroller.scrollTop + scroller.clientHeight / 2 : 0;
@@ -545,20 +583,8 @@ function FlipbookReader({
   }
 
   function fitPages() {
-    const scroller = canvasScrollRef.current;
-    if (!scroller) return;
-    const styles = window.getComputedStyle(scroller);
-    const horizontalPadding = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
-    const verticalPadding = Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom);
-    const availableWidth = Math.max(1, scroller.clientWidth - horizontalPadding);
-    const availableHeight = Math.max(1, scroller.clientHeight - verticalPadding);
-    const spreadAspectRatio = pageAspectRatio * (singlePage ? 1 : 2);
-    const heightAtFullWidth = availableWidth / spreadAspectRatio;
-    const fittedZoom = Math.min(1, availableHeight / heightAtFullWidth);
-    setZoom(Math.max(0.5, Number(fittedZoom.toFixed(2))));
-    window.requestAnimationFrame(() => {
-      scroller.scrollTo({ top: 0, left: 0 });
-    });
+    setFitMode(true);
+    applyFit();
   }
 
   function onTouchStart(event) {
