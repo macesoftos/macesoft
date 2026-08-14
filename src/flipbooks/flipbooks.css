@@ -659,7 +659,6 @@
 
 .flipbook-pages {
   width: 100%;
-  max-width: 1080px;
   min-width: 300px;
   flex: 0 0 auto;
   display: flex;
@@ -667,7 +666,7 @@
   justify-content: center;
   gap: 2px;
   transform-origin: center;
-  will-change: width, max-width;
+  will-change: width;
 }
 
 .flipbook-pages .pdf-page-canvas {
@@ -680,15 +679,15 @@
 }
 
 .pdf-page-canvas { position: relative; }
-.pdf-page-canvas canvas { width: 100%; height: auto; display: block; background: #fff; }
-.pdf-page-canvas small { position: absolute; inset: 0; display: grid; place-items: center; color: #8d645a; background: #fff; font-size: 11px; }
-.pdf-page-placeholder { display: block; aspect-ratio: .77; background: linear-gradient(100deg, #f2efed 20%, #faf8f6 42%, #f2efed 68%); background-size: 220% 100%; animation: flipbook-shimmer 1.2s linear infinite; }
+.pdf-page-canvas canvas { width: 100%; height: 100%; display: block; object-fit: contain; background: #fff; }
+.pdf-page-canvas small { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; color: #8d645a; background: #fff; font-size: 11px; }
+.pdf-page-placeholder { position: absolute; z-index: 1; inset: 0; display: block; background: linear-gradient(100deg, #f2efed 20%, #faf8f6 42%, #f2efed 68%); background-size: 220% 100%; animation: flipbook-shimmer 1.2s linear infinite; }
 @keyframes flipbook-shimmer { to { background-position: -220% 0; } }
 
-.flipbook-pages.turn-next .pdf-page-canvas:last-child { animation: flipbook-turn-next .25s ease; transform-origin: left center; }
-.flipbook-pages.turn-previous .pdf-page-canvas:first-child { animation: flipbook-turn-previous .25s ease; transform-origin: right center; }
-@keyframes flipbook-turn-next { 0% { transform: perspective(1200px) rotateY(0); } 50% { transform: perspective(1200px) rotateY(-5deg); box-shadow: -15px 12px 28px rgb(42 30 22 / 16%); } 100% { transform: perspective(1200px) rotateY(0); } }
-@keyframes flipbook-turn-previous { 0% { transform: perspective(1200px) rotateY(0); } 50% { transform: perspective(1200px) rotateY(5deg); } 100% { transform: perspective(1200px) rotateY(0); } }
+.flipbook-pages.turn-next { animation: flipbook-spread-next .18s ease-out; }
+.flipbook-pages.turn-previous { animation: flipbook-spread-previous .18s ease-out; }
+@keyframes flipbook-spread-next { from { opacity: .72; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes flipbook-spread-previous { from { opacity: .72; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
 
 .flipbook-page-arrow { position: absolute; z-index: 3; top: 50%; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: #282522; box-shadow: 0 4px 12px rgb(0 0 0 / 20%); cursor: pointer; transform: translateY(-50%); }
 .flipbook-page-arrow.previous { left: 12px; }
