@@ -1,3 +1,5 @@
+import { socialIconAssetPath } from "./socialIcons.js";
+
 export const MAX_EMAIL_HTML_LENGTH = 250_000;
 
 const unsafeElements = "script,iframe,object,embed,form,input,button,textarea,select,option,base,link,video,audio,canvas,svg,math,template,xmp";
@@ -268,9 +270,14 @@ function blockEmailHtmlContent(block, origin, theme, draft) {
     const iconColor = safeColor(block.iconColor, theme.linkColor);
     const iconSize = safeNumber(block.iconSize, 14, 48, 24);
     const links = items.map((item) => {
-      const text = block.iconStyle === "text" ? item.platform : String(item.platform || "?").slice(0, 1);
+      const label = item.label || item.platform || "Social profile";
+      const imageSize = Math.max(12, Math.round(iconSize * 0.58));
+      const iconSrc = safeEmailUrl(socialIconAssetPath(item.platform, block.iconStyle === "filled"), origin);
+      const content = block.iconStyle === "text"
+        ? escapeEmailHtml(item.platform)
+        : `<img src="${escapeEmailHtml(iconSrc)}" width="${imageSize}" height="${imageSize}" alt="${escapeEmailHtml(label)}" style="display:inline-block;width:${imageSize}px;height:${imageSize}px;border:0;vertical-align:middle">`;
       const iconStyle = block.iconStyle === "text" ? `color:${iconColor};font-size:${Math.max(12, Math.min(iconSize, 18))}px;text-decoration:underline` : `width:${iconSize}px;height:${iconSize}px;border:1px solid ${iconColor};border-radius:50%;background:${block.iconStyle === "filled" ? iconColor : "transparent"};color:${block.iconStyle === "filled" ? "#ffffff" : iconColor};font-size:${Math.max(11, Math.round(iconSize * 0.55))}px;line-height:${iconSize}px;text-align:center;text-decoration:none`;
-      return `<a href="${escapeEmailHtml(trackedEmailUrl(block, item.url, origin))}" target="_blank" title="${escapeEmailHtml(item.label || item.platform)}" style="display:inline-block;margin:0 ${safeNumber(block.iconSpacing, 0, 40, 12) / 2}px;${iconStyle}">${escapeEmailHtml(text)}</a>`;
+      return `<a href="${escapeEmailHtml(trackedEmailUrl(block, item.url, origin))}" target="_blank" aria-label="${escapeEmailHtml(label)}" title="${escapeEmailHtml(label)}" style="display:inline-block;margin:0 ${safeNumber(block.iconSpacing, 0, 40, 12) / 2}px;${iconStyle}">${content}</a>`;
     }).join("");
     return `<div style="${style}font-family:${fontStack(theme.fontFamily)}">${links}</div>`;
   }
