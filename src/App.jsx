@@ -2275,7 +2275,9 @@ function App() {
               appointments={scopedAppointments}
               services={services}
               transactions={scopedTransactions}
-              staff={staff}
+              staff={scopedStaff}
+              branchRecords={branchRecords}
+              branchScope={branchScope}
               updateStatus={updateAppointmentStatus}
               openModal={openModal}
               globalSearch={globalSearch}
@@ -5213,16 +5215,24 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
   );
 }
 
-function CardViewModule({ appointments, services, transactions, staff, updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView }) {
-  const [date, setDate] = useState("");
+function CardViewModule({ appointments, services, transactions, staff, branchRecords = [], branchScope = "All branches", updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView }) {
+  const [date, setDate] = useState(todayDate());
   const [staffFilter, setStaffFilter] = useState("All staff");
   const [roomFilter, setRoomFilter] = useState("All rooms");
   const [viewMode, setViewMode] = useStoredState("card-view-mode", "list");
-  const rooms = uniqueRoomsFromBranches();
+  const visibleBranches = branchScope === "All branches"
+    ? branchRecords
+    : branchRecords.filter((branch) => branch.name === branchScope);
+  const rooms = [...new Set(
+    visibleBranches
+      .flatMap((branch) => branch.rooms ?? [])
+      .concat(appointments.map((appointment) => appointment.room))
+      .filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
   const staffOptions = [...new Set(staff.map((person) => person.name))].sort((a, b) => a.localeCompare(b));
 
   const cards = appointments
-    .filter((appointment) => !date || appointment.date === date)
+    .filter((appointment) => appointment.date === date)
     .filter((appointment) => staffFilter === "All staff" || appointment.staff === staffFilter)
     .filter((appointment) => roomFilter === "All rooms" || appointment.room === roomFilter)
     .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.staff} ${appointment.room}`).includes(normalize(globalSearch)))
@@ -5374,7 +5384,7 @@ function CardViewModule({ appointments, services, transactions, staff, updateSta
       )}
 
       <footer className="surface-panel full-span card-view-note">
-        <span><AlertCircle size={19} aria-hidden="true" /> Cards represent {date ? "the selected date's" : "today's"} scheduled services. Switch between list and grid, or filter by staff, room, or date.</span>
+        <span><AlertCircle size={19} aria-hidden="true" /> Cards represent {date === todayDate() ? "today's" : "the selected date's"} saved appointments. Switch between list and grid, or filter by staff, room, or date.</span>
         <button className="ghost-button" type="button" onClick={onOpenRoomView}><LayoutGrid size={16} aria-hidden="true" /> View Room View</button>
       </footer>
     </section>
