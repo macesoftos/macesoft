@@ -101,3 +101,34 @@ test("custom code blocks remove executable markup while preserving email HTML", 
   assert.match(html, /<table><tr><td>Safe offer<\/td><\/tr><\/table>/);
   assert.doesNotMatch(html, /onclick|<script/i);
 });
+
+test("treatment rows export their own uploaded icons", () => {
+  const html = buildVisualEmailHtml({
+    blocks: [{
+      id: "treatment-1",
+      type: "treatment",
+      content: "Hydrodermabrasion\nDeeply cleanse and hydrate.\n\nPico-Rejuvenation\nImprove tone and clarity.",
+      itemIcons: [
+        { src: "/api/uploads/hydro-icon", alt: "Hydrodermabrasion icon" },
+        { src: "/api/uploads/pico-icon", alt: "Pico-Rejuvenation icon" },
+      ],
+      align: "left",
+    }],
+  }, {}, "https://app.macebydrmace.com");
+
+  assert.equal((html.match(/https:\/\/app\.macebydrmace\.com\/api\/uploads\/hydro-icon/g) || []).length, 1);
+  assert.equal((html.match(/https:\/\/app\.macebydrmace\.com\/api\/uploads\/pico-icon/g) || []).length, 1);
+  assert.match(html, /alt="Hydrodermabrasion icon"/);
+  assert.match(html, /alt="Pico-Rejuvenation icon"/);
+  assert.match(html, /Hydrodermabrasion/);
+  assert.match(html, /Pico-Rejuvenation/);
+});
+
+test("treatment row icon rejects unsafe URLs during export", () => {
+  const html = buildVisualEmailHtml({
+    blocks: [{ id: "treatment-1", type: "treatment", content: "Treatment\nDescription", itemIcons: [{ src: "javascript:alert(1)" }] }],
+  });
+
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.match(html, /&#10022;/);
+});

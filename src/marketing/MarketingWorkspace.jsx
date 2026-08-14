@@ -31,6 +31,8 @@ import {
   MoveDown,
   MoveUp,
   PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Redo2,
   Save,
@@ -70,6 +72,7 @@ import {
 
 const draftStorageKey = "mace-marketing-campaign-draft-v1";
 const templateStorageKey = "mace-marketing-design-templates-v1";
+const sidebarStorageKey = "mace-marketing-sidebar-collapsed-v1";
 
 const workspaceNavigation = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -452,10 +455,12 @@ export default function MarketingWorkspace({
   sendingCampaignId,
   settings = {},
   templates = [],
+  uploadMarketingImage,
 }) {
   const [route, setRoute] = useState(routeFromLocation);
   const [draft, setDraft] = useState(() => normalizedDraft(safeJsonRead(draftStorageKey, null)));
   const [savedTemplates, setSavedTemplates] = useState(() => safeJsonRead(templateStorageKey, []));
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => safeJsonRead(sidebarStorageKey, false) === true);
 
   useEffect(() => {
     function syncRoute() {
@@ -481,6 +486,10 @@ export default function MarketingWorkspace({
   useEffect(() => {
     safeJsonWrite(draftStorageKey, { ...draft, updatedAt: new Date().toISOString() });
   }, [draft]);
+
+  useEffect(() => {
+    safeJsonWrite(sidebarStorageKey, sidebarCollapsed);
+  }, [sidebarCollapsed]);
 
   const eligibleContacts = useMemo(
     () => clients.filter((client) => channelEligible(client, "Email + SMS")).length,
@@ -510,7 +519,11 @@ export default function MarketingWorkspace({
   }
 
   return (
-    <div className="marketing-workspace" data-testid="marketing-workspace">
+    <div
+      className={`marketing-workspace${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
+      data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
+      data-testid="marketing-workspace"
+    >
       <aside className="marketing-sidebar" aria-label="Marketing workspace navigation">
         <button
           className="marketing-sidebar-brand"
@@ -521,6 +534,15 @@ export default function MarketingWorkspace({
           <img src="/brand/mace-logo.png" alt="MACE" />
           <span>Applications</span>
           <ArrowLeft size={16} aria-hidden="true" />
+        </button>
+        <button
+          aria-label="Hide Marketing menu"
+          className="marketing-sidebar-collapse"
+          onClick={() => setSidebarCollapsed(true)}
+          title="Hide Marketing menu"
+          type="button"
+        >
+          <PanelLeftClose size={17} aria-hidden="true" />
         </button>
         <div className="marketing-sidebar-heading">
           <span className="marketing-sidebar-kicker">Workspace</span>
@@ -546,6 +568,18 @@ export default function MarketingWorkspace({
       </aside>
 
       <section className="marketing-main">
+        {sidebarCollapsed ? (
+          <button
+            aria-label="Show Marketing menu"
+            className="marketing-sidebar-expand"
+            onClick={() => setSidebarCollapsed(false)}
+            title="Show Marketing menu"
+            type="button"
+          >
+            <PanelLeftOpen size={18} aria-hidden="true" />
+            <span>Menu</span>
+          </button>
+        ) : null}
         {route.mode === "create" ? (
           <CampaignBuilder
             clients={clients}
@@ -562,6 +596,7 @@ export default function MarketingWorkspace({
             setDraft={setDraft}
             settings={settings}
             templates={templates}
+            uploadImage={uploadMarketingImage}
           />
         ) : (
           <>
@@ -834,7 +869,7 @@ function MarketingSettingsPage({ notify, openModal, settings }) {
   );
 }
 
-function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, setDraft, settings, templates }) {
+function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [settingsTab, setSettingsTab] = useState("content");
@@ -1268,7 +1303,7 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
             <span className="marketing-drag-announcement" aria-live="polite">{dragAnnouncement}</span>
             {warnings.length > 0 && <div className="marketing-builder-warning"><CircleAlert size={17} /><span>{warnings.length} campaign check{warnings.length === 1 ? "" : "s"} remaining</span></div>}
           </section>
-          <BlockSettings block={selectedBlock} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} />
+          <BlockSettings block={selectedBlock} notify={notify} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} uploadImage={uploadImage} />
         </div>
       )}
       {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode === "html" && (
@@ -1497,7 +1532,7 @@ function RenderedBlock({ block, style }) {
   if (block.type === "button") return <div className="marketing-email-button-wrap" style={style}><a href={block.link || "#missing-link"} onClick={(event) => event.preventDefault()} style={{ background: block.background }}>{block.content}</a></div>;
   if (block.type === "treatment") {
     const rows = String(block.content).split(/\n\s*\n/);
-    return <div className="marketing-treatment-block" style={style}>{rows.map((row, index) => { const [title, ...copy] = row.split("\n"); return <div key={`${title}-${index}`}><span><Sparkles size={15} /></span><p><strong>{title}</strong><small>{copy.join(" ")}</small></p><ChevronRight size={16} /></div>; })}</div>;
+    return <div className="marketing-treatment-block" style={style}>{rows.map((row, index) => { const [title, ...copy] = row.split("\n"); const icon = block.itemIcons?.[index]; return <div key={`${title}-${index}`}><span>{icon?.src ? <img src={icon.src} alt={icon.alt || ""} /> : <Sparkles size={15} />}</span><p><strong>{title}</strong><small>{copy.join(" ")}</small></p><ChevronRight size={16} /></div>; })}</div>;
   }
   if (block.type === "offer") return <div className="marketing-offer-block" style={style}><BellRing size={20} /><p>{block.content}</p></div>;
   if (block.type === "divider") return <div className="marketing-divider" style={style}><i /></div>;
@@ -1520,15 +1555,105 @@ function ColorField({ label, onChange, value }) {
   return <label><span>{label}</span><div className="marketing-color-input"><input aria-label={`${label} picker`} onChange={(event) => onChange(event.target.value)} type="color" value={value} /><input aria-label={`${label} hex value`} onChange={(event) => onChange(event.target.value)} value={value} /></div></label>;
 }
 
-function BlockSettings({ block, settingsTab, setSettingsTab, updateBlock }) {
+function marketingIconDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The icon file could not be read."));
+    reader.onload = () => {
+      const image = new window.Image();
+      image.onerror = () => reject(new Error("Choose a valid JPG, PNG, or WebP image."));
+      image.onload = () => {
+        const size = 128;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          resolve(String(reader.result || ""));
+          return;
+        }
+        const scale = Math.min(size / image.width, size / image.height);
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      image.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function TreatmentIconEditor({ icon, notify, onChange, title, uploadImage }) {
+  const input = useRef(null);
+  const [uploadState, setUploadState] = useState({ error: "", uploading: false });
+
+  async function uploadTreatmentIcon(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/^image\/(?:jpeg|png|webp)$/i.test(file.type)) {
+      setUploadState({ error: "Choose a JPG, PNG, or WebP image.", uploading: false });
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setUploadState({ error: "The icon must be 3 MB or smaller.", uploading: false });
+      return;
+    }
+    if (!uploadImage) {
+      setUploadState({ error: "Icon uploads are not available right now.", uploading: false });
+      return;
+    }
+    setUploadState({ error: "", uploading: true });
+    try {
+      const result = await uploadImage(await marketingIconDataUrl(file));
+      const iconSrc = String(result?.asset?.url || "");
+      if (!iconSrc) throw new Error("The upload did not return an image URL.");
+      onChange({ src: iconSrc });
+      setUploadState({ error: "", uploading: false });
+      notify?.(`${title} icon uploaded.`);
+    } catch (error) {
+      setUploadState({ error: error?.message || "The icon could not be uploaded.", uploading: false });
+    }
+  }
+
+  return (
+    <section className="marketing-icon-editor">
+      <div className="marketing-icon-editor-header">
+        <div className="marketing-icon-preview">{icon.src ? <img src={icon.src} alt={icon.alt || `${title} icon preview`} /> : <Sparkles size={20} />}</div>
+        <div><strong>{title || "Untitled treatment"}</strong><small>Individual row icon</small></div>
+      </div>
+      <input accept="image/jpeg,image/png,image/webp" hidden onChange={uploadTreatmentIcon} ref={input} type="file" />
+      <div className="marketing-icon-actions">
+        <button aria-label={`${icon.src ? "Replace" : "Upload"} icon for ${title}`} disabled={uploadState.uploading} onClick={() => input.current?.click()} type="button"><Upload size={14} /> {uploadState.uploading ? "Uploading…" : icon.src ? "Replace icon" : "Upload icon"}</button>
+        {icon.src && <button aria-label={`Remove icon for ${title}`} onClick={() => onChange({ src: "" })} type="button"><Trash2 size={14} /> Remove</button>}
+      </div>
+      <label><span>Icon URL</span><input aria-label={`${title} icon URL`} placeholder="https://" value={icon.src || ""} onChange={(event) => onChange({ src: event.target.value })} /></label>
+      <label><span>Alternative text</span><input aria-label={`${title} icon alternative text`} placeholder="Decorative if left blank" value={icon.alt || ""} onChange={(event) => onChange({ alt: event.target.value })} /></label>
+      <small>Public-facing JPG, PNG, or WebP · maximum 3 MB.</small>
+      {uploadState.error && <small className="marketing-icon-error" role="alert">{uploadState.error}</small>}
+    </section>
+  );
+}
+
+function BlockSettings({ block, notify, settingsTab, setSettingsTab, updateBlock, uploadImage }) {
   if (!block) return <aside className="marketing-block-settings"><MarketingEmpty title="Select a block" copy="Choose a block on the canvas to edit it." /></aside>;
   const definition = blockDefinitions.find((item) => item.type === block.type);
+  const treatmentRows = block.type === "treatment" ? String(block.content || "").split(/\n\s*\n/).filter(Boolean) : [];
+
+  function updateTreatmentIcon(index, patch) {
+    const itemIcons = Array.from({ length: treatmentRows.length }, (_, itemIndex) => ({ ...(block.itemIcons?.[itemIndex] || {}) }));
+    itemIcons[index] = { ...itemIcons[index], ...patch };
+    updateBlock({ itemIcons });
+  }
+
   return (
     <aside className="marketing-block-settings">
-      <div className="marketing-panel-title"><strong>{block.type === "layout" ? `${block.columns.length}-column layout` : definition?.label || "Block"}</strong><ChevronDown size={16} /></div>
+      <div className="marketing-panel-title"><strong>{block.type === "layout" ? `${block.columns.length}-column layout` : block.type === "treatment" ? "Treatments" : definition?.label || "Block"}</strong><ChevronDown size={16} /></div>
       <div className="marketing-settings-tabs"><button className={settingsTab === "content" ? "active" : ""} onClick={() => setSettingsTab("content")} type="button">Content</button><button className={settingsTab === "style" ? "active" : ""} onClick={() => setSettingsTab("style")} type="button">Style</button></div>
       {settingsTab === "content" ? block.type === "layout" ? <div className="marketing-layout-guidance"><Columns2 size={22} /><strong>Fill each column</strong><p>Drag content blocks from the left panel into a column. You can reorder content within a column or move it between columns.</p><small>{(block.columnWidths || block.columns.map(() => 1)).join(":")} ratio · columns automatically stack on mobile.</small></div> : <div className="marketing-settings-fields">
         {!['divider', 'spacer', 'image', 'logo'].includes(block.type) && <label><span>{block.type === "code" ? "Email-safe HTML" : "Text"} <button onClick={() => updateBlock({ content: `${block.content} {{first_name}}` })} type="button">Personalize</button></span><textarea rows={block.type === "code" ? 10 : 6} value={block.content || ""} onChange={(event) => updateBlock({ content: event.target.value })} /><small>Available token: {'{{first_name}}'}</small></label>}
+        {block.type === "treatment" && <div className="marketing-treatment-icon-list">{treatmentRows.map((row, index) => <TreatmentIconEditor icon={block.itemIcons?.[index] || {}} key={`${block.id}-icon-${index}`} notify={notify} onChange={(patch) => updateTreatmentIcon(index, patch)} title={row.split("\n")[0].trim()} uploadImage={uploadImage} />)}</div>}
         {["image", "video", "product", "productRecommendation"].includes(block.type) && <><label><span>Image URL</span><input value={block.src || ""} onChange={(event) => updateBlock({ src: event.target.value })} /></label>{block.type === "image" && <label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}</>}
         {block.type === "logo" && <label><span>Alternative text</span><input value={block.alt || ""} onChange={(event) => updateBlock({ alt: event.target.value })} /></label>}
         {["button", "image", "logo", "video", "social", "survey", "apps", "product", "productRecommendation"].includes(block.type) && <label><span>Link</span><div className="marketing-input-with-icon"><Link size={15} /><input placeholder="https://" value={block.link || ""} onChange={(event) => updateBlock({ link: event.target.value })} /></div></label>}

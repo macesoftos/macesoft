@@ -39,6 +39,14 @@
   background: #fbfaf7;
 }
 
+.marketing-workspace.sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.marketing-workspace.sidebar-collapsed .marketing-sidebar {
+  display: none;
+}
+
 .marketing-workspace button,
 .marketing-workspace input,
 .marketing-workspace select,
@@ -89,6 +97,35 @@
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.03em;
+}
+
+.marketing-sidebar-collapse {
+  position: absolute;
+  top: 77px;
+  right: -16px;
+  z-index: 4;
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--marketing-border);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--marketing-espresso);
+  box-shadow: 0 5px 16px rgba(67, 43, 29, 0.12);
+  cursor: pointer;
+}
+
+.marketing-sidebar-collapse:hover {
+  border-color: #bca99a;
+  background: var(--marketing-beige-soft);
+}
+
+.marketing-sidebar-collapse:focus-visible,
+.marketing-sidebar-expand:focus-visible {
+  outline: 3px solid rgba(67, 43, 29, 0.23);
+  outline-offset: 2px;
 }
 
 .marketing-sidebar-heading {
@@ -176,11 +213,45 @@
 }
 
 .marketing-main {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
+}
+
+.marketing-sidebar-expand {
+  position: absolute;
+  top: 29px;
+  left: 16px;
+  z-index: 30;
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--marketing-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--marketing-espresso);
+  box-shadow: 0 5px 18px rgba(67, 43, 29, 0.09);
+  cursor: pointer;
+}
+
+.marketing-sidebar-expand:hover {
+  border-color: #bca99a;
+  background: var(--marketing-beige-soft);
+}
+
+.marketing-sidebar-expand span {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.sidebar-collapsed .marketing-header,
+.sidebar-collapsed .marketing-builder-header {
+  padding-left: 104px;
 }
 
 .marketing-header,
@@ -1282,6 +1353,7 @@
 .marketing-treatment-block > div { display: grid; grid-template-columns: 34px minmax(0, 1fr) 18px; align-items: center; gap: 9px; padding: 11px 0; border-bottom: 1px solid #e0d7cd; text-align: left; }
 .marketing-treatment-block > div:last-child { border-bottom: 0; }
 .marketing-treatment-block > div > span { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid #cbb9a8; border-radius: 50%; }
+.marketing-treatment-block > div > span img { display: block; width: 22px; height: 22px; border-radius: 50%; object-fit: contain; }
 .marketing-treatment-block p { display: grid; gap: 2px; margin: 0; }
 .marketing-treatment-block small { color: #68615b; font-size: 9px; }
 .marketing-offer-block { display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 5px; background: #f1e6da; }
@@ -1321,6 +1393,23 @@
 .marketing-settings-fields label > span button { padding: 5px 7px; border: 0; border-radius: 4px; background: #f0ebe5; color: var(--marketing-espresso); font-size: 9px; }
 .marketing-settings-fields textarea { resize: vertical; }
 .marketing-settings-fields small { color: var(--marketing-muted); font-size: 9px; font-weight: 500; }
+.marketing-treatment-icon-list { display: grid; gap: 10px; }
+.marketing-icon-editor { display: grid; gap: 10px; padding: 11px; border: 1px solid var(--marketing-border); border-radius: 9px; background: #fcfaf7; }
+.marketing-icon-editor-header { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 11px; align-items: center; }
+.marketing-icon-editor-header > div:last-child { display: grid; gap: 3px; min-width: 0; }
+.marketing-icon-editor-header strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.marketing-icon-editor-header small { color: var(--marketing-muted); font-size: 9px; }
+.marketing-icon-preview { display: grid; width: 48px; height: 48px; place-items: center; overflow: hidden; border: 1px solid var(--marketing-border); border-radius: 9px; background: #faf7f3; color: var(--marketing-espresso); }
+.marketing-icon-preview img { display: block; width: 34px; height: 34px; object-fit: contain; }
+.marketing-icon-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.marketing-icon-actions button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 5px; padding: 7px 9px; border: 1px solid var(--marketing-border); border-radius: 6px; background: #fff; color: var(--marketing-espresso); font-size: 9px; font-weight: 750; }
+.marketing-icon-actions button:hover { background: var(--marketing-beige-soft); }
+.marketing-icon-actions button:disabled { opacity: 0.55; cursor: wait; }
+.marketing-icon-editor > label { display: grid; gap: 6px; }
+.marketing-icon-editor > label > span { font-size: 9px; font-weight: 700; }
+.marketing-icon-editor > label input { min-height: 36px; }
+.marketing-icon-editor > small { line-height: 1.45; }
+.marketing-icon-editor .marketing-icon-error { color: #a33c30; font-weight: 700; }
 .marketing-input-with-icon { position: relative; display: flex; align-items: center; }
 .marketing-input-with-icon svg { position: absolute; left: 10px; color: #7d736b; }
 .marketing-input-with-icon input { padding-left: 33px; }
@@ -1477,7 +1566,11 @@
   .marketing-workspace-host { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
   .marketing-content-area { height: auto; }
   .marketing-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
+  .marketing-workspace.sidebar-collapsed { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .marketing-workspace.sidebar-collapsed .marketing-sidebar { display: flex; }
   .marketing-sidebar { gap: 0; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--marketing-border); }
+  .marketing-sidebar-collapse,
+  .marketing-sidebar-expand { display: none; }
   .marketing-sidebar-brand,
   .marketing-sidebar-heading,
   .marketing-contact-summary { display: none; }
@@ -1514,6 +1607,8 @@
   .marketing-html-preview { min-height: 640px; padding: 0 12px 78px; }
   .marketing-html-preview-frame { min-height: 540px; }
   .marketing-builder-header { min-height: auto; padding: 13px 12px; }
+  .sidebar-collapsed .marketing-header { padding-left: 14px; }
+  .sidebar-collapsed .marketing-builder-header { padding-left: 12px; }
   .marketing-builder-title { width: 100%; }
   .marketing-builder-title h1 { font-size: 23px; }
   .marketing-builder-title p { display: none; }

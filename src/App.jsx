@@ -700,6 +700,10 @@ function App() {
   const initialHashModule = typeof window === "undefined" ? "" : moduleFromHash(window.location.hash);
   const [activeModule, setActiveModuleState] = useStoredState("active-module", initialPathModule || initialHashModule || defaultModuleId);
   const [branchScope, setBranchScope] = useStoredState("branch-scope", "All branches");
+  const uploadMarketingImage = useCallback(
+    (dataUrl) => uploadImageAsset(dataUrl, "marketing-image", branchScope === "All branches" ? session?.branch || "All branches" : branchScope),
+    [branchScope, session?.branch],
+  );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useStoredState("sidebar-collapsed", false);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
@@ -2572,6 +2576,7 @@ function App() {
               globalSearch={globalSearch}
               isLoading={isBooting}
               notify={notify}
+              uploadMarketingImage={uploadMarketingImage}
             />
           )}
           {activeModule === "staff" && (
