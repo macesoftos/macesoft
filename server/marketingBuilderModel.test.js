@@ -50,6 +50,23 @@ test("Marketing destinations allow safe schemes and reject executable URLs", () 
   assert.equal(validMarketingUrl("data:text/html,unsafe"), false);
 });
 
+test("standalone images export at a 600px cap with their natural aspect ratio", () => {
+  const image = {
+    ...createEmailBlock("image", createId, layouts),
+    src: "https://cdn.example.com/natural-treatment.jpg",
+    aspectRatio: "1:1",
+    crop: "fill",
+    maxWidth: 1200,
+    zoom: 175,
+  };
+  const html = buildVisualEmailHtml({ name: "Natural image", blocks: [image] });
+  const markup = html.match(/<img[^>]+natural-treatment\.jpg[^>]*>/)?.[0] || "";
+
+  assert.match(markup, /width="600"/);
+  assert.match(markup, /width:100%;max-width:600px;height:auto/);
+  assert.doesNotMatch(markup, /aspect-ratio|object-fit|object-position|transform|height:\d+px/);
+});
+
 test("Product fields, responsive visibility, tracking, and Survey links export", () => {
   const html = buildVisualEmailHtml({
     id: "campaign-1",
