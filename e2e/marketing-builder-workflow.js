@@ -20,6 +20,30 @@ async function imageFileTransfer(page, name = "canvas-drop-e2e.png") {
 
 export async function verifyMarketingBuilder(page, expect) {
   await mkdir(artifactDirectory, { recursive: true });
+  const recipientEmail = `audience-preview-${Date.now()}@example.test`;
+  const recipientCreateStatus = await page.evaluate(async (email) => {
+    const response = await fetch("/api/clients", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({
+        id: `audience-preview-${Date.now()}`,
+        fullName: "Audience Preview Recipient",
+        email,
+        mobile: "0917 555 0142",
+        branch: "Mace Davao",
+        marketingOptIn: true,
+        retention: "Inactive",
+        lastVisit: "2025-01-15",
+        source: "Release test",
+      }),
+    });
+    return response.status;
+  }, recipientEmail);
+  expect(recipientCreateStatus).toBe(201);
+  const recipientBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
+  await page.reload();
+  expect((await recipientBootstrap).status()).toBe(200);
 
   if (!hasRealObjectStorage) {
     let uploadedDataUrl = "";
@@ -157,6 +181,15 @@ export async function verifyMarketingBuilder(page, expect) {
   });
   await page.getByLabel("Send date and time").fill(deliveryTime);
   await expect(page.getByText("Approved by your admin account", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /View recipients/i }).click();
+  const audienceDialog = page.getByRole("dialog", { name: "Audience recipients" });
+  await expect(audienceDialog).toBeVisible();
+  await expect(audienceDialog.getByText(recipientEmail, { exact: true })).toBeVisible();
+  await audienceDialog.getByLabel("Search audience recipients").fill(recipientEmail);
+  await expect(audienceDialog.getByRole("row")).toHaveCount(2);
+  await page.screenshot({ path: `${artifactDirectory}/audience-recipient-preview.png`, fullPage: false });
+  await audienceDialog.getByRole("button", { name: "Close audience recipients" }).last().click();
+  await expect(audienceDialog).toBeHidden();
   const scheduleResponse = page.waitForResponse((response) => response.url().endsWith("/schedule") && response.request().method() === "POST");
   await builderHeader.getByRole("button", { name: "Confirm schedule", exact: true }).click();
   const schedule = await scheduleResponse;
