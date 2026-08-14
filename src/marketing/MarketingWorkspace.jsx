@@ -1082,7 +1082,11 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
   useEffect(() => { draftRef.current = draft; campaignIdRef.current = draft.id || campaignIdRef.current; }, [draft]);
 
   function updateDraft(patch) {
-    setDraft((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
+    setDraft((current) => {
+      const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+      draftRef.current = next;
+      return next;
+    });
   }
 
   function updateTheme(patch) {
@@ -1196,7 +1200,8 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
   }
 
   function commitBlocks(nextBlocks) {
-    undoStack.current.push({ blocks: draft.blocks, theme: draft.theme });
+    const current = draftRef.current;
+    undoStack.current.push({ blocks: current.blocks, theme: current.theme });
     if (undoStack.current.length > 30) undoStack.current.shift();
     redoStack.current = [];
     updateDraft({ blocks: nextBlocks });
@@ -1212,6 +1217,16 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
   function updateSelected(patch) {
     commitBlocks(updateEmailBlock(draft.blocks, selectedId, patch));
   }
+
+  function replaceBlockImage(blockId, src) {
+    const current = draftRef.current;
+    commitBlocks(updateEmailBlock(current.blocks, blockId, { src }));
+    setSelectedId(blockId);
+  }
+
+  const changeActiveUploads = useCallback((uploading) => {
+    setActiveUploads((count) => Math.max(0, count + (uploading ? 1 : -1)));
+  }, []);
 
   function addBlock(type, target = insertTarget) {
     const block = newBlock(type);
@@ -1628,24 +1643,28 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
                 blocks={draft.blocks}
                 containerId={ROOT_EMAIL_CONTAINER}
                 dragState={dragState}
+                notify={notify}
                 onDelete={deleteBlock}
                 onDragEnd={endDrag}
                 onDragStart={startCanvasDrag}
                 onDrop={dropOnCanvas}
                 onDuplicate={duplicateBlock}
+                onImageUploadStateChange={changeActiveUploads}
                 onInsert={(target) => { setInsertTarget(target); setLibraryTab("blocks"); }}
                 onMove={moveBlock}
                 onOver={(over) => setDragState((current) => current ? { ...current, over } : current)}
+                onReplaceImage={replaceBlockImage}
                 onSelect={setSelectedId}
                 preview={preview}
                 selectedId={selectedId}
+                uploadImage={uploadImage}
               />
               <footer><strong>{settings.company || "MACE Signature Wellness"}</strong><span>Davao City, Philippines · hello@macebydrmace.com</span><a href="#unsubscribe" onClick={(event) => event.preventDefault()}>Unsubscribe</a></footer>
             </div>
             <span className="marketing-drag-announcement" aria-live="polite">{dragAnnouncement}</span>
             {warnings.length > 0 && <div className="marketing-builder-warning"><CircleAlert size={17} /><span>{warnings.length} campaign check{warnings.length === 1 ? "" : "s"} remaining</span></div>}
           </section>
-          <BlockSettings block={selectedBlock} loadMedia={loadMedia} notify={notify} onUploadStateChange={(uploading) => setActiveUploads((count) => Math.max(0, count + (uploading ? 1 : -1)))} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} uploadImage={uploadImage} />
+          <BlockSettings block={selectedBlock} loadMedia={loadMedia} notify={notify} onUploadStateChange={changeActiveUploads} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} uploadImage={uploadImage} />
         </div>
       )}
       {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode === "html" && (
@@ -1810,7 +1829,7 @@ function EmailDropZone({ containerId, dragState, index, onDrop, onInsert, onOver
   );
 }
 
-function EmailCanvasList({ blocks, containerId, dragState, onDelete, onDragEnd, onDragStart, onDrop, onDuplicate, onInsert, onMove, onOver, onSelect, preview, selectedId }) {
+function EmailCanvasList({ blocks, containerId, dragState, notify, onDelete, onDragEnd, onDragStart, onDrop, onDuplicate, onImageUploadStateChange, onInsert, onMove, onOver, onReplaceImage, onSelect, preview, selectedId, uploadImage }) {
   const isColumn = containerId !== ROOT_EMAIL_CONTAINER;
   return (
     <div className={`marketing-email-stack ${isColumn ? "column-stack" : "root-stack"}`}>
@@ -1825,20 +1844,24 @@ function EmailCanvasList({ blocks, containerId, dragState, onDelete, onDragEnd, 
               isLast={index === blocks.length - 1}
               dragState={dragState}
               isSelected={block.id === selectedId}
+              notify={notify}
               onDelete={onDelete}
               onDragEnd={onDragEnd}
               onDragStart={onDragStart}
               onDrop={onDrop}
               onDuplicate={onDuplicate}
+              onImageUploadStateChange={onImageUploadStateChange}
               onInsert={onInsert}
               onMove={onMove}
               onOver={onOver}
+              onReplaceImage={onReplaceImage}
               onSelect={onSelect}
               preview={preview}
               selectedId={selectedId}
+              uploadImage={uploadImage}
             />
           ) : (
-            <EmailBlock block={block} dragState={dragState} isFirst={index === 0} isLast={index === blocks.length - 1} isSelected={block.id === selectedId} onDelete={onDelete} onDragEnd={onDragEnd} onDragStart={onDragStart} onDuplicate={onDuplicate} onMove={onMove} onSelect={onSelect} preview={preview} />
+            <EmailBlock block={block} dragState={dragState} isFirst={index === 0} isLast={index === blocks.length - 1} isSelected={block.id === selectedId} notify={notify} onDelete={onDelete} onDragEnd={onDragEnd} onDragStart={onDragStart} onDuplicate={onDuplicate} onImageUploadStateChange={onImageUploadStateChange} onMove={onMove} onReplaceImage={onReplaceImage} onSelect={onSelect} preview={preview} uploadImage={uploadImage} />
           )}
           <EmailDropZone containerId={containerId} dragState={dragState} index={index + 1} onDrop={onDrop} onInsert={onInsert} onOver={onOver} />
         </React.Fragment>
@@ -1851,7 +1874,7 @@ function BlockActions({ blockId, isFirst, isLast, onDelete, onDuplicate, onMove 
   return <div className="marketing-block-actions"><button disabled={isFirst} onClick={(event) => { event.stopPropagation(); onMove(blockId, -1); }} title={isFirst ? "Already first" : "Move up"} type="button" aria-label="Move block up"><MoveUp size={15} /></button><button disabled={isLast} onClick={(event) => { event.stopPropagation(); onMove(blockId, 1); }} title={isLast ? "Already last" : "Move down"} type="button" aria-label="Move block down"><MoveDown size={15} /></button><button onClick={(event) => { event.stopPropagation(); onDuplicate(blockId); }} title="Duplicate" type="button" aria-label="Duplicate block"><Copy size={15} /></button><button onClick={(event) => { event.stopPropagation(); onDelete(blockId); }} title="Delete" type="button" aria-label="Delete block"><Trash2 size={15} /></button></div>;
 }
 
-function EmailLayoutBlock({ block, dragState, isFirst, isLast, isSelected, onDelete, onDragEnd, onDragStart, onDrop, onDuplicate, onInsert, onMove, onOver, onSelect, preview, selectedId }) {
+function EmailLayoutBlock({ block, dragState, isFirst, isLast, isSelected, notify, onDelete, onDragEnd, onDragStart, onDrop, onDuplicate, onImageUploadStateChange, onInsert, onMove, onOver, onReplaceImage, onSelect, preview, selectedId, uploadImage }) {
   const hiddenOnPreview = !visibleOn(block, preview === "mobile" ? "mobile" : "desktop");
   const columnEntries = block.columns.map((column, columnIndex) => ({ column, columnIndex }));
   if (preview === "mobile" && block.mobileReverse) columnEntries.reverse();
@@ -1881,17 +1904,21 @@ function EmailLayoutBlock({ block, dragState, isFirst, isLast, isSelected, onDel
               blocks={column}
               containerId={emailColumnId(block.id, columnIndex)}
               dragState={dragState}
+              notify={notify}
               onDelete={onDelete}
               onDragEnd={onDragEnd}
               onDragStart={onDragStart}
               onDrop={onDrop}
               onDuplicate={onDuplicate}
+              onImageUploadStateChange={onImageUploadStateChange}
               onInsert={onInsert}
               onMove={onMove}
               onOver={onOver}
+              onReplaceImage={onReplaceImage}
               onSelect={onSelect}
               preview={preview}
               selectedId={selectedId}
+              uploadImage={uploadImage}
             />
           </div>
         ))}
@@ -1900,19 +1927,84 @@ function EmailLayoutBlock({ block, dragState, isFirst, isLast, isSelected, onDel
   );
 }
 
-function EmailBlock({ block, dragState, isFirst, isLast, isSelected, onDelete, onDragEnd, onDragStart, onDuplicate, onMove, onSelect, preview }) {
+const canvasImageBlockTypes = new Set(["image", "logo", "product", "productRecommendation", "video"]);
+
+function hasExternalFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files") || Boolean(event.dataTransfer?.files?.length);
+}
+
+function EmailBlock({ block, dragState, isFirst, isLast, isSelected, notify, onDelete, onDragEnd, onDragStart, onDuplicate, onImageUploadStateChange, onMove, onReplaceImage, onSelect, preview, uploadImage }) {
+  const imageDropDepth = useRef(0);
+  const [imageDropState, setImageDropState] = useState({ dragging: false, error: "", uploading: false });
   const hiddenOnPreview = !visibleOn(block, preview === "mobile" ? "mobile" : "desktop");
+  const acceptsImageDrop = canvasImageBlockTypes.has(block.type);
   const responsiveFontSize = preview === "mobile" ? block.mobileFontSize || block.responsive?.mobileFontSize || block.fontSize : block.fontSize;
   const responsivePadding = preview === "mobile" && block.responsive?.mobilePadding !== null ? block.responsive.mobilePadding : block.padding;
   const style = { color: block.color, textAlign: block.align, paddingTop: responsivePadding, paddingBottom: responsivePadding, fontSize: responsiveFontSize, fontFamily: block.fontFamily };
+
+  function enterImageDrop(event) {
+    if (!acceptsImageDrop || !hasExternalFiles(event) || imageDropState.uploading) return;
+    event.preventDefault();
+    event.stopPropagation();
+    imageDropDepth.current += 1;
+    setImageDropState((current) => ({ ...current, dragging: true, error: "" }));
+  }
+
+  function leaveImageDrop(event) {
+    if (!acceptsImageDrop || !hasExternalFiles(event) || imageDropState.uploading) return;
+    event.preventDefault();
+    event.stopPropagation();
+    imageDropDepth.current = Math.max(0, imageDropDepth.current - 1);
+    if (imageDropDepth.current === 0) setImageDropState((current) => ({ ...current, dragging: false }));
+  }
+
+  function overImageDrop(event) {
+    if (!acceptsImageDrop || !hasExternalFiles(event) || imageDropState.uploading) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  async function dropImage(event) {
+    if (!acceptsImageDrop || !hasExternalFiles(event) || imageDropState.uploading) return;
+    event.preventDefault();
+    event.stopPropagation();
+    imageDropDepth.current = 0;
+    const file = event.dataTransfer.files?.[0];
+    if (!file) {
+      setImageDropState({ dragging: false, error: "No image file was received.", uploading: false });
+      return;
+    }
+    setImageDropState({ dragging: false, error: "", uploading: true });
+    onImageUploadStateChange?.(true);
+    onSelect(block.id);
+    try {
+      if (!uploadImage) throw new Error("Image uploads are not available right now.");
+      const result = await uploadImage(await readMarketingImageFile(file), file.name);
+      const src = String(result?.asset?.url || "");
+      if (!src) throw new Error("The upload did not return an image URL.");
+      onReplaceImage(block.id, src);
+      setImageDropState({ dragging: false, error: "", uploading: false });
+      notify?.(`${file.name} uploaded to Media and added to this block.`);
+    } catch (error) {
+      const message = error?.message || "The image could not be uploaded.";
+      setImageDropState({ dragging: false, error: message, uploading: false });
+      notify?.(message, "error");
+    } finally {
+      onImageUploadStateChange?.(false);
+    }
+  }
+
   return (
-    <div className={`marketing-email-block ${isSelected ? "selected" : ""} ${dragState?.blockId === block.id ? "dragging" : ""} ${hiddenOnPreview ? "hidden-on-preview" : ""} type-${block.type}`} draggable onClick={() => onSelect(block.id)} onDragEnd={onDragEnd} onDragStart={(event) => onDragStart(event, block.id)} role="button" tabIndex={0} onKeyDown={(event) => {
+    <div className={`marketing-email-block ${isSelected ? "selected" : ""} ${dragState?.blockId === block.id ? "dragging" : ""} ${hiddenOnPreview ? "hidden-on-preview" : ""} ${imageDropState.dragging ? "image-drop-active" : ""} ${imageDropState.uploading ? "image-uploading" : ""} type-${block.type}`} draggable={!imageDropState.uploading} onClick={() => onSelect(block.id)} onDragEnd={onDragEnd} onDragEnter={enterImageDrop} onDragLeave={leaveImageDrop} onDragOver={overImageDrop} onDragStart={(event) => onDragStart(event, block.id)} onDrop={(event) => { void dropImage(event); }} role="button" tabIndex={0} onKeyDown={(event) => {
       if (event.key === "Enter") onSelect(block.id);
       if (event.altKey && event.key === "ArrowUp") { event.preventDefault(); onMove(block.id, -1); }
       if (event.altKey && event.key === "ArrowDown") { event.preventDefault(); onMove(block.id, 1); }
     }}>
       <span className="marketing-block-grip"><GripVertical size={16} /></span>
       <RenderedBlock block={block} preview={preview} style={style} />
+      {(imageDropState.dragging || imageDropState.uploading) && <span className="marketing-canvas-image-drop" aria-live="polite"><Upload size={22} aria-hidden="true" /><strong>{imageDropState.uploading ? "Uploading image…" : "Drop image to replace"}</strong><small>{imageDropState.uploading ? "Saving to Marketing Media" : "JPG, PNG or WebP · maximum 3 MB"}</small></span>}
+      {imageDropState.error && <span className="marketing-canvas-image-error" role="alert"><CircleAlert size={14} />{imageDropState.error}</span>}
       {hiddenOnPreview && <span className="marketing-hidden-label">Hidden on {preview === "mobile" ? "mobile" : "desktop"}</span>}
       {isSelected && <BlockActions blockId={block.id} isFirst={isFirst} isLast={isLast} onDelete={onDelete} onDuplicate={onDuplicate} onMove={onMove} />}
     </div>
