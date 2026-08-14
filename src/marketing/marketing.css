@@ -1734,6 +1734,44 @@
 .marketing-final-confirmation dl div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid #e7e0d8; }
 .marketing-final-confirmation dt { color: var(--marketing-muted); }
 .marketing-final-confirmation dd { margin: 0; font-weight: 750; text-align: right; }
+.marketing-audience-size-button { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--marketing-espresso); font: inherit; }
+.marketing-audience-size-button strong { font-weight: 800; }
+.marketing-audience-size-button span { border-bottom: 1px solid currentColor; font-size: 9px; font-weight: 750; }
+.marketing-audience-size-button:hover span { border-bottom-width: 2px; }
+.marketing-audience-size-button:focus-visible { outline: 2px solid var(--marketing-espresso); outline-offset: 4px; }
+
+.marketing-audience-dialog { position: fixed; inset: 0; z-index: 1120; display: grid; place-items: center; padding: 20px; }
+.marketing-audience-dialog > section { position: relative; z-index: 1; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: min(920px, 96vw); height: min(760px, 92vh); overflow: hidden; border: 1px solid var(--marketing-border); border-radius: 11px; background: #f8f5f1; box-shadow: 0 30px 90px rgba(31, 22, 16, 0.34); }
+.marketing-audience-dialog > section > header { display: flex; min-height: 82px; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--marketing-border); background: #fff; }
+.marketing-audience-dialog > section > header > div { display: grid; min-width: 0; gap: 2px; }
+.marketing-audience-dialog > section > header span { color: var(--marketing-muted); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; }
+.marketing-audience-dialog > section > header h2 { overflow: hidden; margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 24px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.marketing-audience-dialog > section > header p { margin: 1px 0 0; color: var(--marketing-muted); font-size: 9px; }
+.marketing-audience-dialog > section > header > button { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 1px solid var(--marketing-border); border-radius: 50%; background: #fff; color: var(--marketing-espresso); }
+.marketing-audience-dialog-toolbar { display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(280px, 1.2fr); align-items: center; gap: 18px; padding: 13px 20px; border-bottom: 1px solid var(--marketing-border); background: #fff; }
+.marketing-audience-dialog-toolbar label { position: relative; display: flex; align-items: center; }
+.marketing-audience-dialog-toolbar label > svg { position: absolute; left: 12px; color: var(--marketing-muted); pointer-events: none; }
+.marketing-audience-dialog-toolbar input { width: 100%; min-height: 40px; padding: 8px 12px 8px 38px; border: 1px solid var(--marketing-border); border-radius: 7px; outline: 0; background: #fff; color: var(--marketing-ink); font-size: 10px; }
+.marketing-audience-dialog-toolbar input:focus { border-color: #9d8370; box-shadow: 0 0 0 3px rgba(74, 45, 28, 0.09); }
+.marketing-audience-dialog-toolbar p { margin: 0; color: var(--marketing-muted); font-size: 9px; line-height: 1.45; }
+.marketing-audience-table-wrap { min-height: 0; overflow: auto; padding: 14px 20px 20px; }
+.marketing-audience-recipient-table { width: 100%; overflow: hidden; border: 1px solid var(--marketing-border); border-collapse: separate; border-spacing: 0; border-radius: 8px; background: #fff; font-size: 10px; }
+.marketing-audience-recipient-table th { position: sticky; top: 0; z-index: 1; padding: 10px 12px; border-bottom: 1px solid var(--marketing-border); background: #f4eee8; color: var(--marketing-muted); font-size: 8px; text-align: left; text-transform: uppercase; letter-spacing: 0.05em; }
+.marketing-audience-recipient-table td { padding: 11px 12px; border-bottom: 1px solid #eee7df; color: #5e554d; }
+.marketing-audience-recipient-table tr:last-child td { border-bottom: 0; }
+.marketing-audience-recipient-table tbody tr:hover { background: #fcfaf8; }
+.marketing-audience-recipient-table td:first-child { display: flex; align-items: center; gap: 9px; color: var(--marketing-ink); }
+.marketing-audience-recipient-table td:nth-child(2),
+.marketing-audience-recipient-table td:nth-child(3) { white-space: nowrap; }
+.marketing-audience-recipient-table td > svg { margin-right: 6px; color: #8c7461; vertical-align: middle; }
+.marketing-recipient-avatar { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #eee5dd; color: var(--marketing-espresso); font-size: 10px; font-weight: 850; }
+.marketing-audience-table-wrap > .marketing-empty { min-height: 330px; border: 1px dashed var(--marketing-border); background: #fff; }
+.marketing-audience-dialog > section > footer { display: flex; min-height: 60px; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 20px; border-top: 1px solid var(--marketing-border); background: #fff; }
+.marketing-audience-dialog > section > footer > span { color: var(--marketing-muted); font-size: 9px; }
+.marketing-audience-dialog > section > footer > div { display: flex; align-items: center; gap: 10px; }
+.marketing-audience-dialog > section > footer > div span { color: var(--marketing-muted); font-size: 9px; }
+.marketing-audience-dialog > section > footer button { min-height: 35px; padding: 7px 11px; border: 1px solid var(--marketing-border); border-radius: 6px; background: #fff; color: var(--marketing-espresso); font-size: 9px; font-weight: 750; }
+.marketing-audience-dialog > section > footer button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .marketing-email-preview-device.tablet { width: min(600px, 100%); }
 
@@ -1873,6 +1911,13 @@
 }
 
 @media (max-width: 760px) {
+  .marketing-audience-dialog { padding: 7px; }
+  .marketing-audience-dialog > section { width: 100%; height: calc(100vh - 14px); height: calc(100dvh - 14px); }
+  .marketing-audience-dialog-toolbar { grid-template-columns: 1fr; gap: 9px; }
+  .marketing-audience-table-wrap { padding-inline: 10px; }
+  .marketing-audience-recipient-table { min-width: 620px; }
+  .marketing-audience-dialog > section > footer > span { display: none; }
+  .marketing-audience-dialog > section > footer { justify-content: flex-end; }
   .marketing-email-preview-dialog { padding: 7px; }
   .marketing-email-preview-dialog > section { width: 100%; height: calc(100vh - 14px); height: calc(100dvh - 14px); }
   .marketing-email-preview-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }

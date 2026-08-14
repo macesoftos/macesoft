@@ -370,9 +370,11 @@ function channelEligible(client, channel) {
   return Boolean((client.email && emailConsent) || (client.mobile && smsConsent));
 }
 
-function audienceEstimate(clients, segment, channel) {
+function audienceRecipients(clients, segment, channel) {
   const definition = audienceDefinitions.find((item) => item.id === segment) ?? audienceDefinitions[0];
-  return clients.filter((client) => definition.matches(client) && channelEligible(client, channel)).length;
+  return clients
+    .filter((client) => definition.matches(client) && channelEligible(client, channel))
+    .sort((left, right) => String(left.fullName || left.name || left.email || left.mobile || "").localeCompare(String(right.fullName || right.name || right.email || right.mobile || "")));
 }
 
 function campaignDate(campaign) {
@@ -1096,6 +1098,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
+  const [audiencePreviewOpen, setAudiencePreviewOpen] = useState(false);
   const [sendTestOpen, setSendTestOpen] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [deletedNotice, setDeletedNotice] = useState("");
@@ -1117,7 +1120,11 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
   const lastSavedSignatureRef = useRef(draft.id ? JSON.stringify({ ...draft, updatedAt: undefined }) : "");
   const htmlFileInput = useRef(null);
   const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
-  const estimate = audienceEstimate(clients, draft.segment, draft.channel);
+  const recipients = useMemo(
+    () => audienceRecipients(clients, draft.segment, draft.channel),
+    [clients, draft.channel, draft.segment],
+  );
+  const estimate = recipients.length;
   const warnings = campaignWarnings(draft);
   const advisories = campaignAdvisories(draft);
   const approvalRequired = !canApproveMarketing && settings.managerApproval !== false;
@@ -1748,12 +1755,13 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
           updateDraft={updateDraft}
         />
       )}
-      {draft.step === 3 && <ReviewStep approvalRequired={approvalRequired} canApproveMarketing={canApproveMarketing} draft={draft} estimate={estimate} warnings={warnings} updateDraft={updateDraft} />}
-      {draft.step === 4 && <ScheduleStep approvalRequired={approvalRequired} canApproveMarketing={canApproveMarketing} draft={draft} estimate={estimate} updateDraft={updateDraft} />}
+      {draft.step === 3 && <ReviewStep approvalRequired={approvalRequired} canApproveMarketing={canApproveMarketing} draft={draft} estimate={estimate} onViewRecipients={() => setAudiencePreviewOpen(true)} warnings={warnings} updateDraft={updateDraft} />}
+      {draft.step === 4 && <ScheduleStep approvalRequired={approvalRequired} canApproveMarketing={canApproveMarketing} draft={draft} estimate={estimate} onViewRecipients={() => setAudiencePreviewOpen(true)} updateDraft={updateDraft} />}
       {draft.step > 1 && <div className="marketing-builder-mobile-footer"><button onClick={() => updateDraft({ step: Math.max(1, draft.step - 1) })} type="button">Back</button><button className="marketing-primary-button" onClick={() => { void continueStep(); }} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>}
       {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => setTemplateDialogOpen(true)} type="button"><Save size={15} /> Save as template</button>}
       {deletedNotice ? <div className="marketing-undo-notice" role="status"><span>{deletedNotice}</span><button onClick={undo} type="button"><Undo2 size={15} /> Undo</button><button aria-label="Dismiss deleted block notice" onClick={() => setDeletedNotice("")} type="button"><X size={15} /></button></div> : null}
       {emailPreviewOpen ? <EmailPreviewDialog error={draft.editorMode === "html" ? importedHtmlResult.error : ""} html={emailPreviewHtml} name={draft.name} onClose={() => setEmailPreviewOpen(false)} previewText={draft.previewText} subject={draft.subject} /> : null}
+      {audiencePreviewOpen ? <AudienceRecipientsDialog channel={draft.channel} onClose={() => setAudiencePreviewOpen(false)} recipients={recipients} segment={draft.segment} /> : null}
       {sendTestOpen ? <SendTestDialog draft={draft} html={draft.editorMode === "html" ? importedHtmlResult.html : visualEmailHtml} onClose={() => setSendTestOpen(false)} notify={notify} /> : null}
       {templateDialogOpen ? <SaveTemplateDialog draft={draft} html={draft.editorMode === "html" ? importedHtmlResult.html : visualEmailHtml} onClose={() => setTemplateDialogOpen(false)} onSaveTemplate={onSaveTemplate} notify={notify} /> : null}
     </div>
@@ -2549,11 +2557,86 @@ function BlockSettings({ block, loadMedia, notify, onUploadStateChange, settings
   return <aside className="marketing-block-settings"><div className="marketing-panel-title"><strong>{block.type === "layout" ? `${block.columns.length}-column layout` : block.type === "treatment" ? "Treatments" : definition?.label || "Legacy block"}</strong><ChevronDown size={16} /></div><div className="marketing-settings-tabs"><button aria-selected={settingsTab === "content"} className={settingsTab === "content" ? "active" : ""} onClick={() => setSettingsTab("content")} role="tab" type="button">Content</button><button aria-selected={settingsTab === "style"} className={settingsTab === "style" ? "active" : ""} onClick={() => setSettingsTab("style")} role="tab" type="button">Style</button></div><div className="marketing-settings-fields">{settingsTab === "content" ? <BlockContentSettings block={block} loadMedia={loadMedia} notify={notify} onUploadStateChange={onUploadStateChange} updateBlock={updateBlock} uploadImage={uploadImage} /> : <BlockStyleSettings block={block} updateBlock={updateBlock} />}</div><VisibilitySettings block={block} updateBlock={updateBlock} /><LinkTrackingSettings block={block} updateBlock={updateBlock} /></aside>;
 }
 
-function ReviewStep({ approvalRequired, canApproveMarketing, draft, estimate, warnings }) {
+function AudienceSizeButton({ estimate, onViewRecipients }) {
+  const formattedEstimate = estimate.toLocaleString("en-PH");
+  return (
+    <button aria-haspopup="dialog" className="marketing-audience-size-button" onClick={onViewRecipients} type="button">
+      <strong>{formattedEstimate}</strong>
+      <span>View recipients</span>
+      <Eye aria-hidden="true" size={14} />
+    </button>
+  );
+}
+
+function AudienceRecipientsDialog({ channel, onClose, recipients, segment }) {
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const pageSize = 50;
+  const showEmail = channel !== "SMS";
+  const showMobile = channel !== "Email";
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredRecipients = useMemo(() => {
+    if (!normalizedQuery) return recipients;
+    return recipients.filter((recipient) => [recipient.fullName, recipient.name, recipient.email, recipient.mobile]
+      .some((value) => String(value || "").toLowerCase().includes(normalizedQuery)));
+  }, [normalizedQuery, recipients]);
+  const totalPages = Math.max(1, Math.ceil(filteredRecipients.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const firstRecipient = filteredRecipients.length ? ((currentPage - 1) * pageSize) + 1 : 0;
+  const lastRecipient = Math.min(currentPage * pageSize, filteredRecipients.length);
+  const visibleRecipients = filteredRecipients.slice(firstRecipient ? firstRecipient - 1 : 0, lastRecipient);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    function closeWithEscape(event) {
+      if (event.key === "Escape") onClose();
+    }
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeWithEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [onClose]);
+
+  return (
+    <div aria-label="Audience recipients" aria-modal="true" className="marketing-audience-dialog" role="dialog">
+      <button aria-label="Close audience recipients" className="marketing-email-preview-backdrop" onClick={onClose} type="button" />
+      <section>
+        <header>
+          <div><span>Current delivery audience</span><h2>{segment}</h2><p>{recipients.length.toLocaleString("en-PH")} consented recipient{recipients.length === 1 ? "" : "s"} for {channel}</p></div>
+          <button aria-label="Close audience recipients" onClick={onClose} type="button"><X aria-hidden="true" size={19} /></button>
+        </header>
+        <div className="marketing-audience-dialog-toolbar">
+          <label><Search aria-hidden="true" size={16} /><span className="sr-only">Search audience recipients</span><input aria-label="Search audience recipients" autoFocus onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search name, email or mobile" type="search" value={query} /></label>
+          <p>Only contacts with valid details and consent for this channel are shown. Consent and suppressions are checked again before delivery.</p>
+        </div>
+        <div className="marketing-audience-table-wrap">
+          {filteredRecipients.length ? (
+            <table className="marketing-audience-recipient-table">
+              <caption className="sr-only">Eligible recipients for {segment}</caption>
+              <thead><tr><th scope="col">Recipient</th>{showEmail ? <th scope="col">Email address</th> : null}{showMobile ? <th scope="col">Mobile number</th> : null}<th scope="col">Branch</th></tr></thead>
+              <tbody>{visibleRecipients.map((recipient, index) => {
+                const name = recipient.fullName || recipient.name || "Unnamed client";
+                return <tr key={recipient.id || `${recipient.email || recipient.mobile}-${firstRecipient + index}`}><td><span className="marketing-recipient-avatar" aria-hidden="true">{name.trim().charAt(0).toUpperCase() || "?"}</span><strong>{name}</strong></td>{showEmail ? <td><Mail aria-hidden="true" size={14} /><span>{recipient.email || "No eligible email"}</span></td> : null}{showMobile ? <td><MessageSquareText aria-hidden="true" size={14} /><span>{recipient.mobile || "No eligible mobile"}</span></td> : null}<td>{recipient.branch || "All branches"}</td></tr>;
+              })}</tbody>
+            </table>
+          ) : <MarketingEmpty title={query ? "No matching recipients" : "No eligible recipients"} copy={query ? "Try a different name, email address or mobile number." : `No contacts currently have valid details and consent for ${channel}.`} />}
+        </div>
+        <footer>
+          <span>Showing {firstRecipient.toLocaleString("en-PH")}–{lastRecipient.toLocaleString("en-PH")} of {filteredRecipients.length.toLocaleString("en-PH")}</span>
+          <div><button disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">Previous</button><span>Page {currentPage} of {totalPages}</span><button disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} type="button">Next</button></div>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function ReviewStep({ approvalRequired, canApproveMarketing, draft, estimate, onViewRecipients, warnings }) {
   return (
     <section className="marketing-wizard-page review">
       <div className="marketing-review-card"><span className="marketing-eyebrow">Step 3 of 4</span><h2>Review every client-facing detail.</h2><p>Confirm the audience, channels and content before choosing a delivery time.</p>
-        <dl><div><dt>Campaign</dt><dd>{draft.name}</dd></div><div><dt>Channel</dt><dd><ChannelPill value={draft.channel} /></dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Estimated recipients</dt><dd>{estimate.toLocaleString("en-PH")}</dd></div><div><dt>Email subject</dt><dd>{draft.channel === "SMS" ? "Not applicable" : draft.subject}</dd></div></dl>
+        <dl><div><dt>Campaign</dt><dd>{draft.name}</dd></div><div><dt>Channel</dt><dd><ChannelPill value={draft.channel} /></dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Estimated recipients</dt><dd><AudienceSizeButton estimate={estimate} onViewRecipients={onViewRecipients} /></dd></div><div><dt>Email subject</dt><dd>{draft.channel === "SMS" ? "Not applicable" : draft.subject}</dd></div></dl>
         <div className={`marketing-approval-note ${approvalRequired ? "required" : "approved"}`}><Check size={18} aria-hidden="true" /><span><strong>{canApproveMarketing ? "Approved by your admin account" : approvalRequired ? "Administrator approval required" : "No approval step"}</strong><small>{canApproveMarketing ? "Your role can approve and schedule this campaign without a second administrator." : approvalRequired ? "The Marketing approval policy will hold delivery until an Admin or Business Owner approves it." : "The Marketing approval policy is currently turned off."}</small></span></div>
       </div>
       <aside className="marketing-checks-panel"><h3>Campaign checks</h3>{warnings.length ? warnings.map((warning) => <div className="warning" key={warning}><CircleAlert size={16} /><span>{warning}</span></div>) : <div className="success"><Check size={16} /><span>Content, links and required information are ready.</span></div>}<div className="success"><Check size={16} /><span>Unsubscribe footer is included automatically.</span></div><div className="success"><Check size={16} /><span>Consent and suppressions will be rechecked before delivery.</span></div></aside>
@@ -2561,12 +2644,12 @@ function ReviewStep({ approvalRequired, canApproveMarketing, draft, estimate, wa
   );
 }
 
-function ScheduleStep({ approvalRequired, canApproveMarketing, draft, estimate, updateDraft }) {
+function ScheduleStep({ approvalRequired, canApproveMarketing, draft, estimate, onViewRecipients, updateDraft }) {
   return (
     <section className="marketing-wizard-page schedule">
       <div className="marketing-wizard-card"><span className="marketing-eyebrow">Step 4 of 4</span><h2>Choose when to send.</h2><p>Final delivery remains subject to channel consent, suppression and provider-readiness checks.</p>
         <label><span>Send date and time</span><input type="datetime-local" value={draft.scheduledAt} onChange={(event) => updateDraft({ scheduledAt: event.target.value })} /></label>
-        <div className="marketing-final-confirmation"><h3>Final confirmation</h3><dl><div><dt>Channel</dt><dd>{draft.channel}</dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Audience size</dt><dd>{estimate.toLocaleString("en-PH")}</dd></div><div><dt>Sending time</dt><dd>{draft.scheduledAt ? new Date(draft.scheduledAt).toLocaleString("en-PH") : "Choose a time"}</dd></div><div><dt>Approval</dt><dd>{canApproveMarketing ? "Approved by your admin account" : approvalRequired ? "Administrator approval required" : "No approval step"}</dd></div></dl></div>
+        <div className="marketing-final-confirmation"><h3>Final confirmation</h3><dl><div><dt>Channel</dt><dd>{draft.channel}</dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Audience size</dt><dd><AudienceSizeButton estimate={estimate} onViewRecipients={onViewRecipients} /></dd></div><div><dt>Sending time</dt><dd>{draft.scheduledAt ? new Date(draft.scheduledAt).toLocaleString("en-PH") : "Choose a time"}</dd></div><div><dt>Approval</dt><dd>{canApproveMarketing ? "Approved by your admin account" : approvalRequired ? "Administrator approval required" : "No approval step"}</dd></div></dl></div>
       </div>
     </section>
   );
