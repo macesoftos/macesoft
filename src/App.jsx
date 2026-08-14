@@ -10184,15 +10184,19 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     setShowCreate(false);
   }
 
-  useEffect(() => {
-    if (!createRequest || !canManage) return;
+  const openCreate = useCallback(() => {
     setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
     setPhotoError("");
     setSaveError("");
     setBranchToEdit(null);
     setShowCreate(true);
+  }, []);
+
+  useEffect(() => {
+    if (!createRequest || !canManage) return;
+    openCreate();
     onCreateRequestHandled?.(0);
-  }, [canManage, createRequest, onCreateRequestHandled]);
+  }, [canManage, createRequest, onCreateRequestHandled, openCreate]);
 
   function openEdit(branch) {
     setForm({
@@ -10299,6 +10303,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
         </div>
         {canManage && (
           <div className="branch-organization-actions">
+            <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add branch</button>
             <button className="ghost-button" type="button" onClick={onManageCompany}><Settings size={17} /> Add / edit company</button>
           </div>
         )}
@@ -10321,7 +10326,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             <span><b>2</b> Assign rooms and staff</span>
             <span><b>3</b> Start branch operations</span>
           </div>
-          {canManage && <span className="helper-text">Use Create new in the header to add the first branch.</span>}
+          {canManage && <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add first branch</button>}
         </div>
       ) : (
         <div className="branch-grid">
