@@ -35,9 +35,15 @@ export function marketingRouteFromHash(hash) {
   const section = segments[1] || "overview";
   if (!marketingSectionSet.has(section)) return null;
 
+  const campaignMode = segments[2] === "new"
+    ? "create"
+    : segments[2] === "deleted"
+      ? "deleted"
+      : "index";
+
   return {
     section,
-    mode: section === "campaigns" && segments[2] === "new" ? "create" : "index",
+    mode: section === "campaigns" ? campaignMode : "index",
   };
 }
 
@@ -50,6 +56,7 @@ export function marketingHash(section = "overview", mode = "index") {
   const safeSection = marketingSectionSet.has(section) ? section : "overview";
   if (safeSection === "overview") return "#/marketing";
   if (safeSection === "campaigns" && mode === "create") return "#/marketing/campaigns/new";
+  if (safeSection === "campaigns" && mode === "deleted") return "#/marketing/campaigns/deleted";
   return `#/marketing/${safeSection}`;
 }
 

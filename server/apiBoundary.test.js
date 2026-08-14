@@ -65,6 +65,25 @@ test("real API denies private data reads before touching the database", async ()
     });
     assert.equal(treatmentPhoto.status, 401);
 
+    const moveCampaignToDeleted = await fetch(`${baseUrl}/api/marketing/campaigns/campaign-1`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+    });
+    assert.equal(moveCampaignToDeleted.status, 401);
+
+    const restoreCampaign = await fetch(`${baseUrl}/api/marketing/campaigns/campaign-1/restore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(restoreCampaign.status, 401);
+
+    const deleteCampaignForever = await fetch(`${baseUrl}/api/marketing/campaigns/campaign-1/permanent`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+    });
+    assert.equal(deleteCampaignForever.status, 401);
+
     const forgotPassword = await fetch(`${baseUrl}/api/auth/forgot-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
