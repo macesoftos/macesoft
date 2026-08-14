@@ -7746,7 +7746,170 @@ function ClientProfileDialog({
   );
 }
 
-function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
+function treatmentDateParts(value) {
+  const parsed = new Date(`${value || ""}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return { month: "—", day: "—", year: "—" };
+  return {
+    month: new Intl.DateTimeFormat("en-PH", { month: "short" }).format(parsed).toUpperCase(),
+    day: new Intl.DateTimeFormat("en-PH", { day: "2-digit" }).format(parsed),
+    year: new Intl.DateTimeFormat("en-PH", { year: "numeric" }).format(parsed),
+  };
+}
+
+function treatmentPhotoSources(record) {
+  if (!record) return [];
+  const listed = Array.isArray(record.photoUrls) ? record.photoUrls : [];
+  return [
+    record.beforePhotoUrl,
+    record.beforePhoto,
+    record.afterPhotoUrl,
+    record.afterPhoto,
+    ...listed,
+  ].filter((value, index, values) => value && values.indexOf(value) === index).slice(0, 2);
+}
+
+function TreatmentActionsMenu({ actions, label = "Treatment actions" }) {
+  const availableActions = actions.filter(Boolean);
+  return (
+    <details className="treatment-actions-menu">
+      <summary aria-label={label} title={label}>
+        <EllipsisVertical size={18} aria-hidden="true" />
+      </summary>
+      <div className="treatment-actions-popover" role="menu">
+        {availableActions.map(({ icon: Icon, label: actionLabel, onClick }) => (
+          <button
+            key={actionLabel}
+            role="menuitem"
+            type="button"
+            onClick={(event) => {
+              event.currentTarget.closest("details")?.removeAttribute("open");
+              onClick();
+            }}
+          >
+            <Icon size={15} aria-hidden="true" />
+            {actionLabel}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function TreatmentDateBlock({ date }) {
+  const parts = treatmentDateParts(date);
+  return (
+    <time className="treatment-date-block" dateTime={date || undefined}>
+      <span>{parts.month}</span>
+      <strong>{parts.day}</strong>
+      <small>{parts.year}</small>
+    </time>
+  );
+}
+
+function TreatmentMetadata({ record }) {
+  const photoCount = Number(record.photos || 0);
+  const items = [
+    { label: "Consumables", value: record.consumables || "None recorded" },
+    { label: "Device settings", value: record.deviceSettings || "N/A" },
+    { label: "Batch / Lot", value: record.batch || "Not recorded" },
+    { label: "Photos", value: `${photoCount} linked` },
+  ];
+  return (
+    <dl className="treatment-metadata">
+      {items.map((item) => (
+        <div key={item.label}>
+          <dt>{item.label}</dt>
+          <dd>{item.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function TreatmentRecordCard({ record, isPhotoFocus, followUpDue, onEdit, onViewClient, onViewPhotos }) {
+  const note = record.outcome || record.postNotes || record.preNotes || "No clinical note recorded.";
+  const actions = [
+    { icon: Edit3, label: "Edit treatment", onClick: onEdit },
+    record.clientId && onViewClient ? { icon: Users, label: "View client", onClick: onViewClient } : null,
+    { icon: Camera, label: "View linked photos", onClick: onViewPhotos },
+  ];
+
+  return (
+    <article className={`treatment-record-card ${isPhotoFocus ? "is-photo-focus" : ""}`} id={`treatment-record-${record.id}`}>
+      <TreatmentDateBlock date={record.date} />
+      <div className="treatment-record-body">
+        <div className="treatment-record-heading">
+          <div>
+            <h3>{record.service || "Treatment record"}</h3>
+            <strong>{record.client || "Unlinked client"}</strong>
+            <span>{record.provider || "Provider not set"} <b aria-hidden="true">•</b> {record.room || "Room not set"}</span>
+          </div>
+          <div className="treatment-record-status">
+            {record.followUp && <span className={`follow-up-badge ${followUpDue(record) ? "due" : ""}`}>Follow-up</span>}
+            <TreatmentActionsMenu actions={actions} label={`Actions for ${record.service || "treatment record"}`} />
+          </div>
+        </div>
+        <p className="treatment-clinical-note">{note}</p>
+        <TreatmentMetadata record={record} />
+      </div>
+    </article>
+  );
+}
+
+function TreatmentPhotoGallery({ record }) {
+  const sources = treatmentPhotoSources(record);
+  const photoCount = Number(record?.photos || sources.length || 0);
+  const hasProtectedPlaceholders = photoCount > 0 && !sources.length;
+
+  return (
+    <aside className="surface-panel treatment-photo-gallery" aria-labelledby="treatment-photo-title">
+      <div className="treatment-section-header">
+        <div>
+          <span className="treatment-section-icon"><Camera size={18} aria-hidden="true" /></span>
+          <div><h2 id="treatment-photo-title">Before / After Photos</h2>{record && <p>{record.client} · {record.service}</p>}</div>
+        </div>
+        <span className="protected-gallery-label">Protected gallery <LockKeyhole size={13} aria-hidden="true" /></span>
+      </div>
+
+      {sources.length ? (
+        <div className="treatment-photo-grid">
+          {sources.map((source, index) => (
+            <figure key={source}>
+              <img src={source} alt={`${index === 0 ? "Before" : "After"} treatment documentation for ${record.client}`} />
+              <figcaption>{index === 0 ? "Before" : "After"}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : hasProtectedPlaceholders ? (
+        <div className="treatment-photo-grid protected-photo-placeholders" aria-label={`${photoCount} protected treatment photos linked`}>
+          {["Before", "After"].map((label) => (
+            <div key={label}>
+              <LockKeyhole size={22} aria-hidden="true" />
+              <strong>{label}</strong>
+              <span>Protected photo</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="treatment-photo-empty" role="status">
+          <span><Image size={23} aria-hidden="true" /></span>
+          <strong>No treatment photos yet</strong>
+          <p>Upload before and after photos when available.</p>
+        </div>
+      )}
+
+      <button className="treatment-upload-button" type="button" disabled title="Photo uploads are not linked to treatment records in the current data model.">
+        <Upload size={17} aria-hidden="true" /> Upload photos
+      </button>
+      <div className="treatment-privacy-note">
+        <ShieldCheck size={17} aria-hidden="true" />
+        <span>Photo access is restricted to authorized clinical roles and recorded in the audit trail.</span>
+      </div>
+    </aside>
+  );
+}
+
+function TreatmentsModule({ treatments, clients, openModal, globalSearch, onViewClient }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All records");
   const [provider, setProvider] = useState("All providers");
@@ -7773,6 +7936,7 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
           record.provider,
           record.room,
           record.batch,
+          record.consumables,
           record.preNotes,
           record.postNotes,
           record.outcome,
@@ -7795,154 +7959,136 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
   }, [filteredTreatments, selectedId]);
 
   const selectedRecord = filteredTreatments.find((record) => record.id === selectedId) ?? filteredTreatments[0];
+  const hasActiveFilters = Boolean(query || filter !== "All records" || provider !== "All providers");
   const resetFilters = () => {
     setQuery("");
     setFilter("All records");
     setProvider("All providers");
   };
+  const revealRecord = (record) => {
+    resetFilters();
+    setSelectedId(record.id);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`treatment-record-${record.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  const treatmentColumns = [
+    { key: "date", label: "Date", exportValue: (record) => record.date, render: (record) => <time dateTime={record.date}>{record.date || "Not set"}</time> },
+    { key: "client", label: "Client", render: (record) => <strong className="treatment-table-primary">{record.client || "Unlinked client"}</strong> },
+    { key: "service", label: "Procedure", render: (record) => record.service || "Treatment record" },
+    { key: "provider", label: "Provider", render: (record) => record.provider || "Not assigned" },
+    { key: "batch", label: "Lot / Batch", render: (record) => record.batch || "—" },
+    { key: "followUp", label: "Follow-up", exportValue: (record) => record.followUp, render: (record) => record.followUp ? <time className={followUpDue(record) ? "treatment-followup-due" : ""} dateTime={record.followUp}>{record.followUp}</time> : "—" },
+    { key: "consent", label: "Consent", render: (record) => <StatusBadge status={record.consent || "Pending"} /> },
+    {
+      key: "actions",
+      label: "Actions",
+      sortable: false,
+      render: (record) => (
+        <TreatmentActionsMenu
+          label={`Actions for ${record.client || "treatment"}`}
+          actions={[
+            { icon: Eye, label: "View treatment", onClick: () => revealRecord(record) },
+            { icon: Edit3, label: "Edit treatment", onClick: () => openModal("treatment", record) },
+            record.clientId ? { icon: Users, label: "View client", onClick: () => onViewClient(record.clientId) } : null,
+            { icon: Camera, label: "View linked photos", onClick: () => setSelectedId(record.id) },
+          ]}
+        />
+      ),
+    },
+  ];
 
   return (
     <section className="treatments-workspace">
-      <div className="surface-panel treatments-workbench">
-        {!treatments.length ? (
-          <div className="treatments-collection-empty">
-            <span><HeartPulse size={24} aria-hidden="true" /></span>
-            <strong>No treatment records yet</strong>
-            <p>Records created by your clinic will appear here.</p>
-            <button className="primary-button" type="button" onClick={() => openModal("treatment")}>
-              <Plus size={17} aria-hidden="true" /> Add treatment
-            </button>
+      <div className="treatments-primary-grid">
+        <section className="surface-panel treatments-records-panel" aria-labelledby="treatment-records-title">
+          <div className="treatment-section-header">
+            <div>
+              <span className="treatment-section-icon"><FileText size={18} aria-hidden="true" /></span>
+              <div><h2 id="treatment-records-title">Treatment Records</h2><p>Latest treatment procedures and clinical notes</p></div>
+            </div>
+            <span className="treatment-record-count">{filteredTreatments.length} record{filteredTreatments.length === 1 ? "" : "s"}</span>
           </div>
-        ) : (
-          <>
-          <div className="treatments-toolbar">
-          <label className="search-box treatments-search">
-            <Search size={16} aria-hidden="true" />
-            <input
-              aria-label="Search treatment records"
-              placeholder="Search client, procedure, provider, or batch..."
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          <label className="treatments-select">
-            <span>Provider</span>
-            <select aria-label="Filter by provider" value={provider} onChange={(event) => setProvider(event.target.value)}>
-              <option>All providers</option>
-              {providers.map((name) => <option key={name}>{name}</option>)}
-            </select>
-          </label>
-          <div className="treatments-filter-tabs" aria-label="Treatment record filters">
-            {["All records", "Follow-up due", "Consent pending", "Photos linked"].map((option) => (
-              <button className={filter === option ? "active" : ""} key={option} type="button" onClick={() => setFilter(option)}>{option}</button>
+
+          {treatments.length > 0 && (
+            <div className="treatments-record-tools">
+              <label className="search-box treatments-search">
+                <Search size={16} aria-hidden="true" />
+                <input aria-label="Search treatment records" placeholder="Search treatment records..." value={query} onChange={(event) => setQuery(event.target.value)} />
+              </label>
+              <label>
+                <span className="sr-only">Filter by provider</span>
+                <select aria-label="Filter by provider" value={provider} onChange={(event) => setProvider(event.target.value)}>
+                  <option>All providers</option>
+                  {providers.map((name) => <option key={name}>{name}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="sr-only">Filter treatment records</span>
+                <select aria-label="Filter treatment records" value={filter} onChange={(event) => setFilter(event.target.value)}>
+                  {["All records", "Follow-up due", "Consent pending", "Photos linked"].map((option) => <option key={option}>{option}</option>)}
+                </select>
+              </label>
+              {hasActiveFilters && <button className="treatments-clear-filters" type="button" onClick={resetFilters}>Clear</button>}
+            </div>
+          )}
+
+          <div className="treatment-record-list">
+            {filteredTreatments.map((record) => (
+              <TreatmentRecordCard
+                key={record.id}
+                record={record}
+                isPhotoFocus={record.id === selectedRecord?.id}
+                followUpDue={followUpDue}
+                onEdit={() => openModal("treatment", record)}
+                onViewClient={record.clientId ? () => onViewClient(record.clientId) : null}
+                onViewPhotos={() => setSelectedId(record.id)}
+              />
             ))}
-          </div>
-          </div>
-
-          <div className="treatments-workbench-grid">
-          <aside className="treatments-index" aria-label="Treatment record list">
-            <div className="treatments-index-heading">
-              <div><strong>Clinical records</strong><span>{filteredTreatments.length} of {treatments.length}</span></div>
-              {(query || filter !== "All records" || provider !== "All providers") && <button type="button" onClick={resetFilters}>Clear filters</button>}
-            </div>
-            <div className="treatments-index-list">
-              {filteredTreatments.map((record) => {
-                const client = clients.find((item) => item.id === record.clientId);
-                const isSelected = record.id === selectedRecord?.id;
-                return (
-                  <button className={`treatment-index-item ${isSelected ? "selected" : ""}`} key={record.id} type="button" onClick={() => setSelectedId(record.id)} aria-pressed={isSelected}>
-                    <ClientAvatar client={client || { fullName: record.client }} size="small" />
-                    <span className="treatment-index-copy">
-                      <strong>{record.client || "Unlinked client"}</strong>
-                      <b>{record.service || "Treatment record"}</b>
-                      <small>{record.provider || "Provider not set"} · {record.room || "Room not set"}</small>
-                    </span>
-                    <span className="treatment-index-date">
-                      <strong>{formatDate(record.date)}</strong>
-                      <small className={followUpDue(record) ? "due" : ""}>{followUpDue(record) ? "Follow-up due" : normalize(record.consent) === "signed" ? "Consent signed" : "Consent pending"}</small>
-                    </span>
-                  </button>
-                );
-              })}
-              {!filteredTreatments.length && (
-                <div className="treatments-empty">
-                  <Filter size={22} aria-hidden="true" />
-                  <strong>No matching records</strong>
-                  <span>Try another client, provider, or clinical status.</span>
-                  <button className="secondary-button small" type="button" onClick={resetFilters}>Clear filters</button>
-                </div>
-              )}
-            </div>
-          </aside>
-
-          <main className="treatment-detail" aria-live="polite">
-            {selectedRecord ? (
-              <>
-                <div className="treatment-detail-header">
-                  <div>
-                    <span className="treatment-record-id">Record · {selectedRecord.id}</span>
-                    <h3>{selectedRecord.service || "Treatment record"}</h3>
-                    <p>{selectedRecord.client} · {formatDate(selectedRecord.date)}</p>
-                  </div>
-                  <div className="treatment-detail-actions">
-                    <StatusBadge status={selectedRecord.consent || "Pending"} />
-                    <button className="secondary-button small" type="button" onClick={() => openModal("treatment", selectedRecord)}><Edit3 size={15} /> Edit record</button>
-                  </div>
-                </div>
-
-                <div className="treatment-clinical-summary">
-                  <article><span>Provider</span><strong>{selectedRecord.provider || "Not assigned"}</strong></article>
-                  <article><span>Treatment room</span><strong>{selectedRecord.room || "Not recorded"}</strong></article>
-                  <article><span>Follow-up</span><strong className={followUpDue(selectedRecord) ? "due" : ""}>{selectedRecord.followUp ? formatDate(selectedRecord.followUp) : "Not scheduled"}</strong></article>
-                  <article><span>Client feedback</span><strong>{selectedRecord.satisfaction || "Not recorded"}</strong></article>
-                </div>
-
-                <div className="treatment-note-grid">
-                  <section>
-                    <div><ClipboardCheck size={17} /><strong>Pre-treatment assessment</strong></div>
-                    <p>{selectedRecord.preNotes || "No pre-treatment assessment was recorded."}</p>
-                  </section>
-                  <section>
-                    <div><Activity size={17} /><strong>Outcome & clinical notes</strong></div>
-                    <p>{selectedRecord.outcome || selectedRecord.postNotes || "No outcome notes were recorded."}</p>
-                  </section>
-                </div>
-
-                <div className="treatment-documentation-grid">
-                  <section>
-                    <div className="treatment-section-heading"><FileText size={17} /><div><strong>Procedure traceability</strong><span>Products, devices, and lot details</span></div></div>
-                    <dl>
-                      <div><dt>Consumables</dt><dd>{selectedRecord.consumables || "None recorded"}</dd></div>
-                      <div><dt>Device settings</dt><dd>{selectedRecord.deviceSettings || "Not applicable"}</dd></div>
-                      <div><dt>Lot / batch</dt><dd>{selectedRecord.batch || "Not recorded"}</dd></div>
-                    </dl>
-                  </section>
-                  <section>
-                    <div className="treatment-section-heading"><Camera size={17} /><div><strong>Protected documentation</strong><span>Consent and clinical photography</span></div></div>
-                    <div className="treatment-photo-summary">
-                      <span><Camera size={20} aria-hidden="true" /></span>
-                      <div><strong>{Number(selectedRecord.photos || 0)} photo{Number(selectedRecord.photos || 0) === 1 ? "" : "s"} linked</strong><small>Access is restricted and recorded in the audit trail.</small></div>
-                    </div>
-                    <div className="treatment-consent-row"><span>Client consent</span><StatusBadge status={selectedRecord.consent || "Pending"} /></div>
-                  </section>
-                </div>
-
-                <div className={`treatment-followup-banner ${followUpDue(selectedRecord) ? "due" : ""}`}>
-                  <CalendarDays size={19} aria-hidden="true" />
-                  <div>
-                    <strong>{selectedRecord.followUp ? (followUpDue(selectedRecord) ? "Follow-up requires attention" : "Follow-up scheduled") : "No follow-up scheduled"}</strong>
-                    <span>{selectedRecord.followUp ? `${formatDate(selectedRecord.followUp)} · ${selectedRecord.postNotes || "Review the client's response and aftercare."}` : "Add a follow-up date when continued care is required."}</span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="treatments-detail-empty"><HeartPulse size={30} /><strong>Select a treatment record</strong><span>Clinical details will appear here.</span></div>
+            {!treatments.length && (
+              <div className="treatments-collection-empty">
+                <span><HeartPulse size={23} aria-hidden="true" /></span>
+                <strong>No treatments recorded yet</strong>
+                <p>Create or record a treatment to see it here.</p>
+                <button className="primary-button small" type="button" onClick={() => openModal("treatment")}><Plus size={16} aria-hidden="true" /> Add treatment</button>
+              </div>
             )}
-          </main>
+            {treatments.length > 0 && !filteredTreatments.length && (
+              <div className="treatments-collection-empty compact">
+                <span><Filter size={21} aria-hidden="true" /></span>
+                <strong>No matching records</strong>
+                <p>Try another client, provider, or clinical status.</p>
+                <button className="secondary-button small" type="button" onClick={resetFilters}>Clear filters</button>
+              </div>
+            )}
           </div>
-          </>
-        )}
+        </section>
+
+        <TreatmentPhotoGallery record={selectedRecord} />
       </div>
+
+      <section className="surface-panel treatment-table-panel" aria-labelledby="treatment-table-title">
+        <div className="treatment-section-header treatment-table-heading">
+          <div>
+            <span className="treatment-section-icon"><FileText size={18} aria-hidden="true" /></span>
+            <div><h2 id="treatment-table-title">Treatment Table</h2><p>View and manage all treatment procedures</p></div>
+          </div>
+          <span className="treatment-record-count">{treatments.length} record{treatments.length === 1 ? "" : "s"}</span>
+        </div>
+        <div className="treatments-data-table">
+          <DataTable
+            rows={treatments}
+            columns={treatmentColumns}
+            globalSearch={globalSearch}
+            pageSize={6}
+            emptyTitle="No treatment records"
+            exportFilename="mace-treatment-records.csv"
+            exportLabel="Export CSV"
+            compactPagination
+          />
+        </div>
+      </section>
     </section>
   );
 }
