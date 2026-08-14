@@ -83,7 +83,7 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
       link: "",
       linkTitle: "",
       width: 100,
-      maxWidth: 640,
+      maxWidth: 600,
       aspectRatio: "original",
       crop: "cover",
       zoom: 100,

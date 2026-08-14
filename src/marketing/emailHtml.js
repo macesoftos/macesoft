@@ -150,6 +150,14 @@ function imageMarkup(block, src, alt, width = 640) {
   return `<img src="${escapeEmailHtml(src)}" alt="${escapeEmailHtml(block.decorative ? "" : alt)}" width="${maxWidth}" style="display:block;width:${displayWidth}%;max-width:${maxWidth}px;${height ? `height:${height}px;object-fit:${crop};object-position:${focalX}% ${focalY}%;` : "height:auto;"}margin:${margin};border:${borderWidth}px solid ${borderColor};border-radius:${radius}px;box-sizing:border-box;${zoom > 1 ? `transform:scale(${zoom});transform-origin:${focalX}% ${focalY}%;` : ""}">`;
 }
 
+function naturalImageMarkup(block, src, alt) {
+  const radius = safeNumber(block.borderRadius, 0, 80, 0);
+  const borderWidth = safeNumber(block.borderWidth, 0, 12, 0);
+  const borderColor = safeColor(block.borderColor, "transparent");
+  const margin = safeAlign(block.align) === "left" ? "0 auto 0 0" : safeAlign(block.align) === "right" ? "0 0 0 auto" : "0 auto";
+  return `<img src="${escapeEmailHtml(src)}" alt="${escapeEmailHtml(block.decorative ? "" : alt)}" width="600" style="display:block;width:100%;max-width:600px;height:auto;margin:${margin};border:${borderWidth}px solid ${borderColor};border-radius:${radius}px;box-sizing:border-box">`;
+}
+
 function surveyChoiceUrl(draft, block, choice, origin) {
   if (block.responseUrl) {
     try {
@@ -207,7 +215,7 @@ function blockEmailHtmlContent(block, origin, theme, draft) {
   if (block.type === "image") {
     const src = safeEmailUrl(block.src, origin);
     const link = trackedEmailUrl(block, block.link, origin);
-    const image = src ? imageMarkup(block, src, block.alt, 640) : "";
+    const image = src ? naturalImageMarkup(block, src, block.alt) : "";
     return `<div style="${style}background:${safeColor(block.background, "transparent")}">${link ? `<a href="${escapeEmailHtml(link)}" target="_blank" title="${escapeEmailHtml(block.linkTitle || block.alt || "Image link")}" style="text-decoration:none">${image}</a>` : image}${block.caption ? `<div style="padding-top:8px;font-family:${fontStack(theme.fontFamily)};font-size:12px;color:${color}">${escapeEmailHtml(block.caption)}</div>` : ""}</div>`;
   }
   if (block.type === "heading") {

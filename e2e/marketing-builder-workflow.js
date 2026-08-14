@@ -1,23 +1,32 @@
 import { mkdir } from "node:fs/promises";
 
 const artifactDirectory = "test-results/marketing-builder";
-const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const hasRealObjectStorage = Boolean(process.env.STORAGE_BASE_URL && process.env.STORAGE_BUCKET && process.env.STORAGE_SERVICE_KEY);
 
 async function imageFileTransfer(page, name = "canvas-drop-e2e.png") {
-  return page.evaluateHandle(({ base64, fileName }) => {
-    const binary = window.atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return page.evaluateHandle(async (fileName) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1200;
+    canvas.height = 500;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#c16c82";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     const transfer = new DataTransfer();
-    transfer.items.add(new File([bytes], fileName, { type: "image/png" }));
+    transfer.items.add(new File([blob], fileName, { type: "image/png" }));
     return transfer;
-  }, { base64: onePixelPng, fileName: name });
+  }, name);
 }
 
 export async function verifyMarketingBuilder(page, expect) {
   await mkdir(artifactDirectory, { recursive: true });
 
   if (!hasRealObjectStorage) {
+    let uploadedDataUrl = "";
+    await page.route("**/api/uploads/canvas-drop-ci-asset", async (route) => {
+      const encoded = uploadedDataUrl.split(",")[1] || "";
+      await route.fulfill({ body: Buffer.from(encoded, "base64"), contentType: "image/png", status: 200 });
+    });
     await page.route("**/api/uploads", async (route) => {
       const request = route.request();
       if (request.method() !== "POST") {
@@ -28,6 +37,7 @@ export async function verifyMarketingBuilder(page, expect) {
       expect(payload.category).toBe("marketing-image");
       expect(payload.originalName).toBe("canvas-drop-e2e.png");
       expect(payload.dataUrl).toMatch(/^data:image\/png;base64,/);
+      uploadedDataUrl = payload.dataUrl;
       await route.fulfill({
         contentType: "application/json",
         json: { asset: { id: "canvas-drop-ci-asset", name: payload.originalName, originalName: payload.originalName, url: "/api/uploads/canvas-drop-ci-asset" } },
@@ -51,8 +61,19 @@ export async function verifyMarketingBuilder(page, expect) {
   const canvasUploadBody = await canvasUploadResponse.json();
   const canvasAssetId = canvasUploadBody.asset?.id;
   expect(canvasAssetId).toBeTruthy();
-  await expect(canvasImage.locator("img")).toHaveAttribute("src", new RegExp(`/api/uploads/${canvasAssetId}$`));
+  const uploadedImage = canvasImage.locator("img");
+  await expect(uploadedImage).toHaveAttribute("src", new RegExp(`/api/uploads/${canvasAssetId}$`));
+  await expect.poll(() => uploadedImage.evaluate((image) => image.naturalWidth)).toBe(1200);
+  const renderedSize = await uploadedImage.evaluate((image) => ({ height: image.getBoundingClientRect().height, width: image.getBoundingClientRect().width }));
+  expect(renderedSize.width).toBeLessThanOrEqual(600);
+  expect(Math.abs((renderedSize.width / renderedSize.height) - (1200 / 500))).toBeLessThan(0.03);
   await expect(canvasImage.getByText("Uploading image…", { exact: true })).toBeHidden();
+  const imageSettings = page.locator(".marketing-block-settings");
+  await imageSettings.getByRole("tab", { name: "Style", exact: true }).click();
+  await expect(imageSettings.getByText("Natural image size", { exact: true })).toBeVisible();
+  await expect(imageSettings.getByText("Height follows the uploaded image automatically.", { exact: false })).toBeVisible();
+  await expect(imageSettings.locator("label").filter({ hasText: "Aspect ratio" })).toHaveCount(0);
+  await imageSettings.getByRole("tab", { name: "Content", exact: true }).click();
   if (hasRealObjectStorage) {
     const mediaResponse = await page.request.get("/api/marketing/media");
     expect(mediaResponse.status()).toBe(200);
