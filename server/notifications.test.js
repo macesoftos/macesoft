@@ -14,7 +14,7 @@ test("notification branches are normalized and default to all branches", () => {
 
 test("notification queries are scoped by modules and branch", () => {
   assert.deepEqual(notificationWhereForActor(
-    { branch: "Mace Davao" },
+    { role: "Receptionist", branch: "Mace Davao" },
     ["leads", "services"],
   ), {
     module: { in: ["leads", "services"] },
@@ -24,9 +24,13 @@ test("notification queries are scoped by modules and branch", () => {
     ],
   });
   assert.deepEqual(notificationWhereForActor(
-    { branch: "All branches" },
+    { role: "Super Admin", branch: "All branches" },
     ["leads"],
   ), { module: { in: ["leads"] } });
+  assert.deepEqual(notificationWhereForActor(
+    { role: "Receptionist", branch: "All branches" },
+    ["leads"],
+  ), { module: { in: ["leads"] }, id: { in: [] } });
 });
 
 test("unread state is based on each account's read timestamp", () => {

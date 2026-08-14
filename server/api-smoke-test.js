@@ -10,6 +10,14 @@ const ownerHeaders = {
   "X-Mace-Branch": "All branches",
   "X-Mace-Request": "app",
 };
+const branchHeaders = (role, branch) => ({
+  "Content-Type": "application/json",
+  "X-Mace-User-Id": `${role}-${branch}`,
+  "X-Mace-User-Name": `${branch} ${role}`,
+  "X-Mace-Role": role,
+  "X-Mace-Branch": branch,
+  "X-Mace-Request": "app",
+});
 
 function delay(ms) {
   return new Promise((resolve) => {
@@ -57,6 +65,14 @@ async function jsonRequest(path, body, options = {}) {
   });
 }
 
+async function jsonRequestAs(path, body, headers, options = {}) {
+  return request(path, {
+    method: options.method ?? "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
 const server = spawn(process.execPath, ["server/index.js"], {
   cwd: process.cwd(),
   env: { ...process.env, NODE_ENV: "test", API_PORT: String(port), LEADS_API_KEY: "smoke-leads-key", API_ALLOW_TRUSTED_HEADERS: "true" },
@@ -95,6 +111,7 @@ try {
 
   const suffix = Date.now().toString(36);
   const clientId = `cl-smoke-${suffix}`;
+  const bgcClientId = `cl-smoke-bgc-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
   const serviceId = `svc-smoke-${suffix}`;
 
@@ -147,6 +164,62 @@ try {
     marketingOptIn: true,
   });
   assert(createdClient.response.status === 201, "client create failed");
+
+  const createdBgcClient = await jsonRequest("/api/resources/clients", {
+    id: bgcClientId,
+    fullName: "Automated BGC Smoke Client",
+    mobile: `0997${suffix.slice(-6)}`,
+    email: "automated-bgc-smoke@example.test",
+    branch: "Mace BGC",
+    source: "Automated branch isolation test",
+    marketingOptIn: true,
+  });
+  assert(createdBgcClient.response.status === 201, "BGC client create failed");
+
+  const davaoReceptionist = branchHeaders("Receptionist", "Mace Davao");
+  const bgcReceptionist = branchHeaders("Receptionist", "Mace BGC");
+  const invalidAllBranchesReceptionist = branchHeaders("Receptionist", "All branches");
+  const davaoClients = await request("/api/resources/clients", { headers: davaoReceptionist });
+  const bgcClients = await request("/api/resources/clients", { headers: bgcReceptionist });
+  assert(davaoClients.response.ok && davaoClients.payload.some((client) => client.id === clientId), "Davao workspace did not include its own client");
+  assert(!davaoClients.payload.some((client) => client.id === bgcClientId), "Davao workspace exposed a BGC client");
+  assert(bgcClients.response.ok && bgcClients.payload.some((client) => client.id === bgcClientId), "BGC workspace did not include its own client");
+  assert(!bgcClients.payload.some((client) => client.id === clientId), "BGC workspace exposed a Davao client");
+
+  const crossBranchUpdate = await jsonRequestAs(`/api/resources/clients/${bgcClientId}`, {
+    ...createdBgcClient.payload.record,
+    fullName: "Cross-branch update must fail",
+  }, davaoReceptionist, { method: "PUT" });
+  assert(crossBranchUpdate.response.status === 403, "Davao user could update a BGC client");
+  const invalidAllBranchesList = await request("/api/resources/clients", { headers: invalidAllBranchesReceptionist });
+  assert(invalidAllBranchesList.response.ok && invalidAllBranchesList.payload.length === 0, "an operational All branches account received client records");
+
+  const davaoCampaignId = `cmp-smoke-davao-${suffix}`;
+  const bgcCampaignId = `cmp-smoke-bgc-${suffix}`;
+  for (const [id, name, branch] of [
+    [davaoCampaignId, "Davao branch campaign", "Mace Davao"],
+    [bgcCampaignId, "BGC branch campaign", "Mace BGC"],
+  ]) {
+    const campaign = await jsonRequest("/api/resources/campaigns", {
+      id,
+      name,
+      branch,
+      segment: "Inactive clients",
+      channel: "SMS",
+      message: "Branch isolation smoke test",
+      sent: 0,
+      booked: 0,
+      credits: 0,
+      status: "Draft",
+    });
+    assert(campaign.response.status === 201, `${branch} campaign create failed`);
+  }
+  const davaoMarketing = branchHeaders("Marketing Staff", "Mace Davao");
+  const davaoCampaigns = await request("/api/resources/campaigns", { headers: davaoMarketing });
+  assert(davaoCampaigns.response.ok && davaoCampaigns.payload.some((campaign) => campaign.id === davaoCampaignId), "Davao workspace did not include its campaign");
+  assert(!davaoCampaigns.payload.some((campaign) => campaign.id === bgcCampaignId), "Davao workspace exposed a BGC campaign");
+  const crossBranchCampaignDelete = await request(`/api/marketing/campaigns/${bgcCampaignId}`, { method: "DELETE", headers: davaoMarketing });
+  assert(crossBranchCampaignDelete.response.status === 403, "Davao user could delete a BGC campaign");
 
   const updatedClient = await jsonRequest(`/api/resources/clients/${clientId}`, {
     id: clientId,
@@ -450,6 +523,14 @@ try {
     method: "DELETE",
     headers: ownerHeaders,
   });
+  await request(`/api/resources/clients/${bgcClientId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  for (const campaignId of [davaoCampaignId, bgcCampaignId]) {
+    await request(`/api/marketing/campaigns/${campaignId}`, { method: "DELETE", headers: ownerHeaders });
+    await request(`/api/marketing/campaigns/${campaignId}/permanent`, { method: "DELETE", headers: ownerHeaders });
+  }
   await request(`/api/resources/leads/${webhookLeadId}`, {
     method: "DELETE",
     headers: ownerHeaders,

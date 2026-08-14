@@ -6,6 +6,8 @@ import {
   canAccessBranch,
   canMutateBranch,
   filterServiceBranches,
+  hasOrganizationWideAccess,
+  hasValidBranchAssignment,
   isPublicApiRequest,
   moduleAllowed,
   requiredModuleForApiRequest,
@@ -14,6 +16,7 @@ import {
 const roles = { Owner: ["clients", "settings"], Receptionist: ["clients"] };
 const owner = { role: "Owner", branch: "All branches" };
 const receptionist = { role: "Receptionist", branch: "Mace Davao" };
+const invalidReceptionist = { role: "Receptionist", branch: "All branches" };
 
 test("only explicitly public API methods and paths bypass session authentication", () => {
   assert.equal(isPublicApiRequest("POST", "/api/auth/login"), true);
@@ -42,15 +45,20 @@ test("module and branch access enforce least privilege", () => {
   assert.equal(moduleAllowed(receptionist, "settings", roles), false);
   assert.equal(canAccessBranch(receptionist, "Mace Davao"), true);
   assert.equal(canAccessBranch(receptionist, "Mace Makati"), false);
-  assert.equal(canAccessBranch(receptionist, "All branches"), true);
+  assert.equal(canAccessBranch(receptionist, "All branches"), false);
   assert.equal(canMutateBranch(receptionist, "All branches"), false);
   assert.equal(canMutateBranch(receptionist, "Mace Davao"), true);
   assert.equal(canMutateBranch(receptionist, "Mace Makati"), false);
   assert.equal(canMutateBranch(owner, "Mace Davao"), true);
   assert.equal(canAccessBranch(owner, "Mace Davao"), true);
-  assert.deepEqual(branchWhere(receptionist), {
-    OR: [{ branch: "Mace Davao" }, { branch: "All branches" }],
-  });
+  assert.equal(hasOrganizationWideAccess(owner), true);
+  assert.equal(hasOrganizationWideAccess(receptionist), false);
+  assert.equal(hasOrganizationWideAccess({ role: "Admin", branch: "" }), false);
+  assert.equal(hasValidBranchAssignment(receptionist), true);
+  assert.equal(hasValidBranchAssignment(invalidReceptionist), false);
+  assert.deepEqual(branchWhere(receptionist), { branch: "Mace Davao" });
+  assert.deepEqual(branchWhere(invalidReceptionist), { branch: { in: [] } });
+  assert.equal(canAccessBranch(invalidReceptionist, "Mace Davao"), false);
   assert.equal(canAccessBranch(receptionist, ""), false);
 });
 

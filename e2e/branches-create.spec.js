@@ -48,7 +48,10 @@ test.beforeEach(async ({ page }) => {
 test("an organization manager can open the add branch form from the Branches page", async ({ page }) => {
   await page.goto("/#/branches");
 
-  const addBranch = page.getByRole("button", { name: "Add branch", exact: true });
+  const createTrigger = page.getByRole("button", { name: "Create new" });
+  await expect(createTrigger).toBeVisible();
+  await createTrigger.click();
+  const addBranch = page.getByRole("menuitem", { name: "New branch" });
   await expect(addBranch).toBeVisible();
   await addBranch.click();
 

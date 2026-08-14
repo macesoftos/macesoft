@@ -1,3 +1,5 @@
+import { hasOrganizationWideAccess, hasValidBranchAssignment } from "./accessControl.js";
+
 const allBranchesLabel = "All branches";
 
 function clean(value) {
@@ -24,7 +26,8 @@ export function notificationWhereForActor(actor, allowedModules) {
     module: { in: Array.isArray(allowedModules) ? allowedModules : [] },
   };
   const branch = clean(actor?.branch);
-  if (!branch || branch === allBranchesLabel) return where;
+  if (hasOrganizationWideAccess(actor)) return where;
+  if (!hasValidBranchAssignment(actor)) return { ...where, id: { in: [] } };
   return {
     ...where,
     OR: [

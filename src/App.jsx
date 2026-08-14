@@ -902,7 +902,7 @@ function App() {
   }, [clearWorkspaceData]);
 
   useEffect(() => {
-    if (session?.branch && session.branch !== "All branches" && branchScope !== session.branch) {
+    if (session?.branch && !canManageOrganization(session.role) && session.branch !== "All branches" && branchScope !== session.branch) {
       setBranchScope(session.branch);
     }
   }, [branchScope, session, setBranchScope]);
@@ -2023,6 +2023,7 @@ function App() {
     const record = {
       ...values,
       id: values.id || createId("cmp"),
+      branch: values.branch || (branchScope !== "All branches" ? branchScope : session.branch),
       sent: Number(values.sent || 0),
       booked: Number(values.booked || 0),
       credits: Number(values.credits || 0),
@@ -2238,7 +2239,7 @@ function App() {
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = sessionModules.includes("pos");
   const canManageAppointments = sessionModules.includes("appointments");
-  const canAccessAllBranches = session.branch === "All branches";
+  const canAccessAllBranches = canManageOrganization(session.role);
   const shellClassName = [
     "app-shell",
     showSidebar ? "app-shell-with-sidebar" : "app-shell-full",
@@ -2571,7 +2572,7 @@ function App() {
               appointments={appointments}
               services={services}
               staff={staff}
-              branches={branches}
+              branches={branchRecords}
               integrations={leadIntegrations}
               webhookEvents={webhookEvents}
               openModal={openModal}
@@ -2614,6 +2615,7 @@ function App() {
           {activeModule === "staff" && (
             <StaffModule
               staff={staff}
+              branchRecords={branchRecords}
               session={session}
               setSession={setSession}
               openModal={openModal}
@@ -2698,6 +2700,7 @@ function App() {
 
       <ModalHost
         session={session}
+        branchScope={branchScope}
         modal={modal}
         closeModal={closeModal}
         completeTransaction={completeTransaction}
@@ -2715,7 +2718,7 @@ function App() {
         saveRoom={saveRoom}
         clients={clients}
         services={services}
-        branches={branchRecords.length ? branchRecords : branches}
+        branches={branchRecords}
         staff={staff}
         inventory={inventory}
         settings={settings}
@@ -9960,7 +9963,7 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ staff, session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
+function StaffModule({ staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
   const canInvite = canManageOrganization(session.role);
   const [invitations, setInvitations] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -9971,7 +9974,17 @@ function StaffModule({ staff, session, setSession, openModal, toggleAttendance, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const roles = Object.keys(roleAccess).filter((role) => isBusinessOwner(session.role) || !isBusinessOwner(role));
-  const [form, setForm] = useState({ name: "", email: "", role: "Doctor", branch: session.branch || "All branches", department: "", specialty: "", message: "" });
+  const clinicBranches = branchRecords.map((branch) => branch.name);
+  const defaultMemberBranch = clinicBranches.includes(session.branch) ? session.branch : clinicBranches[0] || "";
+  const emptyInvitation = () => ({ name: "", email: "", role: "Doctor", branch: defaultMemberBranch, department: "", specialty: "", message: "" });
+  const [form, setForm] = useState(emptyInvitation);
+
+  useEffect(() => {
+    if (!defaultMemberBranch) return;
+    setForm((current) => canManageOrganization(current.role) || current.branch
+      ? current
+      : { ...current, branch: defaultMemberBranch });
+  }, [defaultMemberBranch]);
 
   const refresh = useCallback(async () => {
     if (!canInvite) return;
@@ -10014,7 +10027,7 @@ function StaffModule({ staff, session, setSession, openModal, toggleAttendance, 
       setInvitations((current) => [result.invitation, ...current]);
       applyAuditLog(result.auditLog);
       setShowInvite(false);
-      setForm({ name: "", email: "", role: "Doctor", branch: session.branch || "All branches", department: "", specialty: "", message: "" });
+      setForm(emptyInvitation());
       notify(result.invitation.status === "Failed" ? "Invitation saved, but email delivery failed. Configure SMTP and resend." : "Invitation sent.", result.invitation.status === "Failed" ? "warning" : "success");
     } catch (saveError) { setError(saveError.message); } finally { setSaving(false); }
   }
@@ -10100,8 +10113,15 @@ function StaffModule({ staff, session, setSession, openModal, toggleAttendance, 
         <div className="form-grid">
           <label><span>Name</span><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label><span>Email</span><input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-          <label><span>Role</span><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
-          <label><span>Branch</span><input value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} /></label>
+          <label><span>Role</span><select value={form.role} onChange={(e) => {
+            const role = e.target.value;
+            setForm((current) => ({
+              ...current,
+              role,
+              branch: canManageOrganization(role) ? "All branches" : (clinicBranches.includes(current.branch) ? current.branch : defaultMemberBranch),
+            }));
+          }}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+          <label><span>Branch</span><select required value={canManageOrganization(form.role) ? "All branches" : form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>{canManageOrganization(form.role) ? <option>All branches</option> : <><option value="" disabled>Select a branch</option>{clinicBranches.map((branch) => <option key={branch}>{branch}</option>)}</>}</select></label>
           <label><span>Department</span><input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
           <label><span>Specialty</span><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></label>
           <label className="full-span"><span>Optional message</span><textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} /></label>
@@ -10903,6 +10923,7 @@ function SupportModule() {
 
 function ModalHost({
   session,
+  branchScope,
   modal,
   closeModal,
   completeTransaction,
@@ -10932,6 +10953,9 @@ function ModalHost({
   if (!modal) return null;
 
   const branchOptions = branches.map((branch) => branch.name);
+  const defaultClinicBranch = branchScope !== "All branches" && branchOptions.includes(branchScope) ? branchScope : branchOptions[0];
+  const defaultRecordBranch = canManageOrganization(session?.role) && branchScope === "All branches" ? "All branches" : defaultClinicBranch;
+  const recordBranchOptions = canManageOrganization(session?.role) ? ["All branches", ...branchOptions] : branchOptions;
   const clientOptions = clients.map((client) => ({ value: client.id, label: client.fullName }));
   const serviceOptions = services.map((service) => ({ value: service.id, label: service.name }));
   const employeeServiceSuggestions = [
@@ -10995,7 +11019,7 @@ function ModalHost({
         time: "10:00",
         clientId: clients[0]?.id,
         serviceId: services[0]?.id,
-        branch: branches[0]?.name,
+        branch: defaultClinicBranch,
         room: "Room 1",
         staff: staff[0]?.name,
         status: "Pending Confirmation",
@@ -11032,7 +11056,7 @@ function ModalHost({
         address: "",
         city: "",
         emergency: "",
-        branch: branches[0]?.name,
+        branch: defaultClinicBranch,
         source: "Walk-in",
         referral: "",
         medicalNotes: "",
@@ -11122,7 +11146,7 @@ function ModalHost({
         packQty: 1,
         beginning: 0,
         stock: 0,
-        branch: branches[0]?.name,
+        branch: defaultClinicBranch,
         location: "",
         reorder: 0,
         expiry: "",
@@ -11194,7 +11218,7 @@ function ModalHost({
         inquiryType: "First-time",
         priority: "Normal",
         owner: staff[0]?.name ?? "Front Desk",
-        branch: branches[0]?.name,
+        branch: defaultClinicBranch,
         created: todayDate(),
         nextAction: "Initial response",
         nextFollowUpAt: "",
@@ -11284,14 +11308,14 @@ function ModalHost({
     },
     expense: {
       title: modal.payload?.id ? "Edit Expense" : "Record Expense",
-      initial: { date: todayDate(), name: "", category: settings.expenseCategories[0], branch: branches[0]?.name, amount: 0, method: "Cash", approver: "Owner", status: "For approval", notes: "", receipt: "Pending", ...modal.payload },
+      initial: { date: todayDate(), name: "", category: settings.expenseCategories[0], branch: defaultRecordBranch, amount: 0, method: "Cash", approver: "Owner", status: "For approval", notes: "", receipt: "Pending", ...modal.payload },
       submitLabel: "Save expense",
       onSubmit: saveExpense,
       fields: [
         field("date", "Date", "date"),
         field("name", "Expense name"),
         field("category", "Category", "select", settings.expenseCategories),
-        field("branch", "Branch", "select", ["All branches", ...branchOptions]),
+        field("branch", "Branch", "select", recordBranchOptions),
         field("amount", "Amount", "number"),
         field("method", "Payment method", "select", paymentMethods),
         field("approver", "Approver"),
@@ -11302,7 +11326,7 @@ function ModalHost({
     },
     staff: {
       title: modal.payload?.id ? "Edit Employee" : "Add Employee",
-      initial: { name: "", photo: "", role: "Nurse / Aesthetician", branch: branches[0]?.name, schedule: "9:00 AM - 6:00 PM", commissionType: "", commissionRate: 0, services: "", status: "Available", attendance: "Clocked out", employmentDate: todayDate(), phone: "", ...modal.payload },
+      initial: { name: "", photo: "", role: "Nurse / Aesthetician", branch: defaultClinicBranch, schedule: "9:00 AM - 6:00 PM", commissionType: "", commissionRate: 0, services: "", status: "Available", attendance: "Clocked out", employmentDate: todayDate(), phone: "", ...modal.payload },
       submitLabel: "Save employee",
       onSubmit: saveStaff,
       fields: [
@@ -11322,7 +11346,7 @@ function ModalHost({
     },
     package: {
       title: modal.payload?.id ? "Edit Package" : "Sell Package",
-      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, expires: todayDate(), branch: "All branches", transferable: false, status: "Active", price: 0, ...modal.payload },
+      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, expires: todayDate(), branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, ...modal.payload },
       submitLabel: "Save package",
       onSubmit: savePackage,
       fields: [
@@ -11331,7 +11355,7 @@ function ModalHost({
         field("sessions", "Sessions", "number"),
         field("used", "Used", "number"),
         field("expires", "Expiration", "date"),
-        field("branch", "Branch", "select", ["All branches", ...branchOptions]),
+        field("branch", "Branch", "select", recordBranchOptions),
         field("transferable", "Transferable", "checkbox"),
         field("status", "Status", "select", ["Active", "Pending", "Completed", "Expired"]),
         field("price", "Price", "number"),
@@ -11341,6 +11365,7 @@ function ModalHost({
       title: modal.payload?.id ? "Edit Campaign" : "New Campaign",
       initial: {
         name: "",
+        branch: defaultRecordBranch,
         segment: "Inactive clients",
         channel: "SMS",
         templateId: defaultMarketingTemplate?.id ?? "",
@@ -11357,6 +11382,7 @@ function ModalHost({
       templateMessages: Object.fromEntries((templates ?? []).map((template) => [template.id, template.text])),
       fields: [
         field("name", "Campaign name"),
+        field("branch", "Branch", "select", recordBranchOptions),
         field("segment", "Segment", "select", ["Birthday month", "Last visit date", "Service category", "VIP", "Inactive clients", "New clients", "Package holders"]),
         field("channel", "Channel", "select", ["Email", "SMS", "Email + SMS"]),
         field("templateId", "Template", "select", templateOptions),

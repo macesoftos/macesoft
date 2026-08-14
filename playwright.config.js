@@ -10,11 +10,19 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "pnpm dev",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: "pnpm dev:api",
+      url: "http://127.0.0.1:3001/api/health/live",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command: "pnpm dev:web",
+      url: "http://127.0.0.1:5173",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });
