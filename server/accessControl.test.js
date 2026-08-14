@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  accountMatchesStaffIdentity,
   branchWhere,
   canAccessBranch,
   canMutateBranch,
@@ -66,6 +67,25 @@ test("staff login connection endpoints are gated behind the staff module", () =>
   assert.equal(requiredModuleForApiRequest("/api/staff/staff-1/account"), "staff");
   assert.equal(isPublicApiRequest("GET", "/api/accounts"), false);
   assert.equal(isPublicApiRequest("PUT", "/api/staff/staff-1/account"), false);
+});
+
+test("a personal workspace only accepts the matching staff identity", () => {
+  assert.equal(accountMatchesStaffIdentity(
+    { name: "Christina Inah J. Pandian", role: "Marketing Staff", branch: "Mace Davao" },
+    { name: "  christina inah j. pandian ", role: "Marketing Staff", branch: "Mace Davao" },
+  ), true);
+  assert.equal(accountMatchesStaffIdentity(
+    { name: "MACE Admin", role: "Super Admin", branch: "All branches" },
+    { name: "Christina Inah J. Pandian", role: "Marketing Staff", branch: "Mace Davao" },
+  ), false);
+  assert.equal(accountMatchesStaffIdentity(
+    { name: "MACE Admin", role: "Super Admin", branch: "All branches" },
+    { name: "MACE Admin", role: "Marketing Staff", branch: "Mace Davao" },
+  ), false);
+  assert.equal(accountMatchesStaffIdentity(
+    { name: "Nurse Bea", role: "Nurse / Aesthetician", branch: "Mace Davao" },
+    { name: "Nurse Bea", role: "Nurse / Aesthetician", branch: "Mace Makati" },
+  ), false);
 });
 
 test("branch-bound users only receive services offered by their branch", () => {

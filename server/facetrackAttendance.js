@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, 
 import express from "express";
 
 import { ORGANIZATION_MANAGER_ROLES } from "../src/organizationRoles.js";
+import { accountMatchesStaffIdentity } from "./accessControl.js";
 
 const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Branch Manager"]);
 const MODULE_ID = "facetrack-attendance";
@@ -36,6 +37,12 @@ function requireAdmin(request) {
   const account = requireAccount(request);
   if (!ADMIN_ROLES.has(account.role)) throw apiError("Administrator approval is required for this action.", 403);
   return account;
+}
+
+async function matchingStaffForAccount(prisma, account) {
+  if (!account.staffId) return null;
+  const staff = await prisma.staffMember.findUnique({ where: { id: account.staffId } });
+  return accountMatchesStaffIdentity(account, staff) ? staff : null;
 }
 
 function enforceVerificationRateLimit(request) {
@@ -308,15 +315,17 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const account = requireAccount(request);
     const policy = await policyFor(prisma);
     const admin = ADMIN_ROLES.has(account.role);
-    if (!admin && !account.staffId) throw apiError("This account is not linked to an employee profile.", 409);
+    const personalStaff = admin ? null : await matchingStaffForAccount(prisma, account);
+    if (!admin && !personalStaff) throw apiError("This account is not linked to its matching employee profile.", 409);
+    const personalStaffId = personalStaff?.id;
     const branchWhere = admin && account.branch !== "All branches" ? { branch: account.branch } : {};
-    const recordWhere = admin ? branchWhere : { staffId: account.staffId };
+    const recordWhere = admin ? branchWhere : { staffId: personalStaffId };
     const requestWhere = admin ? { attendanceRecord: branchWhere } : { requestedById: account.id };
     const [records, requests, staff, profiles, auditEntries] = await Promise.all([
       prisma.faceTrackAttendanceRecord.findMany({ where: recordWhere, include: { staff: true, correctionRequests: { orderBy: { createdAt: "desc" } } }, orderBy: { workDate: "desc" }, take: 150 }),
       prisma.faceTrackCorrectionRequest.findMany({ where: requestWhere, include: { attendanceRecord: { include: { staff: true } }, requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
       admin ? prisma.staffMember.findMany({ where: account.branch !== "All branches" ? { branch: account.branch } : {}, orderBy: { name: "asc" } }) : Promise.resolve([]),
-      admin ? prisma.faceTrackProfile.findMany({ where: { active: true, staff: account.branch !== "All branches" ? { branch: account.branch } : {} }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }) : prisma.faceTrackProfile.findMany({ where: { staffId: account.staffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
+      admin ? prisma.faceTrackProfile.findMany({ where: { active: true, staff: account.branch !== "All branches" ? { branch: account.branch } : {} }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }) : prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
       admin ? prisma.faceTrackAuditEntry.findMany({ where: { attendanceRecord: branchWhere }, include: { attendanceRecord: { include: { staff: { select: { name: true } } } } }, orderBy: { createdAt: "desc" }, take: 250 }) : Promise.resolve([]),
     ]);
     const today = zonedWorkDate(new Date(), policy.timezone);
@@ -377,13 +386,13 @@ export function createFaceTrackAttendanceRouter(prisma) {
   router.post("/clock", asyncRoute(async (request, response) => {
     const account = requireAccount(request);
     enforceVerificationRateLimit(request);
-    if (!account.staffId) throw apiError("This account is not linked to an employee profile.", 409);
+    const staff = await matchingStaffForAccount(prisma, account);
+    if (!staff) throw apiError("This account is not linked to its matching employee profile.", 409);
     const idempotencyKey = clean(request.body?.idempotencyKey);
     if (idempotencyKey.length < 12) throw apiError("A valid attendance request key is required.");
     const descriptor = averageDescriptors(request.body?.descriptors);
-    const [profile, staff, policy] = await Promise.all([
-      prisma.faceTrackProfile.findUnique({ where: { staffId: account.staffId } }),
-      prisma.staffMember.findUnique({ where: { id: account.staffId } }),
+    const [profile, policy] = await Promise.all([
+      prisma.faceTrackProfile.findUnique({ where: { staffId: staff.id } }),
       policyFor(prisma),
     ]);
     if (!policy.enabled) throw apiError("FaceTrack Attendance is currently disabled.", 503);
@@ -562,8 +571,9 @@ export function createFaceTrackAttendanceRouter(prisma) {
   router.post("/correction-requests", asyncRoute(async (request, response) => {
     const account = requireAccount(request);
     if (!account.staffId) throw apiError("This account is not linked to an employee profile.", 409);
-    const record = await prisma.faceTrackAttendanceRecord.findUnique({ where: { id: clean(request.body?.attendanceRecordId) } });
+    const record = await prisma.faceTrackAttendanceRecord.findUnique({ where: { id: clean(request.body?.attendanceRecordId) }, include: { staff: true } });
     if (!record || record.staffId !== account.staffId) throw apiError("Attendance record was not found.", 404);
+    if (!accountMatchesStaffIdentity(account, record.staff)) throw apiError("This account is not linked to its matching employee profile.", 409);
     const pending = await prisma.faceTrackCorrectionRequest.findFirst({ where: { attendanceRecordId: record.id, status: "PENDING" } });
     if (pending) throw apiError("This attendance record already has a pending correction request.", 409);
     const requestedTimeIn = request.body?.requestedTimeIn ? new Date(request.body.requestedTimeIn) : null;
