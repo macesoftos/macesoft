@@ -2964,6 +2964,32 @@ function PublicLeadCapturePage() {
   const [submitted, setSubmitted] = useState(null);
 
   useEffect(() => {
+    if (!isContactEmbed || window.parent === window) return undefined;
+
+    let animationFrame = 0;
+    const publishHeight = () => {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => {
+        const height = Math.ceil(Math.max(
+          document.body?.scrollHeight || 0,
+          document.documentElement.scrollHeight || 0,
+        ));
+        window.parent.postMessage({ type: "mace-inquiry-height", height }, "*");
+      });
+    };
+    const resizeObserver = new ResizeObserver(publishHeight);
+    resizeObserver.observe(document.documentElement);
+    window.addEventListener("load", publishHeight);
+    publishHeight();
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      window.removeEventListener("load", publishHeight);
+    };
+  }, [isContactEmbed]);
+
+  useEffect(() => {
     let cancelled = false;
     loadPublicLeadConfig()
       .then((result) => {
