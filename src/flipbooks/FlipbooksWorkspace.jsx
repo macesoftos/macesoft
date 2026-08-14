@@ -447,17 +447,6 @@ function FlipbooksTable({ books, navigate, onAction }) {
   );
 }
 
-function PreviewDialog({ book, onClose }) {
-  return (
-    <div className="flipbook-modal-backdrop" role="dialog" aria-modal="true" aria-label={`Preview ${book.title}`}>
-      <div className="flipbook-modal preview-modal">
-        <header><div><small>Preview</small><strong>{book.title}</strong></div><button type="button" onClick={onClose} aria-label="Close preview"><X size={19} /></button></header>
-        <FlipbookReader sourceUrl={book.sourceUrl} pageCount={book.pageCount} title={book.title} compact />
-      </div>
-    </div>
-  );
-}
-
 function Toggle({ checked, onChange, label }) {
   return <button className={`flipbook-toggle ${checked ? "on" : ""}`} type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}><span /></button>;
 }
@@ -729,7 +718,6 @@ function EditorPanel({ book, setBook, notify, onShare }) {
 function FlipbookEditor({ id, navigate, notify, onListChanged }) {
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [preview, setPreview] = useState(false);
   const [share, setShare] = useState(false);
   useEffect(() => { getFlipbook(id).then((result) => setBook(result.flipbook)).catch((error) => notify(error.message, "error")).finally(() => setLoading(false)); }, [id, notify]);
   if (loading) return <LoadingState />;
@@ -755,14 +743,39 @@ function FlipbookEditor({ id, navigate, notify, onListChanged }) {
     <div className="flipbook-editor">
       <header className="flipbook-editor-topbar">
         <div><button type="button" onClick={() => navigate("/flipbooks")} aria-label="Back to Flipbooks"><ArrowLeft size={18} /></button><div><small>Flipbook</small><strong>{book.title}</strong></div><StatusPill status={book.status} /></div>
-        <div><button className="flipbook-secondary" type="button" onClick={() => setPreview(true)}><Eye size={17} /> Preview</button><button className="flipbook-secondary" type="button" disabled={!book.publicLink} onClick={() => void copyText(book.publicLink, () => notify("Link copied."))}><Copy size={17} /> Copy Link</button><button className="flipbook-secondary" type="button" onClick={() => void nativeShare()}><Share2 size={17} /> Share</button><button className="flipbook-primary" type="button" onClick={() => void publishOrUpdate()}>{book.status === "Published" ? "Update" : "Publish"}</button></div>
+        <div><button className="flipbook-secondary" type="button" onClick={() => navigate(`/flipbooks/${book.id}/preview`)}><Eye size={17} /> Preview</button><button className="flipbook-secondary" type="button" disabled={!book.publicLink} onClick={() => void copyText(book.publicLink, () => notify("Link copied."))}><Copy size={17} /> Copy Link</button><button className="flipbook-secondary" type="button" onClick={() => void nativeShare()}><Share2 size={17} /> Share</button><button className="flipbook-primary" type="button" onClick={() => void publishOrUpdate()}>{book.status === "Published" ? "Update" : "Publish"}</button></div>
       </header>
       <div className="flipbook-editor-body">
         <FlipbookReader sourceUrl={book.sourceUrl} pageCount={book.pageCount} title={book.title} showThumbnails />
         <EditorPanel key={book.updatedAt} book={book} setBook={(next) => { setBook(next); onListChanged(); }} notify={notify} onShare={() => setShare(true)} />
       </div>
-      {preview && <PreviewDialog book={book} onClose={() => setPreview(false)} />}
       {share && <ShareDialog book={book} onClose={() => setShare(false)} onUpdated={(next) => { setBook(next); onListChanged(); }} notify={notify} />}
+    </div>
+  );
+}
+
+function FlipbookPreviewPage({ id, navigate, notify }) {
+  const [book, setBook] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    getFlipbook(id)
+      .then((result) => setBook(result.flipbook))
+      .catch((error) => notify(error.message, "error"))
+      .finally(() => setLoading(false));
+  }, [id, notify]);
+
+  if (loading) return <LoadingState label="Loading preview…" />;
+  if (!book) return <div className="flipbook-not-found"><FileText size={30} /><h2>Flipbook not found</h2><button type="button" onClick={() => navigate("/flipbooks")}>Back to Flipbooks</button></div>;
+
+  return (
+    <div className="flipbook-preview-page">
+      <header className="flipbook-editor-topbar">
+        <div><button type="button" onClick={() => navigate(`/flipbooks/${book.id}`)} aria-label="Back to editor"><ArrowLeft size={18} /></button><div><small>Preview</small><strong>{book.title}</strong></div><StatusPill status={book.status} /></div>
+        <div><button className="flipbook-secondary" type="button" onClick={() => navigate(`/flipbooks/${book.id}`)}><FileText size={17} /> Edit Flipbook</button>{book.publicLink && <button className="flipbook-secondary" type="button" onClick={() => void copyText(book.publicLink, () => notify("Link copied."))}><Copy size={17} /> Copy Link</button>}{book.publicLink && <a className="flipbook-primary" href={book.publicLink} target="_blank" rel="noreferrer"><ExternalLink size={16} /> Open Public Viewer</a>}</div>
+      </header>
+      <div className="flipbook-preview-page-reader">
+        <FlipbookReader sourceUrl={book.sourceUrl} pageCount={book.pageCount} title={book.title} showThumbnails />
+      </div>
     </div>
   );
 }
@@ -771,14 +784,13 @@ export default function FlipbooksWorkspace({ notify, session }) {
   const [path, navigate] = useWorkspacePath();
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [preview, setPreview] = useState(null);
   const [share, setShare] = useState(null);
   const refresh = useCallback(() => listFlipbooks().then((result) => setBooks(result.flipbooks)).catch((error) => notify(error.message, "error")).finally(() => setLoading(false)), [notify]);
   useEffect(() => { void refresh(); }, [refresh]);
 
   async function action(type, book) {
     try {
-      if (type === "preview") setPreview(book);
+      if (type === "preview") navigate(`/flipbooks/${book.id}/preview`);
       if (type === "share") setShare(book);
       if (type === "copy") {
         if (!book.publicLink) return notify("Publish this flipbook before copying its link.", "warning");
@@ -797,6 +809,9 @@ export default function FlipbooksWorkspace({ notify, session }) {
     } catch (error) { notify(error.message, "error"); }
   }
 
+  const previewMatch = path.match(/^\/flipbooks\/([^/]+)\/preview$/);
+  if (previewMatch) return <FlipbookPreviewPage id={decodeURIComponent(previewMatch[1])} navigate={navigate} notify={notify} />;
+
   const editorMatch = path.match(/^\/flipbooks\/([^/]+)$/);
   const isEditor = editorMatch && !["overview", "new", "shared", "analytics", "settings"].includes(editorMatch[1]);
   if (isEditor) return <FlipbookEditor id={decodeURIComponent(editorMatch[1])} navigate={navigate} notify={notify} onListChanged={refresh} />;
@@ -812,7 +827,6 @@ export default function FlipbooksWorkspace({ notify, session }) {
   return (
     <WorkspaceChrome path={path} navigate={navigate}>
       {content}
-      {preview && <PreviewDialog book={preview} onClose={() => setPreview(null)} />}
       {share && <ShareDialog book={share} onClose={() => setShare(null)} onUpdated={(next) => { setShare(next); void refresh(); }} notify={notify} />}
     </WorkspaceChrome>
   );
