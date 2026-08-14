@@ -63,6 +63,12 @@ import {
   sanitizeMarketingHtml,
 } from "./marketingHtml.js";
 import { normalizeMarketingMediaName, serializeMarketingMediaAsset } from "./marketingMedia.js";
+import {
+  approveMarketingState,
+  marketingApprovalRequired,
+  marketingDeliveryStates,
+  scheduleMarketingState,
+} from "./marketingDelivery.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -2524,6 +2530,14 @@ function emailReady() {
   return Boolean(host && from && (Boolean(user) === Boolean(pass)));
 }
 
+function assertMarketingProviderReady(campaign) {
+  if (clean(campaign?.channel).includes("+")) throw apiError("Combined Email + SMS scheduling requires the coordinated delivery provider.", 503);
+  if (envFlag(process.env.MARKETING_DRY_RUN)) return;
+  const channel = marketingChannel(campaign);
+  if (channel === "sms" && !smsReady()) throw apiError("SMS delivery is not configured. Connect Twilio before scheduling this campaign.", 503);
+  if (channel === "email" && !emailReady()) throw apiError("Email delivery is not configured. Add the SMTP settings before scheduling this campaign.", 503);
+}
+
 async function sendTwilioSms({ to, body }) {
   const accountSid = clean(process.env.TWILIO_ACCOUNT_SID);
   const authToken = clean(process.env.TWILIO_AUTH_TOKEN);
@@ -4329,6 +4343,22 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
   await assertResourceMutationAllowed(request, config, existing);
   const data = await config.normalize(request.body, id);
   await assertResourceMutationAllowed(request, config, data);
+  if (request.params.resource === "campaigns") {
+    const comparableValue = (value) => value instanceof Date ? value.toISOString() : JSON.stringify(value ?? null);
+    const changed = ["name", "branch", "segment", "channel", "templateId", "subject", "message", "html", "design", "scheduledAt", "managerApproval"]
+      .some((field) => comparableValue(existing[field]) !== comparableValue(data[field]));
+    const reopened = ["Scheduled", "Pending approval", "Sending"].includes(existing.status) && data.status === "Draft";
+    if (changed || reopened) {
+      Object.assign(data, {
+        approvedAt: null,
+        approvedById: "",
+        deliveryStatus: "",
+        lastDeliveryError: "",
+        scheduledById: "",
+        status: "Draft",
+      });
+    }
+  }
   if (config.beforeWrite) await config.beforeWrite(data, id);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -5088,7 +5118,14 @@ app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, resp
   const result = await prisma.$transaction(async (tx) => {
     const campaign = await tx.marketingCampaign.update({
       where: { id },
-      data: { deletedAt: null },
+      data: {
+        approvedAt: null,
+        approvedById: "",
+        deletedAt: null,
+        deliveryStatus: "",
+        scheduledById: "",
+        status: "Draft",
+      },
     });
     const auditLog = await writeAudit(tx, request, {
       area: "Marketing",
@@ -5162,23 +5199,77 @@ app.post("/api/marketing/send-test", asyncRoute(async (request, response) => {
   response.json({ sent, failed: failures.length, failures, provider: dryRun ? "dry-run" : "smtp", auditLog });
 }));
 
-app.post("/api/marketing/send", asyncRoute(async (request, response) => {
-  const actor = assertMutationAllowed(request, "sms");
-  const campaign = request.body?.campaign ?? {};
-  if (clean(campaign.id)) {
-    const storedCampaign = await prisma.marketingCampaign.findUnique({
-      where: { id: clean(campaign.id) },
-      select: { branch: true, deletedAt: true },
+app.post("/api/marketing/campaigns/:id/schedule", asyncRoute(async (request, response) => {
+  const id = clean(request.params.id);
+  const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
+  if (!existing) throw apiError("Campaign not found.", 404);
+  const actor = assertMutationAllowed(request, "sms", existing.branch);
+  if (existing.deletedAt) throw apiError("Restore this campaign before scheduling it.", 409);
+  const scheduledAt = new Date(clean(request.body?.scheduledAt) || existing.scheduledAt || "");
+  if (Number.isNaN(scheduledAt.getTime())) throw apiError("Choose a valid delivery date and time.");
+  if (scheduledAt.getTime() <= Date.now()) throw apiError("Choose a delivery time in the future.");
+  assertMarketingProviderReady(existing);
+
+  const marketingSettings = await getPersistedSettings();
+  const transition = scheduleMarketingState({
+    actorId: actor.id,
+    actorRole: actor.role,
+    campaign: { ...existing, managerApproval: marketingSettings.managerApproval !== false },
+    scheduledAt,
+  });
+  const result = await prisma.$transaction(async (tx) => {
+    const campaign = await tx.marketingCampaign.update({ where: { id }, data: transition.data });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: transition.approvalRequired ? "Campaign submitted for approval" : "Campaign scheduled",
+      details: transition.approvalRequired
+        ? `${campaign.name} is waiting for an administrator before delivery.`
+        : `${campaign.name} scheduled for ${scheduledAt.toLocaleString("en-PH")}.`,
     });
-    if (!storedCampaign) throw apiError("Campaign not found.", 404);
-    assertMutationAllowed(request, "sms", storedCampaign.branch);
-    if (storedCampaign.deletedAt) throw apiError("Restore this campaign before sending it.", 409);
-  } else {
-    assertMutationAllowed(request, "sms", requireText(campaign.branch, "Campaign branch"));
-  }
+    return { campaign, auditLog };
+  });
+
+  response.json({ ...result, approvalRequired: transition.approvalRequired });
+}));
+
+app.post("/api/marketing/campaigns/:id/approve", asyncRoute(async (request, response) => {
+  const id = clean(request.params.id);
+  const existing = await prisma.marketingCampaign.findUnique({ where: { id } });
+  if (!existing) throw apiError("Campaign not found.", 404);
+  const actor = assertMutationAllowed(request, "sms", existing.branch);
+  if (!canManageOrganization(actor.role)) throw apiError("Only an Admin or Business Owner can approve Marketing campaigns.", 403);
+  if (existing.deletedAt) throw apiError("Restore this campaign before approving it.", 409);
+  if (!existing.scheduledAt) throw apiError("Choose a delivery date and time before approving this campaign.");
+  assertMarketingProviderReady(existing);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const campaign = await tx.marketingCampaign.update({ where: { id }, data: approveMarketingState({ actorId: actor.id }) });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Campaign approved",
+      details: `${campaign.name} approved and released to the delivery queue.`,
+    });
+    return { campaign, auditLog };
+  });
+
+  response.json(result);
+}));
+
+function deliveryAuditData(request, details) {
+  if (request) return auditData(request, details);
+  return {
+    time: new Date().toLocaleString("en-PH"),
+    actor: "Marketing scheduler",
+    role: "System",
+    area: details.area,
+    action: details.action,
+    details: details.details,
+  };
+}
+
+async function deliverMarketingCampaign({ campaign, clients, request = null }) {
   const settings = await getPersistedSettings();
   const channel = marketingChannel(campaign);
-  const clients = await listResource("clients", actor);
   const templates = await prisma.smsTemplate.findMany({ where: { active: true } });
   const template = pickTemplate({ campaign, templates, channel });
   const emailHtml = channel === "email" ? sanitizeMarketingHtml(campaign.html) : "";
@@ -5186,98 +5277,163 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
   const subject = clean(campaign.subject) || clean(campaign.name) || "A note from MACE";
   const dryRun = envFlag(process.env.MARKETING_DRY_RUN);
 
-  if (!clean(campaign.name)) {
-    throw apiError("Campaign name is required.");
-  }
-  if (!baseMessage) {
-    throw apiError("Campaign message is required.");
-  }
-  if (channel === "sms" && !dryRun && !smsReady()) {
-    throw apiError("SMS is not configured. Add Twilio credentials to .env and restart the API.", 503);
-  }
-  if (channel === "email" && !dryRun && !emailReady()) {
-    throw apiError("Email is not configured. Add SMTP settings to .env and restart the API.", 503);
-  }
+  if (!clean(campaign.name)) throw apiError("Campaign name is required.");
+  if (!baseMessage) throw apiError("Campaign message is required.");
+  assertMarketingProviderReady(campaign);
 
   const { candidates, recipients } = selectMarketingRecipients({ clients, campaign, channel });
   const maxSends = Number(process.env.MAX_MARKETING_SENDS || 500);
-
-  if (!recipients.length) {
-    throw apiError(`No opted-in clients with ${channel === "sms" ? "mobile numbers" : "email addresses"} matched this campaign.`);
-  }
-  if (recipients.length > maxSends) {
-    throw apiError(`This campaign has ${recipients.length} recipients. Set MAX_MARKETING_SENDS higher to send it.`, 413);
-  }
+  if (!recipients.length) throw apiError(`No opted-in clients with ${channel === "sms" ? "mobile numbers" : "email addresses"} matched this campaign.`);
+  if (recipients.length > maxSends) throw apiError(`This campaign has ${recipients.length} recipients. Set MAX_MARKETING_SENDS higher to send it.`, 413);
 
   const transporter = channel === "email" && !dryRun ? createEmailTransport() : null;
   const failures = [];
   let sent = 0;
-
-  for (const recipient of recipients) {
-    const context = { client: recipient.client, campaign, settings };
-    const text = renderMarketingText(baseMessage, context);
-    const html = channel === "email" && emailHtml
-      ? renderMarketingHtml(emailHtml, marketingMergeValues(context))
-      : "";
-    try {
-      if (dryRun) {
-        console.log(`[marketing dry-run] ${channel.toUpperCase()} to ${recipient.contact}: ${text}`);
-      } else if (channel === "sms") {
-        await sendTwilioSms({ to: recipient.contact, body: text });
-      } else {
-        await sendSmtpEmail({ transporter, to: recipient.contact, subject, text, html });
+  try {
+    for (const recipient of recipients) {
+      const context = { client: recipient.client, campaign, settings };
+      const text = renderMarketingText(baseMessage, context);
+      const html = channel === "email" && emailHtml ? renderMarketingHtml(emailHtml, marketingMergeValues(context)) : "";
+      try {
+        if (dryRun) console.log(`[marketing dry-run] ${channel.toUpperCase()} to ${recipient.contact}: ${text}`);
+        else if (channel === "sms") await sendTwilioSms({ to: recipient.contact, body: text });
+        else await sendSmtpEmail({ transporter, to: recipient.contact, subject, text, html });
+        sent += 1;
+      } catch (error) {
+        failures.push({ client: recipient.client.fullName, contact: recipient.contact, error: error.message || "Delivery failed." });
       }
-      sent += 1;
-    } catch (error) {
-      failures.push({
-        client: recipient.client.fullName,
-        contact: recipient.contact,
-        error: error.message || "Delivery failed.",
-      });
     }
+  } finally {
+    transporter?.close();
   }
 
-  if (!sent && failures.length) {
-    throw apiError(failures[0].error || "No messages were delivered.", 502);
-  }
-
+  if (!sent && failures.length) throw apiError(failures[0].error || "No messages were delivered.", 502);
   const failed = failures.length;
   const credits = channel === "sms" ? sent : 0;
   let updatedCampaign = null;
   let auditLog = null;
-
   await prisma.$transaction(async (tx) => {
     if (clean(campaign.id)) {
       updatedCampaign = await tx.marketingCampaign.update({
         where: { id: clean(campaign.id) },
         data: {
-          status: failed ? "Partial" : "Sent",
-          sent,
           credits: channel === "sms" ? credits : Number(campaign.credits || 0),
+          deliveryStatus: failed ? marketingDeliveryStates.partial : marketingDeliveryStates.sent,
+          lastDeliveryError: failures[0]?.error || "",
+          sent,
+          sentAt: new Date(),
+          status: failed ? "Partial" : "Sent",
         },
       });
     }
-
-    auditLog = await writeAudit(tx, request, {
-      area: "Marketing",
-      action: channel === "email" ? "Email campaign sent" : "SMS campaign sent",
-      details: `${campaign.name} delivered to ${sent} client${sent === 1 ? "" : "s"}${failed ? ` with ${failed} failed` : ""}.`,
+    auditLog = await tx.auditLog.create({
+      data: deliveryAuditData(request, {
+        area: "Marketing",
+        action: channel === "email" ? "Email campaign sent" : "SMS campaign sent",
+        details: `${campaign.name} delivered to ${sent} client${sent === 1 ? "" : "s"}${failed ? ` with ${failed} failed` : ""}.`,
+      }),
     });
   });
 
-  response.status(failures.length ? 207 : 200).json({
-    ok: failures.length === 0,
+  return {
+    auditLog,
+    campaign: updatedCampaign,
     channel,
+    credits,
+    failed,
+    failures: failures.slice(0, 5),
+    ok: failures.length === 0,
     provider: dryRun ? "dry-run" : channel === "sms" ? "twilio" : "smtp",
     sent,
-    failed,
     skipped: Math.max(0, candidates.length - recipients.length),
-    credits,
-    failures: failures.slice(0, 5),
-    campaign: updatedCampaign,
-    auditLog,
-  });
+  };
+}
+
+app.post("/api/marketing/send", asyncRoute(async (request, response) => {
+  const actor = assertMutationAllowed(request, "sms");
+  const marketingSettings = await getPersistedSettings();
+  let campaign = request.body?.campaign ?? {};
+  if (clean(campaign.id)) {
+    const storedCampaign = await prisma.marketingCampaign.findUnique({ where: { id: clean(campaign.id) } });
+    if (!storedCampaign) throw apiError("Campaign not found.", 404);
+    assertMutationAllowed(request, "sms", storedCampaign.branch);
+    if (storedCampaign.deletedAt) throw apiError("Restore this campaign before sending it.", 409);
+    const approvalRequired = marketingSettings.managerApproval !== false
+      && !storedCampaign.approvedAt
+      && !canManageOrganization(actor.role);
+    if (approvalRequired || marketingApprovalRequired(storedCampaign, actor.role)) throw apiError("An Admin or Business Owner must approve this campaign before delivery.", 403);
+    campaign = storedCampaign;
+  } else {
+    assertMutationAllowed(request, "sms", requireText(campaign.branch, "Campaign branch"));
+    if (marketingSettings.managerApproval !== false && !canManageOrganization(actor.role)) {
+      throw apiError("Save this campaign and submit it for administrator approval before delivery.", 403);
+    }
+  }
+  const clients = await listResource("clients", actor);
+  const result = await deliverMarketingCampaign({ campaign, clients, request });
+  response.status(result.failed ? 207 : 200).json(result);
 }));
+
+let marketingSchedulerRunning = false;
+
+async function processDueMarketingCampaigns() {
+  if (marketingSchedulerRunning) return;
+  marketingSchedulerRunning = true;
+  try {
+    const now = new Date();
+    await prisma.marketingCampaign.updateMany({
+      where: {
+        deletedAt: null,
+        deliveryStatus: marketingDeliveryStates.processing,
+        updatedAt: { lte: new Date(now.getTime() - 60 * 60 * 1000) },
+      },
+      data: { deliveryStatus: marketingDeliveryStates.queued, status: "Scheduled" },
+    });
+    const dueCampaigns = await prisma.marketingCampaign.findMany({
+      where: {
+        deletedAt: null,
+        deliveryStatus: marketingDeliveryStates.queued,
+        scheduledAt: { lte: now },
+        status: "Scheduled",
+      },
+      orderBy: [{ scheduledAt: "asc" }],
+      take: 10,
+    });
+    if (!dueCampaigns.length) return;
+    const allClients = await listResource("clients");
+    for (const campaign of dueCampaigns) {
+      const claimed = await prisma.marketingCampaign.updateMany({
+        where: { id: campaign.id, deliveryStatus: marketingDeliveryStates.queued, status: "Scheduled" },
+        data: { deliveryStatus: marketingDeliveryStates.processing, lastDeliveryError: "", status: "Sending" },
+      });
+      if (!claimed.count) continue;
+      const clients = isAllBranches(campaign.branch)
+        ? allClients
+        : allClients.filter((client) => clean(client.branch) === clean(campaign.branch));
+      try {
+        await deliverMarketingCampaign({ campaign, clients });
+      } catch (error) {
+        const message = clean(error.message) || "Scheduled delivery failed.";
+        await prisma.$transaction([
+          prisma.marketingCampaign.update({
+            where: { id: campaign.id },
+            data: { deliveryStatus: marketingDeliveryStates.failed, lastDeliveryError: message.slice(0, 1000), status: "Failed" },
+          }),
+          prisma.auditLog.create({
+            data: deliveryAuditData(null, {
+              area: "Marketing",
+              action: "Scheduled campaign failed",
+              details: `${campaign.name}: ${message}`.slice(0, 2000),
+            }),
+          }),
+        ]);
+        console.error(JSON.stringify({ event: "marketing_scheduled_delivery_failed", campaignId: campaign.id, error: message }));
+      }
+    }
+  } finally {
+    marketingSchedulerRunning = false;
+  }
+}
 
 if (process.env.NODE_ENV === "production") {
   const serverDirectory = dirname(fileURLToPath(import.meta.url));
@@ -5323,7 +5479,15 @@ const server = app.listen(port, "0.0.0.0", () => {
   console.log(`MACE ClinicOS listening on port ${port}`);
 });
 
+const marketingSchedulerEnabled = process.env.NODE_ENV !== "test" && process.env.MARKETING_SCHEDULER_ENABLED !== "false";
+const marketingSchedulerInterval = marketingSchedulerEnabled
+  ? setInterval(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, Math.max(5_000, Number(process.env.MARKETING_SCHEDULER_INTERVAL_MS) || 30_000))
+  : null;
+marketingSchedulerInterval?.unref();
+if (marketingSchedulerEnabled) setTimeout(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, 2_000).unref();
+
 function shutdown() {
+  if (marketingSchedulerInterval) clearInterval(marketingSchedulerInterval);
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);

@@ -132,6 +132,8 @@ import {
   saveResourceRecord,
   saveSettingsRecord,
   sendMarketingCampaign,
+  scheduleMarketingCampaign,
+  approveMarketingCampaign,
   setApiSessionContext,
   submitPublicBooking,
   submitPublicLead,
@@ -2119,12 +2121,28 @@ function App() {
     }
   }
 
+  async function scheduleCampaign(id, scheduledAt) {
+    const result = await scheduleMarketingCampaign(id, { scheduledAt });
+    upsertById(setCampaigns, result.campaign);
+    applyAuditLog(result.auditLog);
+    return result;
+  }
+
+  async function approveCampaign(id) {
+    const result = await approveMarketingCampaign(id);
+    upsertById(setCampaigns, result.campaign);
+    applyAuditLog(result.auditLog);
+    notify("Campaign approved and released to the delivery queue.");
+    return result.campaign;
+  }
+
   async function saveSettings(values) {
     const result = await saveSettingsRecord({ ...settings, ...values });
     setSettings(result.settings);
     applyAuditLog(result.auditLog);
     closeModal();
     notify("Settings updated.");
+    return result.settings;
   }
 
   async function publicBooking(values) {
@@ -2594,6 +2612,8 @@ function App() {
           )}
           {activeModule === "sms" && (
             <MarketingWorkspace
+              approveCampaign={approveCampaign}
+              canApproveMarketing={canManageOrganization(session.role)}
               clients={scopedClients}
               templates={smsTemplates}
               campaigns={campaigns}
@@ -2605,6 +2625,8 @@ function App() {
               restoreCampaign={restoreCampaign}
               deleteCampaignForever={deleteCampaignForever}
               saveCampaign={saveCampaign}
+              saveMarketingSettings={saveSettings}
+              scheduleCampaign={scheduleCampaign}
               sendCampaign={sendCampaign}
               sendingCampaignId={sendingCampaignId}
               globalSearch={globalSearch}

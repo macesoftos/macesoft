@@ -146,9 +146,33 @@ export async function verifyMarketingBuilder(page, expect) {
   expect((await templateSave).status()).toBe(201);
   await expect(templateDialog).toBeHidden();
 
+  const builderHeader = page.locator(".marketing-builder-header");
+  await builderHeader.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Approved by your admin account", { exact: true })).toBeVisible();
+  await builderHeader.getByRole("button", { name: "Continue", exact: true }).click();
+  const deliveryTime = await page.evaluate(() => {
+    const date = new Date(Date.now() + (10 * 60 * 1000));
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  });
+  await page.getByLabel("Send date and time").fill(deliveryTime);
+  await expect(page.getByText("Approved by your admin account", { exact: true })).toBeVisible();
+  const scheduleResponse = page.waitForResponse((response) => response.url().endsWith("/schedule") && response.request().method() === "POST");
+  await builderHeader.getByRole("button", { name: "Confirm schedule", exact: true }).click();
+  const schedule = await scheduleResponse;
+  expect(schedule.status()).toBe(200);
+  const scheduleBody = await schedule.json();
+  expect(scheduleBody.approvalRequired).toBe(false);
+  expect(scheduleBody.campaign.managerApproval).toBe(false);
+  expect(scheduleBody.campaign.status).toBe("Scheduled");
+  expect(scheduleBody.campaign.deliveryStatus).toBe("Queued");
+  await expect(page.getByText("Campaign scheduled and added to the delivery queue.", { exact: true })).toBeVisible();
+
   await page.goto("/#/marketing/campaigns");
   const campaignRow = page.getByRole("row").filter({ hasText: "Summer Skin Reset" });
   await expect(campaignRow).toBeVisible();
+  await expect(campaignRow.getByText("Scheduled", { exact: true })).toBeVisible();
+  await expect(campaignRow.getByRole("button", { name: "Queued", exact: true })).toBeDisabled();
   await campaignRow.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByText("E2E Brightening Treatment", { exact: true })).toBeVisible();
 

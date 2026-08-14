@@ -336,8 +336,16 @@ function normalizedDraft(value) {
     html: typeof value.html === "string" ? value.html : "",
     blocks: savedBlocks.length ? savedBlocks : fallback.blocks,
     theme: { ...defaultEmailTheme, ...(value.theme && typeof value.theme === "object" ? value.theme : {}) },
+    scheduledAt: localDateTimeInput(value.scheduledAt || ""),
     step: Math.min(4, Math.max(1, Number(value.step) || 1)),
   };
+}
+
+function localDateTimeInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
+  return new Date(date.getTime() - (date.getTimezoneOffset() * 60_000)).toISOString().slice(0, 16);
 }
 
 function daysSince(value) {
@@ -437,7 +445,9 @@ function campaignAdvisories(draft) {
 }
 
 export default function MarketingWorkspace({
+  approveCampaign,
   askConfirm,
+  canApproveMarketing = false,
   campaigns = [],
   clients = [],
   deleteCampaignForever,
@@ -450,6 +460,8 @@ export default function MarketingWorkspace({
   openModal,
   restoreCampaign,
   saveCampaign,
+  saveMarketingSettings,
+  scheduleCampaign,
   sendCampaign,
   sendingCampaignId,
   settings = {},
@@ -517,7 +529,12 @@ export default function MarketingWorkspace({
   }
 
   function beginCampaign(preset = {}) {
-    setDraft(normalizedDraft({ ...createDefaultDraft(), step: 1, ...preset }));
+    setDraft(normalizedDraft({
+      ...createDefaultDraft(),
+      step: 1,
+      ...preset,
+      managerApproval: canApproveMarketing ? false : settings.managerApproval !== false,
+    }));
     navigate("campaigns", "create");
   }
 
@@ -625,6 +642,7 @@ export default function MarketingWorkspace({
         ) : null}
         {route.mode === "create" ? (
           <CampaignBuilder
+            canApproveMarketing={canApproveMarketing}
             clients={clients}
             draft={draft}
             notify={notify}
@@ -633,6 +651,7 @@ export default function MarketingWorkspace({
             onBack={() => navigate("campaigns")}
             onOpenGlobalNavigation={onOpenGlobalNavigation}
             onSaveCampaign={saveCampaign}
+            onScheduleCampaign={scheduleCampaign}
             onSaveTemplate={persistTemplate}
             setDraft={setDraft}
             settings={settings}
@@ -652,8 +671,10 @@ export default function MarketingWorkspace({
                 <MarketingLoading />
               ) : (
                 <MarketingPage
+                  approveCampaign={approveCampaign}
                   askConfirm={askConfirm}
                   campaigns={activeCampaigns}
+                  canApproveMarketing={canApproveMarketing}
                   clients={clients}
                   deletedCampaigns={deletedCampaigns}
                   deleteCampaignForever={deleteCampaignForever}
@@ -693,6 +714,7 @@ export default function MarketingWorkspace({
                   openModal={openModal}
                   restoreCampaign={restoreCampaign}
                   savedTemplates={savedTemplates}
+                  saveMarketingSettings={saveMarketingSettings}
                   section={route.section}
                   sendCampaign={sendCampaign}
                   sendingCampaignId={sendingCampaignId}
@@ -785,7 +807,7 @@ function MarketingOverview({ campaigns, navigate, onCreate }) {
   );
 }
 
-function CampaignsPage({ askConfirm, campaigns, deletedCampaigns, globalSearch, moveCampaignToDeleted, navigate, notify, onCreate, onEditCampaign, sendCampaign, sendingCampaignId }) {
+function CampaignsPage({ approveCampaign, askConfirm, campaigns, canApproveMarketing, deletedCampaigns, globalSearch, moveCampaignToDeleted, navigate, notify, onCreate, onEditCampaign, sendCampaign, sendingCampaignId }) {
   const [channel, setChannel] = useState("All channels");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
@@ -818,6 +840,17 @@ function CampaignsPage({ askConfirm, campaigns, deletedCampaigns, globalSearch, 
     else confirmation.onConfirm();
   }
 
+  async function approve(campaign) {
+    setBusyId(campaign.id);
+    try {
+      await approveCampaign(campaign.id);
+    } catch (error) {
+      notify?.(error.message || "Unable to approve this campaign.", "error");
+    } finally {
+      setBusyId("");
+    }
+  }
+
   return (
     <div className="marketing-list-page">
       <div className="marketing-list-actions">
@@ -827,24 +860,28 @@ function CampaignsPage({ askConfirm, campaigns, deletedCampaigns, globalSearch, 
       <div className="marketing-toolbar">
         <label className="marketing-search"><Search size={16} /><input aria-label="Search campaigns" onChange={(event) => setQuery(event.target.value)} placeholder="Search campaigns" type="search" value={query} /></label>
         <label><span>Channel</span><select aria-label="Filter by channel" value={channel} onChange={(event) => setChannel(event.target.value)}><option>All channels</option><option>Email</option><option>SMS</option><option>Email + SMS</option></select></label>
-        <label><span>Status</span><select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option>All statuses</option><option>Draft</option><option>Scheduled</option><option>Sent</option><option>Partial</option></select></label>
+        <label><span>Status</span><select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option>All statuses</option><option>Draft</option><option>Pending approval</option><option>Scheduled</option><option>Sending</option><option>Sent</option><option>Partial</option><option>Failed</option></select></label>
       </div>
       {filtered.length ? (
         <div className="marketing-table-wrap">
           <table className="marketing-table">
             <thead><tr><th>Campaign</th><th>Channel</th><th>Audience</th><th>Status</th><th>Scheduled or sent</th><th>Delivery summary</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
-              {filtered.map((campaign) => (
-                <tr key={campaign.id}>
+              {filtered.map((campaign) => {
+                const awaitingApproval = campaign.status === "Pending approval" || campaign.deliveryStatus === "Awaiting approval";
+                const queued = campaign.deliveryStatus === "Queued" || campaign.deliveryStatus === "Processing";
+                const sendDisabled = sendingCampaignId === campaign.id || campaign.channel === "Email + SMS" || awaitingApproval || queued;
+                const sendLabel = sendingCampaignId === campaign.id ? "Sending…" : campaign.channel === "Email + SMS" ? "Setup required" : awaitingApproval ? "Awaiting approval" : queued ? "Queued" : "Send";
+                return <tr key={campaign.id}>
                   <td><strong>{campaign.name}</strong><small>{campaign.subject || "No email subject"}</small></td>
                   <td><ChannelPill value={campaign.channel} /></td>
                   <td>{campaign.segment}</td>
                   <td><StatusPill value={campaign.status} /></td>
                   <td>{campaignDate(campaign)}</td>
                   <td><strong>{Number(campaign.sent || 0).toLocaleString("en-PH")}</strong> delivered<small>{Number(campaign.booked || 0)} bookings</small></td>
-                  <td><div className="marketing-row-actions"><button onClick={() => onEditCampaign(campaign)} type="button">Edit</button><button disabled={sendingCampaignId === campaign.id || campaign.channel === "Email + SMS"} onClick={() => sendCampaign(campaign.id)} title={campaign.channel === "Email + SMS" ? "Combined delivery requires the coordinated delivery endpoint" : undefined} type="button">{sendingCampaignId === campaign.id ? "Sending…" : campaign.channel === "Email + SMS" ? "Setup required" : "Send"}</button><button aria-label={`Delete ${campaign.name}`} className="danger" disabled={busyId === campaign.id} onClick={() => confirmMoveToDeleted(campaign)} type="button"><Trash2 size={14} aria-hidden="true" />{busyId === campaign.id ? "Moving…" : "Delete"}</button></div></td>
+                  <td><div className="marketing-row-actions"><button onClick={() => onEditCampaign(campaign)} type="button">Edit</button>{canApproveMarketing && awaitingApproval ? <button disabled={busyId === campaign.id} onClick={() => { void approve(campaign); }} type="button">{busyId === campaign.id ? "Approving…" : "Approve"}</button> : <button disabled={sendDisabled} onClick={() => sendCampaign(campaign.id)} title={campaign.channel === "Email + SMS" ? "Combined delivery requires the coordinated delivery endpoint" : awaitingApproval ? "An Admin or Business Owner must approve this campaign" : queued ? "This campaign is already in the delivery queue" : undefined} type="button">{sendLabel}</button>}<button aria-label={`Delete ${campaign.name}`} className="danger" disabled={busyId === campaign.id} onClick={() => confirmMoveToDeleted(campaign)} type="button"><Trash2 size={14} aria-hidden="true" />{busyId === campaign.id ? "Working…" : "Delete"}</button></div></td>
                 </tr>
-              ))}
+              })}
             </tbody>
           </table>
         </div>
@@ -1006,16 +1043,34 @@ function ReportsPage({ campaigns }) {
   );
 }
 
-function MarketingSettingsPage({ notify, openModal, settings }) {
-  const [localSettings, setLocalSettings] = useState(() => safeJsonRead("mace-marketing-settings-v1", {
-    senderName: settings.company || "MACE Signature Wellness",
-    replyTo: "hello@macebydrmace.com",
-    unsubscribeText: "You are receiving this because you opted in to MACE marketing. Unsubscribe at any time.",
-    managerApproval: true,
+function MarketingSettingsPage({ canApproveMarketing, notify, openModal, saveMarketingSettings, settings }) {
+  const [localSettings, setLocalSettings] = useState(() => ({
+    ...safeJsonRead("mace-marketing-settings-v1", {}),
+    senderName: settings.marketingSenderName || settings.company || "MACE Signature Wellness",
+    replyTo: settings.marketingReplyTo || "hello@macebydrmace.com",
+    unsubscribeText: settings.marketingUnsubscribeText || "You are receiving this because you opted in to MACE marketing. Unsubscribe at any time.",
+    managerApproval: settings.managerApproval !== false,
   }));
-  function save() {
-    safeJsonWrite("mace-marketing-settings-v1", localSettings);
-    notify?.("Marketing preferences saved on this device.");
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    if (!saveMarketingSettings) {
+      notify?.("Marketing settings are unavailable right now.", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await saveMarketingSettings({
+        marketingSenderName: localSettings.senderName,
+        marketingReplyTo: localSettings.replyTo,
+        marketingUnsubscribeText: localSettings.unsubscribeText,
+        managerApproval: canApproveMarketing ? localSettings.managerApproval : settings.managerApproval !== false,
+      });
+      safeJsonWrite("mace-marketing-settings-v1", localSettings);
+    } catch (error) {
+      notify?.(error.message || "Marketing preferences could not be saved.", "error");
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <div className="marketing-settings-page">
@@ -1024,8 +1079,8 @@ function MarketingSettingsPage({ notify, openModal, settings }) {
         <label><span>Sender name</span><input value={localSettings.senderName} onChange={(event) => setLocalSettings({ ...localSettings, senderName: event.target.value })} /></label>
         <label><span>Reply-to address</span><input type="email" value={localSettings.replyTo} onChange={(event) => setLocalSettings({ ...localSettings, replyTo: event.target.value })} /></label>
         <label className="span-2"><span>Default unsubscribe content</span><textarea rows="4" value={localSettings.unsubscribeText} onChange={(event) => setLocalSettings({ ...localSettings, unsubscribeText: event.target.value })} /></label>
-        <label className="marketing-check span-2"><input type="checkbox" checked={localSettings.managerApproval} onChange={(event) => setLocalSettings({ ...localSettings, managerApproval: event.target.checked })} /><span><strong>Require manager approval</strong><small>Add an approval checkpoint before a campaign can be scheduled.</small></span></label>
-        <div className="marketing-settings-actions span-2"><button onClick={() => openModal("settings", settings)} type="button">Edit clinic details</button><button className="marketing-primary-button" onClick={save} type="button"><Save size={16} /> Save settings</button></div>
+        <label className="marketing-check span-2"><input type="checkbox" checked={localSettings.managerApproval} disabled={!canApproveMarketing} onChange={(event) => setLocalSettings({ ...localSettings, managerApproval: event.target.checked })} /><span><strong>Require manager approval</strong><small>{canApproveMarketing ? "Staff campaigns wait for an Admin or Business Owner. Admin and Owner accounts approve their own campaigns automatically." : "Only an Admin or Business Owner can change this organization policy."}</small></span></label>
+        <div className="marketing-settings-actions span-2"><button onClick={() => openModal("settings", settings)} type="button">Edit clinic details</button><button className="marketing-primary-button" disabled={saving} onClick={() => { void save(); }} type="button"><Save size={16} /> {saving ? "Saving…" : "Save settings"}</button></div>
       </section>
       <aside className="marketing-provider-panel">
         <div className="marketing-section-heading"><div><h2>Delivery providers</h2><p>Credentials stay on the secure server.</p></div></div>
@@ -1037,7 +1092,7 @@ function MarketingSettingsPage({ notify, openModal, settings }) {
   );
 }
 
-function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, setDraft, settings, templates, uploadImage }) {
+function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
@@ -1065,6 +1120,7 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
   const estimate = audienceEstimate(clients, draft.segment, draft.channel);
   const warnings = campaignWarnings(draft);
   const advisories = campaignAdvisories(draft);
+  const approvalRequired = !canApproveMarketing && settings.managerApproval !== false;
   const contentBlocks = flattenEmailBlocks(draft.blocks);
   const linkCount = contentBlocks.filter((block) => String(block.link || "").trim()).length;
   const mergeTagCount = (JSON.stringify(contentBlocks).match(/{{\s*[a-zA-Z0-9_]+(?:\s*\|\s*[^{}]+)?\s*}}/g) || []).length;
@@ -1416,7 +1472,7 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
           theme: snapshot.theme,
         },
         scheduledAt: snapshot.scheduledAt || null,
-        managerApproval: snapshot.managerApproval !== false,
+        managerApproval: approvalRequired,
         sent: Number(snapshot.sent || 0),
         booked: Number(snapshot.booked || 0),
         credits: Number(snapshot.credits || 0),
@@ -1441,7 +1497,7 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
     });
     saveChainRef.current = queued;
     return queued;
-  }, [notify, onSaveCampaign, setDraft, settings]);
+  }, [approvalRequired, notify, onSaveCampaign, setDraft, settings]);
 
   useEffect(() => {
     if (!draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
@@ -1475,10 +1531,24 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
         return;
       }
       try {
-        await saveDraft({ statusOverride: "Scheduled" });
-        updateDraft({ status: "Scheduled" });
-        notify?.(draft.managerApproval ? "Campaign saved for manager approval before scheduled delivery." : "Campaign scheduled.");
-      } catch {
+        const savedCampaign = await saveDraft({ statusOverride: "Draft" });
+        if (!onScheduleCampaign) throw new Error("Campaign scheduling is not available right now.");
+        const result = await onScheduleCampaign(savedCampaign.id, new Date(draft.scheduledAt).toISOString());
+        setDraft((current) => {
+          const next = {
+            ...current,
+            managerApproval: result.campaign.managerApproval,
+            scheduledAt: localDateTimeInput(result.campaign.scheduledAt || current.scheduledAt),
+            status: result.campaign.status,
+            updatedAt: result.campaign.updatedAt || new Date().toISOString(),
+          };
+          draftRef.current = next;
+          lastSavedSignatureRef.current = JSON.stringify({ ...next, updatedAt: undefined });
+          return next;
+        });
+        notify?.(result.approvalRequired ? "Campaign submitted to an administrator for approval." : "Campaign scheduled and added to the delivery queue.");
+      } catch (error) {
+        notify?.(error.message || "Unable to schedule this campaign.", "error");
         return;
       }
       return;
@@ -1537,7 +1607,7 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
         <div className="marketing-builder-title">
           <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications"><Menu size={20} /></button>
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
-          <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value="Draft" /></h1></div>
+          <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value={draft.status || "Draft"} /></h1></div>
         </div>
         <div className="marketing-builder-actions"><span>{saveState}</span>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-preview-email-button" onClick={() => setEmailPreviewOpen(true)} type="button"><Eye size={16} aria-hidden="true" /> Preview email</button> : null}<button onClick={() => { void saveDraft().catch(() => undefined); }} type="button">Save draft</button>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-send-test-button" onClick={() => setSendTestOpen(true)} type="button">Send test</button> : null}<button className="marketing-primary-button" onClick={() => { void continueStep(); }} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>
       </header>
@@ -1678,8 +1748,8 @@ function CampaignBuilder({ askConfirm, clients, draft, loadMedia, notify, onBack
           updateDraft={updateDraft}
         />
       )}
-      {draft.step === 3 && <ReviewStep draft={draft} estimate={estimate} warnings={warnings} updateDraft={updateDraft} />}
-      {draft.step === 4 && <ScheduleStep draft={draft} estimate={estimate} updateDraft={updateDraft} />}
+      {draft.step === 3 && <ReviewStep approvalRequired={approvalRequired} canApproveMarketing={canApproveMarketing} draft={draft} estimate={estimate} warnings={warnings} updateDraft={updateDraft} />}
+      {draft.step === 4 && <ScheduleStep approvalRequired={approvalRequired} canApproveMarketing={canApproveMarketing} draft={draft} estimate={estimate} updateDraft={updateDraft} />}
       {draft.step > 1 && <div className="marketing-builder-mobile-footer"><button onClick={() => updateDraft({ step: Math.max(1, draft.step - 1) })} type="button">Back</button><button className="marketing-primary-button" onClick={() => { void continueStep(); }} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>}
       {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => setTemplateDialogOpen(true)} type="button"><Save size={15} /> Save as template</button>}
       {deletedNotice ? <div className="marketing-undo-notice" role="status"><span>{deletedNotice}</span><button onClick={undo} type="button"><Undo2 size={15} /> Undo</button><button aria-label="Dismiss deleted block notice" onClick={() => setDeletedNotice("")} type="button"><X size={15} /></button></div> : null}
@@ -2479,24 +2549,24 @@ function BlockSettings({ block, loadMedia, notify, onUploadStateChange, settings
   return <aside className="marketing-block-settings"><div className="marketing-panel-title"><strong>{block.type === "layout" ? `${block.columns.length}-column layout` : block.type === "treatment" ? "Treatments" : definition?.label || "Legacy block"}</strong><ChevronDown size={16} /></div><div className="marketing-settings-tabs"><button aria-selected={settingsTab === "content"} className={settingsTab === "content" ? "active" : ""} onClick={() => setSettingsTab("content")} role="tab" type="button">Content</button><button aria-selected={settingsTab === "style"} className={settingsTab === "style" ? "active" : ""} onClick={() => setSettingsTab("style")} role="tab" type="button">Style</button></div><div className="marketing-settings-fields">{settingsTab === "content" ? <BlockContentSettings block={block} loadMedia={loadMedia} notify={notify} onUploadStateChange={onUploadStateChange} updateBlock={updateBlock} uploadImage={uploadImage} /> : <BlockStyleSettings block={block} updateBlock={updateBlock} />}</div><VisibilitySettings block={block} updateBlock={updateBlock} /><LinkTrackingSettings block={block} updateBlock={updateBlock} /></aside>;
 }
 
-function ReviewStep({ draft, estimate, warnings, updateDraft }) {
+function ReviewStep({ approvalRequired, canApproveMarketing, draft, estimate, warnings }) {
   return (
     <section className="marketing-wizard-page review">
       <div className="marketing-review-card"><span className="marketing-eyebrow">Step 3 of 4</span><h2>Review every client-facing detail.</h2><p>Confirm the audience, channels and content before choosing a delivery time.</p>
         <dl><div><dt>Campaign</dt><dd>{draft.name}</dd></div><div><dt>Channel</dt><dd><ChannelPill value={draft.channel} /></dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Estimated recipients</dt><dd>{estimate.toLocaleString("en-PH")}</dd></div><div><dt>Email subject</dt><dd>{draft.channel === "SMS" ? "Not applicable" : draft.subject}</dd></div></dl>
-        <label className="marketing-check"><input type="checkbox" checked={draft.managerApproval} onChange={(event) => updateDraft({ managerApproval: event.target.checked })} /><span><strong>Manager approval required</strong><small>Keep this campaign in review until an authorised manager approves it.</small></span></label>
+        <div className={`marketing-approval-note ${approvalRequired ? "required" : "approved"}`}><Check size={18} aria-hidden="true" /><span><strong>{canApproveMarketing ? "Approved by your admin account" : approvalRequired ? "Administrator approval required" : "No approval step"}</strong><small>{canApproveMarketing ? "Your role can approve and schedule this campaign without a second administrator." : approvalRequired ? "The Marketing approval policy will hold delivery until an Admin or Business Owner approves it." : "The Marketing approval policy is currently turned off."}</small></span></div>
       </div>
       <aside className="marketing-checks-panel"><h3>Campaign checks</h3>{warnings.length ? warnings.map((warning) => <div className="warning" key={warning}><CircleAlert size={16} /><span>{warning}</span></div>) : <div className="success"><Check size={16} /><span>Content, links and required information are ready.</span></div>}<div className="success"><Check size={16} /><span>Unsubscribe footer is included automatically.</span></div><div className="success"><Check size={16} /><span>Consent and suppressions will be rechecked before delivery.</span></div></aside>
     </section>
   );
 }
 
-function ScheduleStep({ draft, estimate, updateDraft }) {
+function ScheduleStep({ approvalRequired, canApproveMarketing, draft, estimate, updateDraft }) {
   return (
     <section className="marketing-wizard-page schedule">
       <div className="marketing-wizard-card"><span className="marketing-eyebrow">Step 4 of 4</span><h2>Choose when to send.</h2><p>Final delivery remains subject to channel consent, suppression and provider-readiness checks.</p>
         <label><span>Send date and time</span><input type="datetime-local" value={draft.scheduledAt} onChange={(event) => updateDraft({ scheduledAt: event.target.value })} /></label>
-        <div className="marketing-final-confirmation"><h3>Final confirmation</h3><dl><div><dt>Channel</dt><dd>{draft.channel}</dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Audience size</dt><dd>{estimate.toLocaleString("en-PH")}</dd></div><div><dt>Sending time</dt><dd>{draft.scheduledAt ? new Date(draft.scheduledAt).toLocaleString("en-PH") : "Choose a time"}</dd></div><div><dt>Approval</dt><dd>{draft.managerApproval ? "Manager approval required" : "No approval step"}</dd></div></dl></div>
+        <div className="marketing-final-confirmation"><h3>Final confirmation</h3><dl><div><dt>Channel</dt><dd>{draft.channel}</dd></div><div><dt>Audience</dt><dd>{draft.segment}</dd></div><div><dt>Audience size</dt><dd>{estimate.toLocaleString("en-PH")}</dd></div><div><dt>Sending time</dt><dd>{draft.scheduledAt ? new Date(draft.scheduledAt).toLocaleString("en-PH") : "Choose a time"}</dd></div><div><dt>Approval</dt><dd>{canApproveMarketing ? "Approved by your admin account" : approvalRequired ? "Administrator approval required" : "No approval step"}</dd></div></dl></div>
       </div>
     </section>
   );
