@@ -350,6 +350,16 @@ export default function MarketingWorkspace({
   return (
     <div className="marketing-workspace" data-testid="marketing-workspace">
       <aside className="marketing-sidebar" aria-label="Marketing workspace navigation">
+        <button
+          className="marketing-sidebar-brand"
+          onClick={onOpenGlobalNavigation}
+          type="button"
+          aria-label="Return to MACE applications"
+        >
+          <img src="/brand/mace-logo.png" alt="MACE" />
+          <span>Applications</span>
+          <ArrowLeft size={16} aria-hidden="true" />
+        </button>
         <div className="marketing-sidebar-heading">
           <span className="marketing-sidebar-kicker">Workspace</span>
           <strong>Marketing</strong>
@@ -445,7 +455,7 @@ function MarketingHeader({ onCreate, onOpenGlobalNavigation, section }) {
   return (
     <header className="marketing-header">
       <div className="marketing-heading-row">
-        <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Open MACE navigation">
+        <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications">
           <Menu size={20} aria-hidden="true" />
         </button>
         <div>
@@ -806,7 +816,7 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
     <div className={`marketing-builder builder-step-${draft.step}`}>
       <header className="marketing-builder-header">
         <div className="marketing-builder-title">
-          <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Open MACE navigation"><Menu size={20} /></button>
+          <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications"><Menu size={20} /></button>
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
           <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value="Draft" /></h1></div>
         </div>
