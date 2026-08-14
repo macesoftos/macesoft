@@ -15,6 +15,7 @@ test("public flipbook state enforces publication, disablement, and expiration", 
   const available = { status: "Published", publicToken: "token", publicEnabled: true, expiresAt: null };
   assert.equal(publicFlipbookState(available, now), "available");
   assert.equal(publicFlipbookState({ ...available, status: "Draft" }, now), "not-found");
+  assert.equal(publicFlipbookState({ ...available, deletedAt: now }, now), "not-found");
   assert.equal(publicFlipbookState({ ...available, publicEnabled: false }, now), "disabled");
   assert.equal(publicFlipbookState({ ...available, expiresAt: new Date("2026-08-14T07:59:59.000Z") }, now), "expired");
 });

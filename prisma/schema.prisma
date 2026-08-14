@@ -954,12 +954,14 @@ model Flipbook {
   allowDownload Boolean               @default(false)
   expiresAt     DateTime?
   publishedAt   DateTime?
+  deletedAt     DateTime?
   views         FlipbookView[]
   accessGrants  FlipbookAccessGrant[]
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
 
   @@index([branch, updatedAt])
+  @@index([branch, deletedAt])
   @@index([status, publicEnabled])
   @@index([createdById])
 }
