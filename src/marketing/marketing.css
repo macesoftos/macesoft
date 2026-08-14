@@ -1065,8 +1065,8 @@
 .marketing-stepper {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  min-height: 72px;
-  padding: 0 42px;
+  min-height: 46px;
+  padding: 0 28px;
   border-bottom: 1px solid var(--marketing-border);
   background: #fff;
 }
@@ -1074,18 +1074,18 @@
 .marketing-stepper button {
   position: relative;
   display: grid;
-  grid-template-columns: 32px auto minmax(24px, 1fr);
+  grid-template-columns: 26px auto minmax(18px, 1fr);
   align-items: center;
-  gap: 10px;
-  padding: 0 6px;
+  gap: 7px;
+  padding: 0 4px;
   border: 0;
   background: transparent;
   color: #77706a;
   text-align: left;
 }
 
-.marketing-stepper button > span { display: inline-flex; width: 29px; height: 29px; align-items: center; justify-content: center; border: 1px solid #b8afa6; border-radius: 50%; background: #fff; color: #4f4842; font-size: 11px; }
-.marketing-stepper button > b { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.marketing-stepper button > span { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 1px solid #b8afa6; border-radius: 50%; background: #fff; color: #4f4842; font-size: 10px; }
+.marketing-stepper button > b { font-size: 10px; font-weight: 600; white-space: nowrap; }
 .marketing-stepper button > i { height: 1px; background: #d8d0c7; }
 .marketing-stepper button:last-child > i { display: none; }
 .marketing-stepper button.active { color: var(--marketing-espresso); }
@@ -2000,9 +2000,9 @@
   .marketing-back-button { width: 38px; height: 38px; }
   .marketing-builder-actions { overflow-x: auto; justify-content: flex-start; }
   .marketing-builder-actions > button { flex: 0 0 auto; min-height: 38px !important; padding: 8px 11px !important; font-size: 10px; }
-  .marketing-stepper { min-height: 60px; padding: 0 10px; }
-  .marketing-stepper button { grid-template-columns: 28px minmax(0, auto); gap: 5px; }
-  .marketing-stepper button > span { width: 26px; height: 26px; }
+  .marketing-stepper { min-height: 44px; padding: 0 8px; }
+  .marketing-stepper button { grid-template-columns: 24px minmax(0, auto); gap: 4px; }
+  .marketing-stepper button > span { width: 22px; height: 22px; }
   .marketing-stepper button > i { display: none; }
   .marketing-stepper button > b { font-size: 9px; }
   .marketing-builder-grid { display: flex; flex-direction: column; overflow: auto; }
