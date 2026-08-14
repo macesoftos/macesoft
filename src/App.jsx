@@ -11547,7 +11547,18 @@ function ConfirmDialog({ confirm, onCancel }) {
   );
 }
 
-function SmartTable({ rows, columns, globalSearch = "", pageSize = 6, emptyTitle = "No records found", toolbarActions = null, showSearch = true }) {
+function SmartTable({
+  rows,
+  columns,
+  globalSearch = "",
+  pageSize = 6,
+  emptyTitle = "No records found",
+  toolbarActions = null,
+  showSearch = true,
+  exportFilename = "mace-export.csv",
+  exportLabel = "CSV",
+  compactPagination = false,
+}) {
   const [query, setQuery] = useState("");
   const sortableColumns = columns.filter((column) => column.sortable !== false && column.key !== "actions");
   const defaultSortKey = sortableColumns[0]?.key ?? columns[0]?.key;
@@ -11645,12 +11656,12 @@ function SmartTable({ rows, columns, globalSearch = "", pageSize = 6, emptyTitle
             </label>
           )}
         </div>
-        <button className="secondary-button small" type="button" onClick={() => downloadCsv("mace-export.csv", filtered, columns)} disabled={!filtered.length}>
-          <Download size={16} aria-hidden="true" /> CSV
+        <button className="secondary-button small" type="button" onClick={() => downloadCsv(exportFilename, filtered, columns)} disabled={!filtered.length}>
+          <Download size={16} aria-hidden="true" /> {exportLabel}
         </button>
       </div>
       <div className="table-status-row" aria-live="polite">
-        <span>{visibleStart}-{visibleEnd} of {filtered.length} result{filtered.length === 1 ? "" : "s"}</span>
+        <span>{compactPagination ? `Showing ${visibleStart} to ${visibleEnd} of ${filtered.length} result${filtered.length === 1 ? "" : "s"}` : `${visibleStart}-${visibleEnd} of ${filtered.length} result${filtered.length === 1 ? "" : "s"}`}</span>
         {selectedKeys.size > 0 && (
           <div className="bulk-actions">
             <strong>{selectedKeys.size} selected</strong>
@@ -11708,12 +11719,12 @@ function SmartTable({ rows, columns, globalSearch = "", pageSize = 6, emptyTitle
         {!visibleRows.length && <EmptyState title={emptyTitle} copy="Try adjusting search, filters, or add a new record." secondary="Search and filters apply across the current branch scope." />}
       </div>
       <div className="pagination">
-        <span>Page {page} of {pageCount}</span>
+        {!compactPagination && <span>Page {page} of {pageCount}</span>}
         <div>
           <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page === 1}>
             <ChevronLeft size={15} aria-hidden="true" /> Previous
           </button>
-          <strong>{page} / {pageCount}</strong>
+          <strong>{compactPagination ? page : `${page} / ${pageCount}`}</strong>
           <button type="button" onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={page === pageCount}>
             Next <ChevronRight size={15} aria-hidden="true" />
           </button>
