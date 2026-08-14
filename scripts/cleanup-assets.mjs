@@ -6,19 +6,21 @@ const bucket = String(process.env.STORAGE_BUCKET || "");
 const serviceKey = String(process.env.STORAGE_SERVICE_KEY || "");
 if (!baseUrl || !bucket || !serviceKey) throw new Error("Object storage configuration is required.");
 
-const [clients, staff, inventory, branches, expenses, corrections] = await Promise.all([
+const [clients, staff, inventory, branches, expenses, corrections, treatmentPhotos] = await Promise.all([
   prisma.client.findMany({ select: { photo: true } }),
   prisma.staffMember.findMany({ select: { photo: true } }),
   prisma.inventoryItem.findMany({ select: { image: true } }),
   prisma.branch.findMany({ select: { image: true } }),
   prisma.expense.findMany({ select: { receipt: true } }),
   prisma.faceTrackCorrectionRequest.findMany({ select: { attachmentUrl: true } }),
+  prisma.treatmentPhoto.findMany({ select: { assetId: true } }),
 ]);
 const references = new Set(
   [...clients.map((item) => item.photo), ...staff.map((item) => item.photo), ...inventory.map((item) => item.image),
     ...branches.map((item) => item.image), ...expenses.map((item) => item.receipt), ...corrections.map((item) => item.attachmentUrl)]
     .map((value) => String(value || "").match(/^\/api\/uploads\/([^/]+)$/)?.[1])
-    .filter(Boolean),
+    .filter(Boolean)
+    .concat(treatmentPhotos.map((item) => item.assetId)),
 );
 const cutoff = new Date(Date.now() - Math.max(1, Number(process.env.ASSET_ORPHAN_GRACE_HOURS || 24)) * 3_600_000);
 const orphans = await prisma.uploadAsset.findMany({ where: { id: { notIn: [...references] }, createdAt: { lt: cutoff } } });

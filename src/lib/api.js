@@ -151,6 +151,19 @@ export function uploadImageAsset(dataUrl, category, branch) {
   });
 }
 
+export function uploadTreatmentPhoto(treatmentId, dataUrl, kind) {
+  return requestJson(`/api/treatments/${encodeURIComponent(treatmentId)}/photos`, {
+    method: "POST",
+    body: JSON.stringify({ dataUrl, kind }),
+  });
+}
+
+export function deleteTreatmentPhoto(treatmentId, photoId) {
+  return requestJson(`/api/treatments/${encodeURIComponent(treatmentId)}/photos/${encodeURIComponent(photoId)}`, {
+    method: "DELETE",
+  });
+}
+
 export function recordAttendance(type, note = "") {
   return requestJson("/api/me/attendance", {
     method: "POST",

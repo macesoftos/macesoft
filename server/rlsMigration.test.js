@@ -18,12 +18,16 @@ const modelTables = [...schema.matchAll(/^model\s+([A-Za-z0-9_]+)\s+\{/gm)]
 
 test("every public Prisma table has row-level security enabled by migrations", () => {
   for (const table of [...modelTables, "_prisma_migrations"]) {
+    const qualifiedTable = `"public"."${table}"`;
+    const schemaRelativeTable = `"${table}"`;
     assert.ok(
-      migrationSql.includes(`ALTER TABLE "public"."${table}" ENABLE ROW LEVEL SECURITY;`),
+      migrationSql.includes(`ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY;`)
+        || migrationSql.includes(`ALTER TABLE ${schemaRelativeTable} ENABLE ROW LEVEL SECURITY;`),
       `Missing RLS migration for public.${table}`,
     );
     assert.ok(
-      migrationSql.includes(`CREATE POLICY "deny_direct_api_access" ON "public"."${table}" AS RESTRICTIVE FOR ALL TO "anon", "authenticated" USING (false) WITH CHECK (false);`),
+      migrationSql.includes(`CREATE POLICY "deny_direct_api_access" ON ${qualifiedTable} AS RESTRICTIVE FOR ALL TO "anon", "authenticated" USING (false) WITH CHECK (false);`)
+        || migrationSql.includes(`CREATE POLICY "deny_direct_api_access" ON ${schemaRelativeTable} AS RESTRICTIVE FOR ALL TO "anon", "authenticated" USING (false) WITH CHECK (false);`),
       `Missing restrictive direct-API policy for public.${table}`,
     );
   }

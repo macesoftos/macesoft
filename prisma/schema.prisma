@@ -411,29 +411,42 @@ model Appointment {
 }
 
 model Treatment {
-  id             String   @id @default(cuid())
+  id             String           @id @default(cuid())
   clientId       String?
-  clientRecord   Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientRecord   Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
   client         String
   date           String
   service        String
-  provider       String   @default("")
-  room           String   @default("")
-  preNotes       String   @default("")
-  postNotes      String   @default("")
-  consumables    String   @default("")
-  deviceSettings String   @default("")
-  batch          String   @default("")
-  consent        String   @default("Pending")
-  followUp       String   @default("")
-  outcome        String   @default("")
-  satisfaction   String   @default("")
-  photos         Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  provider       String           @default("")
+  room           String           @default("")
+  preNotes       String           @default("")
+  postNotes      String           @default("")
+  consumables    String           @default("")
+  deviceSettings String           @default("")
+  batch          String           @default("")
+  consent        String           @default("Pending")
+  followUp       String           @default("")
+  outcome        String           @default("")
+  satisfaction   String           @default("")
+  photos         Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  photoLinks     TreatmentPhoto[]
 
   @@index([clientId])
   @@index([date])
+}
+
+model TreatmentPhoto {
+  id          String      @id @default(cuid())
+  treatmentId String
+  treatment   Treatment   @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  assetId     String      @unique
+  asset       UploadAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  kind        String      @default("Clinical")
+  createdAt   DateTime    @default(now())
+
+  @@index([treatmentId, createdAt])
 }
 
 model InventoryItem {
@@ -890,14 +903,15 @@ model SystemSetting {
 }
 
 model UploadAsset {
-  id           String   @id
-  objectPath   String   @unique
-  category     String
-  branch       String
-  mimeType     String
-  byteSize     Int
-  uploadedById String
-  createdAt    DateTime @default(now())
+  id             String          @id
+  objectPath     String          @unique
+  category       String
+  branch         String
+  mimeType       String
+  byteSize       Int
+  uploadedById   String
+  createdAt      DateTime        @default(now())
+  treatmentPhoto TreatmentPhoto?
 
   @@index([branch])
   @@index([category])
