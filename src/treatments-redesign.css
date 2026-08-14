@@ -292,6 +292,119 @@
 .treatment-photo-summary strong { color: var(--ink); font-size: 0.76rem; }
 .treatment-photo-summary small { color: var(--muted); font-size: 0.66rem; line-height: 1.35; }
 
+.treatment-photo-thumbnails {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.treatment-photo-thumbnails figure {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.treatment-photo-thumbnails a {
+  display: block;
+  overflow: hidden;
+  background: #eee7e1;
+}
+
+.treatment-photo-thumbnails img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  transition: transform 160ms ease;
+}
+
+.treatment-photo-thumbnails a:hover img { transform: scale(1.025); }
+
+.treatment-photo-thumbnails figcaption {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 6px 7px;
+}
+
+.treatment-photo-thumbnails figcaption > span {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.64rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treatment-photo-thumbnails button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: #9c4f43;
+  font: inherit;
+  font-size: 0.58rem;
+  font-weight: 750;
+}
+
+.treatment-photo-thumbnails button:disabled { opacity: 0.55; }
+
+.treatment-photo-controls {
+  display: grid;
+  grid-template-columns: minmax(105px, 0.7fr) minmax(120px, 1fr);
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.treatment-photo-controls select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 28px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.treatment-photo-upload {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.treatment-photo-upload.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.treatment-photo-upload input { display: none; }
+
+.treatment-photo-hint,
+.treatment-photo-error {
+  margin: 7px 0 0;
+  font-size: 0.64rem;
+  line-height: 1.4;
+}
+
+.treatment-photo-hint { color: #876b3f; }
+.treatment-photo-error { color: #a84d3f; font-weight: 700; }
+
 .treatment-consent-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; }
 .treatment-consent-row > span { color: var(--muted); font-size: 0.7rem; font-weight: 750; }
 
@@ -356,4 +469,5 @@
   .treatment-clinical-summary,
   .treatment-note-grid,
   .treatment-documentation-grid { grid-template-columns: 1fr; }
+  .treatment-photo-thumbnails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -48,6 +48,13 @@ test("real API denies private data reads before touching the database", async ()
     const settings = await fetch(`${baseUrl}/api/settings`);
     assert.equal(settings.status, 401);
 
+    const treatmentPhoto = await fetch(`${baseUrl}/api/treatments/treatment-1/photos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({ kind: "Clinical", dataUrl: "data:image/jpeg;base64,/9j/" }),
+    });
+    assert.equal(treatmentPhoto.status, 401);
+
     const forgotPassword = await fetch(`${baseUrl}/api/auth/forgot-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },

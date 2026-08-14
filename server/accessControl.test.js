@@ -56,6 +56,7 @@ test("protected API families resolve to their required workspace modules", () =>
   assert.equal(requiredModuleForApiRequest("/api/leads/lead-1/stage"), "leads");
   assert.equal(requiredModuleForApiRequest("/api/pos/checkout"), "pos");
   assert.equal(requiredModuleForApiRequest("/api/rooms/room-1"), "room-view");
+  assert.equal(requiredModuleForApiRequest("/api/treatments/treatment-1/photos"), "treatments");
   assert.equal(requiredModuleForApiRequest("/api/auth/session"), "");
   assert.equal(requiredModuleForApiRequest("/api/resources/clients"), "");
 });

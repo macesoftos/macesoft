@@ -41,6 +41,11 @@ import {
   packageAfterVoid,
 } from "./posTenders.js";
 import { normalizePaymentReference } from "./paymentReference.js";
+import {
+  canonicalTreatmentPhotoKind,
+  serializeTreatmentWithPhotos,
+  treatmentPhotoKinds,
+} from "./treatmentPhotos.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -288,6 +293,19 @@ async function storageRequest(objectPath, options = {}) {
       ...(options.headers || {}),
     },
   });
+}
+
+async function storeImageObject(dataUrl, category) {
+  const { buffer, mimeType, extension } = decodeImageDataUrl(dataUrl);
+  const id = randomBytes(18).toString("base64url");
+  const objectPath = `${category}/${id}.${extension}`;
+  const uploaded = await storageRequest(objectPath, {
+    method: "POST",
+    headers: { "Content-Type": mimeType, "x-upsert": "false" },
+    body: buffer,
+  });
+  if (!uploaded.ok) throw apiError("Object storage rejected the upload.", 502);
+  return { id, objectPath, category, mimeType, byteSize: buffer.length };
 }
 
 function apiError(message, status = 400) {
@@ -837,7 +855,6 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
     followUp: clean(payload.followUp),
     outcome: clean(payload.outcome),
     satisfaction: clean(payload.satisfaction),
-    photos: numberValue(payload.photos, "Photos linked", { min: 0, integer: true }),
   };
 
   if (payload.id && !existingId) data.id = String(payload.id);
@@ -1259,6 +1276,13 @@ async function writeLeadSideRecords(tx, request, lead, data, previous = null) {
   }
 }
 
+const treatmentPhotoInclude = {
+  photoLinks: {
+    include: { asset: true },
+    orderBy: [{ createdAt: "asc" }],
+  },
+};
+
 const resourceConfigs = {
   clients: {
     delegate: "client",
@@ -1307,6 +1331,9 @@ const resourceConfigs = {
     label: (record) => `${record.client} - ${record.service}`,
     orderBy: [{ date: "desc" }],
     normalize: normalizeTreatmentPayload,
+    include: treatmentPhotoInclude,
+    serialize: serializeTreatmentWithPhotos,
+    reloadAfterWrite: true,
     clientBranch: true,
     relatedClient: true,
   },
@@ -1449,6 +1476,15 @@ async function listResource(resource, actor = null) {
 
   const scopedRows = actor && config.serviceBranches ? filterServiceBranches(rows, actor) : rows;
   return config.serialize ? scopedRows.map(config.serialize) : scopedRows;
+}
+
+async function resourceRecordForResponse(config, record) {
+  if (!config.reloadAfterWrite) return record;
+  const reloaded = await prisma[config.delegate].findUnique({
+    where: { id: record.id },
+    include: config.include,
+  });
+  return reloaded || record;
 }
 
 async function resourceBranch(config, record) {
@@ -3427,26 +3463,96 @@ app.post("/api/uploads", asyncRoute(async (request, response) => {
   const category = requireText(request.body?.category, "Upload category");
   const categoryAccess = uploadCategories[category];
   if (!categoryAccess) throw apiError("Unsupported upload category.", 400);
+  if (category === "treatment-photo") throw apiError("Upload treatment photos from their treatment record.", 400);
   const branch = requireText(request.body?.branch, "Upload branch");
   const actor = assertMutationAllowed(request, categoryAccess.writeModule, branch);
-  const { buffer, mimeType, extension } = decodeImageDataUrl(request.body?.dataUrl);
-  const id = randomBytes(18).toString("base64url");
-  const objectPath = `${category}/${id}.${extension}`;
-  const uploaded = await storageRequest(objectPath, {
-    method: "POST",
-    headers: { "Content-Type": mimeType, "x-upsert": "false" },
-    body: buffer,
-  });
-  if (!uploaded.ok) throw apiError("Object storage rejected the upload.", 502);
+  const stored = await storeImageObject(request.body?.dataUrl, category);
   try {
     const asset = await prisma.uploadAsset.create({
-      data: { id, objectPath, category, branch, mimeType, byteSize: buffer.length, uploadedById: actor.id },
+      data: { ...stored, branch, uploadedById: actor.id },
     });
     response.status(201).json({ asset: { ...asset, url: `/api/uploads/${asset.id}` } });
   } catch (error) {
-    await storageRequest(objectPath, { method: "DELETE" }).catch(() => {});
+    await storageRequest(stored.objectPath, { method: "DELETE" }).catch(() => {});
     throw error;
   }
+}));
+
+app.post("/api/treatments/:id/photos", asyncRoute(async (request, response) => {
+  const treatmentId = clean(request.params.id);
+  const treatment = await prisma.treatment.findUnique({
+    where: { id: treatmentId },
+    include: { clientRecord: { select: { branch: true } } },
+  });
+  if (!treatment) throw apiError("Treatment record not found.", 404);
+  const branch = clean(treatment.clientRecord?.branch) || "All branches";
+  const actor = assertMutationAllowed(request, "treatments", branch);
+  if (clean(treatment.consent).toLowerCase() !== "signed") {
+    throw apiError("Client consent must be signed before treatment photos can be uploaded.", 409);
+  }
+  const kind = canonicalTreatmentPhotoKind(request.body?.kind);
+  if (!kind) throw apiError(`Photo type must be ${treatmentPhotoKinds.join(", ")}.`, 400);
+
+  const stored = await storeImageObject(request.body?.dataUrl, "treatment-photo");
+  let auditLog;
+  try {
+    auditLog = await prisma.$transaction(async (tx) => {
+      const asset = await tx.uploadAsset.create({
+        data: { ...stored, branch, uploadedById: actor.id },
+      });
+      await tx.treatmentPhoto.create({
+        data: { treatmentId, assetId: asset.id, kind },
+      });
+      const count = await tx.treatmentPhoto.count({ where: { treatmentId } });
+      await tx.treatment.update({ where: { id: treatmentId }, data: { photos: count } });
+      return writeAudit(tx, request, {
+        area: "Treatment Records",
+        action: "Treatment photo uploaded",
+        details: `${kind} photo linked to ${treatment.client} - ${treatment.service}.`,
+      });
+    });
+  } catch (error) {
+    await storageRequest(stored.objectPath, { method: "DELETE" }).catch(() => {});
+    throw error;
+  }
+
+  const record = await prisma.treatment.findUnique({ where: { id: treatmentId }, include: treatmentPhotoInclude });
+  response.status(201).json({ record: serializeTreatmentWithPhotos(record), auditLog });
+}));
+
+app.delete("/api/treatments/:id/photos/:photoId", asyncRoute(async (request, response) => {
+  const treatmentId = clean(request.params.id);
+  const photo = await prisma.treatmentPhoto.findFirst({
+    where: { id: clean(request.params.photoId), treatmentId },
+    include: {
+      asset: true,
+      treatment: { include: { clientRecord: { select: { branch: true } } } },
+    },
+  });
+  if (!photo) throw apiError("Treatment photo not found.", 404);
+  const branch = clean(photo.treatment.clientRecord?.branch) || "All branches";
+  const actor = assertMutationAllowed(request, "treatments", branch);
+  if (actor.id !== photo.asset.uploadedById && !canManageOrganization(actor.role)) {
+    throw apiError("Only the uploader or an organization administrator can remove this photo.", 403);
+  }
+
+  const deleted = await storageRequest(photo.asset.objectPath, { method: "DELETE" });
+  if (!deleted.ok && deleted.status !== 404) throw apiError("Object storage could not remove the photo.", 502);
+
+  const auditLog = await prisma.$transaction(async (tx) => {
+    await tx.treatmentPhoto.delete({ where: { id: photo.id } });
+    await tx.uploadAsset.delete({ where: { id: photo.assetId } });
+    const count = await tx.treatmentPhoto.count({ where: { treatmentId } });
+    await tx.treatment.update({ where: { id: treatmentId }, data: { photos: count } });
+    return writeAudit(tx, request, {
+      area: "Treatment Records",
+      action: "Treatment photo removed",
+      details: `${photo.kind} photo removed from ${photo.treatment.client} - ${photo.treatment.service}.`,
+    });
+  });
+
+  const record = await prisma.treatment.findUnique({ where: { id: treatmentId }, include: treatmentPhotoInclude });
+  response.json({ record: serializeTreatmentWithPhotos(record), auditLog });
 }));
 
 app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
@@ -3475,6 +3581,7 @@ app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
   if (!asset) throw apiError("Uploaded asset was not found.", 404);
   const categoryAccess = uploadCategories[asset.category];
   if (!categoryAccess) throw apiError("Uploaded asset category is invalid.", 500);
+  if (asset.category === "treatment-photo") throw apiError("Remove treatment photos from their treatment record.", 409);
   const actor = assertMutationAllowed(request, categoryAccess.writeModule, asset.branch);
   if (actor.id !== asset.uploadedById && !canManageOrganization(actor.role)) {
     throw apiError("Only the uploader or an organization administrator can remove this asset.", 403);
@@ -3954,10 +4061,11 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
     });
     return { record, auditLog };
   });
+  const responseRecord = await resourceRecordForResponse(config, result.record);
 
   response.status(201).json({
     ...result,
-    record: config.serialize ? config.serialize(result.record) : result.record,
+    record: config.serialize ? config.serialize(responseRecord) : responseRecord,
   });
 }));
 
@@ -3986,10 +4094,11 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
     });
     return { record, auditLog };
   });
+  const responseRecord = await resourceRecordForResponse(config, result.record);
 
   response.json({
     ...result,
-    record: config.serialize ? config.serialize(result.record) : result.record,
+    record: config.serialize ? config.serialize(responseRecord) : responseRecord,
   });
 }));
 

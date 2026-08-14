@@ -123,6 +123,8 @@ import {
   submitPublicBooking,
   submitPublicLead,
   updateLeadStage,
+  uploadTreatmentPhoto,
+  deleteTreatmentPhoto,
   uploadImageAsset,
   voidTransactionRecord,
   apiAuthenticationRequiredEvent,
@@ -1789,13 +1791,28 @@ function App() {
       ...values,
       id: values.id || createId("tr"),
       client: client?.fullName ?? values.client,
-      photos: Number(values.photos || 0),
     };
     const result = await saveResourceRecord("treatments", record, { existing: Boolean(values.id) });
     upsertById(setTreatments, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
     notify("Treatment record saved.");
+  }
+
+  async function addTreatmentPhoto(treatmentId, dataUrl, kind) {
+    const result = await uploadTreatmentPhoto(treatmentId, dataUrl, kind);
+    upsertById(setTreatments, result.record);
+    applyAuditLog(result.auditLog);
+    notify(`${kind} photo uploaded. ${result.record.photos} photo${result.record.photos === 1 ? "" : "s"} linked.`);
+    return result.record;
+  }
+
+  async function removeTreatmentPhoto(treatmentId, photoId) {
+    const result = await deleteTreatmentPhoto(treatmentId, photoId);
+    upsertById(setTreatments, result.record);
+    applyAuditLog(result.auditLog);
+    notify(`Treatment photo removed. ${result.record.photos} photo${result.record.photos === 1 ? "" : "s"} linked.`);
+    return result.record;
   }
 
   async function saveExpense(values) {
@@ -2333,6 +2350,8 @@ function App() {
               clients={clients}
               openModal={openModal}
               globalSearch={globalSearch}
+              onUploadPhoto={addTreatmentPhoto}
+              onDeletePhoto={removeTreatmentPhoto}
             />
           )}
           {activeModule === "services" && (
@@ -7231,7 +7250,7 @@ function AppointmentDetailsDrawer({
               <AppointmentContentGroup title="Internal notes" rows={[appointment.notes, appointment.internalNotes].filter(Boolean)} empty="No notes on this booking." />
               <AppointmentContentGroup title="SOAP / Treatment notes" rows={matchingTreatments.flatMap((item) => [item.preNotes, item.postNotes, item.deviceSettings]).filter(Boolean)} empty="No treatment notes linked to this visit." />
               <AppointmentContentGroup title="Prescription and aftercare" rows={matchingTreatments.flatMap((item) => [item.prescription, item.aftercare, item.consumables]).filter(Boolean)} empty="No prescription or aftercare record." />
-              <AppointmentContentGroup title="Attachments" rows={matchingTreatments.flatMap((item) => splitList(item.photos)).filter(Boolean)} empty="No treatment attachments." />
+              <AppointmentContentGroup title="Attachments" rows={matchingTreatments.flatMap((item) => (item.photoItems || []).map((photo) => `${photo.kind} treatment photo`)).filter(Boolean)} empty="No treatment attachments." />
               <AppointmentContentGroup title="Packages" rows={matchingPackages.map((item) => `${item.name} · ${item.remaining ?? item.balance ?? 0} remaining · ${item.status}`)} empty="No package linked to this patient." />
             </div>
           </details>
@@ -7772,7 +7791,133 @@ function ClientProfileDialog({
   );
 }
 
-function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
+function prepareTreatmentPhotoDataUrl(file) {
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+  if (!allowedTypes.includes(file?.type)) {
+    return Promise.reject(new Error("Choose a JPEG, PNG, or WebP image."));
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    return Promise.reject(new Error("Choose an image smaller than 15 MB."));
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The selected image could not be read."));
+    reader.onload = () => {
+      const image = new window.Image();
+      image.onerror = () => reject(new Error("The selected file is not a valid image."));
+      image.onload = () => {
+        const maximumDimension = 1500;
+        const scale = Math.min(1, maximumDimension / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) return reject(new Error("This browser could not prepare the image."));
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        let quality = 0.86;
+        let dataUrl = canvas.toDataURL("image/jpeg", quality);
+        while (dataUrl.length > 1_600_000 && quality > 0.56) {
+          quality -= 0.1;
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
+        }
+        if (dataUrl.length > 1_850_000) return reject(new Error("The image is still too large after optimization."));
+        resolve(dataUrl);
+      };
+      image.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function TreatmentPhotoPanel({ record, onUploadPhoto, onDeletePhoto }) {
+  const [kind, setKind] = useState("Clinical");
+  const [uploading, setUploading] = useState(false);
+  const [removingId, setRemovingId] = useState("");
+  const [error, setError] = useState("");
+  const photoItems = Array.isArray(record.photoItems) ? record.photoItems : [];
+  const consentSigned = normalize(record.consent) === "signed";
+
+  async function uploadFiles(event) {
+    const input = event.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = "";
+    if (!files.length) return;
+    if (files.length > 10) {
+      setError("Upload up to 10 photos at a time.");
+      return;
+    }
+
+    setUploading(true);
+    setError("");
+    let uploadedCount = 0;
+    try {
+      for (const file of files) {
+        const dataUrl = await prepareTreatmentPhotoDataUrl(file);
+        await onUploadPhoto(record.id, dataUrl, kind);
+        uploadedCount += 1;
+      }
+    } catch (uploadError) {
+      const prefix = uploadedCount ? `${uploadedCount} photo${uploadedCount === 1 ? " was" : "s were"} uploaded. ` : "";
+      setError(`${prefix}${uploadError.message || "The remaining photo could not be uploaded."}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removePhoto(photo) {
+    if (!window.confirm(`Remove this ${photo.kind.toLowerCase()} photo from the treatment record?`)) return;
+    setRemovingId(photo.id);
+    setError("");
+    try {
+      await onDeletePhoto(record.id, photo.id);
+    } catch (removeError) {
+      setError(removeError.message || "The photo could not be removed.");
+    } finally {
+      setRemovingId("");
+    }
+  }
+
+  return (
+    <section className="treatment-photo-manager">
+      <div className="treatment-section-heading"><Camera size={17} /><div><strong>Protected documentation</strong><span>Consent and clinical photography</span></div></div>
+      <div className="treatment-photo-summary">
+        <span><Camera size={20} aria-hidden="true" /></span>
+        <div><strong>{photoItems.length} photo{photoItems.length === 1 ? "" : "s"} linked</strong><small>The count updates automatically from uploaded images.</small></div>
+      </div>
+
+      {photoItems.length > 0 && (
+        <div className="treatment-photo-thumbnails">
+          {photoItems.map((photo) => (
+            <figure key={photo.id}>
+              <a href={photo.url} target="_blank" rel="noreferrer" aria-label={`View ${photo.kind.toLowerCase()} treatment photo`}>
+                <img src={photo.url} alt={`${photo.kind} treatment documentation`} />
+              </a>
+              <figcaption><span>{photo.kind}</span><button type="button" disabled={removingId === photo.id} onClick={() => removePhoto(photo)} aria-label={`Remove ${photo.kind.toLowerCase()} photo`}><Trash2 size={13} />{removingId === photo.id ? "Removing" : "Remove"}</button></figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+
+      <div className="treatment-photo-controls">
+        <select aria-label="Treatment photo type" value={kind} onChange={(event) => setKind(event.target.value)} disabled={uploading || !consentSigned}>
+          {["Before", "After", "Clinical"].map((option) => <option key={option}>{option}</option>)}
+        </select>
+        <label className={`secondary-button small treatment-photo-upload ${uploading || !consentSigned ? "disabled" : ""}`}>
+          <Upload size={15} aria-hidden="true" /> {uploading ? "Uploading..." : "Add photos"}
+          <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={uploading || !consentSigned} onChange={uploadFiles} />
+        </label>
+      </div>
+      {!consentSigned && <p className="treatment-photo-hint">Client consent must be signed before clinical photos can be uploaded.</p>}
+      {error && <p className="treatment-photo-error" role="alert">{error}</p>}
+      <div className="treatment-consent-row"><span>Client consent</span><StatusBadge status={record.consent || "Pending"} /></div>
+    </section>
+  );
+}
+
+function TreatmentsModule({ treatments, clients, openModal, globalSearch, onUploadPhoto, onDeletePhoto }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All records");
   const [provider, setProvider] = useState("All providers");
@@ -7943,14 +8088,7 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch }) {
                       <div><dt>Lot / batch</dt><dd>{selectedRecord.batch || "Not recorded"}</dd></div>
                     </dl>
                   </section>
-                  <section>
-                    <div className="treatment-section-heading"><Camera size={17} /><div><strong>Protected documentation</strong><span>Consent and clinical photography</span></div></div>
-                    <div className="treatment-photo-summary">
-                      <span><Camera size={20} aria-hidden="true" /></span>
-                      <div><strong>{Number(selectedRecord.photos || 0)} photo{Number(selectedRecord.photos || 0) === 1 ? "" : "s"} linked</strong><small>Access is restricted and recorded in the audit trail.</small></div>
-                    </div>
-                    <div className="treatment-consent-row"><span>Client consent</span><StatusBadge status={selectedRecord.consent || "Pending"} /></div>
-                  </section>
+                  <TreatmentPhotoPanel key={selectedRecord.id} record={selectedRecord} onUploadPhoto={onUploadPhoto} onDeletePhoto={onDeletePhoto} />
                 </div>
 
                 <div className={`treatment-followup-banner ${followUpDue(selectedRecord) ? "due" : ""}`}>
@@ -10619,7 +10757,7 @@ function ModalHost({
     },
     treatment: {
       title: modal.payload?.id ? "Edit Treatment Record" : "New Treatment Record",
-      initial: { clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name, room: "Room 1", preNotes: "", postNotes: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", photos: 0, ...modal.payload },
+      initial: { clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name, room: "Room 1", preNotes: "", postNotes: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
       submitLabel: "Save treatment",
       onSubmit: saveTreatment,
       fields: [
@@ -10633,7 +10771,6 @@ function ModalHost({
         field("batch", "Lot / batch"),
         field("consent", "Consent", "select", ["Pending", "Signed"]),
         field("followUp", "Follow-up date", "date"),
-        field("photos", "Photos linked", "number"),
         field("satisfaction", "Client satisfaction"),
         field("preNotes", "Pre-treatment notes", "textarea", null, "span-2"),
         field("postNotes", "Post-treatment notes", "textarea", null, "span-2"),
