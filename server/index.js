@@ -24,6 +24,7 @@ import {
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
 import { assertProductionEnvironment } from "./productionConfig.js";
 import {
+  accountMatchesStaffIdentity,
   branchWhere,
   canAccessBranch,
   canMutateBranch,
@@ -980,6 +981,14 @@ function normalizeStaffPayload(payload, existingId = "") {
   return data;
 }
 
+async function validateLinkedStaffIdentity(data, existingId = "") {
+  if (!existingId) return;
+  const linkedAccount = await prisma.account.findFirst({ where: { staffId: existingId } });
+  if (linkedAccount && !accountMatchesStaffIdentity(linkedAccount, data)) {
+    throw apiError("Disconnect this staff profile's login before changing its name, role, or branch.", 409);
+  }
+}
+
 async function normalizePackagePayload(payload, existingId = "") {
   const clientId = cleanOptional(payload.clientId);
   const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
@@ -1384,6 +1393,7 @@ const resourceConfigs = {
     label: (record) => record.name,
     orderBy: [{ name: "asc" }],
     normalize: normalizeStaffPayload,
+    beforeWrite: validateLinkedStaffIdentity,
     branchField: "branch",
   },
   expenses: {
@@ -2681,16 +2691,19 @@ function hashPassword(password) {
 }
 
 function publicAccount(account) {
+  const safeAccount = account?.staffId && Object.hasOwn(account, "staff") && !accountMatchesStaffIdentity(account, account.staff)
+    ? { ...account, staffId: null }
+    : account;
   const modules = roleAccess[account.role] || [];
   return {
-    id: account.id,
-    staffId: account.staffId,
-    name: account.name,
-    email: account.email,
-    role: account.role,
-    branch: account.branch || "",
-    status: account.status,
-    mustChangePassword: account.mustChangePassword,
+    id: safeAccount.id,
+    staffId: safeAccount.staffId,
+    name: safeAccount.name,
+    email: safeAccount.email,
+    role: safeAccount.role,
+    branch: safeAccount.branch || "",
+    status: safeAccount.status,
+    mustChangePassword: safeAccount.mustChangePassword,
     access: {
       active: account.status === "Active" && modules.length > 0,
       branchScoped: !isAllBranches(account.branch),
@@ -2720,13 +2733,16 @@ async function accountFromSession(request) {
   if (!token) return null;
   const session = await prisma.authSession.findUnique({
     where: { tokenHash: sessionTokenHash(token) },
-    include: { account: true },
+    include: { account: { include: { staff: true } } },
   });
   if (!session || session.expiresAt <= new Date() || session.account.status !== "Active" || !clean(session.account.branch)) {
     if (session) await prisma.authSession.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
-  return { token, session, account: session.account };
+  const account = session.account.staffId && !accountMatchesStaffIdentity(session.account, session.account.staff)
+    ? { ...session.account, staffId: null }
+    : session.account;
+  return { token, session, account };
 }
 
 function requireAuthenticatedAccount(request) {
@@ -2827,7 +2843,7 @@ app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();
   const password = requireText(request.body?.password, "Password");
-  const account = await prisma.account.findUnique({ where: { email } });
+  const account = await prisma.account.findUnique({ where: { email }, include: { staff: true } });
   const now = new Date();
 
   if (account?.status === "Active" && !clean(account.branch)) {
@@ -3109,6 +3125,9 @@ app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
     if (account.staffId === staffId) throw apiError("That login is already connected to this staff profile.", 409);
     if (account.staffId) throw apiError("That login is already connected to another staff profile.", 409);
     if (current) throw apiError("This staff profile is already connected to another login.", 409);
+    if (!accountMatchesStaffIdentity(account, staff)) {
+      throw apiError("The login name and role must match the staff profile before they can be connected.", 409);
+    }
 
     const linked = await tx.account.update({ where: { id: account.id }, data: { staffId } });
     const auditLog = await writeAudit(tx, request, {
@@ -3131,7 +3150,16 @@ function attendanceState(events) {
 
 async function buildMyWorkspace(account) {
   const staff = account.staffId ? await prisma.staffMember.findUnique({ where: { id: account.staffId } }) : null;
-  if (!staff) return { account: publicAccount(account), staff: null, events: [], appointments: [], attendance: { status: "Unavailable", nextActions: [] } };
+  if (!staff || !accountMatchesStaffIdentity(account, staff)) {
+    return {
+      account: publicAccount(account),
+      staff: null,
+      connectionIssue: staff ? "IDENTITY_MISMATCH" : "NOT_CONNECTED",
+      events: [],
+      appointments: [],
+      attendance: { status: "Unavailable", nextActions: [] },
+    };
+  }
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
@@ -3152,6 +3180,7 @@ app.post("/api/me/attendance", asyncRoute(async (request, response) => {
   if (!account.staffId) throw apiError("This account is not connected to a staff profile.", 409);
   const type = clean(request.body?.type).toUpperCase();
   const workspace = await buildMyWorkspace(account);
+  if (!workspace.staff) throw apiError("This account is not connected to its matching staff profile.", 409);
   if (!workspace.attendance.nextActions.includes(type)) throw apiError("That attendance action is not valid right now.", 409);
   const event = await prisma.attendanceEvent.create({
     data: { staffId: account.staffId, accountId: account.id, type, branch: account.branch, note: clean(request.body?.note) },

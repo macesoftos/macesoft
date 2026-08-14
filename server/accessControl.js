@@ -70,6 +70,19 @@ export function moduleAllowed(actor, moduleId, roleAccess) {
   return Boolean(actor?.role && (roleAccess[actor.role] || []).includes(moduleId));
 }
 
+function normalizeIdentityValue(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
+}
+
+export function accountMatchesStaffIdentity(account, staff) {
+  if (!account || !staff) return false;
+  const branchMatches = isAllBranches(account.branch)
+    || normalizeIdentityValue(account.branch) === normalizeIdentityValue(staff.branch);
+  return normalizeIdentityValue(account.name) === normalizeIdentityValue(staff.name)
+    && normalizeIdentityValue(account.role) === normalizeIdentityValue(staff.role)
+    && branchMatches;
+}
+
 export function branchWhere(actor, field = "branch") {
   if (!actor || isAllBranches(actor.branch)) return {};
   return { OR: [{ [field]: actor.branch }, { [field]: "All branches" }] };

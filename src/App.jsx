@@ -929,7 +929,7 @@ function App() {
     function openPosFromKeyboard(event) {
       if (event.altKey && event.key.toLowerCase() === "p") {
         event.preventDefault();
-        setActiveModule(activeModule === "pos" ? "my-workspace" : "pos");
+        setActiveModule(activeModule === "pos" ? (isAdmin(session.role) ? "overview" : "my-workspace") : "pos");
       }
     }
 
@@ -1071,6 +1071,12 @@ function App() {
   }, [activeModule, session, sessionModules, setActiveModule]);
 
   useEffect(() => {
+    if (session && isAdmin(session.role) && activeModule === "my-workspace") {
+      setActiveModule("overview", { replace: true });
+    }
+  }, [activeModule, session, setActiveModule]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 2800);
     return () => window.clearTimeout(timer);
@@ -1105,7 +1111,10 @@ function App() {
 
   const visibleNav = useMemo(() => {
     if (!session) return [];
-    return navItems.filter((item) => sessionModules.includes(item.id));
+    return navItems.filter((item) => (
+      sessionModules.includes(item.id)
+      && !(isAdmin(session.role) && item.id === "my-workspace")
+    ));
   }, [session, sessionModules]);
 
   const visibleNavSections = useMemo(() => {
@@ -1268,7 +1277,7 @@ function App() {
     const user = result.account;
     setSessionNotice("");
     setSession(user);
-    setActiveModule("my-workspace");
+    setActiveModule(isAdmin(user.role) ? "overview" : "my-workspace");
     addAudit("Signed in", `${user.name} opened ${settings.productName} as ${user.role}.`, "Authentication", user);
     notify(`Welcome, ${user.name}.`);
   }
@@ -9396,11 +9405,14 @@ function MyWorkspaceModule({ session, notify }) {
   }
 
   if (!workspace?.staff) {
+    const identityMismatch = workspace?.connectionIssue === "IDENTITY_MISMATCH";
     return (
       <section className="surface-panel my-workspace-empty">
         <UserCheck size={28} />
-        <h2>Account connection required</h2>
-        <p>{session.name}'s login is active, but it is not connected to a staff profile yet. An administrator can link it from Staff Management.</p>
+        <h2>{identityMismatch ? "Staff connection needs review" : "Account connection required"}</h2>
+        <p>{identityMismatch
+          ? `${session.name}'s login is connected to a staff profile with a different name or role. An administrator must connect the matching profile from Staff Management.`
+          : `${session.name}'s login is active, but it is not connected to a staff profile yet. An administrator can link it from Staff Management.`}</p>
       </section>
     );
   }

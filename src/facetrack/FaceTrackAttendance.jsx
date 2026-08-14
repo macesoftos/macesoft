@@ -10,6 +10,7 @@ import {
   saveFaceTrackPolicy,
   submitFaceTrackCorrection,
 } from "../lib/api.js";
+import { isAdmin } from "../organizationRoles.js";
 import "./facetrack-attendance.css";
 
 const MODEL_URL = "/facetrack-models";
@@ -266,8 +267,8 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
           <section className="facetrack-hero">
             <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Verified attendance</span><h2>Accurate time, ready for payroll.</h2><p>Face-verified Time In and Time Out with automatic late, overtime, and approval tracking.</p></div>
             <div className="facetrack-hero-actions">
-              {session.staffId && <button className="facetrack-primary light" disabled={!myEnrolled} onClick={() => setCamera({ mode: "clock", staffId: session.staffId, staffName: session.name })} type="button"><Camera /> {myEnrolled ? "Time In / Time Out" : "Enrollment required"}</button>}
-              {session.staffId && !myEnrolled && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Set up face profile</button>}
+              {!isAdmin(session.role) && session.staffId && <button className="facetrack-primary light" disabled={!myEnrolled} onClick={() => setCamera({ mode: "clock", staffId: session.staffId, staffName: session.name })} type="button"><Camera /> {myEnrolled ? "Time In / Time Out" : "Enrollment required"}</button>}
+              {!isAdmin(session.role) && session.staffId && !myEnrolled && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Set up face profile</button>}
             </div>
           </section>
           <section className="facetrack-stats">

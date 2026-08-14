@@ -94,6 +94,20 @@ test("the cleanup migration removes only reserved-domain demo accounts", () => {
   assert.doesNotMatch(migration, /admin@macebydrmace\.com/i);
 });
 
+test("the mismatched admin workspace cleanup only unlinks the confirmed association", () => {
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20260814060000_unlink_mismatched_admin_workspace/migration.sql", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(migration, /cmrm1fimh00001cpno59o8ver/);
+  assert.match(migration, /st-msre8oed-yz72s/);
+  assert.match(migration, /MACE Admin/);
+  assert.match(migration, /Christina Inah J\. Pandian/);
+  assert.match(migration, /SET "staffId" = NULL/);
+  assert.doesNotMatch(migration, /DELETE FROM/i);
+});
+
 test("the removed Dr. Aria demo profile is unassigned without deleting appointments", () => {
   const migration = readFileSync(
     new URL("../prisma/migrations/20260813234000_unassign_removed_dr_aria_appointments/migration.sql", import.meta.url),
