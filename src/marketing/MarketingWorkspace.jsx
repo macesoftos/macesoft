@@ -319,6 +319,7 @@ function createDefaultDraft() {
     managerApproval: true,
     editorMode: "visual",
     html: "",
+    htmlIsCustom: false,
     blocks: createDefaultBlocks(),
     theme: { ...defaultEmailTheme },
     step: 2,
@@ -335,6 +336,7 @@ function normalizedDraft(value) {
     ...value,
     editorMode: value.editorMode === "html" ? "html" : "visual",
     html: typeof value.html === "string" ? value.html : "",
+    htmlIsCustom: value.htmlIsCustom === true,
     blocks: savedBlocks.length ? savedBlocks : fallback.blocks,
     theme: { ...defaultEmailTheme, ...(value.theme && typeof value.theme === "object" ? value.theme : {}) },
     scheduledAt: localDateTimeInput(value.scheduledAt || ""),
@@ -549,6 +551,7 @@ export default function MarketingWorkspace({
       step: 2,
       editorMode: design.editorMode === "html" ? "html" : "visual",
       html: template.html || "",
+      htmlIsCustom: design.htmlIsCustom === true || design.editorMode === "html",
       blocks: Array.isArray(design.blocks) && design.blocks.length ? design.blocks : createDefaultBlocks(),
       theme: { ...defaultEmailTheme, ...(design.theme || {}) },
     });
@@ -1178,10 +1181,15 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
 
   function selectEditorMode(editorMode) {
     if (editorMode === "html") {
-      updateDraft({ editorMode, html: draft.html || visualEmailHtml });
+      updateDraft({ editorMode, html: draft.htmlIsCustom && draft.html ? draft.html : visualEmailHtml });
       return;
     }
     if (draft.editorMode !== "html") return;
+    updateDraft({ editorMode: "visual" });
+    notify?.("Visual design restored. Your HTML source is still saved in the HTML tab.");
+  }
+
+  function convertHtmlToVisualBlocks() {
     const converted = importedEmailHtmlToBlocks(draft.html, createBlockId);
     if (converted.error) {
       notify?.(converted.error, "error");
@@ -1189,15 +1197,15 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
     }
     const applyConversion = () => {
       commitBlocks((converted.blocks.length ? converted.blocks : [newBlock("code")]).map(normalizedDesignBlock).filter(Boolean));
-      updateDraft({ editorMode: "visual", html: converted.html });
+      updateDraft({ editorMode: "visual", html: converted.html, htmlIsCustom: true });
       setSelectedId(converted.blocks[0]?.id || "");
       notify?.(converted.removed ? `HTML converted to editable blocks after removing ${converted.removed} unsupported item${converted.removed === 1 ? "" : "s"}.` : "HTML converted to editable blocks.");
     };
     if (askConfirm) {
       askConfirm({
-        title: "Convert HTML to editable blocks?",
-        copy: "Recognized headings, text, images, buttons and dividers will become editable blocks. Complex email markup is preserved inside safe Code blocks.",
-        actionLabel: "Convert to blocks",
+        title: "Replace the visual design with HTML?",
+        copy: "This converts the current HTML into editable blocks and replaces the visual block layout. You can undo the conversion until the page is reloaded.",
+        actionLabel: "Replace visual design",
         onConfirm: applyConversion,
       });
       return;
@@ -1223,7 +1231,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
       return;
     }
     const applyImport = () => {
-      updateDraft({ editorMode: "html", html: result.html });
+      updateDraft({ editorMode: "html", html: result.html, htmlIsCustom: true });
       notify?.(result.removed ? `HTML imported and cleaned. ${result.removed} unsupported item${result.removed === 1 ? "" : "s"} removed.` : "HTML imported.");
     };
     if (askConfirm && (draft.html.trim() || draft.blocks.length)) {
@@ -1446,6 +1454,12 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
     setDragState(null);
   }
 
+  function dropOnManagedSection(event, index) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placeAfter = event.clientY > bounds.top + (bounds.height / 2);
+    dropOnCanvas(event, { containerId: ROOT_EMAIL_CONTAINER, index: index + (placeAfter ? 1 : 0) });
+  }
+
   const saveDraft = useCallback(({ silent = false, statusOverride = "" } = {}) => {
     const snapshot = draftRef.current;
     const pendingCampaignId = campaignIdRef.current || snapshot.id || createBlockId("cmp");
@@ -1472,10 +1486,11 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
         subject: snapshot.subject,
         message,
         html: emailResult.html,
-        design: {
-          version: 2,
-          editorMode: snapshot.editorMode,
-          previewText: snapshot.previewText,
+          design: {
+            version: 2,
+            editorMode: snapshot.editorMode,
+            htmlIsCustom: snapshot.htmlIsCustom === true,
+            previewText: snapshot.previewText,
           blocks: snapshot.blocks,
           theme: snapshot.theme,
         },
@@ -1680,7 +1695,14 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
                   {["manage", "prebuilt", "saved"].map((tab) => <button aria-selected={sectionTab === tab} className={sectionTab === tab ? "active" : ""} key={tab} onClick={() => setSectionTab(tab)} role="tab" type="button">{tab === "prebuilt" ? "Pre-built" : `${tab[0].toUpperCase()}${tab.slice(1)}`}</button>)}
                 </div>
                 {sectionTab === "manage" && <div className="marketing-manage-sections">
-                  {draft.blocks.map((block, index) => <button className={selectedId === block.id ? "active" : ""} key={block.id} onClick={() => setSelectedId(block.id)} type="button"><GripVertical size={15} /><span><strong>{block.type === "layout" ? `Section ${index + 1}` : blockDefinitions.find((item) => item.type === block.type)?.label || "Section"}</strong><small>{block.type === "layout" ? `${block.columns.length} column${block.columns.length === 1 ? "" : "s"}` : "Content block"}</small></span><ChevronRight size={15} /></button>)}
+                  {draft.blocks.map((block, index) => {
+                    const label = block.type === "layout" ? `Section ${index + 1}` : blockDefinitions.find((item) => item.type === block.type)?.label || "Section";
+                    const dropKey = `manage:${index}`;
+                    return <div className={`marketing-manage-section-row${selectedId === block.id ? " active" : ""}${dragState?.blockId === block.id ? " dragging" : ""}${dragState?.over === dropKey ? " drop-target" : ""}`} data-block-id={block.id} draggable key={block.id} onDragEnd={endDrag} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDragState((current) => current ? { ...current, over: dropKey } : current); }} onDragStart={(event) => startCanvasDrag(event, block.id)} onDrop={(event) => dropOnManagedSection(event, index)}>
+                      <button className="marketing-manage-section-select" onClick={() => setSelectedId(block.id)} type="button"><GripVertical className="marketing-manage-section-grip" size={15} /><span><strong>{label}</strong><small>{block.type === "layout" ? `${block.columns.length} column${block.columns.length === 1 ? "" : "s"}` : "Content block"}</small></span><ChevronRight size={15} /></button>
+                      <span className="marketing-manage-section-actions"><button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => moveBlock(block.id, -1)} type="button"><MoveUp size={14} /></button><button aria-label={`Move ${label} down`} disabled={index === draft.blocks.length - 1} onClick={() => moveBlock(block.id, 1)} type="button"><MoveDown size={14} /></button></span>
+                    </div>;
+                  })}
                   <button className="add" onClick={() => addBlock("layout-1")} type="button"><Plus size={16} /><span><strong>Add blank section</strong><small>Start with one empty column</small></span></button>
                 </div>}
                 {sectionTab === "prebuilt" && <div className="marketing-prebuilt-sections">
@@ -1751,6 +1773,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
           htmlResult={importedHtmlResult}
           notify={notify}
           onClean={cleanImportedHtml}
+          onConvert={convertHtmlToVisualBlocks}
           preview={preview}
           setPreview={setPreview}
           updateDraft={updateDraft}
@@ -1806,7 +1829,7 @@ function EmailPreviewDialog({ error, html, name, onClose, previewText, subject }
   );
 }
 
-function HtmlEmailEditor({ draft, htmlResult, notify, onClean, preview, setPreview, updateDraft }) {
+function HtmlEmailEditor({ draft, htmlResult, notify, onClean, onConvert, preview, setPreview, updateDraft }) {
   const sourceRef = useRef(null);
   const previewHtml = previewPersonalizedHtml(htmlResult.html);
   const tokens = ["{{first_name}}", "{{client}}", "{{email}}", "{{branch}}", "{{company}}", "{{date}}"];
@@ -1833,10 +1856,11 @@ function HtmlEmailEditor({ draft, htmlResult, notify, onClean, preview, setPrevi
         <div><FileCode2 size={20} /><strong>Custom HTML</strong><p>Paste a complete email document or import an HTML file. Email-safe tables, inline styles and responsive CSS are preserved.</p></div>
         <section><span>Personalization</span>{tokens.map((token) => <button key={token} onClick={() => insertToken(token)} type="button">{token}</button>)}</section>
         <section className="marketing-html-safety"><span>Safety check</span><strong className={htmlResult.error || htmlResult.removed ? "warning" : "ready"}>{htmlResult.error ? "Needs attention" : htmlResult.removed ? `${htmlResult.removed} item${htmlResult.removed === 1 ? "" : "s"} to remove` : "Email-safe HTML"}</strong><p>{htmlResult.error || (htmlResult.removed ? "Scripts, forms, embedded frames, event handlers and unsafe URLs are not permitted." : "The source is ready for a sandboxed preview and server validation.")}</p><button disabled={Boolean(htmlResult.error)} onClick={onClean} type="button">Clean HTML</button></section>
+        <section className="marketing-html-convert"><span>Visual design</span><strong>Design and HTML are kept separately</strong><p>Switch tabs without losing either version. Only replace the visual layout when you explicitly convert this HTML.</p><button disabled={Boolean(htmlResult.error)} onClick={onConvert} type="button">Convert HTML to Design</button></section>
       </aside>
       <section className="marketing-html-source">
         <header><div><strong>HTML source</strong><span>{draft.html.length.toLocaleString("en-US")} / {MAX_EMAIL_HTML_LENGTH.toLocaleString("en-US")}</span></div><small>Supports full documents, tables, media queries and inline CSS.</small></header>
-        <textarea aria-label="Email HTML source" onChange={(event) => updateDraft({ html: event.target.value })} ref={sourceRef} spellCheck="false" value={draft.html} />
+        <textarea aria-label="Email HTML source" onChange={(event) => updateDraft({ html: event.target.value, htmlIsCustom: true })} ref={sourceRef} spellCheck="false" value={draft.html} />
       </section>
       <section className="marketing-html-preview">
         <header><strong>Live preview</strong><div className="marketing-preview-toggle"><button className={preview === "desktop" ? "active" : ""} onClick={() => setPreview("desktop")} type="button"><Monitor size={16} /> Desktop</button><button className={preview === "mobile" ? "active" : ""} onClick={() => setPreview("mobile")} type="button"><Smartphone size={16} /> Mobile</button></div></header>
@@ -2157,7 +2181,7 @@ function SaveTemplateDialog({ draft, html, notify, onClose, onSaveTemplate }) {
         thumbnail: form.thumbnail.trim(),
         editorMode: draft.editorMode,
         html: checked.html,
-        design: { version: 2, editorMode: draft.editorMode, previewText: draft.previewText, blocks: draft.blocks, theme: draft.theme },
+        design: { version: 2, editorMode: draft.editorMode, htmlIsCustom: draft.htmlIsCustom === true, previewText: draft.previewText, blocks: draft.blocks, theme: draft.theme },
       });
       notify?.("Design saved to the shared Templates library.");
       onClose();

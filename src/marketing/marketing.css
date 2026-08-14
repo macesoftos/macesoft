@@ -1186,6 +1186,10 @@
 .marketing-html-safety strong.warning { color: #965633; }
 .marketing-html-safety > button { justify-self: start; font-family: var(--font-family-primary) !important; font-weight: 800; }
 .marketing-html-safety > button:disabled { opacity: 0.45; }
+.marketing-html-convert { display: grid !important; }
+.marketing-html-convert strong { font-size: 11px; }
+.marketing-html-convert > button { justify-self: start; font-family: var(--font-family-primary) !important; font-weight: 800; }
+.marketing-html-convert > button:disabled { opacity: 0.45; }
 
 .marketing-html-source {
   display: flex;
@@ -1374,9 +1378,20 @@
 .marketing-section-tabs button { min-height: 34px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #667276; font-size: 9px; }
 .marketing-section-tabs button.active { border-bottom-color: #6b4732; color: #4a3324; font-weight: 800; }
 .marketing-manage-sections { display: grid; gap: 7px; }
-.marketing-manage-sections > button { display: grid; grid-template-columns: 18px minmax(0, 1fr) 18px; min-height: 54px; align-items: center; gap: 7px; padding: 8px; border: 1px solid #e2e9ed; border-radius: 4px; background: #fff; color: #4f585a; text-align: left; }
-.marketing-manage-sections > button.active { border-color: #7b5a45; box-shadow: inset 3px 0 #7b5a45; }
-.marketing-manage-sections > button.add { border-style: dashed; color: #6b4732; }
+.marketing-manage-section-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; border: 1px solid #e2e9ed; border-radius: 4px; background: #fff; color: #4f585a; transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
+.marketing-manage-section-row.active { border-color: #7b5a45; box-shadow: inset 3px 0 #7b5a45; }
+.marketing-manage-section-row.dragging { opacity: 0.48; }
+.marketing-manage-section-row.drop-target { border-color: #7b5a45; box-shadow: 0 0 0 2px rgba(123, 90, 69, 0.16); transform: translateY(1px); }
+.marketing-manage-section-select { display: grid; grid-template-columns: 18px minmax(0, 1fr) 18px; min-height: 54px; align-items: center; gap: 7px; padding: 8px; border: 0; background: transparent; color: inherit; text-align: left; }
+.marketing-manage-section-select > span { display: grid; gap: 2px; }
+.marketing-manage-section-grip { cursor: grab; }
+.marketing-manage-section-actions { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; border-left: 1px solid #e2e9ed; }
+.marketing-manage-section-actions button { display: grid; min-width: 30px; place-items: center; border: 0; border-left: 1px solid #eee8e1; background: transparent; color: #6b625c; }
+.marketing-manage-section-actions button:first-child { border-left: 0; }
+.marketing-manage-section-actions button:hover:not(:disabled) { background: #f5f0eb; color: #4a3324; }
+.marketing-manage-section-actions button:disabled { color: #c8c2bc; }
+.marketing-manage-sections > button.add { display: grid; grid-template-columns: 18px minmax(0, 1fr); min-height: 56px; align-items: center; gap: 7px; padding: 8px; border: 1px dashed #d7ccc2; border-radius: 4px; background: #fff; color: #6b4732; text-align: left; }
+.marketing-manage-sections > button.add:hover { border-color: #7b5a45; background: #faf7f3; }
 .marketing-manage-sections > button > span { display: grid; gap: 2px; }
 .marketing-manage-sections strong { font-size: 10px; }
 .marketing-manage-sections small { color: #7d888b; font-size: 8px; }
