@@ -5199,6 +5199,8 @@ td .inline-actions { flex-wrap: nowrap; }
   padding: 36px clamp(24px, 6vw, 50px);
 }
 
+.public-lead-page-embedded .public-lead-card-heading { display: none; }
+
 .public-lead-brand {
   min-height: 720px;
   display: flex;
