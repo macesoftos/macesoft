@@ -53,6 +53,12 @@ import {
   notificationWhereForActor,
 } from "./notifications.js";
 import { normalizePublicBookingRequest } from "./publicBooking.js";
+import {
+  marketingHtmlToText,
+  normalizeMarketingDesign,
+  renderMarketingHtml,
+  sanitizeMarketingHtml,
+} from "./marketingHtml.js";
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -1173,6 +1179,9 @@ function normalizeCampaignPayload(payload, existingId = "") {
     credits: numberValue(payload.credits, "Credits", { min: 0, integer: true }),
     status: clean(payload.status) || "Draft",
   };
+
+  if (Object.hasOwn(payload, "html")) data.html = sanitizeMarketingHtml(payload.html);
+  if (Object.hasOwn(payload, "design")) data.design = normalizeMarketingDesign(payload.design);
 
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -2415,10 +2424,12 @@ function pickTemplate({ campaign, templates, channel }) {
   };
 }
 
-function renderMarketingText(text, { client, campaign, settings }) {
-  const values = {
+function marketingMergeValues({ client, campaign, settings }) {
+  const fullName = clean(client.fullName);
+  return {
     client: client.fullName,
     name: client.fullName,
+    first_name: fullName.split(/\s+/)[0] || fullName,
     mobile: client.mobile,
     email: client.email,
     branch: client.branch,
@@ -2430,7 +2441,10 @@ function renderMarketingText(text, { client, campaign, settings }) {
     time: "",
     service: campaign.service || campaign.name,
   };
+}
 
+function renderMarketingText(text, context) {
+  const values = marketingMergeValues(context);
   return clean(text).replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key) => clean(values[key] ?? ""));
 }
 
@@ -2523,13 +2537,13 @@ async function createVerifiedEmailTransport() {
   }
 }
 
-async function sendSmtpEmail({ transporter, to, subject, text }) {
+async function sendSmtpEmail({ transporter, to, subject, text, html = "" }) {
   const result = await transporter.sendMail({
     from: clean(process.env.SMTP_FROM),
     to,
     subject,
     text,
-    html: textToHtml(text),
+    html: html || textToHtml(text),
   });
 
   if (!Array.isArray(result.accepted) || result.accepted.length === 0) {
@@ -4846,7 +4860,8 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
   const clients = await listResource("clients", actor);
   const templates = await prisma.smsTemplate.findMany({ where: { active: true } });
   const template = pickTemplate({ campaign, templates, channel });
-  const baseMessage = clean(campaign.message) || clean(template.text);
+  const emailHtml = channel === "email" ? sanitizeMarketingHtml(campaign.html) : "";
+  const baseMessage = clean(campaign.message) || marketingHtmlToText(emailHtml) || clean(template.text);
   const subject = clean(campaign.subject) || clean(campaign.name) || "A note from MACE";
   const dryRun = envFlag(process.env.MARKETING_DRY_RUN);
 
@@ -4878,14 +4893,18 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
   let sent = 0;
 
   for (const recipient of recipients) {
-    const text = renderMarketingText(baseMessage, { client: recipient.client, campaign, settings });
+    const context = { client: recipient.client, campaign, settings };
+    const text = renderMarketingText(baseMessage, context);
+    const html = channel === "email" && emailHtml
+      ? renderMarketingHtml(emailHtml, marketingMergeValues(context))
+      : "";
     try {
       if (dryRun) {
         console.log(`[marketing dry-run] ${channel.toUpperCase()} to ${recipient.contact}: ${text}`);
       } else if (channel === "sms") {
         await sendTwilioSms({ to: recipient.contact, body: text });
       } else {
-        await sendSmtpEmail({ transporter, to: recipient.contact, subject, text });
+        await sendSmtpEmail({ transporter, to: recipient.contact, subject, text, html });
       }
       sent += 1;
     } catch (error) {

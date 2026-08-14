@@ -1,0 +1,3 @@
+ALTER TABLE "MarketingCampaign"
+ADD COLUMN "html" TEXT NOT NULL DEFAULT '',
+ADD COLUMN "design" JSONB;

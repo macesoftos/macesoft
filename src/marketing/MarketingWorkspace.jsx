@@ -14,7 +14,10 @@ import {
   CircleAlert,
   Clock3,
   Columns2,
+  Code2,
   Copy,
+  Download,
+  FileCode2,
   GripVertical,
   Image as ImageIcon,
   LayoutDashboard,
@@ -38,6 +41,7 @@ import {
   Sparkles,
   Trash2,
   Undo2,
+  Upload,
   UserCheck,
   Users,
   Workflow,
@@ -45,6 +49,13 @@ import {
 } from "lucide-react";
 
 import { marketingHash, marketingRouteFromHash } from "./routes.js";
+import {
+  buildVisualEmailHtml,
+  emailHtmlToPlainText,
+  MAX_EMAIL_HTML_LENGTH,
+  previewPersonalizedHtml,
+  sanitizeImportedEmailHtml,
+} from "./emailHtml.js";
 
 const draftStorageKey = "mace-marketing-campaign-draft-v1";
 const templateStorageKey = "mace-marketing-design-templates-v1";
@@ -202,6 +213,8 @@ function createDefaultDraft() {
     status: "Draft",
     scheduledAt: "",
     managerApproval: true,
+    editorMode: "visual",
+    html: "",
     blocks: createDefaultBlocks(),
     step: 2,
     updatedAt: new Date().toISOString(),
@@ -214,6 +227,8 @@ function normalizedDraft(value) {
   return {
     ...fallback,
     ...value,
+    editorMode: value.editorMode === "html" ? "html" : "visual",
+    html: typeof value.html === "string" ? value.html : "",
     blocks: Array.isArray(value.blocks) && value.blocks.length ? value.blocks : fallback.blocks,
     step: Math.min(4, Math.max(1, Number(value.step) || 1)),
   };
@@ -271,9 +286,16 @@ function campaignWarnings(draft) {
   if (draft.channel !== "SMS") {
     if (!draft.subject.trim()) warnings.push("Add an email subject.");
     if (!draft.previewText.trim()) warnings.push("Add email preview text.");
-    if (draft.blocks.some((block) => !String(block.content ?? block.src ?? "").trim() && !["divider", "spacer"].includes(block.type))) warnings.push("Complete or remove empty content blocks.");
-    if (draft.blocks.some((block) => block.type === "button" && !block.link)) warnings.push("Add a destination link to every button.");
-    if (draft.blocks.some((block) => block.type === "image" && !block.alt)) warnings.push("Add alternative text to every image.");
+    if (draft.editorMode === "html") {
+      const htmlResult = sanitizeImportedEmailHtml(draft.html);
+      if (htmlResult.error) warnings.push(htmlResult.error);
+      if (htmlResult.removed) warnings.push("Clean the HTML to remove unsupported or unsafe code before review.");
+      if (htmlResult.html && !/unsubscribe/i.test(htmlResult.html)) warnings.push("Add a visible unsubscribe link or instruction to the HTML.");
+    } else {
+      if (draft.blocks.some((block) => !String(block.content ?? block.src ?? "").trim() && !["divider", "spacer"].includes(block.type))) warnings.push("Complete or remove empty content blocks.");
+      if (draft.blocks.some((block) => block.type === "button" && !block.link)) warnings.push("Add a destination link to every button.");
+      if (draft.blocks.some((block) => block.type === "image" && !block.alt)) warnings.push("Add alternative text to every image.");
+    }
   }
   if (draft.channel !== "Email" && !draft.message.trim()) warnings.push("Add text message content.");
   if (/medical|diagnosis|acne|botox|patient|procedure/i.test(`${draft.subject} ${draft.previewText}`)) warnings.push("Review the subject and preview text for sensitive treatment or medical details.");
@@ -343,6 +365,8 @@ export default function MarketingWorkspace({
       name: template.name,
       subject: template.name,
       step: 2,
+      editorMode: template.html ? "html" : "visual",
+      html: template.html || "",
       blocks: Array.isArray(template.blocks) && template.blocks.length ? template.blocks : createDefaultBlocks(),
     });
   }
@@ -680,9 +704,15 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
   const [saveState, setSaveState] = useState("Saved locally");
   const undoStack = useRef([]);
   const redoStack = useRef([]);
+  const htmlFileInput = useRef(null);
   const selectedBlock = draft.blocks.find((block) => block.id === selectedId) ?? draft.blocks[0];
   const estimate = audienceEstimate(clients, draft.segment, draft.channel);
   const warnings = campaignWarnings(draft);
+  const visualEmailHtml = useMemo(
+    () => buildVisualEmailHtml(draft, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin),
+    [draft, settings],
+  );
+  const importedHtmlResult = useMemo(() => sanitizeImportedEmailHtml(draft.html), [draft.html]);
 
   useEffect(() => {
     setSaveState("Changes saved locally");
@@ -690,6 +720,60 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
 
   function updateDraft(patch) {
     setDraft((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
+  }
+
+  function selectEditorMode(editorMode) {
+    if (editorMode === "html") {
+      updateDraft({ editorMode, html: draft.html || visualEmailHtml });
+      return;
+    }
+    updateDraft({ editorMode: "visual" });
+  }
+
+  async function importHtmlFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/\.html?$/i.test(file.name) && file.type !== "text/html") {
+      notify?.("Choose an HTML or HTM file.", "error");
+      return;
+    }
+    if (file.size > MAX_EMAIL_HTML_LENGTH) {
+      notify?.(`HTML files must be ${MAX_EMAIL_HTML_LENGTH.toLocaleString("en-US")} bytes or smaller.`, "error");
+      return;
+    }
+    const result = sanitizeImportedEmailHtml(await file.text());
+    if (result.error) {
+      notify?.(result.error, "error");
+      return;
+    }
+    updateDraft({ editorMode: "html", html: result.html });
+    notify?.(result.removed ? `HTML imported and cleaned. ${result.removed} unsupported item${result.removed === 1 ? "" : "s"} removed.` : "HTML imported.");
+  }
+
+  function cleanImportedHtml() {
+    if (importedHtmlResult.error) {
+      notify?.(importedHtmlResult.error, "error");
+      return;
+    }
+    updateDraft({ html: importedHtmlResult.html });
+    notify?.(importedHtmlResult.removed ? `HTML cleaned. ${importedHtmlResult.removed} unsupported item${importedHtmlResult.removed === 1 ? "" : "s"} removed.` : "HTML is already clean.");
+  }
+
+  function exportEmailHtml() {
+    const result = sanitizeImportedEmailHtml(draft.editorMode === "html" ? draft.html : visualEmailHtml);
+    if (result.error) {
+      notify?.(result.error, "error");
+      return;
+    }
+    const blob = new Blob([result.html], { type: "text/html;charset=utf-8" });
+    const link = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = `${draft.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mace-campaign"}.html`;
+    link.click();
+    URL.revokeObjectURL(objectUrl);
+    notify?.("Email HTML exported.");
   }
 
   function commitBlocks(nextBlocks) {
@@ -772,9 +856,14 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
 
   async function saveDraft() {
     setSaveState("Saving…");
-    const emailSummary = draft.blocks.map((block) => block.content).filter(Boolean).join("\n\n");
-    const message = draft.channel === "Email" ? emailSummary : draft.message;
     try {
+      const emailResult = draft.channel === "SMS"
+        ? { html: "", error: "" }
+        : sanitizeImportedEmailHtml(draft.editorMode === "html" ? draft.html : visualEmailHtml);
+      if (emailResult.error) throw new Error(emailResult.error);
+      if (emailResult.removed) throw new Error("Clean the imported HTML before saving this campaign.");
+      const emailSummary = emailHtmlToPlainText(emailResult.html);
+      const message = draft.channel === "Email" ? emailSummary : draft.message;
       const savedCampaign = await onSaveCampaign?.({
         id: draft.id,
         name: draft.name,
@@ -783,6 +872,13 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
         templateId: "",
         subject: draft.subject,
         message,
+        html: emailResult.html,
+        design: {
+          version: 1,
+          editorMode: draft.editorMode,
+          previewText: draft.previewText,
+          blocks: draft.blocks,
+        },
         sent: 0,
         booked: 0,
         credits: 0,
@@ -832,6 +928,19 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
       {draft.step === 1 && <AudienceStep clients={clients} draft={draft} estimate={estimate} updateDraft={updateDraft} />}
       {draft.step === 2 && draft.channel === "SMS" && <SmsDesignStep draft={draft} templates={templates} updateDraft={updateDraft} warnings={warnings} />}
       {draft.step === 2 && draft.channel !== "SMS" && (
+        <div className="marketing-email-editor-toolbar">
+          <div className="marketing-editor-mode" role="tablist" aria-label="Email editor mode">
+            <button aria-selected={draft.editorMode !== "html"} className={draft.editorMode !== "html" ? "active" : ""} onClick={() => selectEditorMode("visual")} role="tab" type="button"><PanelLeft size={16} /> Design</button>
+            <button aria-selected={draft.editorMode === "html"} className={draft.editorMode === "html" ? "active" : ""} onClick={() => selectEditorMode("html")} role="tab" type="button"><Code2 size={16} /> HTML</button>
+          </div>
+          <div className="marketing-html-actions">
+            <input accept=".html,.htm,text/html" hidden onChange={importHtmlFile} ref={htmlFileInput} type="file" />
+            <button onClick={() => htmlFileInput.current?.click()} type="button"><Upload size={16} /> Import HTML</button>
+            <button onClick={exportEmailHtml} type="button"><Download size={16} /> Export HTML</button>
+          </div>
+        </div>
+      )}
+      {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode !== "html" && (
         <div className="marketing-builder-grid">
           <aside className="marketing-block-library">
             <div className="marketing-panel-title"><strong>Content blocks</strong><ChevronDown size={16} /></div>
@@ -859,10 +968,61 @@ function CampaignBuilder({ clients, draft, notify, onBack, onOpenGlobalNavigatio
           <BlockSettings block={selectedBlock} settingsTab={settingsTab} setSettingsTab={setSettingsTab} updateBlock={updateSelected} />
         </div>
       )}
+      {draft.step === 2 && draft.channel !== "SMS" && draft.editorMode === "html" && (
+        <HtmlEmailEditor
+          draft={draft}
+          htmlResult={importedHtmlResult}
+          notify={notify}
+          onClean={cleanImportedHtml}
+          preview={preview}
+          setPreview={setPreview}
+          updateDraft={updateDraft}
+        />
+      )}
       {draft.step === 3 && <ReviewStep draft={draft} estimate={estimate} warnings={warnings} updateDraft={updateDraft} />}
       {draft.step === 4 && <ScheduleStep draft={draft} estimate={estimate} updateDraft={updateDraft} />}
       {draft.step > 1 && <div className="marketing-builder-mobile-footer"><button onClick={() => updateDraft({ step: Math.max(1, draft.step - 1) })} type="button">Back</button><button className="marketing-primary-button" onClick={continueStep} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>}
-      {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => { onSaveTemplate({ id: createBlockId("template"), name: draft.name, category: "Saved design", blocks: draft.blocks }); notify?.("Design saved to Templates on this device."); }} type="button"><Save size={15} /> Save as template</button>}
+      {draft.step === 2 && draft.channel !== "SMS" && <button className="marketing-save-template" onClick={() => { const result = sanitizeImportedEmailHtml(draft.editorMode === "html" ? draft.html : visualEmailHtml); if (result.error || result.removed) { notify?.(result.error || "Clean the imported HTML before saving it as a template.", "error"); return; } onSaveTemplate({ id: createBlockId("template"), name: draft.name, category: draft.editorMode === "html" ? "Imported HTML" : "Saved design", editorMode: draft.editorMode, html: result.html, blocks: draft.blocks }); notify?.("Design saved to Templates on this device."); }} type="button"><Save size={15} /> Save as template</button>}
+    </div>
+  );
+}
+
+function HtmlEmailEditor({ draft, htmlResult, notify, onClean, preview, setPreview, updateDraft }) {
+  const sourceRef = useRef(null);
+  const previewHtml = previewPersonalizedHtml(htmlResult.html);
+  const tokens = ["{{first_name}}", "{{client}}", "{{email}}", "{{branch}}", "{{company}}", "{{date}}"];
+
+  function insertToken(token) {
+    const input = sourceRef.current;
+    if (!input) {
+      updateDraft({ html: `${draft.html}${token}` });
+      return;
+    }
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const next = `${draft.html.slice(0, start)}${token}${draft.html.slice(end)}`;
+    updateDraft({ html: next });
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + token.length, start + token.length);
+    });
+  }
+
+  return (
+    <div className="marketing-html-editor">
+      <aside className="marketing-html-tools">
+        <div><FileCode2 size={20} /><strong>Custom HTML</strong><p>Paste a complete email document or import an HTML file. Email-safe tables, inline styles and responsive CSS are preserved.</p></div>
+        <section><span>Personalization</span>{tokens.map((token) => <button key={token} onClick={() => insertToken(token)} type="button">{token}</button>)}</section>
+        <section className="marketing-html-safety"><span>Safety check</span><strong className={htmlResult.error || htmlResult.removed ? "warning" : "ready"}>{htmlResult.error ? "Needs attention" : htmlResult.removed ? `${htmlResult.removed} item${htmlResult.removed === 1 ? "" : "s"} to remove` : "Email-safe HTML"}</strong><p>{htmlResult.error || (htmlResult.removed ? "Scripts, forms, embedded frames, event handlers and unsafe URLs are not permitted." : "The source is ready for a sandboxed preview and server validation.")}</p><button disabled={Boolean(htmlResult.error)} onClick={onClean} type="button">Clean HTML</button></section>
+      </aside>
+      <section className="marketing-html-source">
+        <header><div><strong>HTML source</strong><span>{draft.html.length.toLocaleString("en-US")} / {MAX_EMAIL_HTML_LENGTH.toLocaleString("en-US")}</span></div><small>Supports full documents, tables, media queries and inline CSS.</small></header>
+        <textarea aria-label="Email HTML source" onChange={(event) => updateDraft({ html: event.target.value })} ref={sourceRef} spellCheck="false" value={draft.html} />
+      </section>
+      <section className="marketing-html-preview">
+        <header><strong>Live preview</strong><div className="marketing-preview-toggle"><button className={preview === "desktop" ? "active" : ""} onClick={() => setPreview("desktop")} type="button"><Monitor size={16} /> Desktop</button><button className={preview === "mobile" ? "active" : ""} onClick={() => setPreview("mobile")} type="button"><Smartphone size={16} /> Mobile</button></div></header>
+        {htmlResult.error ? <MarketingEmpty title="HTML preview unavailable" copy={htmlResult.error} /> : <div className={`marketing-html-preview-frame ${preview}`}><iframe sandbox="" srcDoc={previewHtml} title="Email HTML preview" /></div>}
+      </section>
     </div>
   );
 }
