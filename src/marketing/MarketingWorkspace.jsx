@@ -1671,6 +1671,8 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   const draftRef = useRef(draft);
   const saveChainRef = useRef(Promise.resolve());
   const saveRequestRef = useRef(0);
+  const autosaveTimerRef = useRef(null);
+  const finalizingScheduleRef = useRef(false);
   const lastSavedSignatureRef = useRef(draft.id ? JSON.stringify({ ...draft, updatedAt: undefined }) : "");
   const htmlFileInput = useRef(null);
   const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
@@ -2074,10 +2076,14 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   }, [approvalRequired, notify, onSaveCampaign, setDraft, settings]);
 
   useEffect(() => {
-    if (!draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
+    if (finalizingScheduleRef.current || !draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
     setSaveState("Unsaved changes");
     const timer = window.setTimeout(() => { void saveDraft({ silent: true }).catch(() => undefined); }, 1100);
-    return () => window.clearTimeout(timer);
+    autosaveTimerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (autosaveTimerRef.current === timer) autosaveTimerRef.current = null;
+    };
   }, [draft.name, draft.segment, draftSignature, saveDraft]);
 
   useEffect(() => {
@@ -2096,6 +2102,10 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
       return;
     }
     if (draft.step === 4) {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
       if (!draft.scheduledAt || Number.isNaN(new Date(draft.scheduledAt).getTime())) {
         notify?.("Choose a valid delivery date and time.", "error");
         return;
@@ -2104,6 +2114,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
         notify?.("Choose a delivery time in the future.", "error");
         return;
       }
+      finalizingScheduleRef.current = true;
       try {
         const savedCampaign = await saveDraft({ statusOverride: "Draft" });
         if (!onScheduleCampaign) throw new Error("Campaign scheduling is not available right now.");
@@ -2120,8 +2131,10 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
           lastSavedSignatureRef.current = JSON.stringify({ ...next, updatedAt: undefined });
           return next;
         });
+        finalizingScheduleRef.current = false;
         notify?.(result.approvalRequired ? "Campaign submitted to an administrator for approval." : "Campaign scheduled and added to the delivery queue.");
       } catch (error) {
+        finalizingScheduleRef.current = false;
         notify?.(error.message || "Unable to schedule this campaign.", "error");
         return;
       }
