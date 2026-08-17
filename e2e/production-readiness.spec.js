@@ -59,6 +59,10 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   }
 
   await page.goto("/appointments");
+  await expect(page).toHaveURL(/\/appointments$/);
+  await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Back to applications" })).toBeVisible();
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
@@ -89,12 +93,16 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.getByRole("button", { name: "Close form" }).click();
 
   await page.goto("/clients");
+  await expect(page).toHaveURL(/\/clients$/);
+  await expect(page.locator(".sidebar")).toHaveCount(0);
   await createTrigger.click();
   await expect(createMenu.getByRole("menuitem", { name: "New client" })).toBeVisible();
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
-  await page.goto("/#/card-view");
+  await page.goto("/card-view");
+  await expect(page).toHaveURL(/\/card-view$/);
+  await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.getByLabel("Card filters")).toBeVisible();
   await expect(page.getByText("Completion rate", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Total Cards", { exact: true })).toHaveCount(0);
@@ -103,7 +111,9 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     await expect(page.getByText(demoPatient, { exact: true })).toHaveCount(0);
   }
 
-  await page.goto("/#/room-view");
+  await page.goto("/room-view");
+  await expect(page).toHaveURL(/\/room-view$/);
+  await expect(page.locator(".sidebar")).toHaveCount(0);
   await createTrigger.click();
   const newRoomAction = createMenu.getByRole("menuitem", { name: "New room" });
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toBeVisible();

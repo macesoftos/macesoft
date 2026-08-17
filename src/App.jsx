@@ -590,6 +590,7 @@ const moduleIdSet = new Set(navItems.map((item) => item.id));
 const modulePathById = new Map(navItems.filter((item) => item.path).map((item) => [item.id, item.path]));
 const moduleIdByPath = new Map(navItems.filter((item) => item.path).map((item) => [item.path, item.id]));
 const recordDetailModules = new Set(["appointments", "clients", "leads", "treatments", "staff"]);
+const mainSystemModules = new Set(["overview"]);
 
 function recordDetailRouteFromPath(pathname) {
   const path = normalizedPathname(pathname);
@@ -2313,7 +2314,7 @@ function App() {
       <>
         <FlipbooksWorkspace
           notify={notify}
-          onExit={() => setActiveModule("overview")}
+          onExit={() => setActiveModule("applications")}
           session={session}
         />
         {toast && <Toast toast={toast} />}
@@ -2327,7 +2328,8 @@ function App() {
       : navItems.find((item) => item.id === activeModule)?.label ?? "Dashboard"
   );
   const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
-  const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView && !isMarketingView;
+  const isStandaloneWorkspaceView = !mainSystemModules.has(activeModule);
+  const showSidebar = visibleNavSections.length > 0 && !isStandaloneWorkspaceView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = sessionModules.includes("pos");
   const canManageAppointments = sessionModules.includes("appointments");
@@ -2341,8 +2343,10 @@ function App() {
     isApplicationsView ? "applications-page-shell" : "",
     isFaceTrackView ? "facetrack-page-shell" : "",
     isMarketingView ? "marketing-page-shell" : "",
+    isStandaloneWorkspaceView ? "standalone-module-shell" : "",
     isPosView && isPosChromeRevealed ? "pos-chrome-revealed" : "",
-    !isMarketingView ? "has-mobile-navigation" : "marketing-standalone-shell",
+    !isStandaloneWorkspaceView ? "has-mobile-navigation" : "",
+    isMarketingView ? "marketing-standalone-shell" : "",
   ].filter(Boolean).join(" ");
   const posChromeHandlers = isPosView
     ? {
@@ -2373,7 +2377,7 @@ function App() {
           />
         )}
 
-        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
+        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isStandaloneWorkspaceView ? "standalone-module-workspace" : ""} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
           {isPosView && (
             <div
               aria-label="Show POS header"
@@ -2426,9 +2430,9 @@ function App() {
                   <button
                     className="topbar-back-button"
                     type="button"
-                    onClick={() => setActiveModule("overview")}
-                    title="Back to apps"
-                    aria-label="Back to apps"
+                    onClick={() => setActiveModule("applications")}
+                    title="Back to applications"
+                    aria-label="Back to applications"
                   >
                     <ArrowLeft size={18} aria-hidden="true" />
                   </button>
@@ -2491,7 +2495,7 @@ function App() {
 
         <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""} ${isFlipbooksView ? "flipbooks-content-area" : ""}`}>
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
-          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
+          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("applications")} />}
           {activeModule === "overview" && (
             <Dashboard
               session={session}
@@ -2786,7 +2790,7 @@ function App() {
         </section>
       </main>
 
-      {!isPosView && !isApplicationsView && !isFaceTrackView && !isMarketingView && (
+      {!isStandaloneWorkspaceView && (
         <>
           <MobileBottomNavigation
             activeModule={activeModule}
