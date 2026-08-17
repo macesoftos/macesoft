@@ -63,6 +63,12 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
 
+  await page.goto("/appointments/nonexistent-release-check");
+  await expect(page).toHaveURL(/\/appointments\/nonexistent-release-check$/);
+  await expect(page.getByText("Appointment not found", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to appointments" }).click();
+  await expect(page).toHaveURL(/\/appointments$/);
+
   const createTrigger = page.getByRole("button", { name: "Create new" });
   await createTrigger.focus();
   await page.keyboard.press("ArrowDown");
