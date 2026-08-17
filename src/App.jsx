@@ -9901,10 +9901,12 @@ function LeadDetailPanel({
   focusBooking,
 }) {
   const bookingSectionRef = useRef(null);
+  const followUpSectionRef = useRef(null);
 
   useEffect(() => {
     if (!focusBooking) return undefined;
     const frame = window.requestAnimationFrame(() => {
+      if (bookingSectionRef.current) bookingSectionRef.current.open = true;
       bookingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       bookingSectionRef.current?.querySelector("select")?.focus({ preventScroll: true });
     });
@@ -9925,31 +9927,51 @@ function LeadDetailPanel({
   const relatedClient = clients.find((client) => client.id === lead.linkedClientId);
   const likelyDuplicate = lead.duplicateOfLeadId ? clients.find((client) => client.id === lead.duplicateOfLeadId) || null : null;
   const scoreReasons = Array.isArray(lead.scoreReasons) ? lead.scoreReasons : [];
+  const inquiryMessage = String(lead.message || lead.concern || "").trim();
+  const recentActivities = (lead.activities ?? [])
+    .filter((activity) => !(activity.title === "Lead captured" && String(activity.note || "").trim() === inquiryMessage))
+    .slice(0, 6);
+
+  function revealSection(ref) {
+    if (!ref.current) return;
+    ref.current.open = true;
+    ref.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.requestAnimationFrame(() => ref.current?.querySelector("input, select, textarea")?.focus({ preventScroll: true }));
+  }
 
   return (
     <aside className="surface-panel lead-detail-panel">
-      <SectionHeader icon={UserCheck} title="Lead Detail" action={lead.status} />
-      <div className="lead-detail-header">
-        <div>
-          <h3>{lead.name}</h3>
-          <span>{lead.interest || lead.concern || "General inquiry"}</span>
+      <SectionHeader icon={Inbox} title="Customer inquiry" action={lead.status} />
+      <section className="lead-client-summary" aria-labelledby="lead-customer-name">
+        <div className="lead-detail-header">
+          <div>
+            <p className="eyebrow">Inquiry from {lead.source || lead.firstTouchSource || "website"}</p>
+            <h3 id="lead-customer-name">{lead.name}</h3>
+            <span>Interested in {lead.interest || "a general consultation"}</span>
+          </div>
+          <StatusBadge status={lead.status} />
         </div>
-        <StatusBadge status={lead.status} />
-      </div>
 
-      <div className="lead-detail-meta">
-        <RecordPill label="Score" value={Number(lead.score || 0)} />
-        <RecordPill label="Owner" value={lead.owner || "Unassigned"} />
-        <RecordPill label="Branch" value={lead.branch || "-"} />
-        <RecordPill label="SLA" value={leadSlaState(lead)} />
-      </div>
+        <div className="lead-inquiry-card">
+          <div>
+            <MessageSquareText size={20} aria-hidden="true" />
+            <h4>What the customer said</h4>
+          </div>
+          <blockquote>{inquiryMessage || "The customer did not include a message."}</blockquote>
+          {lead.concern && String(lead.concern).trim() !== inquiryMessage && <p><strong>Main concern:</strong> {lead.concern}</p>}
+        </div>
 
-      <div className="lead-primary-actions">
-        {!isClosed && (
-          <button className="primary-button small" type="button" disabled={busyAction === "convert"} onClick={() => runLeadAction("convert", () => convertLead(lead.id, { notes: conversionNotes }))}>
-            <UserCheck size={16} /> Convert
-          </button>
-        )}
+        <dl className="lead-contact-grid">
+          <div><dt>Mobile</dt><dd>{lead.mobile ? <a href={`tel:${lead.mobile}`}>{lead.mobile}</a> : "Not provided"}</dd></div>
+          <div><dt>Email</dt><dd>{lead.email ? <a href={`mailto:${lead.email}`}>{lead.email}</a> : "Not provided"}</dd></div>
+          <div><dt>Preferred contact</dt><dd>{lead.preferredChannel || "Phone"}</dd></div>
+          <div><dt>Submitted</dt><dd>{lead.createdAt ? compactDate(lead.createdAt) : lead.created || "-"}</dd></div>
+          <div><dt>Source</dt><dd>{lead.source || lead.firstTouchSource || "Website"}</dd></div>
+          <div><dt>Branch</dt><dd>{lead.branch || "Unassigned"}</dd></div>
+        </dl>
+      </section>
+
+      <div className="lead-primary-actions" aria-label="Customer contact actions">
         <button className="secondary-button small" type="button" disabled={!lead.mobile || busyAction === "call"} onClick={() => runLeadAction("call", () => addActivity(lead.id, { type: "Call", title: "Call logged", channel: "Phone", note: `Called ${lead.mobile}`, lastContactedAt: new Date().toISOString() }))}>
           <PhoneCall size={16} /> Call
         </button>
@@ -9959,41 +9981,24 @@ function LeadDetailPanel({
         <button className="secondary-button small" type="button" disabled={!lead.email || busyAction === "email"} onClick={() => runLeadAction("email", () => addActivity(lead.id, { type: "Email", title: "Email logged", channel: "Email", note: `Email recorded for ${lead.email}`, lastContactedAt: new Date().toISOString() }))}>
           <Mail size={16} /> Email
         </button>
+        <button className="secondary-button small" type="button" onClick={() => revealSection(followUpSectionRef)}><Clock size={16} /> Follow up</button>
+        <button className="primary-button small" type="button" onClick={() => revealSection(bookingSectionRef)}><CalendarDays size={16} /> Book appointment</button>
       </div>
 
-      <div className="lead-detail-section">
-        <h4>Workflow</h4>
-        <div className="lead-stage-form">
-          <label>
-            <span>Stage</span>
-            <select value={lead.status} onChange={(event) => runLeadAction("stage", () => changeStage(lead, event.target.value))}>
-              {leadStatuses.map((stage) => <option key={stage}>{stage}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Loss reason</span>
-            <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
-              {leadLossReasons.map((reason) => <option key={reason}>{reason}</option>)}
-            </select>
-          </label>
-          <button className="secondary-button small" type="button" disabled={busyAction === "lost"} onClick={() => runLeadAction("lost", () => changeStage(lead, "Lost", { lossReason }))}>
-            Mark Lost
-          </button>
-        </div>
+      <div className="lead-simple-workflow">
+        <label>
+          <span>Lead status</span>
+          <select aria-label="Lead status" value={lead.status} onChange={(event) => runLeadAction("stage", () => changeStage(lead, event.target.value))}>
+            {leadStatuses.map((stage) => <option key={stage}>{stage}</option>)}
+          </select>
+        </label>
+        <div><span>Assigned to</span><strong>{lead.owner || "Unassigned"}</strong></div>
+        <div><span>Permission</span><strong>{lead.permissionToContact ? "Okay to respond" : "Do not contact"}</strong></div>
       </div>
 
-      <div className="lead-detail-section">
-        <h4>Contact</h4>
-        <dl className="lead-detail-list">
-          <div><dt>Mobile</dt><dd>{lead.mobile || "-"}</dd></div>
-          <div><dt>Email</dt><dd>{lead.email || "-"}</dd></div>
-          <div><dt>Preferred</dt><dd>{lead.preferredChannel || "Phone"}</dd></div>
-          <div><dt>Consent</dt><dd>{lead.permissionToContact ? "Respond allowed" : "Do not contact"}</dd></div>
-        </dl>
-      </div>
-
-      <div className="lead-detail-section">
-        <h4>Next Action</h4>
+      <details className="lead-action-disclosure" ref={followUpSectionRef}>
+        <summary><span><Clock size={17} /> Schedule a follow-up</span><small>Set the next contact date and purpose</small></summary>
+        <div className="lead-action-disclosure-body">
         <div className="lead-action-form">
           <label>
             <span>Due</span>
@@ -10017,10 +10022,12 @@ function LeadDetailPanel({
             <Clock size={16} /> Schedule Follow-Up
           </button>
         </div>
-      </div>
+        </div>
+      </details>
 
-      <div className="lead-detail-section lead-booking-section" ref={bookingSectionRef}>
-        <h4>Book</h4>
+      <details className="lead-action-disclosure lead-booking-section" ref={bookingSectionRef}>
+        <summary><span><CalendarDays size={17} /> Book an appointment</span><small>Choose the service, date, and provider</small></summary>
+        <div className="lead-action-disclosure-body">
         <div className="lead-action-form">
           <label>
             <span>Service</span>
@@ -10056,10 +10063,11 @@ function LeadDetailPanel({
             <CalendarDays size={16} /> Book Appointment
           </button>
         </div>
-      </div>
+        </div>
+      </details>
 
       <div className="lead-detail-section">
-        <h4>Note</h4>
+        <h4>Internal note</h4>
         <div className="lead-note-box">
           <textarea rows={3} value={quickNote} onChange={(event) => setQuickNote(event.target.value)} placeholder="Add internal note" />
           <button className="secondary-button small" type="button" disabled={!quickNote.trim() || busyAction === "note"} onClick={() => runLeadAction("note", () => addActivity(lead.id, { type: "Note", title: "Internal note", note: quickNote }))}>
@@ -10069,55 +10077,57 @@ function LeadDetailPanel({
       </div>
 
       <div className="lead-detail-section">
-        <h4>Attribution</h4>
-        <dl className="lead-detail-list">
-          <div><dt>First touch</dt><dd>{lead.firstTouchSource || lead.source || "-"}</dd></div>
-          <div><dt>Latest touch</dt><dd>{lead.latestTouchSource || lead.source || "-"}</dd></div>
-          <div><dt>Campaign</dt><dd>{lead.campaign || lead.utmCampaign || "-"}</dd></div>
-          <div><dt>External ID</dt><dd>{lead.externalLeadId || "-"}</dd></div>
-        </dl>
-      </div>
-
-      <div className="lead-detail-section">
-        <h4>Related</h4>
-        <dl className="lead-detail-list">
-          <div><dt>Client</dt><dd>{relatedClient?.fullName || lead.linkedClientId || "-"}</dd></div>
-          <div><dt>Appointment</dt><dd>{relatedAppointment ? `${relatedAppointment.date} ${relatedAppointment.time}` : lead.linkedAppointmentId || "-"}</dd></div>
-          <div><dt>Duplicate</dt><dd>{likelyDuplicate?.fullName || lead.duplicateOfLeadId || "-"}</dd></div>
-        </dl>
-        <div className="lead-secondary-actions">
-          <button className="secondary-button small" type="button" onClick={() => openModal("lead", lead)}><Edit3 size={16} /> Edit</button>
-          {lead.duplicateOfLeadId && <button className="secondary-button small" type="button" disabled={busyAction === "merge"} onClick={() => runLeadAction("merge", () => mergeLead(lead.duplicateOfLeadId, { duplicateId: lead.id }))}>Merge Duplicate</button>}
-        </div>
-      </div>
-
-      <div className="lead-detail-section">
-        <h4>Score Reasons</h4>
-        <div className="lead-reason-list">
-          {scoreReasons.length ? scoreReasons.map((item, index) => (
-            <span key={`${item.reason}-${index}`}>+{item.points} {item.reason}</span>
-          )) : <span>No scoring reasons stored.</span>}
-        </div>
-      </div>
-
-      <div className="lead-detail-section">
-        <h4>Timeline</h4>
+        <h4>Recent activity</h4>
         <div className="lead-timeline">
-          {(lead.activities ?? []).slice(0, 8).map((activity) => (
+          {recentActivities.map((activity) => (
             <article key={activity.id}>
               <strong>{activity.title}</strong>
               <span>{activity.actor} / {compactDate(activity.occurredAt)}</span>
               {activity.note && <p>{activity.note}</p>}
             </article>
           ))}
-          {!(lead.activities ?? []).length && <p className="empty-copy">No timeline records yet.</p>}
+          {!recentActivities.length && <p className="empty-copy">No follow-up activity yet.</p>}
         </div>
       </div>
 
-      <label className="lead-conversion-note">
-        <span>Conversion note</span>
-        <textarea rows={2} value={conversionNotes} onChange={(event) => setConversionNotes(event.target.value)} />
-      </label>
+      <details className="lead-more-details">
+        <summary>More lead details</summary>
+        <div className="lead-more-details-body">
+          <div className="lead-detail-meta">
+            <RecordPill label="Score" value={Number(lead.score || 0)} />
+            <RecordPill label="SLA" value={leadSlaState(lead)} />
+            <RecordPill label="First touch" value={lead.firstTouchSource || lead.source || "-"} />
+            <RecordPill label="Campaign" value={lead.campaign || lead.utmCampaign || "-"} />
+          </div>
+          <div className="lead-detail-section">
+            <h4>Close or convert</h4>
+            <div className="lead-stage-form">
+              <label><span>Loss reason</span><select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>{leadLossReasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
+              <button className="secondary-button small" type="button" disabled={busyAction === "lost"} onClick={() => runLeadAction("lost", () => changeStage(lead, "Lost", { lossReason }))}>Mark Lost</button>
+              {!isClosed && <label className="span-2 lead-conversion-note"><span>Conversion note (optional)</span><textarea rows={2} value={conversionNotes} onChange={(event) => setConversionNotes(event.target.value)} /></label>}
+              {!isClosed && <button className="primary-button small span-2" type="button" disabled={busyAction === "convert"} onClick={() => runLeadAction("convert", () => convertLead(lead.id, { notes: conversionNotes }))}><UserCheck size={16} /> Convert to client</button>}
+            </div>
+          </div>
+          <div className="lead-detail-section">
+            <h4>Attribution and related records</h4>
+            <dl className="lead-detail-list">
+              <div><dt>Latest touch</dt><dd>{lead.latestTouchSource || lead.source || "-"}</dd></div>
+              <div><dt>External ID</dt><dd>{lead.externalLeadId || "-"}</dd></div>
+              <div><dt>Client</dt><dd>{relatedClient?.fullName || lead.linkedClientId || "-"}</dd></div>
+              <div><dt>Appointment</dt><dd>{relatedAppointment ? `${relatedAppointment.date} ${relatedAppointment.time}` : lead.linkedAppointmentId || "-"}</dd></div>
+              <div><dt>Duplicate</dt><dd>{likelyDuplicate?.fullName || lead.duplicateOfLeadId || "-"}</dd></div>
+            </dl>
+            <div className="lead-secondary-actions">
+              <button className="secondary-button small" type="button" onClick={() => openModal("lead", lead)}><Edit3 size={16} /> Edit lead</button>
+              {lead.duplicateOfLeadId && <button className="secondary-button small" type="button" disabled={busyAction === "merge"} onClick={() => runLeadAction("merge", () => mergeLead(lead.duplicateOfLeadId, { duplicateId: lead.id }))}>Merge Duplicate</button>}
+            </div>
+          </div>
+          <div className="lead-detail-section">
+            <h4>Why this lead scored {Number(lead.score || 0)}</h4>
+            <div className="lead-reason-list">{scoreReasons.length ? scoreReasons.map((item, index) => <span key={`${item.reason}-${index}`}>+{item.points} {item.reason}</span>) : <span>No scoring reasons stored.</span>}</div>
+          </div>
+        </div>
+      </details>
     </aside>
   );
 }
