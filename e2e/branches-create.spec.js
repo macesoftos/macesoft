@@ -45,8 +45,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("an organization manager can open the add branch form from the Branches page", async ({ page }) => {
-  await page.goto("/#/branches");
+test("an organization manager can open the standalone Branches workspace", async ({ page }) => {
+  await page.goto("/branches");
+
+  await expect(page).toHaveURL(/\/branches$/);
+  await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Back to applications" })).toBeVisible();
 
   const createTrigger = page.getByRole("button", { name: "Create new" });
   await expect(createTrigger).toBeVisible();
