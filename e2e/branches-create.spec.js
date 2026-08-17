@@ -51,7 +51,8 @@ test("an organization manager can open the standalone Branches workspace", async
   await expect(page).toHaveURL(/\/branches$/);
   await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Back to applications" })).toBeVisible();
+  const backToDashboard = page.getByRole("button", { name: "Back to dashboard" });
+  await expect(backToDashboard).toBeVisible();
 
   const createTrigger = page.getByRole("button", { name: "Create new" });
   await expect(createTrigger).toBeVisible();
@@ -65,4 +66,9 @@ test("an organization manager can open the standalone Branches workspace", async
   await expect(dialog.getByLabel("Branch name")).toBeVisible();
   await expect(dialog.getByLabel("City")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Create branch" })).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await backToDashboard.click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
 });
