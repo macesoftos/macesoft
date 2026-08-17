@@ -133,7 +133,10 @@ try {
     const privateAssetId = privateImageUpload.payload.asset.id;
     const privateViaPublicRoute = await fetch(`${baseUrl}/api/public/marketing-assets/${encodeURIComponent(privateAssetId)}`);
     assert(privateViaPublicRoute.status === 404, "private image was exposed through the public Marketing route");
-    await request(`/api/uploads/${encodeURIComponent(marketingAssetId)}`, { method: "DELETE", headers: ownerHeaders });
+    const movedMarketingImage = await request(`/api/uploads/${encodeURIComponent(marketingAssetId)}`, { method: "DELETE", headers: ownerHeaders });
+    assert(movedMarketingImage.response.status === 204, "marketing image was not moved to Deleted");
+    const deletedMarketingImage = await jsonRequest("/api/marketing/media/permanent", { ids: [marketingAssetId] }, { method: "DELETE" });
+    assert(deletedMarketingImage.response.ok && deletedMarketingImage.payload.count === 1, "marketing image was not permanently removed");
     await request(`/api/uploads/${encodeURIComponent(privateAssetId)}`, { method: "DELETE", headers: ownerHeaders });
   }
 

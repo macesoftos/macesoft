@@ -976,12 +976,14 @@ model UploadAsset {
   byteSize       Int
   uploadedById   String
   createdAt      DateTime        @default(now())
+  deletedAt      DateTime?
   treatmentPhoto TreatmentPhoto?
   flipbook       Flipbook?
 
   @@index([branch])
   @@index([category])
   @@index([category, branch, createdAt])
+  @@index([category, branch, deletedAt, createdAt])
   @@index([uploadedById])
 }
 
