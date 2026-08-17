@@ -1084,6 +1084,11 @@ function App() {
 
     function syncModuleFromLocation() {
       setCurrentPath(normalizedPathname(window.location.pathname));
+      const detailRoute = recordDetailRouteFromPath(window.location.pathname);
+      if (detailRoute) {
+        setActiveModuleState(detailRoute.moduleId);
+        return;
+      }
       const routeModule = moduleFromPath(window.location.pathname) || moduleFromHash(window.location.hash);
       if (routeModule) {
         if (routeModule === "sms" && isMarketingHash(window.location.hash)) {
