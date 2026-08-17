@@ -312,6 +312,17 @@ export async function verifyMarketingBuilder(page, expect) {
   await expect(page.getByText("E2E Brightening Treatment", { exact: true })).toBeVisible();
 
   await page.goto("/marketing/templates");
+  const starterPreviews = page.locator(".marketing-template-preview.is-starter");
+  await expect(starterPreviews).toHaveCount(10);
+  const starterLayouts = await starterPreviews.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-layout")));
+  expect(new Set(starterLayouts).size).toBe(10);
+  const birthdayTemplate = page.getByRole("heading", { name: "Birthday offer", exact: true }).locator("xpath=ancestor::article");
+  await birthdayTemplate.getByRole("button", { name: "Preview", exact: true }).click();
+  const birthdayPreview = page.getByRole("dialog", { name: "Preview Birthday offer" });
+  await expect(birthdayPreview).toBeVisible();
+  await expect(birthdayPreview.frameLocator("iframe").getByText("A little something for you", { exact: true })).toBeVisible();
+  await birthdayPreview.getByRole("button", { name: "Close", exact: true }).click();
+  await page.screenshot({ path: `${artifactDirectory}/distinct-starter-templates.png`, fullPage: false });
   const savedTemplateHeading = page.getByRole("heading", { name: "Release-tested Product email", exact: true });
   await expect(savedTemplateHeading).toBeVisible();
   await savedTemplateHeading.locator("xpath=ancestor::article").getByRole("button", { name: "Preview", exact: true }).click();

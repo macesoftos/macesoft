@@ -160,7 +160,7 @@ const aiSectionDefinitions = [
   { type: "people", label: "People update", icon: Users },
 ];
 
-const starterTemplates = [
+const starterTemplateDefinitions = [
   { id: "monthly-newsletter", name: "Monthly newsletter", category: "Newsletter", description: "Clinic news, featured treatments and helpful care guidance." },
   { id: "treatment-promotion", name: "Treatment promotion", category: "Promotion", description: "A focused treatment story with a single booking action." },
   { id: "new-treatment", name: "New treatment announcement", category: "Announcement", description: "Introduce a new service with benefits and availability." },
@@ -304,6 +304,243 @@ function normalizedDesignBlock(block) {
 function createDefaultBlocks() {
   return ["logo", "image", "heading", "text", "treatment", "button", "divider", "contact"].map(newBlock);
 }
+
+function templateBlock(type, patch = {}) {
+  return { ...newBlock(type), ...patch };
+}
+
+function templateLayout(type, columns, patch = {}) {
+  return { ...newBlock(type), ...patch, columns };
+}
+
+function templateFooter(patch = {}) {
+  return templateBlock("footer", { padding: 20, ...patch });
+}
+
+function templateTheme(patch = {}) {
+  return { ...defaultEmailTheme, ...patch };
+}
+
+function createStarterTemplateDesign(id) {
+  const logo = (patch = {}) => templateBlock("logo", { padding: 14, width: 120, mobileWidth: 108, ...patch });
+  const button = (content, patch = {}) => templateBlock("button", { content, ...patch });
+  const heading = (content, patch = {}) => templateBlock("heading", { content, ...patch });
+  const text = (content, patch = {}) => templateBlock("text", { content, ...patch });
+  const image = (src, alt, patch = {}) => templateBlock("image", { src, alt, ...patch });
+  const finish = ({ blocks, preview, previewText, subject, theme }) => ({
+    preview,
+    previewText,
+    subject,
+    design: { editorMode: "visual", blocks, theme },
+  });
+
+  const designs = {
+    "monthly-newsletter": () => finish({
+      subject: "The MACE Edit: this month at the clinic",
+      previewText: "Clinic notes, featured care and considered advice for the month ahead.",
+      preview: { layout: "newsletter", kicker: "THE MACE EDIT", title: "Monthly notes", image: "/brand/clinic-davao.jpg", accent: "#795743", surface: "#eee5db" },
+      theme: templateTheme({ canvasBackground: "#eee8e1", headingColor: "#35261e", buttonBackground: "#6d4935", contentWidth: 680 }),
+      blocks: [
+        logo({ align: "left", padding: 18 }),
+        heading("The MACE Edit", { align: "left", fontSize: 38, padding: 20 }),
+        text("A considered monthly note with clinic news, thoughtful skincare guidance and services worth discovering.", { align: "left", fontSize: 16, padding: 20 }),
+        templateBlock("divider", { padding: 4, spacingTop: 8, spacingBottom: 8 }),
+        templateLayout("layout-2", [
+          [image("/brand/clinic-davao.jpg", "MACE Davao clinic", { borderRadius: 8, padding: 8 })],
+          [heading("Inside this issue", { level: "h2", align: "left", fontSize: 25, padding: 10 }), text("A clinic update, one featured treatment and simple ways to care for your skin between visits.", { align: "left", padding: 10 }), button("Read this month’s edit", { align: "left", padding: 10 })],
+        ], { gap: 18, padding: 18, background: "#f6f1eb", borderRadius: 10 }),
+        heading("Featured this month", { level: "h2", align: "left", fontSize: 26, padding: 20 }),
+        templateLayout("layout-2", [
+          [templateBlock("product", { title: "Hydrodermabrasion", description: "Deep cleansing and hydration for smoother-looking skin.", src: "/brand/result-1.jpg" })],
+          [templateBlock("product", { title: "Pico-Rejuvenation", description: "Support clarity, tone and texture with minimal downtime.", src: "/brand/result-2.jpg" })],
+        ], { gap: 14, padding: 12 }),
+        templateFooter(),
+      ],
+    }),
+    "treatment-promotion": () => finish({
+      subject: "A focused treatment offer from MACE",
+      previewText: "Discover a considered treatment option and reserve your preferred consultation time.",
+      preview: { layout: "promotion", kicker: "LIMITED APPOINTMENTS", title: "Treatment focus", image: "/brand/result-1.jpg", accent: "#5b3826", surface: "#ead8ce" },
+      theme: templateTheme({ canvasBackground: "#eadfd7", headingColor: "#382319", buttonBackground: "#4d2b1c", sectionPadding: 12 }),
+      blocks: [
+        logo({ padding: 16 }),
+        image("/brand/result-1.jpg", "MACE signature facial treatment", { padding: 0, borderRadius: 0 }),
+        text("THIS MONTH AT MACE", { fontSize: 11, fontWeight: 700, letterSpacing: 2, padding: 14, color: "#9a684f" }),
+        heading("Refresh your skin with a considered treatment plan", { fontSize: 36, padding: 14 }),
+        text("Begin with a consultation and explore an option selected around your goals, comfort and schedule.", { fontSize: 16, padding: 14 }),
+        templateBlock("offer", { content: "Treatment focus\nLimited consultation appointments are available this month.", background: "#f1e2d9", color: "#4a2f22", padding: 20 }),
+        button("Reserve a consultation", { padding: 18, horizontalPadding: 34 }),
+        templateFooter(),
+      ],
+    }),
+    "new-treatment": () => finish({
+      subject: "Introducing a new treatment at MACE",
+      previewText: "Meet the newest addition to our considered treatment menu.",
+      preview: { layout: "announcement", kicker: "NOW AVAILABLE", title: "Meet something new", image: "/brand/result-2.jpg", accent: "#416557", surface: "#e2ebe6" },
+      theme: templateTheme({ canvasBackground: "#e7eee9", headingColor: "#263d34", textColor: "#3f554c", buttonBackground: "#365b4d", linkColor: "#365b4d", contentWidth: 680 }),
+      blocks: [
+        logo({ align: "left", padding: 18 }),
+        templateLayout("layout-1-2", [
+          [text("NEW AT MACE", { align: "left", fontSize: 11, letterSpacing: 2, color: "#557c6d", padding: 10 }), heading("A new way to support brighter-looking skin", { align: "left", fontSize: 34, padding: 10 }), text("Discover our newest clinician-led treatment and whether it may suit your individual goals.", { align: "left", padding: 10 }), button("Explore the treatment", { align: "left", padding: 10 })],
+          [image("/brand/result-2.jpg", "Client receiving personalised MACE care", { borderRadius: 10, padding: 6 })],
+        ], { columnWidths: [2, 3], gap: 20, padding: 20, background: "#edf3ef", borderRadius: 12 }),
+        heading("Designed around you", { level: "h2", fontSize: 27, padding: 18 }),
+        templateLayout("layout-3", [
+          [heading("Considered", { level: "h3", fontSize: 18, padding: 8 }), text("A consultation-led plan.", { fontSize: 13, padding: 8 })],
+          [heading("Personal", { level: "h3", fontSize: 18, padding: 8 }), text("Options shaped around your goals.", { fontSize: 13, padding: 8 })],
+          [heading("Supported", { level: "h3", fontSize: 18, padding: 8 }), text("Clear guidance before and after.", { fontSize: 13, padding: 8 })],
+        ], { gap: 10, padding: 12, background: "#f7faf8" }),
+        templateFooter(),
+      ],
+    }),
+    "birthday-offer": () => finish({
+      subject: "A birthday-month treat, just for you",
+      previewText: "Celebrate your month with a thoughtful MACE invitation.",
+      preview: { layout: "birthday", kicker: "JUST FOR YOU", title: "Birthday glow", badge: "BIRTHDAY", accent: "#a75d70", surface: "#f3dfe3" },
+      theme: templateTheme({ canvasBackground: "#f5e8e7", headingColor: "#663744", textColor: "#684b53", buttonBackground: "#8f4d60", linkColor: "#8f4d60" }),
+      blocks: [
+        logo({ padding: 18 }),
+        text("A LITTLE NOTE FOR YOUR BIRTHDAY MONTH", { fontSize: 11, letterSpacing: 2, color: "#a15d70", padding: 12 }),
+        heading("Happy birthday, {{first_name}}", { fontSize: 39, color: "#6d3948", padding: 14 }),
+        text("We hope the year ahead brings confidence, calm and plenty of reasons to celebrate.", { fontSize: 16, padding: 14 }),
+        templateLayout("layout-1-2", [
+          [image("/brand/products/post-care-cream.png", "MACE post-care cream", { background: "#f8edef", borderRadius: 999, padding: 14, aspectRatio: "original" })],
+          [heading("A little something for you", { level: "h2", align: "left", fontSize: 25, padding: 10 }), text("Enjoy a birthday-month consultation invitation and ask our team about the offer available to you.", { align: "left", padding: 10 }), button("View your birthday invitation", { align: "left", padding: 10, background: "#8f4d60", borderColor: "#8f4d60" })],
+        ], { columnWidths: [1, 2], gap: 18, padding: 20, background: "#f3dfe3", borderRadius: 14 }),
+        templateBlock("social", { iconColor: "#8f4d60", padding: 18 }),
+        templateFooter({ background: "#fff9f8" }),
+      ],
+    }),
+    "rebooking-reminder": () => finish({
+      subject: "A gentle reminder when you’re ready to return",
+      previewText: "Choose a convenient time for your next MACE visit.",
+      preview: { layout: "reminder", kicker: "A GENTLE REMINDER", title: "Time for your next visit?", badge: "30", accent: "#755747", surface: "#eee9e4" },
+      theme: templateTheme({ canvasBackground: "#efebe7", headingColor: "#3e3028", textColor: "#5a5049", buttonBackground: "#654637", contentWidth: 620 }),
+      blocks: [
+        logo({ align: "left", padding: 20 }),
+        templateBlock("divider", { padding: 0, spacingTop: 6, spacingBottom: 6 }),
+        text("A GENTLE REMINDER", { align: "left", fontSize: 11, letterSpacing: 2, color: "#8b6b59", padding: 18 }),
+        heading("Ready for your next visit?", { align: "left", fontSize: 36, padding: 18 }),
+        text("Hello {{first_name}}, when the time feels right, our team can help you plan your next appointment.", { align: "left", fontSize: 16, padding: 18 }),
+        templateBlock("offer", { content: "Your next step\nChoose a convenient appointment time or speak with the clinic first.", background: "#f4f0ec", padding: 20, align: "left" }),
+        templateLayout("layout-2", [
+          [heading("Choose a time", { level: "h3", align: "left", fontSize: 19, padding: 8 }), text("View available consultation times online.", { align: "left", fontSize: 13, padding: 8 })],
+          [heading("Questions first?", { level: "h3", align: "left", fontSize: 19, padding: 8 }), text("Reply or contact the clinic before booking.", { align: "left", fontSize: 13, padding: 8 })],
+        ], { gap: 12, padding: 14, background: "#faf8f5" }),
+        button("Book your next visit", { align: "left", padding: 20 }),
+        templateFooter({ align: "left" }),
+      ],
+    }),
+    "inactive-client": () => finish({
+      subject: "We’d love to welcome you back to MACE",
+      previewText: "Reconnect with considered care whenever you feel ready.",
+      preview: { layout: "inactive", kicker: "WELCOME BACK", title: "It’s been a while", image: "/brand/clinic.jpg", accent: "#6c5142", surface: "#ded7d1" },
+      theme: templateTheme({ canvasBackground: "#e7e1dc", headingColor: "#352820", buttonBackground: "#5b4031", contentWidth: 680 }),
+      blocks: [
+        image("/brand/clinic.jpg", "The welcoming MACE clinic interior", { padding: 0, maxWidth: 680 }),
+        logo({ padding: 18 }),
+        text("WELCOME BACK", { fontSize: 11, letterSpacing: 2, color: "#8d6d5c", padding: 10 }),
+        heading("It’s been a while, {{first_name}}", { fontSize: 37, padding: 14 }),
+        text("There is no pressure and no rush—just a warm invitation to reconnect with our team whenever you are ready.", { fontSize: 16, padding: 14 }),
+        templateLayout("layout-2", [
+          [templateBlock("productRecommendation", { recommendationLabel: "A FRESH START", title: "Skin consultation", description: "Revisit your goals with a calm, personalised consultation.", src: "/brand/result-1.jpg" })],
+          [templateBlock("productRecommendation", { recommendationLabel: "DISCOVER AGAIN", title: "Signature care", description: "Explore current services and what may suit you now.", src: "/brand/result-2.jpg" })],
+        ], { gap: 14, padding: 14 }),
+        button("Reconnect with MACE", { padding: 20 }),
+        templateFooter(),
+      ],
+    }),
+    "seasonal-skincare": () => finish({
+      subject: "Your seasonal skin guide from MACE",
+      previewText: "Three considered ways to adjust your routine for the season ahead.",
+      preview: { layout: "seasonal", kicker: "SEASONAL EDIT", title: "Skin in season", image: "/brand/clinic-davao.jpg", accent: "#587266", surface: "#dfe9e3" },
+      theme: templateTheme({ canvasBackground: "#e5ece7", headingColor: "#30473d", textColor: "#495f55", buttonBackground: "#49685a", linkColor: "#49685a", contentWidth: 680 }),
+      blocks: [
+        logo({ align: "left", padding: 18 }),
+        text("THE SEASONAL EDIT", { align: "left", fontSize: 11, letterSpacing: 2, color: "#668276", padding: 14 }),
+        heading("A calmer approach to seasonal skin", { align: "left", fontSize: 38, padding: 14 }),
+        image("/brand/clinic-davao.jpg", "Quiet consultation space at MACE Davao", { borderRadius: 10, padding: 14 }),
+        text("As weather, routines and environments change, a few thoughtful adjustments can help keep your skincare feeling consistent.", { align: "left", fontSize: 16, padding: 18 }),
+        templateLayout("layout-3", [
+          [heading("01", { level: "h3", fontSize: 22, color: "#6b8a7c", padding: 8 }), heading("Simplify", { level: "h3", fontSize: 18, padding: 6 }), text("Keep the essentials steady.", { fontSize: 13, padding: 6 })],
+          [heading("02", { level: "h3", fontSize: 22, color: "#6b8a7c", padding: 8 }), heading("Support", { level: "h3", fontSize: 18, padding: 6 }), text("Adjust hydration with care.", { fontSize: 13, padding: 6 })],
+          [heading("03", { level: "h3", fontSize: 22, color: "#6b8a7c", padding: 8 }), heading("Review", { level: "h3", fontSize: 18, padding: 6 }), text("Ask when something changes.", { fontSize: 13, padding: 6 })],
+        ], { gap: 10, padding: 14, background: "#f2f7f3", borderRadius: 10 }),
+        button("Plan a seasonal consultation", { padding: 20 }),
+        templateFooter(),
+      ],
+    }),
+    "clinic-event": () => finish({
+      subject: "You’re invited: an evening at MACE",
+      previewText: "Save the date for clinic news, thoughtful conversation and personalised guidance.",
+      preview: { layout: "event", kicker: "SAVE THE DATE", title: "An evening at MACE", badge: "24 AUG", accent: "#d9b89d", surface: "#392820" },
+      theme: templateTheme({ canvasBackground: "#ded5cf", headingColor: "#32241d", buttonBackground: "#3d291f", contentWidth: 680 }),
+      blocks: [
+        templateLayout("layout-1-2", [
+          [templateBlock("offer", { content: "24 AUG\n6:00 PM\nMACE Davao", background: "#d6b79d", color: "#322219", fontSize: 16, padding: 22 })],
+          [text("SAVE THE DATE", { align: "left", fontSize: 11, letterSpacing: 2, color: "#d8b89f", padding: 8 }), heading("An evening at MACE", { align: "left", fontSize: 37, color: "#ffffff", padding: 8 }), text("Join us for clinic news, thoughtful conversation and personalised skincare guidance.", { align: "left", color: "#eadfd7", padding: 8 }), button("Reserve your place", { align: "left", padding: 8, background: "#d6b79d", borderColor: "#d6b79d", textColor: "#342219" })],
+        ], { columnWidths: [1, 2], gap: 22, padding: 26, background: "#392820", borderRadius: 12 }),
+        image("/brand/clinic.jpg", "MACE clinic event setting", { padding: 14, borderRadius: 10 }),
+        heading("What to expect", { level: "h2", fontSize: 26, padding: 16 }),
+        templateLayout("layout-3", [
+          [text("Clinic updates", { fontSize: 14, padding: 10 })],
+          [text("Skin education", { fontSize: 14, padding: 10 })],
+          [text("One-to-one guidance", { fontSize: 14, padding: 10 })],
+        ], { gap: 8, padding: 12, background: "#f6f1ed" }),
+        templateBlock("social", { padding: 18 }),
+        templateFooter(),
+      ],
+    }),
+    aftercare: () => finish({
+      subject: "Your general MACE aftercare guide",
+      previewText: "Simple general reminders to support comfort after your visit.",
+      preview: { layout: "aftercare", kicker: "CARE GUIDE", title: "After your visit", badge: "✓", accent: "#607970", surface: "#e6ece9" },
+      theme: templateTheme({ canvasBackground: "#e9eeeb", headingColor: "#30443d", textColor: "#4d5f58", buttonBackground: "#506c62", linkColor: "#506c62", contentWidth: 640 }),
+      blocks: [
+        logo({ align: "left", padding: 20 }),
+        text("YOUR GENERAL CARE GUIDE", { align: "left", fontSize: 11, letterSpacing: 2, color: "#6c857c", padding: 16 }),
+        heading("A few reminders after your visit", { align: "left", fontSize: 36, padding: 16 }),
+        text("These are general comfort reminders only. Always follow the personalised guidance provided by your clinician.", { align: "left", fontSize: 15, padding: 16, background: "#eff4f1" }),
+        templateLayout("layout-2", [
+          [heading("First 24 hours", { level: "h2", align: "left", fontSize: 22, padding: 10 }), text("Keep your routine gentle, avoid unnecessary heat and use only products discussed with your clinician.", { align: "left", fontSize: 14, padding: 10 })],
+          [heading("Keep in mind", { level: "h2", align: "left", fontSize: 22, padding: 10 }), text("Comfort and recovery vary. Contact the clinic if you are unsure about anything you notice.", { align: "left", fontSize: 14, padding: 10 })],
+        ], { gap: 14, padding: 16, background: "#f5f8f6", borderWidth: 1, borderColor: "#d1dfd8", borderRadius: 10 }),
+        templateBlock("divider", { padding: 6 }),
+        heading("When to contact us", { level: "h2", align: "left", fontSize: 24, padding: 14 }),
+        text("If you have a concern, contact the clinic directly rather than relying on this general email.", { align: "left", padding: 14 }),
+        button("Contact the clinic", { align: "left", padding: 16 }),
+        templateFooter({ align: "left" }),
+      ],
+    }),
+    consultation: () => finish({
+      subject: "Begin with a personalised MACE consultation",
+      previewText: "Meet the team, discuss your goals and understand the options available to you.",
+      preview: { layout: "consultation", kicker: "YOUR FIRST STEP", title: "Let’s begin with you", image: "/brand/dr-mace.jpg", accent: "#7c523d", surface: "#eee2d9" },
+      theme: templateTheme({ canvasBackground: "#eee6df", headingColor: "#39271e", textColor: "#59483e", buttonBackground: "#684531", contentWidth: 700 }),
+      blocks: [
+        templateLayout("layout-1-2", [
+          [image("/brand/dr-mace.jpg", "Dr. Mace at the clinic", { padding: 0, borderRadius: 10, aspectRatio: "4:3" })],
+          [logo({ align: "left", padding: 10 }), text("YOUR FIRST STEP", { align: "left", fontSize: 11, letterSpacing: 2, color: "#8d634d", padding: 10 }), heading("Let’s begin with you", { align: "left", fontSize: 38, padding: 10 }), text("A consultation is time to discuss your goals, ask questions and understand the options available to you.", { align: "left", padding: 10 }), button("Book a consultation", { align: "left", padding: 10 })],
+        ], { columnWidths: [1, 2], gap: 20, padding: 20, background: "#f5eee8", borderRadius: 12, verticalAlign: "middle" }),
+        heading("What happens next", { level: "h2", fontSize: 27, padding: 18 }),
+        templateLayout("layout-3", [
+          [heading("1", { level: "h3", fontSize: 23, color: "#9b7059", padding: 8 }), heading("Share", { level: "h3", fontSize: 18, padding: 6 }), text("Tell us what matters to you.", { fontSize: 13, padding: 6 })],
+          [heading("2", { level: "h3", fontSize: 23, color: "#9b7059", padding: 8 }), heading("Explore", { level: "h3", fontSize: 18, padding: 6 }), text("Review considered options.", { fontSize: 13, padding: 6 })],
+          [heading("3", { level: "h3", fontSize: 23, color: "#9b7059", padding: 8 }), heading("Decide", { level: "h3", fontSize: 18, padding: 6 }), text("Move forward at your pace.", { fontSize: 13, padding: 6 })],
+        ], { gap: 10, padding: 14 }),
+        templateBlock("social", { padding: 18 }),
+        templateFooter(),
+      ],
+    }),
+  };
+
+  return (designs[id] || designs["monthly-newsletter"])();
+}
+
+const starterTemplates = starterTemplateDefinitions.map((template) => ({
+  ...template,
+  ...createStarterTemplateDesign(template.id),
+}));
 
 function createDefaultDraft() {
   return {
@@ -549,7 +786,8 @@ export default function MarketingWorkspace({
     const design = template.design && typeof template.design === "object" ? template.design : template;
     beginCampaign({
       name: template.name,
-      subject: template.name,
+      subject: template.subject || template.name,
+      previewText: template.previewText || template.description || "",
       step: 2,
       editorMode: design.editorMode === "html" ? "html" : "visual",
       html: template.html || "",
@@ -973,6 +1211,25 @@ function DeletedCampaignsPage({ askConfirm, deletedCampaigns, deleteCampaignFore
   );
 }
 
+function TemplateCardPreview({ index, template }) {
+  if (template.thumbnail) return <div className="marketing-template-preview has-thumbnail"><img src={template.thumbnail} alt="" /></div>;
+  if (!template.preview) return <div className={`marketing-template-preview generic preview-${index % 4}`}><span>MACE</span><i /><i /><b /></div>;
+  const preview = template.preview;
+  return (
+    <div
+      className={`marketing-template-preview is-starter template-preview-${preview.layout}`}
+      data-template-layout={preview.layout}
+      style={{ "--template-accent": preview.accent, "--template-surface": preview.surface }}
+    >
+      <div className="template-mini-brand">MACE</div>
+      {preview.image ? <div className="template-mini-media"><img src={preview.image} alt="" /></div> : null}
+      <div className="template-mini-copy"><span>{preview.kicker}</span><strong>{preview.title}</strong><i /><i /><b /></div>
+      {preview.badge ? <div className="template-mini-badge">{preview.badge}</div> : null}
+      <div className="template-mini-marks"><i /><i /><i /></div>
+    </div>
+  );
+}
+
 function TemplatesPage({ onDeleteTemplate, onDuplicateTemplate, onUseTemplate, savedTemplates, templates }) {
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const allTemplates = [...starterTemplates, ...savedTemplates];
@@ -983,7 +1240,7 @@ function TemplatesPage({ onDeleteTemplate, onDuplicateTemplate, onUseTemplate, s
         <div className="marketing-template-grid">
           {allTemplates.map((template, index) => (
             <article className="marketing-template-card" key={`${template.id}-${index}`}>
-              <div className={`marketing-template-preview preview-${index % 4}`}>{template.thumbnail ? <img src={template.thumbnail} alt="" /> : <><span>MACE</span><i /><i /><b /></>}</div>
+              <TemplateCardPreview index={index} template={template} />
               <div><span>{template.category || "Saved design"}</span><h3>{template.name}</h3><p>{template.description || "A reusable design saved from the campaign builder."}</p></div>
               <div className="marketing-template-actions">
                 <button onClick={() => onUseTemplate(template)} type="button">{savedTemplates.some((item) => item.id === template.id) ? "Edit design" : "Use template"}</button>
