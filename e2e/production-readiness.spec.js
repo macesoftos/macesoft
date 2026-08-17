@@ -68,7 +68,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page).toHaveURL(/\/appointments$/);
   await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Back to applications" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to dashboard" })).toBeVisible();
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();

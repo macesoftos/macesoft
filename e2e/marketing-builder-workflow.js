@@ -336,7 +336,8 @@ export async function verifyMarketingBuilder(page, expect) {
   await savedTemplatePreview.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.getByRole("button", { name: "Show Marketing menu" }).click();
-  await page.getByRole("button", { name: "Return to MACE applications" }).click();
+  await page.getByRole("button", { name: "Return to MACE dashboard" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
   await page.getByRole("button", { name: "My Workspace", exact: true }).click();
   await expect(page.getByLabel(/open account menu for/i)).toBeVisible();
 

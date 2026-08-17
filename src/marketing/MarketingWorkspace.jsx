@@ -720,7 +720,7 @@ export default function MarketingWorkspace({
   loadMarketingMedia,
   moveCampaignToDeleted,
   notify,
-  onOpenGlobalNavigation,
+  onOpenDashboard,
   openModal,
   restoreCampaign,
   saveCampaign,
@@ -889,12 +889,12 @@ export default function MarketingWorkspace({
       <aside className="marketing-sidebar" aria-label="Marketing workspace navigation">
         <button
           className="marketing-sidebar-brand"
-          onClick={onOpenGlobalNavigation}
+          onClick={onOpenDashboard}
           type="button"
-          aria-label="Return to MACE applications"
+          aria-label="Return to MACE dashboard"
         >
           <img src="/brand/mace-logo.png" alt="MACE" />
-          <span>Applications</span>
+          <span>Dashboard</span>
           <ArrowLeft size={16} aria-hidden="true" />
         </button>
         <button
@@ -953,7 +953,7 @@ export default function MarketingWorkspace({
             askConfirm={askConfirm}
             loadMedia={loadMarketingMedia}
             onBack={() => navigate("campaigns")}
-            onOpenGlobalNavigation={onOpenGlobalNavigation}
+            onOpenDashboard={onOpenDashboard}
             onSaveCampaign={saveCampaign}
             onScheduleCampaign={scheduleCampaign}
             onSaveTemplate={persistTemplate}
@@ -967,7 +967,7 @@ export default function MarketingWorkspace({
             <MarketingHeader
               mode={route.mode}
               onCreate={() => beginCampaign()}
-              onOpenGlobalNavigation={onOpenGlobalNavigation}
+              onOpenDashboard={onOpenDashboard}
               section={route.section}
             />
             <div className="marketing-page-scroll">
@@ -1042,14 +1042,14 @@ export default function MarketingWorkspace({
   );
 }
 
-function MarketingHeader({ mode, onCreate, onOpenGlobalNavigation, section }) {
+function MarketingHeader({ mode, onCreate, onOpenDashboard, section }) {
   const sectionLabel = workspaceNavigation.find((item) => item.id === section)?.label ?? "Overview";
   const isDeleted = section === "campaigns" && mode === "deleted";
   const label = isDeleted ? "Deleted campaigns" : sectionLabel;
   return (
     <header className="marketing-header">
       <div className="marketing-heading-row">
-        <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications">
+        <button className="marketing-global-menu" onClick={onOpenDashboard} type="button" aria-label="Return to MACE dashboard">
           <Menu size={20} aria-hidden="true" />
         </button>
         <div>
@@ -1648,7 +1648,7 @@ function MarketingSettingsPage({ canApproveMarketing, notify, openModal, saveMar
   );
 }
 
-function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
+function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenDashboard, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
@@ -2192,7 +2192,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
     <div className={`marketing-builder builder-step-${draft.step}`}>
       <header className="marketing-builder-header">
         <div className="marketing-builder-title">
-          <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications"><Menu size={20} /></button>
+          <button className="marketing-global-menu" onClick={onOpenDashboard} type="button" aria-label="Return to MACE dashboard"><Menu size={20} /></button>
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
           <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value={draft.status || "Draft"} /></h1></div>
           <label className="marketing-builder-branch"><span>Branch</span><select aria-label="Campaign branch" value={draft.branch || ""} onChange={(event) => updateDraft({ branch: event.target.value })}><option value="" disabled>Select a branch</option>{draft.id && draft.branch === "All branches" ? <option value="All branches">Organization-wide legacy</option> : null}{branches.map((branch) => <option key={branch.id || branch.name} value={branch.name}>{branch.name}</option>)}</select></label>

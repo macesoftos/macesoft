@@ -2394,7 +2394,7 @@ function App() {
       <>
         <FlipbooksWorkspace
           notify={notify}
-          onExit={() => setActiveModule("applications")}
+          onExit={() => setActiveModule("overview")}
           session={session}
         />
         {toast && <Toast toast={toast} />}
@@ -2512,9 +2512,9 @@ function App() {
                   <button
                     className="topbar-back-button"
                     type="button"
-                    onClick={() => setActiveModule("applications")}
-                    title="Back to applications"
-                    aria-label="Back to applications"
+                    onClick={() => setActiveModule("overview")}
+                    title="Back to dashboard"
+                    aria-label="Back to dashboard"
                   >
                     <ArrowLeft size={18} aria-hidden="true" />
                   </button>
@@ -2575,7 +2575,7 @@ function App() {
 
         <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""} ${isFlipbooksView ? "flipbooks-content-area" : ""}`}>
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
-          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("applications")} />}
+          {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
             <Dashboard
               session={session}
@@ -2791,7 +2791,7 @@ function App() {
               settings={settings}
               openModal={openModal}
               askConfirm={askConfirm}
-              onOpenGlobalNavigation={() => setActiveModule("applications")}
+              onOpenDashboard={() => setActiveModule("overview")}
               moveCampaignToDeleted={moveCampaignToDeleted}
               restoreCampaign={restoreCampaign}
               deleteCampaignForever={deleteCampaignForever}
