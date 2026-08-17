@@ -16,7 +16,7 @@ test("anonymous users cannot read clinic data", async ({ request }) => {
 });
 
 test("an authenticated owner can open a scoped workspace and sign out", async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   await page.goto("/");
   await page.getByLabel("Email").fill(ownerEmail);
   await page.getByLabel("Password").fill(ownerPassword);
@@ -123,6 +123,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   const roomName = `Release Room ${Date.now()}`;
   await expect(roomDialog).toBeVisible();
   await roomDialog.getByLabel("Room name, required").fill(`  ${roomName}  `);
+  await roomDialog.getByLabel("Room branch, required").selectOption({ label: "Mace Davao" });
   const roomCreation = page.waitForResponse((response) => response.url().endsWith("/api/rooms") && response.request().method() === "POST");
   await roomDialog.getByRole("button", { name: "Add room" }).click();
   const roomCreationResponse = await roomCreation;

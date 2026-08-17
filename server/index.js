@@ -29,6 +29,7 @@ import {
   canAccessBranch,
   canMutateBranch,
   filterServiceBranches,
+  hasOrganizationPermission,
   hasOrganizationWideAccess,
   hasValidBranchAssignment,
   isAllBranches,
@@ -36,6 +37,16 @@ import {
   moduleAllowed,
   requiredModuleForApiRequest,
 } from "./accessControl.js";
+import {
+  ALL_BRANCHES_ID,
+  accountAccessInclude,
+  branchManagementInclude,
+  branchStatuses,
+  enabledModulesForBranch,
+  normalizeBranchCode,
+  parsePermissionList,
+  resolveAccountBranchAccess,
+} from "./branchAccess.js";
 import {
   assertGiftCertificateUsable,
   assertPackageRedeemable,
@@ -60,6 +71,25 @@ import {
   renderMarketingHtml,
   sanitizeMarketingHtml,
 } from "./marketingHtml.js";
+import {
+  INVITATION_DELIVERY_STATUSES,
+  INVITATION_PERMISSION_LABELS,
+  INVITATION_PERMISSIONS,
+  INVITATION_STATUSES,
+  actorPermissions,
+  assertAssignableInvitationRole,
+  assertPrivilegedConfirmation,
+  assertRequestedModules,
+  assertRequestedPermissions,
+  assignableInvitationRoles,
+  canInviteUsers,
+  canManageInvitation,
+  invitationScopeWhere,
+  isBranchManager,
+  normalizeEmail,
+  sanitizeInvitationMessage,
+  uniqueStrings,
+} from "./invitations.js";
 import {
   normalizeMarketingMediaName,
   normalizeMarketingMediaSelection,
@@ -193,6 +223,13 @@ const publicWriteLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: { error: "Too many requests. Please wait one minute." },
+});
+const invitationSendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.INVITATION_RATE_LIMIT || 20),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many invitation attempts. Please wait 15 minutes." },
 });
 
 app.use("/api", apiLimiter);
@@ -700,6 +737,7 @@ function actorFromRequest(request) {
       name: clean(request.get("x-mace-user-name")) || "System",
       role: clean(request.get("x-mace-role")),
       branch: clean(request.get("x-mace-branch")) || "All branches",
+      organizationId: clean(request.get("x-mace-organization-id")) || "org-mace",
     };
   }
   return { id: "", name: "System", role: "", branch: "All branches" };
@@ -732,15 +770,32 @@ function assertReadAllowed(request, moduleId) {
   return actor;
 }
 
-function auditData(request, { action, area, details }) {
+function auditData(request, {
+  action,
+  area,
+  details,
+  branchId = undefined,
+  subjectType = "",
+  subjectId = "",
+  beforeValues = {},
+  afterValues = {},
+}) {
   const actor = actorFromRequest(request);
   return {
     time: new Date().toLocaleString("en-PH"),
     actor: actor.name,
     role: actor.role || "System",
+    // Only session-backed actors are guaranteed to reference a persisted
+    // Account. Test-only trusted headers and service actors remain snapshots.
+    actorAccountId: request.authSession && actor.id ? actor.id : null,
+    branchId: branchId === undefined ? (actor.access?.scope === "branch" ? actor.access.activeBranchId : null) : branchId,
     area,
     action,
+    subjectType,
+    subjectId,
     details,
+    beforeValues: jsonText(beforeValues, {}),
+    afterValues: jsonText(afterValues, {}),
   };
 }
 
@@ -769,6 +824,7 @@ const notificationTitles = {
 async function createAppNotification(tx, {
   actor = "System",
   branches = ["All branches"],
+  recipientAccountIds = [],
   message,
   module,
   recordId = "",
@@ -778,6 +834,7 @@ async function createAppNotification(tx, {
     data: {
       actor: clean(actor) || "System",
       branches: normalizeNotificationBranches(branches),
+      recipientAccountIds: uniqueStrings(recipientAccountIds),
       message: requireText(message, "Notification message"),
       module: requireText(module, "Notification module"),
       recordId: clean(recordId),
@@ -897,6 +954,9 @@ async function normalizeAppointmentPayload(payload, existingId = "") {
       throw apiError("Selected service is not offered at this branch.", 409);
     }
   }
+  if (client && client.branch !== data.branch) {
+    throw apiError("The selected client belongs to another branch.", 409);
+  }
 
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -960,6 +1020,7 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
     client: clean(client?.fullName) || requireText(payload.client, "Client"),
     date: requireText(payload.date, "Treatment date"),
     service: requireText(payload.service, "Service"),
+    branch: requireText(payload.branch || client.branch, "Branch"),
     provider: clean(payload.provider),
     room: clean(payload.room),
     preNotes: clean(payload.preNotes),
@@ -972,6 +1033,7 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
     outcome: clean(payload.outcome),
     satisfaction: clean(payload.satisfaction),
   };
+  if (client.branch !== data.branch) throw apiError("The selected client belongs to another branch.", 409);
 
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -1096,11 +1158,26 @@ function normalizeStaffPayload(payload, existingId = "") {
   return data;
 }
 
+function assertStaffAccessMutation(request, data, existing = null) {
+  const actor = actorFromRequest(request);
+  if (canManageOrganization(actor.role)) return;
+  if (!isBranchManager(actor.role) || !actorPermissions(actor).includes("staff.manage")) {
+    throw apiError("You do not have permission to assign employee roles or branch access.", 403);
+  }
+  if (!canAccessBranch(actor, data.branch) || (existing?.branch && !canAccessBranch(actor, existing.branch))) {
+    throw apiError("This employee belongs to another branch.", 403);
+  }
+  assertAssignableInvitationRole(actor, data.role, roleAccess);
+}
+
 async function validateLinkedStaffIdentity(data, existingId = "") {
   if (!existingId) return;
   const linkedAccount = await prisma.account.findFirst({ where: { staffId: existingId } });
-  if (linkedAccount && !accountMatchesStaffIdentity(linkedAccount, data)) {
-    throw apiError("Disconnect this staff profile's login before changing its name, role, or branch.", 409);
+  const sameIdentity = linkedAccount
+    && clean(linkedAccount.name).toLocaleLowerCase("en") === clean(data.name).toLocaleLowerCase("en")
+    && clean(linkedAccount.role).toLocaleLowerCase("en") === clean(data.role).toLocaleLowerCase("en");
+  if (linkedAccount && !sameIdentity) {
+    throw apiError("Disconnect this staff profile's login before changing its name or role.", 409);
   }
 }
 
@@ -1125,6 +1202,9 @@ async function normalizePackagePayload(payload, existingId = "") {
     status: clean(payload.status) || (used >= sessions && sessions > 0 ? "Completed" : "Active"),
     price: numberValue(payload.price, "Package price", { min: 0 }),
   };
+  if (client && data.branch !== "All branches" && client.branch !== data.branch) {
+    throw apiError("The selected client belongs to another branch.", 409);
+  }
 
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -1278,9 +1358,62 @@ function serializeBranch(branch) {
   return {
     ...branch,
     devices: parseJsonList(branch.devices),
+    operatingHours: parseJsonObject(branch.operatingHours, {}),
     rooms: roomRecords.map((room) => room.name),
     roomRecords,
+    modules: Array.isArray(branch.modules)
+      ? branch.modules.map((item) => ({ moduleId: item.moduleId, enabled: item.enabled }))
+      : [],
+    enabledModules: Array.isArray(branch.modules)
+      ? branch.modules.filter((item) => item.enabled).map((item) => item.moduleId)
+      : [],
+    managers: Array.isArray(branch.memberships)
+      ? branch.memberships
+        .filter((membership) => ["Branch Manager", "Admin"].includes(membership.role) && membership.status === "Active")
+        .map((membership) => ({
+          membershipId: membership.id,
+          role: membership.role,
+          permissions: parsePermissionList(membership.permissions),
+          ...(membership.account || {}),
+        }))
+      : [],
+    employeeCount: Number(branch.employeeCount ?? branch._count?.memberships ?? branch.staff ?? 0),
   };
+}
+
+async function syncStaffBranchAssignment(tx, request, staff, _data, previous = null) {
+  if (!previous || previous.branch === staff.branch) return;
+  const branch = await tx.branch.findFirst({
+    where: { organizationId: actorFromRequest(request).organizationId, name: staff.branch, status: "Active" },
+    select: { id: true, name: true },
+  });
+  if (!branch) throw apiError("Choose an active branch in this organization.", 400);
+  const linkedAccount = await tx.account.findFirst({ where: { staffId: staff.id } });
+  if (linkedAccount && !["Branch Manager", "Admin"].includes(staff.role)) {
+    await tx.branchMembership.updateMany({
+      where: { accountId: linkedAccount.id },
+      data: { isPrimary: false, status: "Inactive" },
+    });
+    await tx.branchMembership.upsert({
+      where: { branchId_accountId: { branchId: branch.id, accountId: linkedAccount.id } },
+      create: { branchId: branch.id, accountId: linkedAccount.id, role: staff.role, isPrimary: true },
+      update: { role: staff.role, status: "Active", isPrimary: true },
+    });
+    await tx.account.update({
+      where: { id: linkedAccount.id },
+      data: { branch: branch.name, lastBranchId: branch.id, role: staff.role },
+    });
+  }
+  await writeAudit(tx, request, {
+    area: "Branches",
+    action: "Employee transferred",
+    branchId: branch.id,
+    subjectType: "StaffMember",
+    subjectId: staff.id,
+    details: `${staff.name} transferred from ${previous.branch} to ${staff.branch}; historical records retain their original branch.`,
+    beforeValues: { branch: previous.branch, role: previous.role },
+    afterValues: { branch: staff.branch, role: staff.role },
+  });
 }
 
 function serializeLead(lead) {
@@ -1487,7 +1620,7 @@ const resourceConfigs = {
     include: treatmentPhotoInclude,
     serialize: serializeTreatmentWithPhotos,
     reloadAfterWrite: true,
-    clientBranch: true,
+    branchField: "branch",
     relatedClient: true,
   },
   packages: {
@@ -1499,6 +1632,7 @@ const resourceConfigs = {
     normalize: normalizePackagePayload,
     branchField: "branch",
     relatedClient: true,
+    allowLegacyOrganizationScope: true,
   },
   giftCertificates: {
     delegate: "giftCertificate",
@@ -1508,6 +1642,7 @@ const resourceConfigs = {
     orderBy: [{ expires: "asc" }],
     normalize: normalizeGiftCertificatePayload,
     branchField: "branch",
+    allowLegacyOrganizationScope: true,
   },
   leads: {
     delegate: "lead",
@@ -1538,6 +1673,7 @@ const resourceConfigs = {
     orderBy: [{ name: "asc" }],
     normalize: normalizeStaffPayload,
     beforeWrite: validateLinkedStaffIdentity,
+    afterWrite: syncStaffBranchAssignment,
     branchField: "branch",
   },
   expenses: {
@@ -1573,6 +1709,7 @@ const resourceConfigs = {
     orderBy: [{ updatedAt: "desc" }],
     normalize: normalizeCampaignPayload,
     branchField: "branch",
+    allowLegacyOrganizationScope: true,
   },
   transactions: {
     delegate: "sale",
@@ -1593,6 +1730,7 @@ const resourceConfigs = {
     orderBy: [{ createdAt: "desc" }],
     normalize: normalizeAuditPayload,
     readOnly: true,
+    stableBranchField: "branchId",
   },
   inventoryMovements: {
     delegate: "inventoryMovement",
@@ -1619,6 +1757,14 @@ async function listResource(resource, actor = null) {
   let where = {};
   if (actor) {
     if (config.branchField) where = branchWhere(actor, config.branchField);
+    if (config.stableBranchField) {
+      where = actor.access?.scope === "all"
+        ? { OR: [
+          { [config.stableBranchField]: { in: actor.access?.branches?.map((branch) => branch.id) || [] } },
+          { [config.stableBranchField]: null, actorAccount: { is: { organizationId: actor.organizationId } } },
+        ] }
+        : { [config.stableBranchField]: actor.access?.activeBranchId || "__none__" };
+    }
     if (config.clientBranch) {
       where = { clientRecord: { is: branchWhere(actor) } };
     }
@@ -1670,6 +1816,35 @@ async function assertResourceMutationAllowed(request, config, record) {
   }
   assertServiceBranchChangeAllowed(actor, config, record);
   return actor;
+}
+
+function branchScopedPayload(request, payload, config) {
+  if (!config?.branchField) return payload ?? {};
+  const actor = actorFromRequest(request);
+  const access = actor.access;
+  if (!access) return payload ?? {};
+  const suppliedBranch = clean(payload?.[config.branchField]);
+  if (
+    request.params?.id
+    && config.allowLegacyOrganizationScope
+    && isAllBranches(suppliedBranch)
+    && hasOrganizationWideAccess(actor)
+  ) {
+    return payload ?? {};
+  }
+  if (access.scope === "branch") {
+    const activeBranch = clean(access.activeBranch?.name);
+    if (suppliedBranch && suppliedBranch !== activeBranch) {
+      throw apiError(`Switch to ${suppliedBranch} before creating or editing records there.`, 409);
+    }
+    return { ...(payload ?? {}), [config.branchField]: activeBranch };
+  }
+  if (!suppliedBranch || isAllBranches(suppliedBranch)) {
+    throw apiError("Choose a specific active branch while using All Branches.", 400);
+  }
+  const allowed = access.branches?.some((branch) => branch.name === suppliedBranch && branch.branchStatus === "Active");
+  if (!allowed) throw apiError("Choose an active branch in your organization.", 403);
+  return payload ?? {};
 }
 
 async function getPersistedSettings() {
@@ -2052,10 +2227,10 @@ async function detectLeadDuplicate(tx, normalized, branch) {
 async function routeIncomingLead(tx, normalized, { defaultBranch = "", allowPayloadBranch = false } = {}) {
   let branch = clean(defaultBranch) || (allowPayloadBranch ? clean(normalized.branch) : "");
   if (!branch) {
-    const firstBranch = await tx.branch.findFirst({ orderBy: { name: "asc" } });
+    const firstBranch = await tx.branch.findFirst({ where: { status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, orderBy: { name: "asc" } });
     branch = firstBranch?.name || "All branches";
   } else {
-    const configuredBranch = await tx.branch.findUnique({ where: { name: branch }, select: { id: true } });
+    const configuredBranch = await tx.branch.findFirst({ where: { name: branch, status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, select: { id: true } });
     if (!configuredBranch) throw apiError("The lead integration is assigned to an unavailable branch.", 409);
   }
   let owner = clean(normalized.owner);
@@ -2433,11 +2608,6 @@ function normalizePhone(value) {
   return countryCode ? `+${countryCode}${digits.replace(/^0+/, "")}` : digits;
 }
 
-function normalizeEmail(value) {
-  const email = clean(value).toLowerCase();
-  return email.includes("@") ? email : "";
-}
-
 function dateAgeDays(value) {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return null;
@@ -2463,6 +2633,8 @@ function matchesMarketingSegment(client, campaign) {
 
   if (segment.includes("birthday")) return isBirthdayMonth(client);
   if (segment.includes("vip")) return tag.includes("vip");
+  if (segment.includes("inactive 60")) return lastVisitAge !== null && lastVisitAge >= 60;
+  if (segment.includes("inactive 30")) return lastVisitAge !== null && lastVisitAge >= 30;
   if (segment.includes("inactive")) return retention.includes("inactive") || (lastVisitAge !== null && lastVisitAge >= 90);
   if (segment.includes("new")) return retention.includes("new") || source.includes("online");
   if (segment.includes("package")) return Boolean(packageBalance && packageBalance !== "none");
@@ -2472,7 +2644,12 @@ function matchesMarketingSegment(client, campaign) {
 }
 
 function selectMarketingRecipients({ clients, campaign, channel }) {
-  const candidates = clients.filter((client) => client.marketingOptIn !== false && matchesMarketingSegment(client, campaign));
+  const matchesCampaignBranch = (record) => isAllBranches(campaign.branch) || clean(record.branch) === clean(campaign.branch);
+  const candidates = clients.filter((client) => (
+    matchesCampaignBranch(client)
+    && client.marketingOptIn !== false
+    && matchesMarketingSegment(client, campaign)
+  ));
   const recipients = [];
 
   candidates.forEach((client) => {
@@ -2663,6 +2840,20 @@ async function sendSmtpEmail({ transporter, to, subject, text, html = "" }) {
   return result.messageId;
 }
 
+async function listBranchesForBootstrap(actor) {
+  const organizationManager = canManageOrganization(actor.role) || hasOrganizationPermission(actor, "branches.manage");
+  const where = organizationManager
+    ? { organizationId: actor.organizationId }
+    : { id: { in: actor.access?.branches?.map((branch) => branch.id) || [] }, status: "Active" };
+  const rows = await prisma.branch.findMany({
+    where,
+    orderBy: [{ name: "asc" }],
+    include: organizationManager ? branchManagementInclude() : { rooms: true, modules: true },
+  });
+  const counts = await Promise.all(rows.map((branch) => prisma.staffMember.count({ where: { branch: branch.name } })));
+  return rows.map((branch, index) => serializeBranch({ ...branch, employeeCount: counts[index] }));
+}
+
 async function buildBootstrapPayload(actor) {
   const [
     clients,
@@ -2702,16 +2893,12 @@ async function buildBootstrapPayload(actor) {
     listResource("campaigns", actor),
     listResource("auditLogs", actor),
     listResource("inventoryMovements", actor),
-    prisma.branch.findMany({
-      where: hasOrganizationWideAccess(actor) ? {} : { name: actor.branch },
-      orderBy: [{ name: "asc" }],
-      include: { rooms: true },
-    }),
+    listBranchesForBootstrap(actor),
     getPersistedSettings(),
     moduleAllowed(actor, "leads", roleAccess) ? listLeadIntegrations() : [],
     moduleAllowed(actor, "leads", roleAccess)
       ? prisma.webhookEvent.findMany({
-        where: hasOrganizationWideAccess(actor) ? {} : { lead: { is: { branch: actor.branch } } },
+        where: { lead: { is: branchWhere(actor) } },
         orderBy: [{ receivedAt: "desc" }],
         take: 50,
       })
@@ -2735,7 +2922,7 @@ async function buildBootstrapPayload(actor) {
     campaigns,
     auditLogs,
     inventoryMovements,
-    branches: branches.map(serializeBranch),
+    branches,
     settings,
     leadIntegrations,
     webhookEvents,
@@ -2937,25 +3124,27 @@ function hashPassword(password) {
   return `scrypt$${salt}$${scryptSync(password, salt, 64).toString("hex")}`;
 }
 
-function publicAccount(account) {
+function publicAccount(account, requestedBranchId = "") {
   const safeAccount = account?.staffId && Object.hasOwn(account, "staff") && !accountMatchesStaffIdentity(account, account.staff)
     ? { ...account, staffId: null }
     : account;
-  const modules = roleAccess[account.role] || [];
+  const access = safeAccount?.access || resolveAccountBranchAccess(safeAccount, requestedBranchId, roleAccess);
   return {
     id: safeAccount.id,
     staffId: safeAccount.staffId,
     name: safeAccount.name,
     email: safeAccount.email,
-    role: safeAccount.role,
-    branch: safeAccount.branch || "",
+    role: access.scope === "branch" && access.activeBranch?.role ? access.activeBranch.role : safeAccount.role,
+    branch: access.scope === "all" ? "All branches" : access.activeBranch?.name || safeAccount.branch || "",
+    organizationId: safeAccount.organizationId || "",
+    organizationWideAccess: access.organizationWide,
+    organizationPermissions: parsePermissionList(safeAccount.organizationPermissions),
+    organizationModules: parsePermissionList(safeAccount.organizationModules),
     status: safeAccount.status,
     mustChangePassword: safeAccount.mustChangePassword,
-    access: {
-      active: account.status === "Active" && modules.length > 0,
-      branchScoped: !hasOrganizationWideAccess(account),
-      modules,
-    },
+    createdAt: safeAccount.createdAt,
+    updatedAt: safeAccount.updatedAt,
+    access: { ...access, branchScoped: access.scope !== "all" },
   };
 }
 
@@ -2980,7 +3169,7 @@ async function accountFromSession(request) {
   if (!token) return null;
   const session = await prisma.authSession.findUnique({
     where: { tokenHash: sessionTokenHash(token) },
-    include: { account: { include: { staff: true } } },
+    include: { account: { include: accountAccessInclude } },
   });
   if (!session || session.expiresAt <= new Date() || session.account.status !== "Active" || !hasValidBranchAssignment(session.account)) {
     if (session) await prisma.authSession.delete({ where: { id: session.id } }).catch(() => {});
@@ -2989,7 +3178,20 @@ async function accountFromSession(request) {
   const account = session.account.staffId && !accountMatchesStaffIdentity(session.account, session.account.staff)
     ? { ...session.account, staffId: null }
     : session.account;
-  return { token, session, account };
+  const actor = publicAccount(account, request.get("x-mace-branch-id"));
+  return {
+    token,
+    session,
+    account: {
+      ...account,
+      baseRole: account.role,
+      role: actor.role,
+      branch: actor.branch,
+      organizationWideAccess: actor.organizationWideAccess,
+      access: actor.access,
+    },
+    actor,
+  };
 }
 
 function requireAuthenticatedAccount(request) {
@@ -2997,70 +3199,284 @@ function requireAuthenticatedAccount(request) {
   return request.authAccount;
 }
 
-const invitationStatuses = ["Pending", "Accepted", "Expired", "Revoked", "Failed"];
-const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1000;
+const invitationLifetimeDays = Math.min(30, Math.max(1, Number(process.env.INVITATION_EXPIRY_DAYS || 7)));
+const invitationLifetimeMs = invitationLifetimeDays * 24 * 60 * 60 * 1000;
+const organizationManagerRoles = ["Owner", "Business Owner", "Super Admin"];
+const invitationInclude = {
+  organization: { select: { id: true, name: true } },
+  invitedBy: { select: { id: true, name: true, email: true } },
+  acceptedBy: { select: { id: true, name: true, email: true } },
+  revokedBy: { select: { id: true, name: true, email: true } },
+  branches: {
+    include: { branch: { include: { modules: true } } },
+    orderBy: { createdAt: "asc" },
+  },
+};
 
 function requireInvitationManager(request) {
-  const account = requireAuthenticatedAccount(request);
-  if (!canManageOrganization(account.role)) {
-    throw apiError("Only an Admin or Business Owner can manage invitations.", 403);
+  requireAuthenticatedAccount(request);
+  const actor = actorFromRequest(request);
+  if (!canInviteUsers(actor)) {
+    throw apiError("You do not have permission to invite organization members.", 403);
   }
-  return account;
+  return actor;
 }
 
+function invitationNames(payload) {
+  const legacyName = clean(payload?.name);
+  const nameParts = legacyName.split(/\s+/).filter(Boolean);
+  const firstName = requireText(payload?.firstName || nameParts.shift(), "First name").slice(0, 100);
+  const lastName = requireText(payload?.lastName || nameParts.join(" "), "Last name").slice(0, 100);
+  return { firstName, lastName, name: `${firstName} ${lastName}`.trim() };
+}
+
+async function invitationBranches(actor, role, payload, fallbackBranches = []) {
+  if (canManageOrganization(role)) {
+    const supplied = uniqueStrings(payload?.branchIds).length || (clean(payload?.branch) && !isAllBranches(payload.branch));
+    if (supplied) throw apiError("Organization-wide roles must not use a stored branch assignment.", 400);
+    return [];
+  }
+
+  let branchIds = uniqueStrings(payload?.branchIds, 25);
+  if (!branchIds.length && clean(payload?.branch) && !isAllBranches(payload.branch)) {
+    const legacyBranch = await prisma.branch.findFirst({
+      where: { organizationId: actor.organizationId, name: clean(payload.branch), status: "Active" },
+      select: { id: true },
+    });
+    if (legacyBranch) branchIds = [legacyBranch.id];
+  }
+  if (!branchIds.length) branchIds = fallbackBranches.map((item) => item.branchId || item.id).filter(Boolean);
+  if (!branchIds.length) throw apiError("Choose at least one active clinic branch.", 400);
+
+  if (!canManageOrganization(actor.role)) {
+    const activeBranchId = actor.access?.activeBranchId;
+    if (branchIds.length !== 1 || branchIds[0] !== activeBranchId) {
+      throw apiError("You can only invite members to your currently active branch.", 403);
+    }
+  }
+
+  const records = await prisma.branch.findMany({
+    where: { id: { in: branchIds }, organizationId: actor.organizationId, status: "Active" },
+    include: { modules: true },
+  });
+  if (records.length !== branchIds.length) throw apiError("One or more selected branches are unavailable.", 403);
+  const byId = new Map(records.map((branch) => [branch.id, branch]));
+  return branchIds.map((id) => byId.get(id));
+}
+
+async function normalizeInvitationInput(actor, payload, current = null) {
+  const role = assertAssignableInvitationRole(actor, requireText(payload?.role || current?.role, "Role"), roleAccess);
+  assertPrivilegedConfirmation(actor, role, payload?.confirmOrganizationAccess === true || (current && current.role === role));
+  const names = invitationNames({
+    firstName: payload?.firstName ?? current?.firstName,
+    lastName: payload?.lastName ?? current?.lastName,
+    name: payload?.name ?? current?.name,
+  });
+  const branches = await invitationBranches(actor, role, payload, current?.branches || []);
+  const permissions = assertRequestedPermissions(actor, payload?.permissions ?? parseJsonList(current?.permissions));
+  const modules = assertRequestedModules(actor, role, payload?.modules ?? (current ? parseJsonList(current.modules) : undefined), branches, roleAccess);
+  return {
+    ...names,
+    role,
+    branches,
+    branch: branches[0]?.name || "",
+    modules,
+    permissions,
+    department: boundedPublicText(payload?.department ?? current?.department, "Department", 120),
+    specialty: boundedPublicText(payload?.specialty ?? current?.specialty, "Specialty", 120),
+    position: boundedPublicText(payload?.position ?? current?.position, "Position", 120),
+    message: sanitizeInvitationMessage(payload?.message ?? current?.message),
+  };
+}
+
+function publicInvitation(invitation) {
+  const {
+    tokenHash: _tokenHash,
+    organization: organizationRecord,
+    invitedBy: inviter,
+    acceptedBy: acceptor,
+    revokedBy: revoker,
+    branches: assignments = [],
+    ...safe
+  } = invitation;
+  const effectiveStatus = safe.status === "Pending" && safe.expiresAt <= new Date() ? "Expired" : safe.status;
+  return {
+    ...safe,
+    status: effectiveStatus,
+    modules: parseJsonList(safe.modules),
+    permissions: parseJsonList(safe.permissions),
+    organization: organizationRecord ? { id: organizationRecord.id, name: organizationRecord.name } : undefined,
+    invitedBy: inviter ? { id: inviter.id, name: inviter.name } : undefined,
+    acceptedBy: acceptor ? { id: acceptor.id, name: acceptor.name } : undefined,
+    revokedBy: revoker ? { id: revoker.id, name: revoker.name } : undefined,
+    branchIds: assignments.map((assignment) => assignment.branchId),
+    branches: assignments.map((assignment) => ({
+      id: assignment.branchId,
+      name: assignment.branch?.name || "",
+      status: assignment.branch?.status || "",
+    })),
+  };
+}
+
+function publicInvitationSummary(invitation, accountExists = false) {
+  const safe = publicInvitation(invitation);
+  return {
+    id: safe.id,
+    name: safe.name,
+    firstName: safe.firstName,
+    email: safe.email,
+    role: safe.role,
+    position: safe.position,
+    organization: safe.organization,
+    branches: safe.branches,
+    status: safe.status,
+    expiresAt: safe.expiresAt,
+    accountExists,
+  };
+}
+
+function invitationUrl(token) {
+  const configuredOrigin = clean(process.env.APP_ORIGIN).split(",")[0];
+  if (!configuredOrigin && process.env.NODE_ENV === "production") {
+    throw apiError("Invitation email requires APP_ORIGIN to be configured.", 503);
+  }
+  const origin = configuredOrigin || `http://127.0.0.1:${port}`;
+  return `${origin.replace(/\/$/, "")}/accept-invitation?token=${encodeURIComponent(token)}`;
+}
+
+function invitationEmailContent(invitation, token, inviter) {
+  const acceptUrl = invitationUrl(token);
+  const branchNames = invitation.branches?.map((assignment) => assignment.branch?.name).filter(Boolean) || [];
+  const organizationName = invitation.organization?.name || "MACE by Dr. Mace";
+  const expires = invitation.expiresAt.toLocaleString("en-PH", { dateStyle: "long", timeStyle: "short" });
+  const assignment = branchNames.length ? branchNames.join(", ") : "Organization-wide";
+  const text = [
+    `Hello ${invitation.firstName || invitation.name},`,
+    "",
+    `${inviter.name} invited you to join ${organizationName}.`,
+    `Role: ${invitation.role}`,
+    `Branch: ${assignment}`,
+    invitation.position ? `Position: ${invitation.position}` : "",
+    invitation.message ? `Personal message: ${invitation.message}` : "",
+    "",
+    `Accept invitation: ${acceptUrl}`,
+    `This personal, single-use link expires ${expires}. Do not share it.`,
+    "If you do not recognize this invitation, do not open the link and contact the clinic directly.",
+  ].filter((line, index, lines) => line || lines[index - 1] !== "").join("\n");
+  const logoUrl = `${acceptUrl.split("/accept-invitation")[0]}/brand/mace-logo.png`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f5f1eb;font-family:Arial,sans-serif;color:#2d2824"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff;border-radius:18px;overflow:hidden"><tr><td style="padding:28px 32px;border-bottom:1px solid #eadfd4"><img src="${escapeHtml(logoUrl)}" width="138" alt="MACE by Dr. Mace"></td></tr><tr><td style="padding:32px"><p style="margin:0 0 12px;color:#8a624c;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em">You’re invited</p><h1 style="margin:0 0 18px;font-size:28px">Join ${escapeHtml(organizationName)}</h1><p>Hello ${escapeHtml(invitation.firstName || invitation.name)},</p><p>${escapeHtml(inviter.name)} invited you to join as <strong>${escapeHtml(invitation.role)}</strong> for <strong>${escapeHtml(assignment)}</strong>.</p>${invitation.message ? `<p style="padding:14px 16px;background:#f8f4ef;border-radius:10px">${escapeHtml(invitation.message)}</p>` : ""}<p style="margin:28px 0"><a href="${escapeHtml(acceptUrl)}" style="display:inline-block;background:#7b4b36;color:#fff;text-decoration:none;padding:13px 22px;border-radius:9px;font-weight:700">Accept invitation</a></p><p style="font-size:13px;color:#6f6761">This personal, single-use link expires ${escapeHtml(expires)}. Do not share it.</p><p style="font-size:13px;color:#6f6761">If you do not recognize this invitation, ignore this email and contact the clinic directly.</p></td></tr></table></td></tr></table></body></html>`;
+  return { text, html };
+}
+
+// Compatibility adapters for the established invitation endpoints while the
+// normalized invitation records carry organization and branch assignments.
+const invitationStatuses = INVITATION_STATUSES;
+
 function invitationRole(value, actor) {
-  const role = requireText(value, "Role");
-  if (!Object.keys(roleAccess).includes(role)) {
-    throw apiError("Choose a configured organization role.");
-  }
-  if (isBusinessOwner(role) && !isBusinessOwner(actor.role)) {
-    throw apiError("Only a Business Owner can invite another Business Owner.", 403);
-  }
-  return role;
+  return assertAssignableInvitationRole(actor, requireText(value, "Role"), roleAccess);
 }
 
 async function invitationBranch(value, role) {
   if (canManageOrganization(role)) return "All branches";
-  const branch = requireText(value, "Branch");
-  if (isAllBranches(branch)) {
-    throw apiError("Choose one clinic branch for this role.");
-  }
-  const existing = await prisma.branch.findUnique({ where: { name: branch }, select: { id: true } });
-  if (!existing) throw apiError("Choose an active clinic branch.");
-  return branch;
-}
-
-function publicInvitation(invitation) {
-  const effectiveStatus = invitation.status === "Pending" && invitation.expiresAt <= new Date()
-    ? "Expired"
-    : invitation.status;
-  return { ...invitation, status: effectiveStatus, tokenHash: undefined };
-}
-
-function invitationUrl(token) {
-  const origin = clean(process.env.APP_ORIGIN).split(",")[0] || `http://localhost:${port}`;
-  return `${origin.replace(/\/$/, "")}/?invitation=${encodeURIComponent(token)}`;
+  const name = requireText(value, "Branch");
+  const branch = await prisma.branch.findFirst({ where: { name, status: "Active" }, select: { name: true } });
+  if (!branch) throw apiError("Choose an active branch.", 400);
+  return branch.name;
 }
 
 function invitationEmailText(invitation, token, inviter) {
-  return [
-    `Hello ${invitation.name},`,
-    "",
-    `${inviter.name} invited you to join MACE ClinicOS as ${invitation.role}.`,
-    invitation.department ? `Department: ${invitation.department}` : "",
-    invitation.specialty ? `Specialty: ${invitation.specialty}` : "",
-    invitation.message ? `Message: ${invitation.message}` : "",
-    "",
-    `Accept invitation: ${invitationUrl(token)}`,
-    `This secure, single-use link expires ${invitation.expiresAt.toLocaleString("en-PH")}.`,
-  ].filter((line, index, lines) => line || lines[index - 1] !== "").join("\n");
+  return invitationEmailContent(invitation, token, inviter).text;
+}
+
+async function deliverInvitation(invitation, token, inviter, subject) {
+  const content = invitationEmailContent(invitation, token, inviter);
+  const transporter = createEmailTransport();
+  try {
+    await sendSmtpEmail({ transporter, to: invitation.email, subject, ...content });
+  } finally {
+    transporter.close();
+  }
+}
+
+async function updateInvitationDelivery(request, invitation, token, inviter, subject, action) {
+  try {
+    await deliverInvitation(invitation, token, inviter, subject);
+    const saved = await prisma.userInvitation.update({
+      where: { id: invitation.id },
+      data: { deliveryStatus: "Sent", failedReason: "" },
+      include: invitationInclude,
+    });
+    const auditLog = await writeAudit(prisma, request, {
+      area: "Access",
+      action,
+      branchId: saved.branches[0]?.branchId || null,
+      subjectType: "UserInvitation",
+      subjectId: saved.id,
+      details: `Invitation email sent to ${saved.email}.`,
+      afterValues: { deliveryStatus: "Sent", expiresAt: saved.expiresAt },
+    });
+    return { invitation: saved, auditLog };
+  } catch (error) {
+    const saved = await prisma.userInvitation.update({
+      where: { id: invitation.id },
+      data: { deliveryStatus: "Failed", failedReason: clean(error.message).slice(0, 500) },
+      include: invitationInclude,
+    });
+    const auditLog = await writeAudit(prisma, request, {
+      area: "Access",
+      action: "Invitation delivery failed",
+      branchId: saved.branches[0]?.branchId || null,
+      subjectType: "UserInvitation",
+      subjectId: saved.id,
+      details: `Invitation for ${saved.email} was saved but email delivery failed.`,
+      afterValues: { deliveryStatus: "Failed" },
+    });
+    return { invitation: saved, auditLog, deliveryError: "The invitation was saved, but the email could not be delivered. You can retry safely." };
+  }
 }
 
 async function expireInvitations() {
-  await prisma.userInvitation.updateMany({
+  const expired = await prisma.userInvitation.findMany({
     where: { status: "Pending", expiresAt: { lte: new Date() } },
-    data: { status: "Expired" },
+    include: invitationInclude,
   });
+  for (const invitation of expired) {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.userInvitation.updateMany({
+        where: { id: invitation.id, status: "Pending", expiresAt: { lte: new Date() } },
+        data: { status: "Expired" },
+      });
+      if (!changed.count) return;
+      await tx.auditLog.create({ data: {
+        time: new Date().toLocaleString("en-PH"),
+        actor: "System",
+        role: "System",
+        branchId: invitation.branches[0]?.branchId || null,
+        area: "Access",
+        action: "Invitation expired",
+        subjectType: "UserInvitation",
+        subjectId: invitation.id,
+        details: `Invitation for ${invitation.email} expired.`,
+        beforeValues: jsonText({ status: "Pending" }, {}),
+        afterValues: jsonText({ status: "Expired" }, {}),
+      } });
+      if (canManageOrganization(invitation.role)) {
+        const owners = await tx.account.findMany({
+          where: { organizationId: invitation.organizationId, status: "Active", role: { in: organizationManagerRoles } },
+          select: { id: true },
+        });
+        if (owners.length) {
+          await createAppNotification(tx, {
+            module: "staff",
+            title: "Privileged invitation expired",
+            message: `The ${invitation.role} invitation for ${invitation.email} expired.`,
+            recipientAccountIds: owners.map((owner) => owner.id),
+            recordId: invitation.id,
+          });
+        }
+      }
+    });
+  }
 }
 
 app.use("/api", asyncRoute(async (request, _response, next) => {
@@ -3068,7 +3484,7 @@ app.use("/api", asyncRoute(async (request, _response, next) => {
   if (authenticated) {
     request.authSession = authenticated.session;
     request.authAccount = authenticated.account;
-    request.authActor = publicAccount(authenticated.account);
+    request.authActor = authenticated.actor;
   }
   next();
 }));
@@ -3090,7 +3506,8 @@ app.use("/api", (request, response, next) => {
     return next(apiError("This request did not pass the CSRF check.", 403));
   }
   const requiredModule = requiredModuleForApiRequest(request.originalUrl);
-  if (requiredModule && !moduleAllowed(request.authActor, requiredModule, roleAccess)) {
+  const organizationModuleGrant = requiredModule === "branches" && hasOrganizationPermission(request.authActor, "branches.manage");
+  if (requiredModule && !organizationModuleGrant && !moduleAllowed(request.authActor, requiredModule, roleAccess)) {
     return next(apiError(`Your role does not allow access to ${requiredModule}.`, 403));
   }
   return next();
@@ -3116,7 +3533,7 @@ app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();
   const password = requireText(request.body?.password, "Password");
-  const account = await prisma.account.findUnique({ where: { email }, include: { staff: true } });
+  const account = await prisma.account.findUnique({ where: { email }, include: accountAccessInclude });
   const now = new Date();
 
   if (!account || account.status !== "Active" || (account.lockedUntil && account.lockedUntil > now) || !verifyPassword(password, account.passwordHash)) {
@@ -3136,11 +3553,6 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
   if (!hasValidBranchAssignment(account)) {
     throw apiError("This account must be assigned to one clinic branch. Contact an administrator.", 403);
   }
-  if (!hasOrganizationWideAccess(account)) {
-    const assignedBranch = await prisma.branch.findUnique({ where: { name: clean(account.branch) }, select: { id: true } });
-    if (!assignedBranch) throw apiError("This account is assigned to an inactive clinic branch. Contact an administrator.", 403);
-  }
-
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + sessionDurationMs);
   await prisma.$transaction([
@@ -3219,8 +3631,8 @@ app.post("/api/auth/reset-password", asyncRoute(async (request, response) => {
 }));
 
 app.get("/api/auth/session", asyncRoute(async (request, response) => {
-  const account = requireAuthenticatedAccount(request);
-  response.json({ account: publicAccount(account), expiresAt: request.authSession.expiresAt });
+  requireAuthenticatedAccount(request);
+  response.json({ account: request.authActor, expiresAt: request.authSession.expiresAt });
 }));
 
 app.post("/api/auth/logout", asyncRoute(async (request, response) => {
@@ -3247,107 +3659,307 @@ app.post("/api/auth/change-password", asyncRoute(async (request, response) => {
     await writeAudit(tx, request, { area: "Authentication", action: "Password changed", details: "Account password changed and other sessions revoked." });
     return saved;
   });
-  response.json({ account: publicAccount(updated) });
+  response.json({ account: { ...request.authActor, mustChangePassword: updated.mustChangePassword } });
 }));
 
 app.get("/api/invitations", asyncRoute(async (request, response) => {
-  requireInvitationManager(request);
+  const actor = requireInvitationManager(request);
   await expireInvitations();
-  const invitations = await prisma.userInvitation.findMany({ orderBy: { createdAt: "desc" } });
-  response.json({ invitations: invitations.map(publicInvitation), statuses: invitationStatuses });
-}));
-
-app.post("/api/invitations", asyncRoute(async (request, response) => {
-  const actor = requireInvitationManager(request);
-  const email = requireText(request.body?.email, "Email").toLowerCase();
-  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.");
-  const name = requireText(request.body?.name, "Name");
-  const role = invitationRole(request.body?.role, actor);
-  const branch = await invitationBranch(request.body?.branch, role);
-  await expireInvitations();
-  if (await prisma.account.findUnique({ where: { email } })) throw apiError("This user already belongs to the organization.", 409);
-  if (await prisma.userInvitation.findFirst({ where: { email, status: "Pending", expiresAt: { gt: new Date() } } })) {
-    throw apiError("A pending invitation already exists for this email address.", 409);
-  }
-
-  const token = randomBytes(32).toString("base64url");
-  const invitation = await prisma.userInvitation.create({ data: {
-    email,
-    name,
-    role,
-    branch,
-    department: clean(request.body?.department),
-    specialty: clean(request.body?.specialty),
-    message: clean(request.body?.message),
-    tokenHash: sessionTokenHash(token),
-    expiresAt: new Date(Date.now() + invitationLifetimeMs),
-    invitedById: actor.id,
-  } });
-
-  let saved = invitation;
-  try {
-    await sendSmtpEmail({ transporter: createEmailTransport(), to: email, subject: `You're invited to MACE ClinicOS`, text: invitationEmailText(invitation, token, actor) });
-  } catch (error) {
-    saved = await prisma.userInvitation.update({ where: { id: invitation.id }, data: { status: "Failed", failedReason: clean(error.message).slice(0, 500) } });
-  }
-  const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: saved.status === "Failed" ? "Invitation delivery failed" : "Invitation created", details: `${email} invited as ${role}.` }) });
-  response.status(201).json({ invitation: publicInvitation(saved), auditLog });
-}));
-
-app.post("/api/invitations/:id/resend", asyncRoute(async (request, response) => {
-  const actor = requireInvitationManager(request);
-  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
-  if (!current || !["Pending", "Expired", "Failed"].includes(current.status)) throw apiError("This invitation cannot be resent.", 409);
-  if (isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) throw apiError("Only a Business Owner can resend a Business Owner invitation.", 403);
-  await invitationBranch(current.branch, current.role);
-  const token = randomBytes(32).toString("base64url");
-  let invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { tokenHash: sessionTokenHash(token), status: "Pending", expiresAt: new Date(Date.now() + invitationLifetimeMs), failedReason: "", revokedAt: null } });
-  try {
-    await sendSmtpEmail({ transporter: createEmailTransport(), to: invitation.email, subject: `Reminder: your MACE ClinicOS invitation`, text: invitationEmailText(invitation, token, actor) });
-  } catch (error) {
-    invitation = await prisma.userInvitation.update({ where: { id: current.id }, data: { status: "Failed", failedReason: clean(error.message).slice(0, 500) } });
-  }
-  const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: invitation.status === "Failed" ? "Invitation delivery failed" : "Invitation resent", details: `${invitation.email} invitation resent.` }) });
-  response.json({ invitation: publicInvitation(invitation), auditLog });
-}));
-
-app.post("/api/invitations/:id/revoke", asyncRoute(async (request, response) => {
-  const actor = requireInvitationManager(request);
-  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) } });
-  if (!current || current.status !== "Pending") throw apiError("Only a pending invitation can be revoked.", 409);
-  if (isBusinessOwner(current.role) && !isBusinessOwner(actor.role)) throw apiError("Only a Business Owner can revoke a Business Owner invitation.", 403);
-  const revoked = await prisma.userInvitation.updateMany({
-    where: { id: current.id, status: "Pending", revokedAt: null },
-    data: { status: "Revoked", revokedAt: new Date() },
+  const [invitations, branches] = await Promise.all([
+    prisma.userInvitation.findMany({
+      where: invitationScopeWhere(actor),
+      include: invitationInclude,
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.branch.findMany({
+      where: canManageOrganization(actor.role)
+        ? { organizationId: actor.organizationId, status: "Active" }
+        : { id: actor.access?.activeBranchId, organizationId: actor.organizationId, status: "Active" },
+      include: { modules: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const roles = assignableInvitationRoles(actor, roleAccess);
+  const managedPermissions = canManageOrganization(actor.role)
+    ? [...INVITATION_PERMISSIONS]
+    : INVITATION_PERMISSIONS.filter((permission) => actorPermissions(actor).includes(permission));
+  response.json({
+    invitations: invitations.map(publicInvitation),
+    statuses: INVITATION_STATUSES,
+    deliveryStatuses: INVITATION_DELIVERY_STATUSES,
+    capabilities: {
+      canInvite: true,
+      canInviteManagers: canManageOrganization(actor.role) || actorPermissions(actor).includes("staff.invite_managers"),
+      organizationManager: canManageOrganization(actor.role),
+      roles,
+      roleModules: Object.fromEntries(roles.map((role) => [role, roleAccess[role] || []])),
+      permissions: managedPermissions.map((id) => ({ id, label: INVITATION_PERMISSION_LABELS[id] || id })),
+      branches: branches.map((branch) => ({
+        id: branch.id,
+        name: branch.name,
+        enabledModules: enabledModulesForBranch(branch, roleAccess.Owner),
+      })),
+      invitationExpiryDays: invitationLifetimeDays,
+    },
   });
-  if (revoked.count !== 1) throw apiError("This invitation is no longer pending.", 409);
-  const invitation = await prisma.userInvitation.findUnique({ where: { id: current.id } });
-  const auditLog = await prisma.auditLog.create({ data: auditData(request, { area: "Access", action: "Invitation revoked", details: `${invitation.email} invitation revoked.` }) });
-  response.json({ invitation: publicInvitation(invitation), auditLog });
 }));
+
+app.post("/api/invitations", invitationSendLimiter, asyncRoute(async (request, response) => {
+  const actor = requireInvitationManager(request);
+  const email = normalizeEmail(requireText(request.body?.email, "Email"));
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.");
+  const input = await normalizeInvitationInput(actor, request.body);
+  await expireInvitations();
+  const account = await prisma.account.findUnique({ where: { email }, select: { id: true, organizationId: true } });
+  if (account) {
+    if (account.organizationId === actor.organizationId) {
+      throw apiError("This user already belongs to the organization. Use Manage access to add a branch or change their role.", 409);
+    }
+    throw apiError("This email cannot be invited to this organization.", 409);
+  }
+  const duplicate = await prisma.userInvitation.findFirst({
+    where: { organizationId: actor.organizationId, email, status: "Pending" },
+    include: invitationInclude,
+  });
+  if (duplicate) {
+    throw apiError("A pending invitation already exists for this email. Open it to edit or resend it.", 409);
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const invitation = await prisma.$transaction(async (tx) => {
+    const saved = await tx.userInvitation.create({
+      data: {
+        organizationId: actor.organizationId,
+        email,
+        name: input.name,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        role: input.role,
+        branch: input.branch,
+        department: input.department,
+        specialty: input.specialty,
+        position: input.position,
+        modules: jsonText(input.modules, []),
+        permissions: jsonText(input.permissions, []),
+        message: input.message,
+        tokenHash: sessionTokenHash(token),
+        expiresAt: new Date(Date.now() + invitationLifetimeMs),
+        invitedById: actor.id,
+        branches: { create: input.branches.map((branch) => ({ branchId: branch.id })) },
+      },
+      include: invitationInclude,
+    });
+    await writeAudit(tx, request, {
+      area: "Access",
+      action: "Invitation created",
+      branchId: input.branches[0]?.id || null,
+      subjectType: "UserInvitation",
+      subjectId: saved.id,
+      details: `${email} invited as ${input.role}.`,
+      afterValues: {
+        email,
+        name: input.name,
+        role: input.role,
+        branchIds: input.branches.map((branch) => branch.id),
+        modules: input.modules,
+        permissions: input.permissions,
+        expiresAt: saved.expiresAt,
+      },
+    });
+    return saved;
+  });
+  const delivery = await updateInvitationDelivery(request, invitation, token, actor, `You're invited to ${invitation.organization.name}`, "Invitation sent");
+  response.status(201).json({
+    invitation: publicInvitation(delivery.invitation),
+    auditLog: delivery.auditLog,
+    deliveryError: delivery.deliveryError,
+  });
+}));
+
+app.patch("/api/invitations/:id", invitationSendLimiter, asyncRoute(async (request, response) => {
+  const actor = requireInvitationManager(request);
+  await expireInvitations();
+  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) }, include: invitationInclude });
+  if (!current || !canManageInvitation(actor, current)) throw apiError("Invitation not found.", 404);
+  if (current.status !== "Pending") throw apiError("Only a pending invitation can be edited.", 409);
+  const input = await normalizeInvitationInput(actor, request.body, current);
+  const before = publicInvitation(current);
+  const token = randomBytes(32).toString("base64url");
+  const invitation = await prisma.$transaction(async (tx) => {
+    await tx.userInvitationBranch.deleteMany({ where: { invitationId: current.id } });
+    const saved = await tx.userInvitation.update({
+      where: { id: current.id },
+      data: {
+        name: input.name,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        role: input.role,
+        branch: input.branch,
+        department: input.department,
+        specialty: input.specialty,
+        position: input.position,
+        modules: jsonText(input.modules, []),
+        permissions: jsonText(input.permissions, []),
+        message: input.message,
+        tokenHash: sessionTokenHash(token),
+        expiresAt: new Date(Date.now() + invitationLifetimeMs),
+        resentAt: new Date(),
+        deliveryStatus: "Not Sent",
+        failedReason: "",
+        branches: { create: input.branches.map((branch) => ({ branchId: branch.id })) },
+      },
+      include: invitationInclude,
+    });
+    await writeAudit(tx, request, {
+      area: "Access",
+      action: "Invitation edited",
+      branchId: input.branches[0]?.id || null,
+      subjectType: "UserInvitation",
+      subjectId: saved.id,
+      details: `Pending invitation for ${saved.email} was edited and its previous link invalidated.`,
+      beforeValues: before,
+      afterValues: publicInvitation(saved),
+    });
+    return saved;
+  });
+  const delivery = await updateInvitationDelivery(request, invitation, token, actor, `Updated invitation to ${invitation.organization.name}`, "Invitation resent after edit");
+  response.json({ invitation: publicInvitation(delivery.invitation), auditLog: delivery.auditLog, deliveryError: delivery.deliveryError });
+}));
+
+app.post("/api/invitations/:id/resend", invitationSendLimiter, asyncRoute(async (request, response) => {
+  const actor = requireInvitationManager(request);
+  await expireInvitations();
+  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) }, include: invitationInclude });
+  if (!current || !canManageInvitation(actor, current)) throw apiError("Invitation not found.", 404);
+  if (!["Pending", "Expired"].includes(current.status)) throw apiError("This invitation cannot be resent.", 409);
+  assertAssignableInvitationRole(actor, current.role, roleAccess);
+  assertRequestedPermissions(actor, parseJsonList(current.permissions));
+  assertRequestedModules(actor, current.role, parseJsonList(current.modules), current.branches.map((assignment) => assignment.branch), roleAccess);
+  const conflicting = await prisma.userInvitation.findFirst({
+    where: { organizationId: current.organizationId, email: current.email, status: "Pending", id: { not: current.id } },
+  });
+  if (conflicting) throw apiError("Another pending invitation already exists for this email.", 409);
+  const token = randomBytes(32).toString("base64url");
+  const invitation = await prisma.userInvitation.update({
+    where: { id: current.id },
+    data: {
+      tokenHash: sessionTokenHash(token),
+      status: "Pending",
+      deliveryStatus: "Not Sent",
+      expiresAt: new Date(Date.now() + invitationLifetimeMs),
+      resentAt: new Date(),
+      failedReason: "",
+      revokedAt: null,
+      revokedById: null,
+    },
+    include: invitationInclude,
+  });
+  const delivery = await updateInvitationDelivery(request, invitation, token, actor, `Reminder: your invitation to ${invitation.organization.name}`, "Invitation resent");
+  response.json({ invitation: publicInvitation(delivery.invitation), auditLog: delivery.auditLog, deliveryError: delivery.deliveryError });
+}));
+
+async function cancelInvitation(request, response) {
+  const actor = requireInvitationManager(request);
+  await expireInvitations();
+  const current = await prisma.userInvitation.findUnique({ where: { id: clean(request.params.id) }, include: invitationInclude });
+  if (!current || !canManageInvitation(actor, current)) throw apiError("Invitation not found.", 404);
+  if (current.status !== "Pending") throw apiError("Only a pending invitation can be cancelled.", 409);
+  const result = await prisma.$transaction(async (tx) => {
+    const revoked = await tx.userInvitation.updateMany({
+      where: { id: current.id, status: "Pending", revokedAt: null },
+      data: { status: "Revoked", revokedAt: new Date(), revokedById: actor.id },
+    });
+    if (revoked.count !== 1) throw apiError("This invitation is no longer pending.", 409);
+    const invitation = await tx.userInvitation.findUnique({ where: { id: current.id }, include: invitationInclude });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Access",
+      action: "Invitation cancelled",
+      branchId: invitation.branches[0]?.branchId || null,
+      subjectType: "UserInvitation",
+      subjectId: invitation.id,
+      details: `${invitation.email} invitation cancelled and its link invalidated.`,
+      beforeValues: { status: current.status },
+      afterValues: { status: "Revoked", revokedAt: invitation.revokedAt },
+    });
+    if (canManageOrganization(invitation.role)) {
+      const owners = await tx.account.findMany({
+        where: { organizationId: invitation.organizationId, status: "Active", role: { in: organizationManagerRoles } },
+        select: { id: true },
+      });
+      if (owners.length) {
+        await createAppNotification(tx, {
+          actor: actor.name,
+          module: "staff",
+          title: "Privileged invitation cancelled",
+          message: `The ${invitation.role} invitation for ${invitation.email} was cancelled.`,
+          recipientAccountIds: owners.map((owner) => owner.id),
+          recordId: invitation.id,
+        });
+      }
+    }
+    return { invitation, auditLog };
+  });
+  response.json({ invitation: publicInvitation(result.invitation), auditLog: result.auditLog });
+}
+
+app.post("/api/invitations/:id/cancel", asyncRoute(cancelInvitation));
+app.post("/api/invitations/:id/revoke", asyncRoute(cancelInvitation));
 
 app.get("/api/invitations/accept/:token", asyncRoute(async (request, response) => {
-  const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash: sessionTokenHash(request.params.token) } });
+  const tokenHash = sessionTokenHash(requireText(request.params.token, "Invitation token"));
+  let invitation = await prisma.userInvitation.findUnique({ where: { tokenHash }, include: invitationInclude });
   if (!invitation) throw apiError("This invitation link is invalid.", 404);
-  response.json({ invitation: publicInvitation(invitation) });
+  if (invitation.status === "Pending" && invitation.expiresAt <= new Date()) {
+    await expireInvitations();
+    invitation = await prisma.userInvitation.findUnique({ where: { id: invitation.id }, include: invitationInclude });
+  }
+  const account = await prisma.account.findUnique({ where: { email: invitation.email }, select: { id: true, organizationId: true } });
+  response.json({
+    invitation: publicInvitationSummary(invitation, account?.organizationId === invitation.organizationId),
+    authenticatedEmail: request.authAccount?.email || "",
+  });
 }));
 
 app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) => {
-  const tokenHash = sessionTokenHash(request.params.token);
-  const password = requireText(request.body?.password, "Password");
-  if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.");
+  const tokenHash = sessionTokenHash(requireText(request.params.token, "Invitation token"));
+  if (request.body?.termsAccepted !== true || request.body?.privacyAccepted !== true) {
+    throw apiError("Accept the Terms of Service and Privacy Policy to continue.", 400);
   }
-  const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash } });
-  if (!invitation || invitation.status !== "Pending") throw apiError("This invitation is no longer available.", 409);
+  const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash }, include: invitationInclude });
+  if (!invitation) throw apiError("This invitation link is invalid.", 404);
+  if (invitation.status === "Accepted") throw apiError("This invitation has already been accepted.", 409);
+  if (invitation.status === "Revoked") throw apiError("This invitation was cancelled. Contact an administrator for a new invitation.", 410);
+  if (invitation.status !== "Pending") throw apiError("This invitation is no longer available.", 409);
   if (invitation.expiresAt <= new Date()) {
-    await prisma.userInvitation.updateMany({
-      where: { id: invitation.id, status: "Pending", expiresAt: { lte: new Date() } },
-      data: { status: "Expired" },
-    });
+    await expireInvitations();
     throw apiError("This invitation has expired.", 410);
   }
-  await invitationBranch(invitation.branch, invitation.role);
+  const existingAccount = await prisma.account.findUnique({ where: { email: invitation.email } });
+  if (existingAccount && existingAccount.organizationId !== invitation.organizationId) {
+    throw apiError("This invitation cannot be accepted with the available account.", 409);
+  }
+  if (request.authAccount && normalizeEmail(request.authAccount.email) !== invitation.email) {
+    throw apiError("This invitation belongs to another email. Sign out and continue with the invited email.", 403);
+  }
+  if (existingAccount && request.authAccount?.id !== existingAccount.id) {
+    throw apiError("Sign in with the invited email before accepting this invitation.", 401);
+  }
+  const password = existingAccount ? "" : requireText(request.body?.password, "Password");
+  if (!existingAccount && (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password))) {
+    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.");
+  }
+  const selectedBranches = invitation.branches.map((assignment) => assignment.branch);
+  if (!canManageOrganization(invitation.role) && (!selectedBranches.length || selectedBranches.some((branch) => branch.status !== "Active"))) {
+    throw apiError("One or more assigned branches are no longer active. Ask an administrator to update the invitation.", 409);
+  }
+  const invitationModules = assertRequestedModules(
+    { role: "Owner", access: { modules: roleAccess.Owner } },
+    invitation.role,
+    parseJsonList(invitation.modules),
+    selectedBranches,
+    roleAccess,
+  );
+  const invitationPermissions = assertRequestedPermissions({ role: "Owner" }, parseJsonList(invitation.permissions));
   const result = await prisma.$transaction(async (tx) => {
     const acceptedClaim = await tx.userInvitation.updateMany({
       where: {
@@ -3357,36 +3969,314 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
-      data: { status: "Accepted", acceptedAt: new Date() },
+      data: { status: "Accepted", acceptedAt: new Date(), termsAcceptedAt: new Date() },
     });
     if (acceptedClaim.count !== 1) throw apiError("This invitation is no longer available.", 409);
-    let account = await tx.account.findUnique({ where: { email: invitation.email } });
-    if (account && !verifyPassword(password, account.passwordHash)) throw apiError("Use the password for the existing account.", 401);
-    if (!account) {
-      const staff = await tx.staffMember.create({ data: { name: invitation.name, role: invitation.role, branch: invitation.branch, status: "Available" } });
-      account = await tx.account.create({ data: { staffId: staff.id, name: invitation.name, email: invitation.email, passwordHash: hashPassword(password), role: invitation.role, branch: invitation.branch, status: "Active", mustChangePassword: false } });
-    } else {
-      account = await tx.account.update({ where: { id: account.id }, data: { role: invitation.role, branch: invitation.branch, status: "Active" } });
+    const branchRecords = invitation.branches.length
+      ? await tx.branch.findMany({ where: { id: { in: invitation.branches.map((item) => item.branchId) }, organizationId: invitation.organizationId, status: "Active" }, include: { modules: true } })
+      : [];
+    if (!canManageOrganization(invitation.role) && branchRecords.length !== invitation.branches.length) {
+      throw apiError("An assigned branch is no longer active.", 409);
     }
-    const accepted = await tx.userInvitation.findUnique({ where: { id: invitation.id } });
-    await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: invitation.name, role: invitation.role, area: "Access", action: "Invitation accepted", details: `${invitation.email} joined the organization.` } });
-    return { account, invitation: accepted };
+    assertRequestedModules({ role: "Owner", access: { modules: roleAccess.Owner } }, invitation.role, invitationModules, branchRecords, roleAccess);
+    let account = existingAccount;
+    const primaryBranch = branchRecords[0] || null;
+    if (!account) {
+      const staff = primaryBranch
+        ? await tx.staffMember.create({ data: { name: invitation.name, role: invitation.role, branch: primaryBranch.name, status: "Available" } })
+        : null;
+      account = await tx.account.create({
+        data: {
+          staffId: staff?.id || null,
+          name: invitation.name,
+          email: invitation.email,
+          passwordHash: hashPassword(password),
+          role: invitation.role,
+          branch: primaryBranch?.name || "",
+          organizationId: invitation.organizationId,
+          organizationWideAccess: canManageOrganization(invitation.role),
+          organizationModules: canManageOrganization(invitation.role) ? jsonText(invitationModules, []) : "[]",
+          lastBranchId: primaryBranch?.id || null,
+          status: "Active",
+          mustChangePassword: false,
+        },
+      });
+    } else {
+      account = await tx.account.update({
+        where: { id: account.id },
+        data: {
+          role: invitation.role,
+          organizationWideAccess: canManageOrganization(invitation.role),
+          organizationModules: canManageOrganization(invitation.role) ? jsonText(invitationModules, []) : account.organizationModules,
+          branch: primaryBranch?.name || account.branch,
+          lastBranchId: primaryBranch?.id || account.lastBranchId,
+          status: "Active",
+        },
+      });
+    }
+    for (const branchRecord of branchRecords) {
+      await tx.branchMembership.upsert({
+        where: { branchId_accountId: { branchId: branchRecord.id, accountId: account.id } },
+        create: {
+          branchId: branchRecord.id,
+          accountId: account.id,
+          role: invitation.role,
+          permissions: jsonText(invitationPermissions, []),
+          modules: jsonText(invitationModules, []),
+          isPrimary: branchRecord.id === primaryBranch?.id,
+        },
+        update: {
+          role: invitation.role,
+          permissions: jsonText(invitationPermissions, []),
+          modules: jsonText(invitationModules, []),
+          status: "Active",
+          isPrimary: branchRecord.id === primaryBranch?.id,
+        },
+      });
+    }
+    const accepted = await tx.userInvitation.update({
+      where: { id: invitation.id },
+      data: { acceptedById: account.id },
+      include: invitationInclude,
+    });
+    await tx.auditLog.create({ data: {
+      time: new Date().toLocaleString("en-PH"),
+      actor: account.name,
+      role: invitation.role,
+      actorAccountId: account.id,
+      branchId: primaryBranch?.id || null,
+      area: "Access",
+      action: "Invitation accepted",
+      subjectType: "Account",
+      subjectId: account.id,
+      details: `${invitation.email} joined ${invitation.organization.name}.`,
+      afterValues: jsonText({ role: invitation.role, branchIds: branchRecords.map((branch) => branch.id), modules: invitationModules, permissions: invitationPermissions }, {}),
+    } });
+    const ownerRecipients = await tx.account.findMany({
+      where: { organizationId: invitation.organizationId, status: "Active", role: { in: organizationManagerRoles } },
+      select: { id: true },
+    });
+    const managerRecipients = branchRecords.length
+      ? await tx.branchMembership.findMany({
+        where: { branchId: { in: branchRecords.map((branch) => branch.id) }, status: "Active", role: { in: ["Branch Manager", "Admin"] } },
+        select: { accountId: true },
+      })
+      : [];
+    const recipientAccountIds = uniqueStrings([
+      ...ownerRecipients.map((item) => item.id),
+      ...managerRecipients.map((item) => item.accountId),
+    ]).filter((id) => id !== account.id);
+    if (recipientAccountIds.length) {
+      await createAppNotification(tx, {
+        actor: account.name,
+        branches: branchRecords.map((branch) => branch.name),
+        recipientAccountIds,
+        module: "staff",
+        recordId: account.id,
+        title: `${invitation.role} invitation accepted`,
+        message: `${account.name} accepted access to ${branchRecords.map((branch) => branch.name).join(", ") || invitation.organization.name}.`,
+      });
+    }
+    return { account, invitation: accepted, primaryBranch };
   });
-  response.json({ account: publicAccount(result.account), invitation: publicInvitation(result.invitation) });
+  const loadedAccount = await prisma.account.findUnique({ where: { id: result.account.id }, include: accountAccessInclude });
+  response.json({
+    account: publicAccount(loadedAccount, result.primaryBranch?.id || ALL_BRANCHES_ID),
+    invitation: publicInvitation(result.invitation),
+    redirectPath: result.primaryBranch ? `/?branch=${encodeURIComponent(result.primaryBranch.id)}` : "/",
+  });
 }));
 
 function requireStaffLinkManager(request) {
-  const account = requireAuthenticatedAccount(request);
-  if (!canManageOrganization(account.role)) {
-    throw apiError("Only an Admin or Business Owner can connect logins to staff profiles.", 403);
+  requireAuthenticatedAccount(request);
+  const actor = actorFromRequest(request);
+  const branchStaffManager = ["Branch Manager", "Admin"].includes(actor.role)
+    && moduleAllowed(actor, "staff", roleAccess);
+  if (!canManageOrganization(actor.role) && !branchStaffManager && !actor.access?.permissions?.includes("staff.manage")) {
+    throw apiError("You do not have permission to manage employee login access.", 403);
   }
-  return account;
+  return actor;
 }
 
 app.get("/api/accounts", asyncRoute(async (request, response) => {
-  requireStaffLinkManager(request);
-  const accounts = await prisma.account.findMany({ orderBy: { name: "asc" } });
-  response.json({ accounts: accounts.map(publicAccount) });
+  const actor = requireStaffLinkManager(request);
+  const accounts = await prisma.account.findMany({
+    where: canManageOrganization(actor.role)
+      ? { organizationId: actor.organizationId }
+      : { organizationId: actor.organizationId, branchMemberships: { some: { branchId: actor.access?.activeBranchId, status: "Active" } } },
+    include: accountAccessInclude,
+    orderBy: { name: "asc" },
+  });
+  response.json({ accounts: accounts.map((account) => publicAccount(account)) });
+}));
+
+function requireUserAccessManager(request) {
+  requireAuthenticatedAccount(request);
+  const actor = actorFromRequest(request);
+  if (canManageOrganization(actor.role)) return actor;
+  if (!isBranchManager(actor.role) || !actorPermissions(actor).includes("staff.manage")) {
+    throw apiError("You do not have permission to manage user access.", 403);
+  }
+  return actor;
+}
+
+app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
+  const actor = requireUserAccessManager(request);
+  const target = await prisma.account.findFirst({
+    where: { id: clean(request.params.id), organizationId: actor.organizationId },
+    include: accountAccessInclude,
+  });
+  if (!target) throw apiError("User not found.", 404);
+  if (!canManageOrganization(actor.role)) {
+    if (target.id === actor.id) throw apiError("You cannot change your own role or branch access.", 403);
+    if (canManageOrganization(target.role) || !target.branchMemberships.some((membership) => membership.branchId === actor.access?.activeBranchId && membership.status === "Active")) {
+      throw apiError("This user belongs to another branch or has higher authority.", 403);
+    }
+  }
+
+  const nextStatus = clean(request.body?.status || target.status);
+  if (!["Active", "Inactive"].includes(nextStatus)) throw apiError("Choose Active or Inactive for user status.", 400);
+  const nextRole = requireText(request.body?.role || target.role, "Role");
+  assertAssignableInvitationRole(actor, nextRole, roleAccess);
+  if (canManageOrganization(nextRole) && nextRole !== target.role) {
+    assertPrivilegedConfirmation(actor, nextRole, request.body?.confirmOrganizationAccess === true);
+  }
+  const removesOrganizationManager = target.status === "Active"
+    && canManageOrganization(target.role)
+    && (nextStatus !== "Active" || !canManageOrganization(nextRole));
+  if (removesOrganizationManager) {
+    const activeManagers = await prisma.account.count({
+      where: { organizationId: actor.organizationId, status: "Active", role: { in: organizationManagerRoles } },
+    });
+    if (activeManagers <= 1) throw apiError("The last active Owner or Super Admin cannot be deactivated or demoted.", 409);
+  }
+
+  const currentBranchIds = target.branchMemberships.filter((membership) => membership.status === "Active").map((membership) => membership.branchId);
+  const suppliedBranchIds = request.body?.branchIds === undefined ? currentBranchIds : uniqueStrings(request.body.branchIds, 25);
+  const branchPayload = { branchIds: suppliedBranchIds };
+  const branches = await invitationBranches(actor, nextRole, branchPayload, target.branchMemberships);
+  const branchChanged = JSON.stringify([...currentBranchIds].sort()) !== JSON.stringify(branches.map((branch) => branch.id).sort());
+  if (branchChanged && request.body?.confirmAccessChange !== true) {
+    throw apiError("Confirm the branch access change before saving.", 400);
+  }
+  const permissions = assertRequestedPermissions(actor, request.body?.permissions ?? (
+    target.branchMemberships.find((membership) => membership.status === "Active")?.permissions
+      ? parseJsonList(target.branchMemberships.find((membership) => membership.status === "Active").permissions)
+      : []
+  ));
+  const requestedModules = request.body?.modules ?? (() => {
+    const stored = target.branchMemberships.find((membership) => membership.status === "Active")?.modules;
+    return stored && parseJsonList(stored).length ? parseJsonList(stored) : undefined;
+  })();
+  const modules = assertRequestedModules(actor, nextRole, requestedModules, branches, roleAccess);
+  const primaryBranch = branches[0] || null;
+
+  const result = await prisma.$transaction(async (tx) => {
+    if (canManageOrganization(nextRole)) {
+      await tx.branchMembership.updateMany({ where: { accountId: target.id }, data: { status: "Inactive", isPrimary: false } });
+    } else {
+      const selectedIds = branches.map((branch) => branch.id);
+      await tx.branchMembership.updateMany({
+        where: { accountId: target.id, branchId: { notIn: selectedIds } },
+        data: { status: "Inactive", isPrimary: false },
+      });
+      for (const branch of branches) {
+        await tx.branchMembership.upsert({
+          where: { branchId_accountId: { branchId: branch.id, accountId: target.id } },
+          create: {
+            branchId: branch.id,
+            accountId: target.id,
+            role: nextRole,
+            permissions: jsonText(permissions, []),
+            modules: jsonText(modules, []),
+            status: nextStatus,
+            isPrimary: branch.id === primaryBranch?.id,
+          },
+          update: {
+            role: nextRole,
+            permissions: jsonText(permissions, []),
+            modules: jsonText(modules, []),
+            status: nextStatus,
+            isPrimary: branch.id === primaryBranch?.id,
+          },
+        });
+      }
+    }
+    const saved = await tx.account.update({
+      where: { id: target.id },
+      data: {
+        role: nextRole,
+        status: nextStatus,
+        organizationWideAccess: canManageOrganization(nextRole),
+        organizationModules: canManageOrganization(nextRole) ? jsonText(modules, []) : "[]",
+        branch: primaryBranch?.name || (canManageOrganization(nextRole) ? "" : target.branch),
+        lastBranchId: primaryBranch?.id || null,
+      },
+    });
+    if (target.staffId && primaryBranch) {
+      await tx.staffMember.update({
+        where: { id: target.staffId },
+        data: { role: nextRole, branch: primaryBranch.name, status: nextStatus === "Active" ? "Available" : "Inactive" },
+      });
+    }
+    if (nextStatus !== "Active") await tx.authSession.deleteMany({ where: { accountId: target.id } });
+
+    const auditEntries = [];
+    const baseAudit = {
+      area: "Access",
+      branchId: primaryBranch?.id || null,
+      subjectType: "Account",
+      subjectId: target.id,
+    };
+    if (target.role !== nextRole) auditEntries.push(await writeAudit(tx, request, {
+      ...baseAudit,
+      action: "Role changed",
+      details: `${target.email} role changed from ${target.role} to ${nextRole}.`,
+      beforeValues: { role: target.role },
+      afterValues: { role: nextRole },
+    }));
+    if (branchChanged) auditEntries.push(await writeAudit(tx, request, {
+      ...baseAudit,
+      action: "Existing user assigned to branches",
+      details: `${target.email} branch access was updated.`,
+      beforeValues: { branchIds: currentBranchIds },
+      afterValues: { branchIds: branches.map((branch) => branch.id) },
+    }));
+    const beforePermissions = parseJsonList(target.branchMemberships.find((membership) => membership.status === "Active")?.permissions);
+    if (JSON.stringify(beforePermissions.sort()) !== JSON.stringify([...permissions].sort())) auditEntries.push(await writeAudit(tx, request, {
+      ...baseAudit,
+      action: "Permissions changed",
+      details: `${target.email} permissions were updated.`,
+      beforeValues: { permissions: beforePermissions },
+      afterValues: { permissions },
+    }));
+    if (target.status !== nextStatus) auditEntries.push(await writeAudit(tx, request, {
+      ...baseAudit,
+      action: nextStatus === "Active" ? "User reactivated" : "User deactivated",
+      details: `${target.email} was ${nextStatus === "Active" ? "reactivated" : "deactivated"}.`,
+      beforeValues: { status: target.status },
+      afterValues: { status: nextStatus },
+    }));
+    if (canManageOrganization(nextRole) && !canManageOrganization(target.role)) {
+      const owners = await tx.account.findMany({
+        where: { organizationId: actor.organizationId, status: "Active", role: { in: organizationManagerRoles } },
+        select: { id: true },
+      });
+      if (owners.length) {
+        await createAppNotification(tx, {
+          actor: actor.name,
+          module: "staff",
+          title: "Organization-wide role granted",
+          message: `${saved.name} was granted ${nextRole} access.`,
+          recipientAccountIds: owners.map((owner) => owner.id),
+          recordId: saved.id,
+        });
+      }
+    }
+    return { saved, auditEntries };
+  });
+  const reloaded = await prisma.account.findUnique({ where: { id: result.saved.id }, include: accountAccessInclude });
+  response.json({ account: publicAccount(reloaded), auditLogs: result.auditEntries, auditLog: result.auditEntries[0] || null });
 }));
 
 app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
@@ -3418,6 +4308,7 @@ app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
 
     const account = await tx.account.findUnique({ where: { id: accountId } });
     if (!account) throw apiError("That login was not found.", 404);
+    if (account.organizationId !== actor.organizationId) throw apiError("That login belongs to another organization.", 403);
     if (isBusinessOwner(account.role) && !isBusinessOwner(actor.role)) {
       throw apiError("Only a Business Owner can connect a Business Owner login.", 403);
     }
@@ -3428,7 +4319,14 @@ app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
       throw apiError("The login name and role must match the staff profile before they can be connected.", 409);
     }
 
-    const linked = await tx.account.update({ where: { id: account.id }, data: { staffId } });
+    const staffBranch = await tx.branch.findFirst({ where: { organizationId: actor.organizationId, name: staff.branch, status: "Active" } });
+    if (!staffBranch) throw apiError("The employee branch is not active.", 409);
+    const linked = await tx.account.update({ where: { id: account.id }, data: { staffId, branch: staff.branch, lastBranchId: staffBranch.id } });
+    await tx.branchMembership.upsert({
+      where: { branchId_accountId: { branchId: staffBranch.id, accountId: account.id } },
+      create: { branchId: staffBranch.id, accountId: account.id, role: staff.role, isPrimary: true },
+      update: { role: staff.role, status: "Active", isPrimary: true },
+    });
     const auditLog = await writeAudit(tx, request, {
       area: "Access",
       action: "Login connected",
@@ -3475,6 +4373,24 @@ async function buildMyWorkspace(account) {
 
 app.get("/api/me/workspace", asyncRoute(async (request, response) => {
   response.json(await buildMyWorkspace(requireAuthenticatedAccount(request)));
+}));
+
+app.post("/api/me/active-branch", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  const requestedBranchId = requireText(request.body?.branchId, "Branch");
+  if (requestedBranchId === ALL_BRANCHES_ID) {
+    if (!request.authActor.access?.organizationWide) {
+      throw apiError("All Branches is restricted to organization-wide accounts.", 403);
+    }
+  } else if (!request.authActor.access?.branches?.some((branch) => branch.id === requestedBranchId && branch.branchStatus === "Active")) {
+    throw apiError("You do not have access to that active branch.", 403);
+  }
+  await prisma.account.update({
+    where: { id: account.id },
+    data: { lastBranchId: requestedBranchId === ALL_BRANCHES_ID ? null : requestedBranchId },
+  });
+  const reloaded = await prisma.account.findUnique({ where: { id: account.id }, include: accountAccessInclude });
+  response.json({ account: publicAccount(reloaded, requestedBranchId) });
 }));
 
 app.post("/api/me/attendance", asyncRoute(async (request, response) => {
@@ -3621,174 +4537,302 @@ app.delete("/api/rooms/:id", asyncRoute(async (request, response) => {
   });
 }));
 
+const branchConfigModuleIds = sidebarModules
+  .map((module) => module.id)
+  .filter((moduleId) => !["my-workspace", "applications", "branches", "settings"].includes(moduleId));
+
+function requireBranchAdministration(request) {
+  const actor = actorFromRequest(request);
+  if (!canManageOrganization(actor.role) && !hasOrganizationPermission(actor, "branches.manage")) {
+    throw apiError("Only an Owner, Super Admin, or explicitly authorized organization administrator can manage branches.", 403);
+  }
+  return actor;
+}
+
+function normalizedBranchModules(value) {
+  const requested = Array.isArray(value) ? value.map(String) : branchConfigModuleIds;
+  const invalid = requested.filter((moduleId) => !branchConfigModuleIds.includes(moduleId));
+  if (invalid.length) throw apiError(`Unknown branch module: ${invalid[0]}.`, 400);
+  return [...new Set(requested)];
+}
+
+function normalizeBranchForm(payload, existing = null) {
+  const name = requireText(payload?.name, "Branch name");
+  const code = normalizeBranchCode(payload?.code || existing?.code || name);
+  if (!code) throw apiError("Branch code must contain letters or numbers.", 400);
+  const email = clean(payload?.email).toLowerCase();
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid branch email address.", 400);
+  const status = clean(payload?.status || existing?.status || "Active");
+  if (!branchStatuses.includes(status)) throw apiError("Choose Active, Inactive, or Archived for branch status.", 400);
+  return {
+    name,
+    code,
+    city: clean(payload?.city),
+    address: clean(payload?.address),
+    phone: clean(payload?.phone),
+    email,
+    timezone: clean(payload?.timezone) || "Asia/Manila",
+    hours: clean(payload?.hours),
+    operatingHours: jsonText(payload?.operatingHours || {}, {}),
+    status,
+    archivedAt: status === "Archived" ? existing?.archivedAt || new Date() : null,
+    devices: jsonText(payload?.devices || [], []),
+    image: assetReference(payload?.image, "Branch image"),
+  };
+}
+
+async function branchWithManagementData(database, branchId) {
+  const branch = await database.branch.findUnique({
+    where: { id: branchId },
+    include: branchManagementInclude(),
+  });
+  if (!branch) return null;
+  const employeeCount = await database.staffMember.count({ where: { branch: branch.name } });
+  return { ...branch, employeeCount };
+}
+
+async function syncBranchManagers(database, branch, managerIds) {
+  if (!Array.isArray(managerIds)) return;
+  const uniqueIds = [...new Set(managerIds.map(String).filter(Boolean))];
+  const accounts = uniqueIds.length
+    ? await database.account.findMany({ where: { id: { in: uniqueIds }, organizationId: branch.organizationId, status: "Active" } })
+    : [];
+  if (accounts.length !== uniqueIds.length) throw apiError("One or more selected managers are unavailable in this organization.", 400);
+  if (accounts.some((account) => canManageOrganization(account.role))) throw apiError("Organization-wide owners do not need branch manager assignments.", 400);
+  await database.branchMembership.updateMany({
+    where: { branchId: branch.id, role: { in: ["Branch Manager", "Admin"] }, accountId: { notIn: uniqueIds } },
+    data: { status: "Inactive", isPrimary: false },
+  });
+  for (const account of accounts) {
+    await database.branchMembership.upsert({
+      where: { branchId_accountId: { branchId: branch.id, accountId: account.id } },
+      create: { branchId: branch.id, accountId: account.id, role: "Branch Manager", permissions: jsonText(["staff.invite"], []), isPrimary: !account.lastBranchId },
+      update: { role: "Branch Manager", status: "Active", permissions: jsonText(["staff.invite"], []) },
+    });
+  }
+}
+
+app.get("/api/branches", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "branches");
+  const where = canManageOrganization(actor.role) || hasOrganizationPermission(actor, "branches.manage")
+    ? { organizationId: actor.organizationId }
+    : { id: { in: actor.access?.branches?.map((branch) => branch.id) || [] }, status: "Active" };
+  const rows = await prisma.branch.findMany({ where, orderBy: [{ name: "asc" }], include: branchManagementInclude() });
+  const counts = await Promise.all(rows.map((branch) => prisma.staffMember.count({ where: { branch: branch.name } })));
+  response.json({ branches: rows.map((branch, index) => serializeBranch({ ...branch, employeeCount: counts[index] })) });
+}));
+
 app.post("/api/branches", asyncRoute(async (request, response) => {
-  const account = requireAuthenticatedAccount(request);
-  if (!canManageOrganization(account.role)) throw apiError("Only an Admin or Business Owner can create branches.", 403);
-  const name = requireText(request.body?.name, "Branch name");
+  const actor = requireBranchAdministration(request);
+  const data = normalizeBranchForm(request.body);
   const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
+  const enabledModules = normalizedBranchModules(request.body?.enabledModules);
+  const duplicate = await prisma.branch.findFirst({
+    where: { organizationId: actor.organizationId, OR: [{ name: data.name }, { code: data.code }] },
+  });
+  if (duplicate) throw apiError(duplicate.code === data.code ? `Branch code ${data.code} is already in use.` : `A branch named ${data.name} already exists.`, 409);
   const result = await prisma.$transaction(async (tx) => {
     const branch = await tx.branch.create({
       data: {
-        name,
-        city: clean(request.body?.city),
-        address: clean(request.body?.address),
-        phone: clean(request.body?.phone),
-        hours: clean(request.body?.hours),
-        devices: jsonText(request.body?.devices || [], []),
-        image: assetReference(request.body?.image, "Branch image"),
+        ...data,
+        organizationId: actor.organizationId,
         rooms: roomCount ? { create: Array.from({ length: roomCount }, (_value, index) => ({ name: `Room ${index + 1}` })) } : undefined,
+        modules: { create: branchConfigModuleIds.map((moduleId) => ({ moduleId, enabled: enabledModules.includes(moduleId) })) },
       },
-      include: { rooms: true },
     });
+    await syncBranchManagers(tx, branch, request.body?.managerIds);
     const auditLog = await writeAudit(tx, request, {
       area: "Branches",
       action: "Branch created",
-      details: `${branch.name} was added with ${branch.rooms.length} rooms.`,
+      branchId: branch.id,
+      subjectType: "Branch",
+      subjectId: branch.id,
+      details: `${branch.name} (${branch.code}) was created with ${roomCount} rooms.`,
+      afterValues: { ...data, enabledModules, managerIds: request.body?.managerIds || [] },
     });
-    return { branch, auditLog };
+    return { branch: await branchWithManagementData(tx, branch.id), auditLog };
   });
   response.status(201).json({ branch: serializeBranch(result.branch), auditLog: result.auditLog });
 }));
 
 app.put("/api/branches/:id", asyncRoute(async (request, response) => {
-  const account = requireAuthenticatedAccount(request);
-  if (!canManageOrganization(account.role)) throw apiError("Only an Admin or Business Owner can edit branches.", 403);
-
+  const actor = requireBranchAdministration(request);
   const id = clean(request.params.id);
-  const existing = await prisma.branch.findUnique({ where: { id }, include: { rooms: { orderBy: { createdAt: "asc" } } } });
+  const existing = await prisma.branch.findFirst({
+    where: { id, organizationId: actor.organizationId },
+    include: branchManagementInclude(),
+  });
   if (!existing) throw apiError("Branch not found.", 404);
-  const name = requireText(request.body?.name, "Branch name");
-  if (name !== existing.name && await prisma.branch.findUnique({ where: { name } })) {
-    throw apiError(`A branch named ${name} already exists.`, 409);
+  const data = normalizeBranchForm(request.body, existing);
+  if (existing.status === "Active" && data.status !== "Active") {
+    const activeCount = await prisma.branch.count({ where: { organizationId: actor.organizationId, status: "Active" } });
+    if (activeCount <= 1) throw apiError("The organization must keep at least one active branch.", 409);
   }
-  const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount) || 0));
+  const duplicate = await prisma.branch.findFirst({
+    where: { organizationId: actor.organizationId, id: { not: id }, OR: [{ name: data.name }, { code: data.code }] },
+  });
+  if (duplicate) throw apiError(duplicate.code === data.code ? `Branch code ${data.code} is already in use.` : `A branch named ${data.name} already exists.`, 409);
+  const roomCount = Math.max(0, Math.min(50, Number(request.body?.roomCount ?? activeRoomRecords(existing.rooms).length) || 0));
   const activeRooms = activeRoomRecords(existing.rooms);
   const roomsToArchive = roomCount < activeRooms.length ? activeRooms.slice(roomCount) : [];
   for (const room of roomsToArchive) {
-    const upcoming = await upcomingRoomAppointments(existing.name, room.name);
-    if (upcoming.length) {
-      throw apiError(`${room.name} has upcoming appointments. Reassign or cancel them before reducing the branch room count.`, 409);
+    if ((await upcomingRoomAppointments(existing.name, room.name)).length) {
+      throw apiError(`${room.name} has upcoming appointments. Reassign or cancel them before reducing the room count.`, 409);
     }
   }
   const result = await prisma.$transaction(async (tx) => {
-    await renameBranchReferences(tx, existing.name, name);
-
+    await renameBranchReferences(tx, existing.name, data.name);
     if (roomCount > activeRooms.length) {
       const names = nextRoomNames(existing.rooms, roomCount - activeRooms.length);
-      await tx.room.createMany({ data: names.map((roomName) => ({ name: roomName, branchId: existing.id })) });
+      await tx.room.createMany({ data: names.map((name) => ({ name, branchId: id })) });
     } else if (roomsToArchive.length) {
-      const roomIds = roomsToArchive.map((room) => room.id);
-      if (roomIds.length) {
-        await tx.room.updateMany({
-          where: { id: { in: roomIds } },
-          data: { status: ARCHIVED_ROOM_STATUS },
+      await tx.room.updateMany({ where: { id: { in: roomsToArchive.map((room) => room.id) } }, data: { status: ARCHIVED_ROOM_STATUS } });
+    }
+    const branch = await tx.branch.update({ where: { id }, data });
+    if (Array.isArray(request.body?.enabledModules)) {
+      const enabledModules = normalizedBranchModules(request.body.enabledModules);
+      for (const moduleId of branchConfigModuleIds) {
+        await tx.branchModule.upsert({
+          where: { branchId_moduleId: { branchId: id, moduleId } },
+          create: { branchId: id, moduleId, enabled: enabledModules.includes(moduleId) },
+          update: { enabled: enabledModules.includes(moduleId) },
         });
       }
     }
-
-    const branch = await tx.branch.update({
-      where: { id: existing.id },
-      data: {
-        name,
-        city: clean(request.body?.city),
-        address: clean(request.body?.address),
-        phone: clean(request.body?.phone),
-        hours: clean(request.body?.hours),
-        devices: jsonText(request.body?.devices || [], []),
-        image: assetReference(request.body?.image, "Branch image"),
-      },
-      include: { rooms: { orderBy: { createdAt: "asc" } } },
-    });
+    await syncBranchManagers(tx, branch, request.body?.managerIds);
     const auditLog = await writeAudit(tx, request, {
       area: "Branches",
       action: "Branch updated",
-      details: existing.name === branch.name
-        ? `${branch.name} profile and room setup were updated.`
-        : `${existing.name} was renamed to ${branch.name}; linked branch assignments were migrated.`,
+      branchId: id,
+      subjectType: "Branch",
+      subjectId: id,
+      details: existing.name === branch.name ? `${branch.name} settings were updated.` : `${existing.name} was renamed to ${branch.name}; linked records were migrated.`,
+      beforeValues: serializeBranch(existing),
+      afterValues: { ...data, enabledModules: request.body?.enabledModules, managerIds: request.body?.managerIds },
     });
-    return { branch, auditLog };
+    return { branch: await branchWithManagementData(tx, id), auditLog };
   });
-
   response.json({ branch: serializeBranch(result.branch), previousName: existing.name, auditLog: result.auditLog });
 }));
 
-async function branchDeletionBlockers(database, branchName) {
-  const checks = [
-    ["clients", database.client.count({ where: { branch: branchName } })],
-    ["employees", database.staffMember.count({ where: { branch: branchName } })],
-    ["user accounts", database.account.count({ where: { branch: branchName } })],
-    ["invitations", database.userInvitation.count({ where: { branch: branchName } })],
-    ["attendance events", database.attendanceEvent.count({ where: { branch: branchName } })],
-    ["FaceTrack attendance records", database.faceTrackAttendanceRecord.count({ where: { branch: branchName } })],
-    ["FaceTrack kiosks", database.faceTrackKioskDevice.count({ where: { branch: branchName } })],
-    ["appointments", database.appointment.count({ where: { branch: branchName } })],
-    ["inventory items", database.inventoryItem.count({ where: { branch: branchName } })],
-    ["inventory movements", database.inventoryMovement.count({ where: { branch: branchName } })],
-    ["sales", database.sale.count({ where: { branch: branchName } })],
-    ["packages", database.clinicPackage.count({ where: { branch: branchName } })],
-    ["gift certificates", database.giftCertificate.count({ where: { branch: branchName } })],
-    ["leads", database.lead.count({ where: { OR: [{ branch: branchName }, { assignedBranch: branchName }] } })],
-    ["expenses", database.expense.count({ where: { branch: branchName } })],
-    ["marketing campaigns", database.marketingCampaign.count({ where: { branch: branchName } })],
-    ["uploaded assets", database.uploadAsset.count({ where: { branch: branchName, category: { not: "branch-photo" } } })],
-  ];
-  const [counts, services] = await Promise.all([
-    Promise.all(checks.map(async ([label, countPromise]) => [label, await countPromise])),
-    database.service.findMany({ select: { branches: true } }),
-  ]);
-  const serviceCount = services.filter((service) => parseJsonList(service.branches).includes(branchName)).length;
-  return [
-    ...counts.filter(([_label, count]) => count > 0),
-    ...(serviceCount ? [["services", serviceCount]] : []),
-  ];
-}
-
-app.delete("/api/branches/:id", asyncRoute(async (request, response) => {
-  const account = requireAuthenticatedAccount(request);
-  if (!isAdmin(account.role)) throw apiError("Only a Super Admin or Admin can delete branches.", 403);
-
-  const branch = await prisma.branch.findUnique({ where: { id: clean(request.params.id) } });
-  if (!branch) throw apiError("Branch not found.", 404);
-  if (clean(request.body?.confirmationName) !== branch.name) {
-    throw apiError(`Type ${branch.name} exactly to confirm deletion.`, 400);
+async function setBranchLifecycle(request, status) {
+  const actor = requireBranchAdministration(request);
+  if (!branchStatuses.includes(status)) throw apiError("Unsupported branch status.", 400);
+  const id = clean(request.params.id);
+  const existing = await prisma.branch.findFirst({ where: { id, organizationId: actor.organizationId } });
+  if (!existing) throw apiError("Branch not found.", 404);
+  if (status !== "Active" && existing.status === "Active") {
+    const activeCount = await prisma.branch.count({ where: { organizationId: actor.organizationId, status: "Active" } });
+    if (activeCount <= 1) throw apiError("The organization must keep at least one active branch.", 409);
   }
-  const requestedDestination = clean(request.body?.reassignTo);
-
-  const imageAssetId = clean(branch.image).match(/^\/api\/uploads\/([^/?#]+)$/)?.[1] || "";
-  const imageAsset = imageAssetId ? await prisma.uploadAsset.findUnique({ where: { id: imageAssetId } }) : null;
   const result = await prisma.$transaction(async (tx) => {
-    if (await tx.branch.count() <= 1) throw apiError("The organization must keep at least one branch.", 409);
-    let reassignedTo = "";
-    if (requestedDestination) {
-      const destination = await tx.branch.findUnique({ where: { name: requestedDestination } });
-      if (!destination || destination.id === branch.id) {
-        throw apiError("Choose another active branch for linked records.", 400);
-      }
-      await renameBranchReferences(tx, branch.name, destination.name);
-      reassignedTo = destination.name;
-    }
-    const blockers = await branchDeletionBlockers(tx, branch.name);
-    if (blockers.length) {
-      const summary = blockers.map(([label, count]) => `${count} ${label}`).join(", ");
-      throw apiError(`Reassign linked branch data before deleting ${branch.name}: ${summary}.`, 409);
-    }
-
-    await tx.branch.delete({ where: { id: branch.id } });
-    if (imageAssetId) await tx.uploadAsset.deleteMany({ where: { id: imageAssetId, category: "branch-photo" } });
+    const branch = await tx.branch.update({
+      where: { id },
+      data: { status, archivedAt: status === "Archived" ? new Date() : null },
+    });
+    const action = status === "Archived" ? "Branch archived" : status === "Active" ? "Branch reactivated" : "Branch deactivated";
     const auditLog = await writeAudit(tx, request, {
       area: "Branches",
-      action: "Branch deleted",
-      details: reassignedTo
-        ? `${branch.name} was permanently deleted after linked records were reassigned to ${reassignedTo}.`
-        : `${branch.name} was permanently deleted after exact-name confirmation.`,
+      action,
+      branchId: id,
+      subjectType: "Branch",
+      subjectId: id,
+      details: `${branch.name} is now ${status.toLowerCase()}; historical records were preserved.`,
+      beforeValues: { status: existing.status, archivedAt: existing.archivedAt },
+      afterValues: { status, archivedAt: branch.archivedAt },
     });
-    return { auditLog, reassignedTo };
+    return { branch: await branchWithManagementData(tx, id), auditLog };
   });
+  return { branch: serializeBranch(result.branch), auditLog: result.auditLog };
+}
 
-  if (imageAsset?.objectPath) {
-    storageRequest(imageAsset.objectPath, { method: "DELETE" }).catch(() => {});
+app.post("/api/branches/:id/archive", asyncRoute(async (request, response) => response.json(await setBranchLifecycle(request, "Archived"))));
+app.post("/api/branches/:id/reactivate", asyncRoute(async (request, response) => response.json(await setBranchLifecycle(request, "Active"))));
+app.patch("/api/branches/:id/status", asyncRoute(async (request, response) => response.json(await setBranchLifecycle(request, requireText(request.body?.status, "Status")))));
+
+app.put("/api/branches/:id/modules", asyncRoute(async (request, response) => {
+  const actor = requireBranchAdministration(request);
+  const id = clean(request.params.id);
+  const branch = await prisma.branch.findFirst({ where: { id, organizationId: actor.organizationId } });
+  if (!branch) throw apiError("Branch not found.", 404);
+  const enabledModules = normalizedBranchModules(request.body?.enabledModules);
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.branchModule.findMany({ where: { branchId: id, enabled: true }, select: { moduleId: true } });
+    for (const moduleId of branchConfigModuleIds) {
+      await tx.branchModule.upsert({
+        where: { branchId_moduleId: { branchId: id, moduleId } },
+        create: { branchId: id, moduleId, enabled: enabledModules.includes(moduleId) },
+        update: { enabled: enabledModules.includes(moduleId) },
+      });
+    }
+    const auditLog = await writeAudit(tx, request, {
+      area: "Branches",
+      action: "Branch modules changed",
+      branchId: id,
+      subjectType: "Branch",
+      subjectId: id,
+      details: `${branch.name} now has ${enabledModules.length} enabled modules.`,
+      beforeValues: { enabledModules: before.map((item) => item.moduleId) },
+      afterValues: { enabledModules },
+    });
+    return { branch: await branchWithManagementData(tx, id), auditLog };
+  });
+  response.json({ branch: serializeBranch(result.branch), auditLog: result.auditLog });
+}));
+
+app.put("/api/branches/:id/memberships", asyncRoute(async (request, response) => {
+  const actor = requireBranchAdministration(request);
+  const id = clean(request.params.id);
+  const branch = await prisma.branch.findFirst({ where: { id, organizationId: actor.organizationId } });
+  if (!branch) throw apiError("Branch not found.", 404);
+  const assignments = Array.isArray(request.body?.assignments) ? request.body.assignments : [];
+  const accountIds = [...new Set(assignments.map((item) => clean(item.accountId)).filter(Boolean))];
+  const accounts = await prisma.account.findMany({ where: { id: { in: accountIds }, organizationId: actor.organizationId } });
+  if (accounts.length !== accountIds.length) throw apiError("One or more accounts are outside this organization.", 403);
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.branchMembership.findMany({ where: { branchId: id } });
+    if (request.body?.replace === true) {
+      await tx.branchMembership.updateMany({ where: { branchId: id, accountId: { notIn: accountIds } }, data: { status: "Inactive", isPrimary: false } });
+    }
+    for (const assignment of assignments) {
+      const accountId = requireText(assignment.accountId, "Account");
+      const role = requireText(assignment.role, "Branch role");
+      if (!Object.hasOwn(roleAccess, role)) throw apiError(`Unsupported role: ${role}.`, 400);
+      const permissions = parsePermissionList(assignment.permissions);
+      if (assignment.isPrimary) await tx.branchMembership.updateMany({ where: { accountId }, data: { isPrimary: false } });
+      await tx.branchMembership.upsert({
+        where: { branchId_accountId: { branchId: id, accountId } },
+        create: { branchId: id, accountId, role, permissions: jsonText(permissions, []), status: clean(assignment.status) || "Active", isPrimary: Boolean(assignment.isPrimary) },
+        update: { role, permissions: jsonText(permissions, []), status: clean(assignment.status) || "Active", isPrimary: Boolean(assignment.isPrimary) },
+      });
+      if (assignment.isPrimary) {
+        await tx.account.update({ where: { id: accountId }, data: { lastBranchId: id, branch: branch.name } });
+      }
+    }
+    const auditLog = await writeAudit(tx, request, {
+      area: "Branches",
+      action: "Branch assignments changed",
+      branchId: id,
+      subjectType: "Branch",
+      subjectId: id,
+      details: `${branch.name} account assignments were updated.`,
+      beforeValues: { assignments: before },
+      afterValues: { assignments },
+    });
+    return { branch: await branchWithManagementData(tx, id), auditLog };
+  });
+  response.json({ branch: serializeBranch(result.branch), auditLog: result.auditLog });
+}));
+
+// Backward-compatible delete calls now archive. No branch or business record is
+// permanently deleted through the application API.
+app.delete("/api/branches/:id", asyncRoute(async (request, response) => {
+  const branch = await prisma.branch.findUnique({ where: { id: clean(request.params.id) } });
+  if (!branch) throw apiError("Branch not found.", 404);
+  if (clean(request.body?.confirmationName) && clean(request.body.confirmationName) !== branch.name) {
+    throw apiError(`Type ${branch.name} exactly to confirm archival.`, 400);
   }
-  response.json({ id: branch.id, name: branch.name, reassignedTo: result.reassignedTo, auditLog: result.auditLog });
+  response.json(await setBranchLifecycle(request, "Archived"));
 }));
 
 app.post("/api/uploads", asyncRoute(async (request, response) => {
@@ -3820,10 +4864,9 @@ app.post("/api/treatments/:id/photos", asyncRoute(async (request, response) => {
   const treatmentId = clean(request.params.id);
   const treatment = await prisma.treatment.findUnique({
     where: { id: treatmentId },
-    include: { clientRecord: { select: { branch: true } } },
   });
   if (!treatment) throw apiError("Treatment record not found.", 404);
-  const branch = clean(treatment.clientRecord?.branch) || "All branches";
+  const branch = clean(treatment.branch) || "All branches";
   const actor = assertMutationAllowed(request, "treatments", branch);
   if (clean(treatment.consent).toLowerCase() !== "signed") {
     throw apiError("Client consent must be signed before treatment photos can be uploaded.", 409);
@@ -3864,11 +4907,11 @@ app.delete("/api/treatments/:id/photos/:photoId", asyncRoute(async (request, res
     where: { id: clean(request.params.photoId), treatmentId },
     include: {
       asset: true,
-      treatment: { include: { clientRecord: { select: { branch: true } } } },
+      treatment: true,
     },
   });
   if (!photo) throw apiError("Treatment photo not found.", 404);
-  const branch = clean(photo.treatment.clientRecord?.branch) || "All branches";
+  const branch = clean(photo.treatment.branch) || "All branches";
   const actor = assertMutationAllowed(request, "treatments", branch);
   if (actor.id !== photo.asset.uploadedById && !canManageOrganization(actor.role)) {
     throw apiError("Only the uploader or an organization administrator can remove this photo.", 403);
@@ -4037,7 +5080,7 @@ app.get("/api/settings", asyncRoute(async (request, response) => {
 app.put("/api/settings", asyncRoute(async (request, response) => {
   const account = requireAuthenticatedAccount(request);
   if (!canManageOrganization(account.role)) {
-    throw apiError("Only a Super Admin, Admin, or Business Owner can edit the company profile.", 403);
+    throw apiError("Only an Owner or Super Admin can edit organization settings.", 403);
   }
   assertMutationAllowed(request, "settings");
   const settings = await savePersistedSettings(request.body ?? {});
@@ -4059,7 +5102,7 @@ app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
 app.get("/api/leads/webhook-events", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "leads");
   const events = await prisma.webhookEvent.findMany({
-    where: hasOrganizationWideAccess(actor) ? {} : { lead: { is: { branch: actor.branch } } },
+    where: { lead: { is: branchWhere(actor) } },
     orderBy: [{ receivedAt: "desc" }],
     take: 100,
   });
@@ -4398,7 +5441,7 @@ app.get("/api/clients", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/clients", asyncRoute(async (request, response) => {
-  const data = normalizeClientPayload(request.body);
+  const data = normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients));
   assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.create({ data });
   response.status(201).json(client);
@@ -4409,7 +5452,7 @@ app.put("/api/clients/:id", asyncRoute(async (request, response) => {
   const existing = await prisma.client.findUnique({ where: { id } });
   if (!existing) throw apiError("Client not found.", 404);
   assertMutationAllowed(request, "clients", existing.branch);
-  const data = normalizeClientPayload(request.body, id);
+  const data = normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients), id);
   assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.update({ where: { id }, data });
   response.json(client);
@@ -4436,8 +5479,9 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
     throw apiError(`${request.params.resource} cannot be created through the generic API.`, 405);
   }
 
-  const data = await config.normalize(request.body);
+  const data = await config.normalize(branchScopedPayload(request, request.body, config));
   await assertResourceMutationAllowed(request, config, data);
+  if (request.params.resource === "staff") assertStaffAccessMutation(request, data);
   if (config.beforeWrite) await config.beforeWrite(data);
 
   const result = await prisma.$transaction(async (tx) => {
@@ -4472,8 +5516,9 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
     throw apiError("Restore this campaign before editing it.", 409);
   }
   await assertResourceMutationAllowed(request, config, existing);
-  const data = await config.normalize(request.body, id);
+  const data = await config.normalize(branchScopedPayload(request, request.body, config), id);
   await assertResourceMutationAllowed(request, config, data);
+  if (request.params.resource === "staff") assertStaffAccessMutation(request, data, existing);
   if (request.params.resource === "campaigns") {
     const comparableValue = (value) => value instanceof Date ? value.toISOString() : JSON.stringify(value ?? null);
     const changed = ["name", "branch", "segment", "channel", "templateId", "subject", "message", "html", "design", "scheduledAt", "managerApproval"]
@@ -4539,6 +5584,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
   const [settings, branchRows, serviceRows] = await Promise.all([
     getPersistedSettings(),
     prisma.branch.findMany({
+      where: { status: "Active", modules: { some: { moduleId: { in: ["leads", "booking"] }, enabled: true } } },
       orderBy: [{ name: "asc" }],
       select: { id: true, name: true },
     }),
@@ -4591,8 +5637,8 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
 
   const requestedBranch = boundedPublicText(values.branch, "Branch", 120);
   const branch = requestedBranch
-    ? await prisma.branch.findFirst({ where: { name: requestedBranch }, select: { name: true } })
-    : await prisma.branch.findFirst({ orderBy: [{ name: "asc" }], select: { name: true } });
+    ? await prisma.branch.findFirst({ where: { name: requestedBranch, status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, select: { name: true } })
+    : await prisma.branch.findFirst({ where: { status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, orderBy: [{ name: "asc" }], select: { name: true } });
   if (!branch) throw apiError(requestedBranch ? "Selected branch is unavailable." : "No clinic branch is available for inquiries.", requestedBranch ? 400 : 503);
 
   const requestedServiceId = boundedPublicText(values.serviceId, "Service", 120);
@@ -4668,7 +5714,7 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   if (!service || !service.active) {
     throw apiError("Selected service is unavailable.", 404);
   }
-  const branch = await prisma.branch.findUnique({ where: { name: booking.branch }, include: { rooms: true } });
+  const branch = await prisma.branch.findFirst({ where: { name: booking.branch, status: "Active", modules: { some: { moduleId: "booking", enabled: true } } }, include: { rooms: true } });
   if (!branch) throw apiError("Selected branch is unavailable.", 404);
   const serviceBranches = parseJsonList(service.branches);
   if (serviceBranches.length && !serviceBranches.includes(booking.branch) && !serviceBranches.includes("All branches")) {

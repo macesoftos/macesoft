@@ -52,6 +52,14 @@ const actionDefinitions = {
     modal: "staff",
     requiredModules: ["staff"],
   },
+  invite: {
+    id: "invite",
+    label: "Invite user",
+    icon: "email",
+    handler: "invite-user",
+    requiredModules: ["staff"],
+    requiresInvitationPermission: true,
+  },
   inventory: {
     id: "inventory",
     label: "New inventory item",
@@ -115,8 +123,8 @@ export const globalActionsByModule = {
   treatments: ["treatment"],
   services: ["service"],
   packages: ["package"],
-  staff: ["staff"],
-  branches: ["branch"],
+  staff: ["invite", "staff"],
+  branches: ["invite", "branch"],
   inventory: ["inventory"],
   expenses: ["expense"],
   sms: ["campaign", "emailCampaign"],
@@ -126,6 +134,7 @@ export function getGlobalCreateActions({
   moduleId,
   sessionModules = [],
   canManageOrganization = false,
+  canInviteUsers = false,
   context = {},
 }) {
   const allowedModules = new Set(sessionModules);
@@ -136,6 +145,7 @@ export function getGlobalCreateActions({
     .filter(Boolean)
     .filter((action) => action.requiredModules.every((module) => allowedModules.has(module)))
     .filter((action) => !action.requiresOrganizationManagement || canManageOrganization)
+    .filter((action) => !action.requiresInvitationPermission || canInviteUsers)
     .map((action) => ({
       ...action,
       payload: typeof action.payload === "function" ? action.payload(context) : action.payload,

@@ -66,9 +66,14 @@ async function clearDatabase() {
   await prisma.appointment.deleteMany();
   await prisma.service.deleteMany();
   await prisma.staffMember.deleteMany();
+  await prisma.client.deleteMany();
   await prisma.room.deleteMany();
   await prisma.branch.deleteMany();
-  await prisma.client.deleteMany();
+  await prisma.organization.deleteMany();
+}
+
+async function seedOrganization() {
+  await prisma.organization.create({ data: { id: "org-mace", name: "MACE by Dr. Mace", slug: "mace-by-dr-mace" } });
 }
 
 async function seedBranches() {
@@ -76,7 +81,9 @@ async function seedBranches() {
     await prisma.branch.create({
       data: {
         id: branch.id,
+        organizationId: "org-mace",
         name: branch.name,
+        code: branch.id.replace(/^br-/, "").toUpperCase(),
         city: branch.city,
         address: branch.address,
         phone: branch.phone,
@@ -84,6 +91,9 @@ async function seedBranches() {
         staff: Number(branch.staff || 0),
         devices: asJsonText(branch.devices),
         image: branch.image,
+        modules: {
+          create: ["overview", "appointments", "clients", "leads", "pos", "card-view", "room-view", "treatments", "services", "packages", "booking", "staff-view", "staff", "facetrack-attendance", "inventory", "expenses", "reports", "sms", "flipbooks", "support"].map((moduleId) => ({ moduleId, enabled: true })),
+        },
         rooms: {
           create: branch.rooms.map((room) => ({
             name: room,
@@ -187,6 +197,7 @@ async function seedGrowthAndAdminRecords() {
   await prisma.expense.createMany({
     data: initialExpenses.map((expense) => ({
       ...expense,
+      branch: expense.branch === "All branches" ? branches[0].name : expense.branch,
       amount: Number(expense.amount || 0),
     })),
   });
@@ -206,7 +217,7 @@ async function seedGrowthAndAdminRecords() {
       role: "System",
       area: "Setup",
       action: "Database seeded",
-      details: "MACE ClinicOS SQLite database seeded from workspace data.",
+      details: "MACE ClinicOS database seeded from workspace data.",
     },
   });
   await prisma.systemSetting.create({
@@ -247,6 +258,7 @@ async function seedInventoryMovements() {
 
 async function main() {
   await clearDatabase();
+  await seedOrganization();
   await seedBranches();
   await seedClients();
   await seedOperationalRecords();

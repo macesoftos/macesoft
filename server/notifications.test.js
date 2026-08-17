@@ -19,18 +19,23 @@ test("notification queries are scoped by modules and branch", () => {
   ), {
     module: { in: ["leads", "services"] },
     OR: [
-      { branches: { has: "All branches" } },
-      { branches: { has: "Mace Davao" } },
+      {
+        recipientAccountIds: { isEmpty: true },
+        OR: [
+          { branches: { has: "All branches" } },
+          { branches: { has: "Mace Davao" } },
+        ],
+      },
     ],
   });
   assert.deepEqual(notificationWhereForActor(
     { role: "Super Admin", branch: "All branches" },
     ["leads"],
-  ), { module: { in: ["leads"] } });
+  ), { module: { in: ["leads"] }, OR: [{ recipientAccountIds: { isEmpty: true } }] });
   assert.deepEqual(notificationWhereForActor(
     { role: "Receptionist", branch: "All branches" },
     ["leads"],
-  ), { module: { in: ["leads"] }, id: { in: [] } });
+  ), { module: { in: ["leads"] }, OR: [{ id: { in: [] } }] });
 });
 
 test("unread state is based on each account's read timestamp", () => {
@@ -38,4 +43,13 @@ test("unread state is based on each account's read timestamp", () => {
   assert.equal(notificationIsUnread(notification, null), true);
   assert.equal(notificationIsUnread(notification, "2026-08-14T09:59:59.000Z"), true);
   assert.equal(notificationIsUnread(notification, "2026-08-14T10:00:00.000Z"), false);
+});
+
+test("targeted notifications are visible only to named accounts", () => {
+  const where = notificationWhereForActor(
+    { id: "manager-davao", role: "Branch Manager", branch: "Mace Davao" },
+    ["staff"],
+  );
+  assert.deepEqual(where.OR[0], { recipientAccountIds: { has: "manager-davao" } });
+  assert.deepEqual(where.OR[1].recipientAccountIds, { isEmpty: true });
 });
