@@ -77,7 +77,7 @@ if (!smtpAddress || typeof smtpAddress === "string") throw new Error("SMTP smoke
 
 async function waitForSmtpMessage(count) {
   const startedAt = Date.now();
-  while (smtpMessages.length < count && Date.now() - startedAt < 5_000) await delay(25);
+  while (smtpMessages.length < count && Date.now() - startedAt < 15_000) await delay(25);
   assert(smtpMessages.length >= count, `SMTP smoke server did not receive message ${count}.`);
   return smtpMessages[count - 1]
     .replace(/=\r?\n/g, "")

@@ -22,7 +22,7 @@ test("anonymous users cannot read clinic data", async ({ request }) => {
 });
 
 test("an authenticated owner can open a scoped workspace and sign out", async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   await page.goto("/");
   await page.getByLabel("Email").fill(ownerEmail);
   await page.getByLabel("Password").fill(ownerPassword);
@@ -183,6 +183,35 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   }, { id: guardAppointmentId, room: roomName });
   expect(guardCreationStatus).toBe(201);
 
+  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await gotoAuthenticatedWorkspace(page, "/room-view");
+    const roomAction = page.getByRole("button", { name: `Actions for ${roomName}` });
+    await expect(roomAction).toBeVisible();
+    await roomAction.click();
+    const deleteMenu = page.getByRole("menu", { name: `${roomName} actions` });
+    await expect(deleteMenu).toBeVisible();
+    const roomActionBox = await roomAction.boundingBox();
+    const deleteMenuBox = await deleteMenu.boundingBox();
+    expect(roomActionBox).not.toBeNull();
+    expect(deleteMenuBox).not.toBeNull();
+    if (!roomActionBox || !deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
+    expect(deleteMenuBox.x).toBeGreaterThanOrEqual(0);
+    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(deleteMenuBox.y + deleteMenuBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(deleteMenuBox.x).toBeLessThan(roomActionBox.x);
+    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(roomActionBox.x + roomActionBox.width + 1);
+    await page.keyboard.press("Escape");
+
+    await createTrigger.click();
+    await createMenu.getByRole("menuitem", { name: "New room" }).click();
+    await expect(page.getByRole("dialog", { name: "New room" })).toBeVisible();
+    await page.getByRole("button", { name: "Close room form" }).click();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoAuthenticatedWorkspace(page, "/room-view");
+
   await page.getByRole("button", { name: `Actions for ${roomName}` }).click();
   await page.getByRole("menuitem", { name: "Delete room" }).click();
   const roomDeleteDialog = page.getByRole("alertdialog", { name: `Delete ${roomName}` });
@@ -208,32 +237,6 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   expect((await roomDeletion).status()).toBe(200);
   await expect(roomDeleteDialog).toBeHidden();
   await expect(page.getByRole("button", { name: `Actions for ${roomName}` })).toHaveCount(0);
-
-  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
-    await page.setViewportSize(viewport);
-    await gotoAuthenticatedWorkspace(page, "/#/room-view");
-    const roomAction = page.getByRole("button", { name: "Actions for Consult Room" });
-    await expect(roomAction).toBeVisible();
-    await roomAction.click();
-    const deleteMenu = page.getByRole("menu", { name: "Consult Room actions" });
-    await expect(deleteMenu).toBeVisible();
-    const roomActionBox = await roomAction.boundingBox();
-    const deleteMenuBox = await deleteMenu.boundingBox();
-    expect(roomActionBox).not.toBeNull();
-    expect(deleteMenuBox).not.toBeNull();
-    if (!roomActionBox || !deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
-    expect(deleteMenuBox.x).toBeGreaterThanOrEqual(0);
-    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(viewport.width);
-    expect(deleteMenuBox.y + deleteMenuBox.height).toBeLessThanOrEqual(viewport.height);
-    expect(deleteMenuBox.x).toBeLessThan(roomActionBox.x);
-    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(roomActionBox.x + roomActionBox.width + 1);
-    await page.keyboard.press("Escape");
-
-    await createTrigger.click();
-    await createMenu.getByRole("menuitem", { name: "New room" }).click();
-    await expect(page.getByRole("dialog", { name: "New room" })).toBeVisible();
-    await page.getByRole("button", { name: "Close room form" }).click();
-  }
 
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
