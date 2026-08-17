@@ -22,17 +22,24 @@ export function normalizeNotificationBranches(value, fallback = allBranchesLabel
 }
 
 export function notificationWhereForActor(actor, allowedModules) {
-  const where = {
-    module: { in: Array.isArray(allowedModules) ? allowedModules : [] },
-  };
+  const moduleWhere = { module: { in: Array.isArray(allowedModules) ? allowedModules : [] } };
   const branch = clean(actor?.branch);
-  if (hasOrganizationWideAccess(actor)) return where;
-  if (!hasValidBranchAssignment(actor)) return { ...where, id: { in: [] } };
+  const untargetedBranchWhere = actor?.access?.scope === "all" || (hasOrganizationWideAccess(actor) && !actor?.access)
+    ? { recipientAccountIds: { isEmpty: true } }
+    : !hasValidBranchAssignment(actor)
+      ? { id: { in: [] } }
+      : {
+        recipientAccountIds: { isEmpty: true },
+        OR: [
+          { branches: { has: allBranchesLabel } },
+          { branches: { has: branch } },
+        ],
+      };
   return {
-    ...where,
+    ...moduleWhere,
     OR: [
-      { branches: { has: allBranchesLabel } },
-      { branches: { has: branch } },
+      ...(actor?.id ? [{ recipientAccountIds: { has: actor.id } }] : []),
+      untargetedBranchWhere,
     ],
   };
 }

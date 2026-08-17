@@ -8,6 +8,12 @@ if (!ownerEmail || !ownerPassword) {
   throw new Error("BOOTSTRAP_OWNER_EMAIL and BOOTSTRAP_OWNER_PASSWORD are required for authenticated browser tests.");
 }
 
+async function gotoAuthenticatedWorkspace(page, path) {
+  const bootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.status() === 200);
+  await page.goto(path);
+  await bootstrap;
+}
+
 test("anonymous users cannot read clinic data", async ({ request }) => {
   for (const path of ["/api/bootstrap", "/api/clients", "/api/settings"]) {
     const response = await request.get(path);
@@ -58,7 +64,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     await expect(accountMenu).toBeVisible();
   }
 
-  await page.goto("/appointments");
+  await gotoAuthenticatedWorkspace(page, "/appointments");
   await expect(page).toHaveURL(/\/appointments$/);
   await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
@@ -67,7 +73,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
 
-  await page.goto("/appointments/nonexistent-release-check");
+  await gotoAuthenticatedWorkspace(page, "/appointments/nonexistent-release-check");
   await expect(page).toHaveURL(/\/appointments\/nonexistent-release-check$/);
   await expect(page.getByText("Appointment not found", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Back to appointments" }).click();
@@ -92,7 +98,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByRole("dialog", { name: "New appointment" })).toBeVisible();
   await page.getByRole("button", { name: "Close form" }).click();
 
-  await page.goto("/clients");
+  await gotoAuthenticatedWorkspace(page, "/clients");
   await expect(page).toHaveURL(/\/clients$/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await createTrigger.click();
@@ -100,7 +106,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
-  await page.goto("/card-view");
+  await gotoAuthenticatedWorkspace(page, "/card-view");
   await expect(page).toHaveURL(/\/card-view$/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.getByLabel("Card filters")).toBeVisible();
@@ -111,7 +117,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     await expect(page.getByText(demoPatient, { exact: true })).toHaveCount(0);
   }
 
-  await page.goto("/room-view");
+  await gotoAuthenticatedWorkspace(page, "/room-view");
   await expect(page).toHaveURL(/\/room-view$/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await createTrigger.click();
@@ -123,6 +129,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   const roomName = `Release Room ${Date.now()}`;
   await expect(roomDialog).toBeVisible();
   await roomDialog.getByLabel("Room name, required").fill(`  ${roomName}  `);
+  await roomDialog.getByLabel("Room branch, required").selectOption({ label: "Mace Davao" });
   const roomCreation = page.waitForResponse((response) => response.url().endsWith("/api/rooms") && response.request().method() === "POST");
   await roomDialog.getByRole("button", { name: "Add room" }).click();
   const roomCreationResponse = await roomCreation;
@@ -204,7 +211,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await page.goto("/#/room-view");
+    await gotoAuthenticatedWorkspace(page, "/#/room-view");
     const roomAction = page.getByRole("button", { name: "Actions for Consult Room" });
     await expect(roomAction).toBeVisible();
     await roomAction.click();
@@ -230,7 +237,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await page.goto("/appointments");
+    await gotoAuthenticatedWorkspace(page, "/appointments");
     await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
     await createTrigger.click();
@@ -246,7 +253,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await page.goto("/#/support");
+  await gotoAuthenticatedWorkspace(page, "/#/support");
   await expect(page.getByRole("button", { name: "Create new" })).toHaveCount(0);
 
   const serviceId = `svc-e2e-${Date.now()}`;

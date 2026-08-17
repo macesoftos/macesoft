@@ -7,6 +7,7 @@ const branchReferenceFields = Object.freeze([
   ["faceTrackAttendanceRecord", "branch"],
   ["faceTrackKioskDevice", "branch"],
   ["appointment", "branch"],
+  ["treatment", "branch"],
   ["inventoryItem", "branch"],
   ["inventoryMovement", "branch"],
   ["sale", "branch"],
@@ -17,6 +18,8 @@ const branchReferenceFields = Object.freeze([
   ["expense", "branch"],
   ["uploadAsset", "branch"],
   ["marketingCampaign", "branch"],
+  ["marketingEmailTemplate", "branch"],
+  ["flipbook", "branch"],
 ]);
 
 function parseBranchList(value) {
@@ -59,5 +62,13 @@ export async function renameBranchReferences(database, previousName, nextName) {
       ? []
       : [database.service.update({ where: { id: service.id }, data: { branches } })];
   });
-  await Promise.all([...directUpdates, ...serviceUpdates]);
+  const notifications = await database.appNotification.findMany({
+    where: { branches: { has: previousName } },
+    select: { id: true, branches: true },
+  });
+  const notificationUpdates = notifications.map((notification) => database.appNotification.update({
+    where: { id: notification.id },
+    data: { branches: [...new Set(notification.branches.map((branch) => branch === previousName ? nextName : branch))] },
+  }));
+  await Promise.all([...directUpdates, ...serviceUpdates, ...notificationUpdates]);
 }
