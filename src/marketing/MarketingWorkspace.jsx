@@ -545,6 +545,7 @@ const starterTemplates = starterTemplateDefinitions.map((template) => ({
 function createDefaultDraft() {
   return {
     id: "",
+    branch: "",
     name: "Summer Skin Reset",
     channel: "Email",
     segment: "Inactive clients",
@@ -610,10 +611,10 @@ function channelEligible(client, channel) {
   return Boolean((client.email && emailConsent) || (client.mobile && smsConsent));
 }
 
-function audienceRecipients(clients, segment, channel) {
+function audienceRecipients(clients, segment, channel, branch = "") {
   const definition = audienceDefinitions.find((item) => item.id === segment) ?? audienceDefinitions[0];
   return clients
-    .filter((client) => definition.matches(client) && channelEligible(client, channel))
+    .filter((client) => (!branch || branch === "All branches" || client.branch === branch) && definition.matches(client) && channelEligible(client, channel))
     .sort((left, right) => String(left.fullName || left.name || left.email || left.mobile || "").localeCompare(String(right.fullName || right.name || right.email || right.mobile || "")));
 }
 
@@ -691,6 +692,8 @@ function campaignAdvisories(draft) {
 export default function MarketingWorkspace({
   approveCampaign,
   askConfirm,
+  branches = [],
+  branchScope = "All branches",
   canApproveMarketing = false,
   campaigns = [],
   clients = [],
@@ -776,6 +779,7 @@ export default function MarketingWorkspace({
     setDraft(normalizedDraft({
       ...createDefaultDraft(),
       step: 1,
+      branch: branchScope !== "All branches" ? branchScope : branches.length === 1 ? branches[0].name : "",
       ...preset,
       managerApproval: canApproveMarketing ? false : settings.managerApproval !== false,
     }));
@@ -888,6 +892,7 @@ export default function MarketingWorkspace({
         ) : null}
         {route.mode === "create" ? (
           <CampaignBuilder
+            branches={branches}
             canApproveMarketing={canApproveMarketing}
             clients={clients}
             draft={draft}
@@ -1357,7 +1362,7 @@ function MarketingSettingsPage({ canApproveMarketing, notify, openModal, saveMar
   );
 }
 
-function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
+function CampaignBuilder({ askConfirm, branches = [], canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
@@ -1380,12 +1385,14 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
   const draftRef = useRef(draft);
   const saveChainRef = useRef(Promise.resolve());
   const saveRequestRef = useRef(0);
+  const autosaveTimerRef = useRef(null);
+  const finalizingScheduleRef = useRef(false);
   const lastSavedSignatureRef = useRef(draft.id ? JSON.stringify({ ...draft, updatedAt: undefined }) : "");
   const htmlFileInput = useRef(null);
   const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
   const recipients = useMemo(
-    () => audienceRecipients(clients, draft.segment, draft.channel),
-    [clients, draft.channel, draft.segment],
+    () => audienceRecipients(clients, draft.segment, draft.channel, draft.branch),
+    [clients, draft.branch, draft.channel, draft.segment],
   );
   const estimate = recipients.length;
   const warnings = campaignWarnings(draft);
@@ -1727,6 +1734,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
     const signature = JSON.stringify({ ...snapshot, id: pendingCampaignId, updatedAt: undefined });
     setSaveState("Saving…");
     const run = async () => {
+      if (!snapshot.branch) throw new Error("Choose an active branch for this campaign.");
       const campaignSnapshot = { ...snapshot, id: pendingCampaignId };
       const generatedHtml = snapshot.channel === "SMS" ? "" : buildVisualEmailHtml(campaignSnapshot, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin);
       const emailResult = snapshot.channel === "SMS"
@@ -1738,6 +1746,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
       const message = snapshot.channel === "Email" ? emailSummary : snapshot.message;
       const savedCampaign = await onSaveCampaign?.({
         id: pendingCampaignId,
+        branch: snapshot.branch,
         name: snapshot.name,
         segment: snapshot.segment,
         channel: snapshot.channel,
@@ -1782,10 +1791,14 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
   }, [approvalRequired, notify, onSaveCampaign, setDraft, settings]);
 
   useEffect(() => {
-    if (!draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
+    if (finalizingScheduleRef.current || !draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
     setSaveState("Unsaved changes");
     const timer = window.setTimeout(() => { void saveDraft({ silent: true }).catch(() => undefined); }, 1100);
-    return () => window.clearTimeout(timer);
+    autosaveTimerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (autosaveTimerRef.current === timer) autosaveTimerRef.current = null;
+    };
   }, [draft.name, draft.segment, draftSignature, saveDraft]);
 
   useEffect(() => {
@@ -1804,6 +1817,10 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
       return;
     }
     if (draft.step === 4) {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
       if (!draft.scheduledAt || Number.isNaN(new Date(draft.scheduledAt).getTime())) {
         notify?.("Choose a valid delivery date and time.", "error");
         return;
@@ -1812,6 +1829,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
         notify?.("Choose a delivery time in the future.", "error");
         return;
       }
+      finalizingScheduleRef.current = true;
       try {
         const savedCampaign = await saveDraft({ statusOverride: "Draft" });
         if (!onScheduleCampaign) throw new Error("Campaign scheduling is not available right now.");
@@ -1828,8 +1846,10 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
           lastSavedSignatureRef.current = JSON.stringify({ ...next, updatedAt: undefined });
           return next;
         });
+        finalizingScheduleRef.current = false;
         notify?.(result.approvalRequired ? "Campaign submitted to an administrator for approval." : "Campaign scheduled and added to the delivery queue.");
       } catch (error) {
+        finalizingScheduleRef.current = false;
         notify?.(error.message || "Unable to schedule this campaign.", "error");
         return;
       }
@@ -1890,6 +1910,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
           <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications"><Menu size={20} /></button>
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
           <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value={draft.status || "Draft"} /></h1></div>
+          <label className="marketing-builder-branch"><span>Branch</span><select aria-label="Campaign branch" value={draft.branch || ""} onChange={(event) => updateDraft({ branch: event.target.value })}><option value="" disabled>Select a branch</option>{draft.id && draft.branch === "All branches" ? <option value="All branches">Organization-wide legacy</option> : null}{branches.map((branch) => <option key={branch.id || branch.name} value={branch.name}>{branch.name}</option>)}</select></label>
         </div>
         <div className="marketing-builder-actions"><span>{saveState}</span>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-preview-email-button" onClick={() => setEmailPreviewOpen(true)} type="button"><Eye size={16} aria-hidden="true" /> Preview email</button> : null}<button onClick={() => { void saveDraft().catch(() => undefined); }} type="button">Save draft</button>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-send-test-button" onClick={() => setSendTestOpen(true)} type="button">Send test</button> : null}<button className="marketing-primary-button" onClick={() => { void continueStep(); }} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>
       </header>

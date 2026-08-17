@@ -177,6 +177,39 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   }, { id: guardAppointmentId, room: roomName });
   expect(guardCreationStatus).toBe(201);
 
+  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const responsiveRoomBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
+    await page.goto("/room-view");
+    expect((await responsiveRoomBootstrap).status()).toBe(200);
+    const roomAction = page.getByRole("button", { name: `Actions for ${roomName}` });
+    await expect(roomAction).toBeVisible();
+    await roomAction.click();
+    const deleteMenu = page.getByRole("menu", { name: `${roomName} actions` });
+    await expect(deleteMenu).toBeVisible();
+    const roomActionBox = await roomAction.boundingBox();
+    const deleteMenuBox = await deleteMenu.boundingBox();
+    expect(roomActionBox).not.toBeNull();
+    expect(deleteMenuBox).not.toBeNull();
+    if (!roomActionBox || !deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
+    expect(deleteMenuBox.x).toBeGreaterThanOrEqual(0);
+    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(deleteMenuBox.y + deleteMenuBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(deleteMenuBox.x).toBeLessThan(roomActionBox.x);
+    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(roomActionBox.x + roomActionBox.width + 1);
+    await page.keyboard.press("Escape");
+
+    await createTrigger.click();
+    await createMenu.getByRole("menuitem", { name: "New room" }).click();
+    await expect(page.getByRole("dialog", { name: "New room" })).toBeVisible();
+    await page.getByRole("button", { name: "Close room form" }).click();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const desktopRoomBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
+  await page.goto("/room-view");
+  expect((await desktopRoomBootstrap).status()).toBe(200);
+
   await page.getByRole("button", { name: `Actions for ${roomName}` }).click();
   await page.getByRole("menuitem", { name: "Delete room" }).click();
   const roomDeleteDialog = page.getByRole("alertdialog", { name: `Delete ${roomName}` });
@@ -205,33 +238,9 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await page.goto("/#/room-view");
-    const roomAction = page.getByRole("button", { name: "Actions for Consult Room" });
-    await expect(roomAction).toBeVisible();
-    await roomAction.click();
-    const deleteMenu = page.getByRole("menu", { name: "Consult Room actions" });
-    await expect(deleteMenu).toBeVisible();
-    const roomActionBox = await roomAction.boundingBox();
-    const deleteMenuBox = await deleteMenu.boundingBox();
-    expect(roomActionBox).not.toBeNull();
-    expect(deleteMenuBox).not.toBeNull();
-    if (!roomActionBox || !deleteMenuBox) throw new Error("Room action menu did not produce a visible bounding box.");
-    expect(deleteMenuBox.x).toBeGreaterThanOrEqual(0);
-    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(viewport.width);
-    expect(deleteMenuBox.y + deleteMenuBox.height).toBeLessThanOrEqual(viewport.height);
-    expect(deleteMenuBox.x).toBeLessThan(roomActionBox.x);
-    expect(deleteMenuBox.x + deleteMenuBox.width).toBeLessThanOrEqual(roomActionBox.x + roomActionBox.width + 1);
-    await page.keyboard.press("Escape");
-
-    await createTrigger.click();
-    await createMenu.getByRole("menuitem", { name: "New room" }).click();
-    await expect(page.getByRole("dialog", { name: "New room" })).toBeVisible();
-    await page.getByRole("button", { name: "Close room form" }).click();
-  }
-
-  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
-    await page.setViewportSize(viewport);
+    const responsiveAppointmentsBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
     await page.goto("/appointments");
+    expect((await responsiveAppointmentsBootstrap).status()).toBe(200);
     await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
     await createTrigger.click();
