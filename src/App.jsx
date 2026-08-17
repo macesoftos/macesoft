@@ -2702,6 +2702,8 @@ function App() {
           {activeModule === "sms" && (
             <MarketingWorkspace
               approveCampaign={approveCampaign}
+              branches={branchRecords.filter((branch) => branch.status === "Active")}
+              branchScope={branchScope}
               canApproveMarketing={canManageOrganization(session.role)}
               clients={scopedClients}
               templates={smsTemplates}

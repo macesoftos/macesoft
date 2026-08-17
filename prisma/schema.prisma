@@ -886,6 +886,21 @@ model MarketingEmailTemplate {
   @@index([branch, updatedAt])
 }
 
+model MarketingAudienceMember {
+  id        String   @id @default(cuid())
+  name      String   @default("")
+  email     String
+  audience  String
+  branch    String
+  source    String   @default("Manual")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email, audience, branch])
+  @@index([branch, audience])
+  @@index([email])
+}
+
 model MarketingSurveyResponse {
   id         String            @id @default(cuid())
   campaignId String
