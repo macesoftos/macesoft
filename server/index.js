@@ -60,7 +60,11 @@ import {
   renderMarketingHtml,
   sanitizeMarketingHtml,
 } from "./marketingHtml.js";
-import { normalizeMarketingMediaName, serializeMarketingMediaAsset } from "./marketingMedia.js";
+import {
+  normalizeMarketingMediaName,
+  normalizeMarketingMediaSelection,
+  serializeMarketingMediaAsset,
+} from "./marketingMedia.js";
 import {
   approveMarketingState,
   marketingApprovalRequired,
@@ -3940,6 +3944,19 @@ app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
   if (actor.id !== asset.uploadedById && !canManageOrganization(actor.role)) {
     throw apiError("Only the uploader or an organization administrator can remove this asset.", 403);
   }
+  if (asset.category === "marketing-image") {
+    if (asset.deletedAt) throw apiError("Delete this image forever from Marketing Media > Deleted.", 409);
+    await prisma.$transaction(async (tx) => {
+      await tx.uploadAsset.update({ where: { id: asset.id }, data: { deletedAt: new Date() } });
+      await writeAudit(tx, request, {
+        area: "Marketing",
+        action: "Marketing image moved to Deleted",
+        details: `${normalizeMarketingMediaName(asset.originalName) || "Marketing image"} moved to Deleted and can be restored.`,
+      });
+    });
+    response.status(204).end();
+    return;
+  }
   const deleted = await storageRequest(asset.objectPath, { method: "DELETE" });
   if (!deleted.ok && deleted.status !== 404) throw apiError("Object storage could not remove the asset.", 502);
   await prisma.uploadAsset.delete({ where: { id: asset.id } });
@@ -5175,12 +5192,103 @@ app.delete("/api/marketing/campaigns/:id", asyncRoute(async (request, response) 
 
 app.get("/api/marketing/media", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "sms");
-  const assets = await prisma.uploadAsset.findMany({
-    where: { category: "marketing-image", ...branchWhere(actor) },
-    orderBy: [{ createdAt: "desc" }],
-    take: 250,
+  const scope = { category: "marketing-image", ...branchWhere(actor) };
+  const includeDeleted = clean(request.query.status).toLowerCase() === "all";
+  const [activeAssets, deletedAssets, active, deleted] = await Promise.all([
+    prisma.uploadAsset.findMany({
+      where: { ...scope, deletedAt: null },
+      orderBy: [{ createdAt: "desc" }],
+      take: 250,
+    }),
+    includeDeleted ? prisma.uploadAsset.findMany({
+      where: { ...scope, deletedAt: { not: null } },
+      orderBy: [{ deletedAt: "desc" }, { createdAt: "desc" }],
+      take: 250,
+    }) : Promise.resolve([]),
+    prisma.uploadAsset.count({ where: { ...scope, deletedAt: null } }),
+    prisma.uploadAsset.count({ where: { ...scope, deletedAt: { not: null } } }),
+  ]);
+  const assets = includeDeleted ? [...activeAssets, ...deletedAssets] : activeAssets;
+  response.json({ assets: assets.map(serializeMarketingMediaAsset), counts: { active, deleted } });
+}));
+
+function marketingMediaMutation(request, deleted) {
+  const actor = assertMutationAllowed(request, "sms");
+  const selection = normalizeMarketingMediaSelection(request.body ?? {});
+  if (!selection.all && !selection.ids.length) throw apiError("Select at least one Marketing image.", 400);
+  if (selection.ids.length > 250) throw apiError("Manage no more than 250 selected images at once.", 400);
+  return {
+    selection,
+    where: {
+      category: "marketing-image",
+      ...branchWhere(actor),
+      deletedAt: deleted ? { not: null } : null,
+      ...(selection.all ? {} : { id: { in: selection.ids } }),
+    },
+  };
+}
+
+app.post("/api/marketing/media/delete", asyncRoute(async (request, response) => {
+  const { where } = marketingMediaMutation(request, false);
+  const deletedAt = new Date();
+  const result = await prisma.$transaction(async (tx) => {
+    const changed = await tx.uploadAsset.updateMany({ where, data: { deletedAt } });
+    const auditLog = changed.count ? await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Marketing images moved to Deleted",
+      details: `${changed.count} Marketing image${changed.count === 1 ? "" : "s"} moved to Deleted and can be restored.`,
+    }) : null;
+    return { count: changed.count, auditLog };
   });
-  response.json({ assets: assets.map(serializeMarketingMediaAsset) });
+  response.json(result);
+}));
+
+app.post("/api/marketing/media/restore", asyncRoute(async (request, response) => {
+  const { where } = marketingMediaMutation(request, true);
+  const result = await prisma.$transaction(async (tx) => {
+    const changed = await tx.uploadAsset.updateMany({ where, data: { deletedAt: null } });
+    const auditLog = changed.count ? await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Marketing images restored",
+      details: `${changed.count} Marketing image${changed.count === 1 ? "" : "s"} restored to the Media library.`,
+    }) : null;
+    return { count: changed.count, auditLog };
+  });
+  response.json(result);
+}));
+
+app.delete("/api/marketing/media/permanent", asyncRoute(async (request, response) => {
+  const { where } = marketingMediaMutation(request, true);
+  const assets = await prisma.uploadAsset.findMany({ where });
+  const removedIds = [];
+  const failedIds = [];
+  for (let index = 0; index < assets.length; index += 8) {
+    const batch = assets.slice(index, index + 8);
+    const outcomes = await Promise.all(batch.map(async (asset) => {
+      try {
+        const deleted = await storageRequest(asset.objectPath, { method: "DELETE" });
+        return deleted.ok || deleted.status === 404;
+      } catch {
+        return false;
+      }
+    }));
+    outcomes.forEach((removed, offset) => (removed ? removedIds : failedIds).push(batch[offset].id));
+  }
+
+  let auditLog = null;
+  if (removedIds.length) {
+    auditLog = await prisma.$transaction(async (tx) => {
+      for (let index = 0; index < removedIds.length; index += 500) {
+        await tx.uploadAsset.deleteMany({ where: { id: { in: removedIds.slice(index, index + 500) } } });
+      }
+      return writeAudit(tx, request, {
+        area: "Marketing",
+        action: "Marketing images permanently deleted",
+        details: `${removedIds.length} Marketing image${removedIds.length === 1 ? "" : "s"} permanently deleted.${failedIds.length ? ` ${failedIds.length} could not be removed from storage.` : ""}`,
+      });
+    });
+  }
+  response.json({ count: removedIds.length, failedCount: failedIds.length, auditLog });
 }));
 
 app.get("/api/marketing/templates", asyncRoute(async (request, response) => {

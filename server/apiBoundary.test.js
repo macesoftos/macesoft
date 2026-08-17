@@ -58,6 +58,27 @@ test("real API denies private data reads before touching the database", async ()
     const marketingMedia = await fetch(`${baseUrl}/api/marketing/media`);
     assert.equal(marketingMedia.status, 401);
 
+    const moveMarketingMediaToDeleted = await fetch(`${baseUrl}/api/marketing/media/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({ ids: ["asset-1"] }),
+    });
+    assert.equal(moveMarketingMediaToDeleted.status, 401);
+
+    const restoreMarketingMedia = await fetch(`${baseUrl}/api/marketing/media/restore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({ ids: ["asset-1"] }),
+    });
+    assert.equal(restoreMarketingMedia.status, 401);
+
+    const deleteMarketingMediaForever = await fetch(`${baseUrl}/api/marketing/media/permanent`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+      body: JSON.stringify({ ids: ["asset-1"] }),
+    });
+    assert.equal(deleteMarketingMediaForever.status, 401);
+
     const markNotificationsRead = await fetch(`${baseUrl}/api/notifications/read`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },

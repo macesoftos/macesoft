@@ -156,8 +156,29 @@ export function uploadImageAsset(dataUrl, category, branch, originalName = "") {
   });
 }
 
-export function loadMarketingMedia() {
-  return requestJson("/api/marketing/media");
+export function loadMarketingMedia({ includeDeleted = false } = {}) {
+  return requestJson(`/api/marketing/media${includeDeleted ? "?status=all" : ""}`);
+}
+
+export function moveMarketingMediaToDeleted({ ids = [], all = false } = {}) {
+  return requestJson("/api/marketing/media/delete", {
+    method: "POST",
+    body: JSON.stringify({ ids, all }),
+  });
+}
+
+export function restoreMarketingMedia({ ids = [], all = false } = {}) {
+  return requestJson("/api/marketing/media/restore", {
+    method: "POST",
+    body: JSON.stringify({ ids, all }),
+  });
+}
+
+export function deleteMarketingMediaForever({ ids = [], all = false } = {}) {
+  return requestJson("/api/marketing/media/permanent", {
+    method: "DELETE",
+    body: JSON.stringify({ ids, all }),
+  });
 }
 
 export function loadMarketingEmailTemplates() {
