@@ -237,6 +237,24 @@ export function deleteMarketingEmailTemplate(id) {
   return requestJson(`/api/marketing/templates/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export function loadMarketingAudienceMembers() {
+  return requestJson("/api/marketing/audience-members");
+}
+
+export function addMarketingAudienceMember(member) {
+  return requestJson("/api/marketing/audience-members", {
+    method: "POST",
+    body: JSON.stringify(member),
+  });
+}
+
+export function importMarketingAudienceMembers(payload) {
+  return requestJson("/api/marketing/audience-members/import", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 async function requestPublicJson(path, options = {}) {
   const { accessToken = "", viewerId = "", headers = {}, ...fetchOptions } = options;
   const response = await fetch(`${apiBase}${path}`, {

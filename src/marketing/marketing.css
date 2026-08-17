@@ -299,6 +299,30 @@
   line-height: 1.05;
 }
 
+.marketing-builder-branch {
+  display: grid;
+  min-width: 150px;
+  gap: 3px;
+  margin-left: 6px;
+  color: var(--marketing-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.marketing-builder-branch select {
+  min-height: 36px;
+  padding: 7px 30px 7px 10px;
+  border: 1px solid var(--marketing-border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--marketing-espresso);
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .marketing-global-menu,
 .marketing-back-button {
   display: none;
@@ -969,8 +993,12 @@
 .marketing-audience-grid p { min-height: 35px; margin: 0; color: var(--marketing-muted); font-size: 11px; line-height: 1.5; }
 .marketing-audience-grid dl { display: grid; grid-template-columns: 1fr 1fr; margin: 2px 0 0; border-block: 1px solid #eee8e1; }
 .marketing-audience-grid dl div { display: flex; justify-content: space-between; padding: 10px 4px; font-size: 11px; }
+.marketing-audience-grid dt button { padding: 0; border: 0; border-bottom: 1px solid currentColor; background: transparent; color: var(--marketing-espresso); font: inherit; cursor: pointer; }
+.marketing-audience-grid dt button:hover { border-bottom-width: 2px; }
 .marketing-audience-grid dd { margin: 0; font-weight: 800; }
-.marketing-audience-grid article > button { display: inline-flex; align-items: center; gap: 5px; justify-self: start; padding: 4px 0; border: 0; background: transparent; color: var(--marketing-espresso); font-weight: 800; }
+.marketing-audience-grid article > footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 7px 14px; }
+.marketing-audience-grid article > footer button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 0; border: 0; background: transparent; color: var(--marketing-espresso); font-size: 10px; font-weight: 800; }
+.marketing-audience-grid article > footer button:hover { text-decoration: underline; }
 
 .marketing-automation-list article {
   display: grid;
@@ -1797,8 +1825,19 @@
 .marketing-audience-dialog-toolbar input { width: 100%; min-height: 40px; padding: 8px 12px 8px 38px; border: 1px solid var(--marketing-border); border-radius: 7px; outline: 0; background: #fff; color: var(--marketing-ink); font-size: 10px; }
 .marketing-audience-dialog-toolbar input:focus { border-color: #9d8370; box-shadow: 0 0 0 3px rgba(74, 45, 28, 0.09); }
 .marketing-audience-dialog-toolbar p { margin: 0; color: var(--marketing-muted); font-size: 9px; line-height: 1.45; }
+.marketing-audience-manager-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 20px; border-bottom: 1px solid var(--marketing-border); background: #fff; }
+.marketing-audience-manager-toolbar > label { position: relative; display: flex; min-width: 220px; flex: 1 1 360px; align-items: center; }
+.marketing-audience-manager-toolbar > label svg { position: absolute; left: 12px; color: var(--marketing-muted); pointer-events: none; }
+.marketing-audience-manager-toolbar input[type="search"] { width: 100%; min-height: 40px; padding: 8px 12px 8px 38px; border: 1px solid var(--marketing-border); border-radius: 7px; outline: 0; background: #fff; color: var(--marketing-ink); font-size: 10px; }
+.marketing-audience-manager-toolbar input[type="search"]:focus { border-color: #9d8370; box-shadow: 0 0 0 3px rgba(74, 45, 28, 0.09); }
+.marketing-audience-manager-toolbar > div { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.marketing-audience-manager-toolbar > div > button { display: inline-flex; min-height: 39px; align-items: center; justify-content: center; gap: 6px; padding: 8px 11px; border: 1px solid var(--marketing-border); border-radius: 6px; background: #fff; color: var(--marketing-espresso); font-size: 9px; font-weight: 800; white-space: nowrap; }
+.marketing-audience-manager-toolbar > div > button:first-of-type { border-color: var(--marketing-espresso); background: var(--marketing-espresso); color: #fff; }
+.marketing-audience-manager-toolbar > div > button:disabled { cursor: not-allowed; opacity: .45; }
+.marketing-audience-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .marketing-audience-table-wrap { min-height: 0; overflow: auto; padding: 14px 20px 20px; }
 .marketing-audience-recipient-table { width: 100%; overflow: hidden; border: 1px solid var(--marketing-border); border-collapse: separate; border-spacing: 0; border-radius: 8px; background: #fff; font-size: 10px; }
+.marketing-audience-email-table { min-width: 780px; }
 .marketing-audience-recipient-table th { position: sticky; top: 0; z-index: 1; padding: 10px 12px; border-bottom: 1px solid var(--marketing-border); background: #f4eee8; color: var(--marketing-muted); font-size: 8px; text-align: left; text-transform: uppercase; letter-spacing: 0.05em; }
 .marketing-audience-recipient-table td { padding: 11px 12px; border-bottom: 1px solid #eee7df; color: #5e554d; }
 .marketing-audience-recipient-table tr:last-child td { border-bottom: 0; }
@@ -1807,6 +1846,8 @@
 .marketing-audience-recipient-table td:nth-child(2),
 .marketing-audience-recipient-table td:nth-child(3) { white-space: nowrap; }
 .marketing-audience-recipient-table td > svg { margin-right: 6px; color: #8c7461; vertical-align: middle; }
+.marketing-audience-source { display: inline-flex; padding: 4px 7px; border-radius: 999px; background: #f0ece7; color: #635950; font-size: 8px; font-weight: 750; white-space: nowrap; }
+.marketing-audience-source.imported { background: #eaf2ec; color: #41624a; }
 .marketing-recipient-avatar { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #eee5dd; color: var(--marketing-espresso); font-size: 10px; font-weight: 850; }
 .marketing-audience-table-wrap > .marketing-empty { min-height: 330px; border: 1px dashed var(--marketing-border); background: #fff; }
 .marketing-audience-dialog > section > footer { display: flex; min-height: 60px; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 20px; border-top: 1px solid var(--marketing-border); background: #fff; }
@@ -1829,14 +1870,26 @@
 .marketing-action-dialog-body > p { margin: 0; color: var(--marketing-muted); font-size: 11px; line-height: 1.55; }
 .marketing-action-dialog-body label { display: grid; gap: 7px; color: var(--marketing-espresso); font-size: 10px; font-weight: 750; }
 .marketing-action-dialog-body input,
+.marketing-action-dialog-body select,
 .marketing-action-dialog-body textarea { width: 100%; border: 1px solid #d9cfc5; border-radius: 6px; background: #fff; color: #271b14; font: inherit; font-weight: 500; line-height: 1.45; }
 .marketing-action-dialog-body input { min-height: 40px; padding: 9px 11px; }
+.marketing-action-dialog-body select { min-height: 40px; padding: 9px 32px 9px 11px; }
 .marketing-action-dialog-body textarea { resize: vertical; padding: 10px 11px; }
 .marketing-action-dialog-body small { color: var(--marketing-muted); font-size: 8px; font-weight: 500; }
 .marketing-action-dialog > form > footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 13px 20px; border-top: 1px solid var(--marketing-border); background: #faf8f5; }
 .marketing-action-dialog > form > footer button { display: inline-flex; min-height: 39px; align-items: center; justify-content: center; gap: 6px; padding: 8px 15px; border: 1px solid var(--marketing-border); border-radius: 6px; background: #fff; color: var(--marketing-espresso); font-size: 10px; font-weight: 800; }
 .marketing-action-dialog > form > footer .marketing-primary-button { border-color: var(--marketing-espresso); background: var(--marketing-espresso); color: #fff; }
 .marketing-action-dialog button:disabled { cursor: not-allowed; opacity: 0.52; }
+.marketing-audience-action-dialog { z-index: 1150; }
+.marketing-audience-action-dialog .marketing-action-dialog-body label > span { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.marketing-audience-consent-check { display: flex !important; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid #d9cfc5; border-radius: 7px; background: #faf8f5; }
+.marketing-audience-consent-check input { width: 16px !important; height: 16px; min-height: 0; flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--marketing-espresso); }
+.marketing-audience-consent-check > span { display: grid !important; justify-content: stretch !important; gap: 3px; }
+.marketing-audience-consent-check strong { font-size: 10px; }
+.marketing-audience-import-summary { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #cfded2; border-radius: 7px; background: #f1f6f1; color: #365541; }
+.marketing-audience-import-summary > span { display: grid; gap: 2px; }
+.marketing-audience-import-summary strong { font-size: 11px; }
+.marketing-audience-import-summary small { color: #637168; }
 .marketing-inline-error,
 .marketing-inline-success { display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; border: 1px solid #e2b6ad; border-radius: 6px; background: #fff4f1; color: #852d22; font-size: 9px; line-height: 1.4; }
 .marketing-inline-success { border-color: #b8d8c0; background: #f1faf3; color: #246036; }
@@ -1957,6 +2010,10 @@
   .marketing-audience-dialog { padding: 7px; }
   .marketing-audience-dialog > section { width: 100%; height: calc(100vh - 14px); height: calc(100dvh - 14px); }
   .marketing-audience-dialog-toolbar { grid-template-columns: 1fr; gap: 9px; }
+  .marketing-audience-manager-toolbar { align-items: stretch; flex-direction: column; padding-inline: 10px; }
+  .marketing-audience-manager-toolbar > label { min-width: 0; flex-basis: auto; }
+  .marketing-audience-manager-toolbar > div { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .marketing-audience-manager-toolbar > div > button { padding-inline: 7px; white-space: normal; }
   .marketing-audience-table-wrap { padding-inline: 10px; }
   .marketing-audience-recipient-table { min-width: 620px; }
   .marketing-audience-dialog > section > footer > span { display: none; }
@@ -2024,6 +2081,7 @@
   .sidebar-collapsed .marketing-header { padding-left: 14px; }
   .sidebar-collapsed .marketing-builder-header { padding-left: 12px; }
   .marketing-builder-title { width: 100%; }
+  .marketing-builder-branch { min-width: 128px; margin-left: auto; }
   .marketing-builder-title h1 { font-size: 23px; }
   .marketing-builder-title p { display: none; }
   .marketing-back-button { width: 38px; height: 38px; }

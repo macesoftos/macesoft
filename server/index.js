@@ -72,6 +72,11 @@ import {
   sanitizeMarketingHtml,
 } from "./marketingHtml.js";
 import {
+  marketingAudienceMemberAsClient,
+  marketingAudienceMemberMatchesSegment,
+  normalizeMarketingAudienceMember,
+} from "./marketingAudienceMembers.js";
+import {
   INVITATION_DELIVERY_STATUSES,
   INVITATION_PERMISSION_LABELS,
   INVITATION_PERMISSIONS,
@@ -2643,18 +2648,26 @@ function matchesMarketingSegment(client, campaign) {
   return true;
 }
 
-function selectMarketingRecipients({ clients, campaign, channel }) {
+function selectMarketingRecipients({ clients, members = [], campaign, channel }) {
   const matchesCampaignBranch = (record) => isAllBranches(campaign.branch) || clean(record.branch) === clean(campaign.branch);
-  const candidates = clients.filter((client) => (
+  const clientCandidates = clients.filter((client) => (
     matchesCampaignBranch(client)
     && client.marketingOptIn !== false
     && matchesMarketingSegment(client, campaign)
   ));
+  const memberCandidates = channel === "email"
+    ? members
+      .filter((member) => matchesCampaignBranch(member) && marketingAudienceMemberMatchesSegment(member, campaign.segment))
+      .map(marketingAudienceMemberAsClient)
+    : [];
+  const candidates = [...clientCandidates, ...memberCandidates];
   const recipients = [];
+  const seenContacts = new Set();
 
   candidates.forEach((client) => {
     const contact = channel === "email" ? normalizeEmail(client.email) : normalizePhone(client.mobile);
-    if (contact) {
+    if (contact && !seenContacts.has(contact)) {
+      seenContacts.add(contact);
       recipients.push({ client, contact });
     }
   });
@@ -6411,6 +6424,83 @@ app.delete("/api/marketing/templates/:id", asyncRoute(async (request, response) 
   response.json(result);
 }));
 
+app.get("/api/marketing/audience-members", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "sms");
+  const members = await prisma.marketingAudienceMember.findMany({
+    where: branchWhere(actor),
+    orderBy: [{ name: "asc" }, { email: "asc" }],
+  });
+  response.json({ members });
+}));
+
+app.post("/api/marketing/audience-members", asyncRoute(async (request, response) => {
+  if (request.body?.consentConfirmed !== true) {
+    throw apiError("Confirm that this contact consented to receive marketing email.");
+  }
+  const data = normalizeMarketingAudienceMember(request.body);
+  assertMutationAllowed(request, "sms", data.branch);
+  const existing = await prisma.marketingAudienceMember.findUnique({
+    where: { email_audience_branch: { email: data.email, audience: data.audience, branch: data.branch } },
+  });
+  if (existing) {
+    response.json({ member: existing, created: false });
+    return;
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const member = await tx.marketingAudienceMember.create({ data });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Audience email added",
+      details: `${member.email} added to ${member.audience} for ${member.branch}.`,
+      subjectType: "MarketingAudienceMember",
+      subjectId: member.id,
+      afterValues: { audience: member.audience, branch: member.branch, email: member.email, source: member.source },
+    });
+    return { member, auditLog };
+  });
+  response.status(201).json({ ...result, created: true });
+}));
+
+app.post("/api/marketing/audience-members/import", asyncRoute(async (request, response) => {
+  if (request.body?.consentConfirmed !== true) {
+    throw apiError("Confirm that these contacts consented to receive marketing email.");
+  }
+  const inputMembers = Array.isArray(request.body?.members) ? request.body.members : [];
+  if (!inputMembers.length) throw apiError("The CSV does not contain any email contacts.");
+  if (inputMembers.length > 1_000) throw apiError("Import no more than 1,000 email contacts at a time.", 413);
+
+  const uniqueMembers = new Map();
+  inputMembers.forEach((values) => {
+    const member = normalizeMarketingAudienceMember(values, {
+      defaultAudience: request.body?.audience,
+      defaultBranch: request.body?.branch,
+      source: "CSV import",
+    });
+    assertMutationAllowed(request, "sms", member.branch);
+    uniqueMembers.set(`${member.email}\u0000${member.audience}\u0000${member.branch}`, member);
+  });
+  const data = [...uniqueMembers.values()];
+
+  const result = await prisma.$transaction(async (tx) => {
+    const imported = await tx.marketingAudienceMember.createMany({ data, skipDuplicates: true });
+    const members = await tx.marketingAudienceMember.findMany({
+      where: {
+        OR: data.map((member) => ({ email: member.email, audience: member.audience, branch: member.branch })),
+      },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Marketing",
+      action: "Audience emails imported",
+      details: `${imported.count} email contact${imported.count === 1 ? "" : "s"} imported; ${data.length - imported.count} duplicate${data.length - imported.count === 1 ? "" : "s"} skipped.`,
+      afterValues: { imported: imported.count, skipped: data.length - imported.count },
+    });
+    return { auditLog, imported: imported.count, members, skipped: data.length - imported.count };
+  });
+  response.status(201).json(result);
+}));
+
 async function validatedMarketingSurveyRequest(request, values) {
   const campaignId = boundedPublicText(request.params.campaignId, "Campaign", 100);
   const blockId = boundedPublicText(request.params.blockId, "Survey block", 140);
@@ -6616,7 +6706,7 @@ function deliveryAuditData(request, details) {
   };
 }
 
-async function deliverMarketingCampaign({ campaign, clients, request = null }) {
+async function deliverMarketingCampaign({ campaign, clients, members = [], request = null }) {
   const settings = await getPersistedSettings();
   const channel = marketingChannel(campaign);
   const templates = await prisma.smsTemplate.findMany({ where: { active: true } });
@@ -6630,9 +6720,9 @@ async function deliverMarketingCampaign({ campaign, clients, request = null }) {
   if (!baseMessage) throw apiError("Campaign message is required.");
   assertMarketingProviderReady(campaign);
 
-  const { candidates, recipients } = selectMarketingRecipients({ clients, campaign, channel });
+  const { candidates, recipients } = selectMarketingRecipients({ clients, members, campaign, channel });
   const maxSends = Number(process.env.MAX_MARKETING_SENDS || 500);
-  if (!recipients.length) throw apiError(`No opted-in clients with ${channel === "sms" ? "mobile numbers" : "email addresses"} matched this campaign.`);
+  if (!recipients.length) throw apiError(`No opted-in contacts with ${channel === "sms" ? "mobile numbers" : "email addresses"} matched this campaign.`);
   if (recipients.length > maxSends) throw apiError(`This campaign has ${recipients.length} recipients. Set MAX_MARKETING_SENDS higher to send it.`, 413);
 
   const transporter = channel === "email" && !dryRun ? createEmailTransport() : null;
@@ -6679,7 +6769,7 @@ async function deliverMarketingCampaign({ campaign, clients, request = null }) {
       data: deliveryAuditData(request, {
         area: "Marketing",
         action: channel === "email" ? "Email campaign sent" : "SMS campaign sent",
-        details: `${campaign.name} delivered to ${sent} client${sent === 1 ? "" : "s"}${failed ? ` with ${failed} failed` : ""}.`,
+        details: `${campaign.name} delivered to ${sent} contact${sent === 1 ? "" : "s"}${failed ? ` with ${failed} failed` : ""}.`,
       }),
     });
   });
@@ -6719,7 +6809,8 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
     }
   }
   const clients = await listResource("clients", actor);
-  const result = await deliverMarketingCampaign({ campaign, clients, request });
+  const members = await prisma.marketingAudienceMember.findMany({ where: branchWhere(actor) });
+  const result = await deliverMarketingCampaign({ campaign, clients, members, request });
   response.status(result.failed ? 207 : 200).json(result);
 }));
 
@@ -6749,7 +6840,10 @@ async function processDueMarketingCampaigns() {
       take: 10,
     });
     if (!dueCampaigns.length) return;
-    const allClients = await listResource("clients");
+    const [allClients, allMembers] = await Promise.all([
+      listResource("clients"),
+      prisma.marketingAudienceMember.findMany(),
+    ]);
     for (const campaign of dueCampaigns) {
       try {
         assertMarketingProviderReady(campaign);
@@ -6769,8 +6863,11 @@ async function processDueMarketingCampaigns() {
       const clients = isAllBranches(campaign.branch)
         ? allClients
         : allClients.filter((client) => clean(client.branch) === clean(campaign.branch));
+      const members = isAllBranches(campaign.branch)
+        ? allMembers
+        : allMembers.filter((member) => clean(member.branch) === clean(campaign.branch));
       try {
-        await deliverMarketingCampaign({ campaign, clients });
+        await deliverMarketingCampaign({ campaign, clients, members });
       } catch (error) {
         const message = clean(error.message) || "Scheduled delivery failed.";
         await prisma.$transaction([
