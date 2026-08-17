@@ -89,11 +89,15 @@ import {
 } from "./builderModel.js";
 import { socialIconDefinition } from "./socialIcons.js";
 import {
+  addMarketingAudienceMember,
   deleteMarketingEmailTemplate,
+  importMarketingAudienceMembers,
+  loadMarketingAudienceMembers,
   loadMarketingEmailTemplates,
   saveMarketingEmailTemplate,
   sendMarketingTestEmail,
 } from "../lib/api.js";
+import { downloadAudienceCsv, parseAudienceCsv, validAudienceEmail } from "./audienceCsv.js";
 
 const draftStorageKey = "mace-marketing-campaign-draft-v1";
 const templateStorageKey = "mace-marketing-design-templates-v1";
@@ -545,6 +549,7 @@ const starterTemplates = starterTemplateDefinitions.map((template) => ({
 function createDefaultDraft() {
   return {
     id: "",
+    branch: "",
     name: "Summer Skin Reset",
     channel: "Email",
     segment: "Inactive clients",
@@ -610,10 +615,23 @@ function channelEligible(client, channel) {
   return Boolean((client.email && emailConsent) || (client.mobile && smsConsent));
 }
 
-function audienceRecipients(clients, segment, channel) {
+function audienceRecipients(clients, members, segment, channel, branch = "") {
   const definition = audienceDefinitions.find((item) => item.id === segment) ?? audienceDefinitions[0];
-  return clients
-    .filter((client) => definition.matches(client) && channelEligible(client, channel))
+  const matchesBranch = (contact) => !branch || branch === "All branches" || contact.branch === branch;
+  const clientRecipients = clients.filter((client) => matchesBranch(client) && definition.matches(client) && channelEligible(client, channel));
+  const memberRecipients = channel === "SMS" ? [] : members
+    .filter((member) => matchesBranch(member) && (segment === audienceDefinitions[0].id || member.audience === segment))
+    .map((member) => ({ ...member, fullName: member.name || "Email contact", marketingOptIn: true, audienceMember: true }));
+  const seen = new Set();
+  return [...clientRecipients, ...memberRecipients]
+    .filter((contact) => {
+      const emailKey = String(contact.email || "").trim().toLowerCase();
+      const mobileKey = String(contact.mobile || "").replace(/\D/g, "");
+      const key = channel === "SMS" ? mobileKey : channel === "Email" ? emailKey : emailKey || (mobileKey ? `mobile:${mobileKey}` : "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .sort((left, right) => String(left.fullName || left.name || left.email || left.mobile || "").localeCompare(String(right.fullName || right.name || right.email || right.mobile || "")));
 }
 
@@ -691,6 +709,8 @@ function campaignAdvisories(draft) {
 export default function MarketingWorkspace({
   approveCampaign,
   askConfirm,
+  branches = [],
+  branchScope = "All branches",
   canApproveMarketing = false,
   campaigns = [],
   clients = [],
@@ -715,6 +735,8 @@ export default function MarketingWorkspace({
   const [route, setRoute] = useState(routeFromLocation);
   const [draft, setDraft] = useState(() => normalizedDraft(safeJsonRead(draftStorageKey, null)));
   const [savedTemplates, setSavedTemplates] = useState(() => safeJsonRead(templateStorageKey, []));
+  const [audienceMembers, setAudienceMembers] = useState([]);
+  const [audienceMembersLoading, setAudienceMembersLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => safeJsonRead(sidebarStorageKey, false) === true);
   const activeCampaigns = useMemo(() => campaigns.filter((campaign) => !campaign.deletedAt), [campaigns]);
   const deletedCampaigns = useMemo(() => campaigns.filter((campaign) => Boolean(campaign.deletedAt)), [campaigns]);
@@ -762,9 +784,42 @@ export default function MarketingWorkspace({
     return () => { active = false; };
   }, [notify]);
 
+  const refreshAudienceMembers = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setAudienceMembersLoading(true);
+    try {
+      const result = await loadMarketingAudienceMembers();
+      const members = Array.isArray(result?.members) ? result.members : [];
+      setAudienceMembers(members);
+      return members;
+    } catch (error) {
+      notify?.(error.message || "Audience emails could not be loaded.", "error");
+      return [];
+    } finally {
+      setAudienceMembersLoading(false);
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    void refreshAudienceMembers();
+  }, [branchScope, refreshAudienceMembers]);
+
+  async function addAudienceMember(values) {
+    const result = await addMarketingAudienceMember({ ...values, consentConfirmed: true });
+    await refreshAudienceMembers({ quiet: true });
+    notify?.(result.created ? "Email added to the audience." : "That email is already in this audience.", result.created ? "success" : "warning");
+    return result;
+  }
+
+  async function importAudienceMembers(values) {
+    const result = await importMarketingAudienceMembers({ ...values, consentConfirmed: true });
+    await refreshAudienceMembers({ quiet: true });
+    notify?.(`${result.imported} email${result.imported === 1 ? "" : "s"} imported${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : ""}.`);
+    return result;
+  }
+
   const eligibleContacts = useMemo(
-    () => clients.filter((client) => channelEligible(client, "Email + SMS")).length,
-    [clients],
+    () => audienceRecipients(clients, audienceMembers, audienceDefinitions[0].id, "Email + SMS").length,
+    [audienceMembers, clients],
   );
 
   function navigate(section, mode = "index") {
@@ -775,6 +830,7 @@ export default function MarketingWorkspace({
   function beginCampaign(preset = {}) {
     setDraft(normalizedDraft({
       ...createDefaultDraft(),
+      branch: branchScope !== "All branches" ? branchScope : branches.length === 1 ? branches[0].name : "",
       step: 1,
       ...preset,
       managerApproval: canApproveMarketing ? false : settings.managerApproval !== false,
@@ -888,6 +944,8 @@ export default function MarketingWorkspace({
         ) : null}
         {route.mode === "create" ? (
           <CampaignBuilder
+            audienceMembers={audienceMembers}
+            branches={branches}
             canApproveMarketing={canApproveMarketing}
             clients={clients}
             draft={draft}
@@ -917,8 +975,12 @@ export default function MarketingWorkspace({
                 <MarketingLoading />
               ) : (
                 <MarketingPage
+                  audienceMembers={audienceMembers}
+                  audienceMembersLoading={audienceMembersLoading}
                   approveCampaign={approveCampaign}
                   askConfirm={askConfirm}
+                  branches={branches}
+                  branchScope={branchScope}
                   campaigns={activeCampaigns}
                   canApproveMarketing={canApproveMarketing}
                   clients={clients}
@@ -930,8 +992,10 @@ export default function MarketingWorkspace({
                   moveCampaignToDeleted={moveCampaignToDeleted}
                   navigate={navigate}
                   notify={notify}
+                  onAddAudienceMember={addAudienceMember}
                   onEditCampaign={editCampaign}
                   onCreate={beginCampaign}
+                  onImportAudienceMembers={importAudienceMembers}
                   onDeleteTemplate={async (template) => {
                     try {
                       await deleteMarketingEmailTemplate(template.id);
@@ -1260,17 +1324,244 @@ function TemplatesPage({ onDeleteTemplate, onDuplicateTemplate, onUseTemplate, s
   );
 }
 
-function AudiencesPage({ clients, onCreate }) {
+function AudiencesPage({ audienceMembers = [], audienceMembersLoading, branches = [], branchScope, clients, notify, onAddAudienceMember, onCreate, onImportAudienceMembers }) {
+  const [selectedAudience, setSelectedAudience] = useState(null);
   return (
     <div className="marketing-audience-page">
       <div className="marketing-consent-notice"><UserCheck size={20} /><div><strong>Consent is applied per channel</strong><p>Estimates use channel-specific consent when available and the existing opt-in for legacy contacts. Suppressions and delivery failures must be rechecked by the provider before sending.</p></div></div>
       <div className="marketing-audience-grid">
         {audienceDefinitions.map((audience) => {
-          const emailCount = clients.filter((client) => audience.matches(client) && channelEligible(client, "Email")).length;
-          const smsCount = clients.filter((client) => audience.matches(client) && channelEligible(client, "SMS")).length;
-          return <article key={audience.id}><div><span className="marketing-audience-icon"><Users size={19} /></span><StatusPill value="Saved" /></div><h3>{audience.name}</h3><p>{audience.description}</p><dl><div><dt>Email</dt><dd>{emailCount}</dd></div><div><dt>SMS</dt><dd>{smsCount}</dd></div></dl><button onClick={() => onCreate({ segment: audience.id, step: 1 })} type="button">Use audience <ChevronRight size={15} /></button></article>;
+          const emailCount = audienceRecipients(clients, audienceMembers, audience.id, "Email").length;
+          const smsCount = audienceRecipients(clients, audienceMembers, audience.id, "SMS").length;
+          return (
+            <article key={audience.id}>
+              <div><span className="marketing-audience-icon"><Users size={19} /></span><StatusPill value="Saved" /></div>
+              <h3>{audience.name}</h3>
+              <p>{audience.description}</p>
+              <dl>
+                <div><dt><button aria-label={`View ${audience.name} contacts`} onClick={() => setSelectedAudience(audience)} type="button">Email</button></dt><dd>{audienceMembersLoading ? "…" : emailCount}</dd></div>
+                <div><dt>SMS</dt><dd>{smsCount}</dd></div>
+              </dl>
+              <footer>
+                <button onClick={() => setSelectedAudience(audience)} type="button"><Eye size={14} /> View contacts</button>
+                <button onClick={() => onCreate({ segment: audience.id, step: 1 })} type="button">Use audience <ChevronRight size={15} /></button>
+              </footer>
+            </article>
+          );
         })}
       </div>
+      {selectedAudience ? (
+        <AudienceEmailManager
+          audience={selectedAudience}
+          branches={branches}
+          branchScope={branchScope}
+          clients={clients}
+          members={audienceMembers}
+          notify={notify}
+          onAdd={onAddAudienceMember}
+          onClose={() => setSelectedAudience(null)}
+          onImport={onImportAudienceMembers}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AudienceEmailManager({ audience, branches, branchScope, clients, members, notify, onAdd, onClose, onImport }) {
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [importDraft, setImportDraft] = useState(null);
+  const fileInput = useRef(null);
+  const pageSize = 50;
+  const recipients = useMemo(
+    () => audienceRecipients(clients, members, audience.id, "Email + SMS").map((recipient) => ({ ...recipient, audience: audience.id })),
+    [audience.id, clients, members],
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredRecipients = useMemo(() => {
+    if (!normalizedQuery) return recipients;
+    return recipients.filter((recipient) => [recipient.fullName, recipient.name, recipient.email, recipient.mobile, recipient.branch, recipient.source]
+      .some((value) => String(value || "").toLowerCase().includes(normalizedQuery)));
+  }, [normalizedQuery, recipients]);
+  const totalPages = Math.max(1, Math.ceil(filteredRecipients.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const firstRecipient = filteredRecipients.length ? ((currentPage - 1) * pageSize) + 1 : 0;
+  const lastRecipient = Math.min(currentPage * pageSize, filteredRecipients.length);
+  const visibleRecipients = filteredRecipients.slice(firstRecipient ? firstRecipient - 1 : 0, lastRecipient);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    function closeWithEscape(event) {
+      if (event.key !== "Escape") return;
+      if (addOpen) setAddOpen(false);
+      else if (importDraft) setImportDraft(null);
+      else onClose();
+    }
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeWithEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [addOpen, importDraft, onClose]);
+
+  async function readImportFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 2_000_000) {
+      notify?.("CSV files must be 2 MB or smaller.", "error");
+      return;
+    }
+    try {
+      const parsed = parseAudienceCsv(await file.text());
+      if (!parsed.contacts.length) {
+        notify?.("No valid email addresses were found in that CSV.", "warning");
+        return;
+      }
+      if (parsed.contacts.length > 1_000) {
+        notify?.("Import no more than 1,000 email contacts at a time.", "error");
+        return;
+      }
+      setImportDraft({ ...parsed, filename: file.name });
+    } catch (error) {
+      notify?.(error.message || "That CSV could not be read.", "error");
+    }
+  }
+
+  function exportContacts() {
+    const slug = audience.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    downloadAudienceCsv(`mace-${slug || "audience"}-contacts.csv`, filteredRecipients);
+    notify?.(`${filteredRecipients.length} contact${filteredRecipients.length === 1 ? "" : "s"} exported.`);
+  }
+
+  return (
+    <div aria-label={`${audience.name} audience contacts`} aria-modal="true" className="marketing-audience-dialog marketing-audience-manager-dialog" role="dialog">
+      <button aria-label="Close audience contacts" className="marketing-email-preview-backdrop" onClick={onClose} type="button" />
+      <section>
+        <header>
+          <div><span>Saved audience contacts</span><h2>{audience.name}</h2><p>{recipients.length.toLocaleString("en-PH")} consented contact{recipients.length === 1 ? "" : "s"}</p></div>
+          <button aria-label="Close audience contacts" onClick={onClose} type="button"><X aria-hidden="true" size={19} /></button>
+        </header>
+        <div className="marketing-audience-manager-toolbar">
+          <label><Search aria-hidden="true" size={16} /><span className="sr-only">Search audience contacts</span><input aria-label="Search audience contacts" autoFocus onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search name, email, phone, branch or source" type="search" value={query} /></label>
+          <div>
+            <input accept=".csv,text/csv" className="marketing-audience-file-input" onChange={readImportFile} ref={fileInput} tabIndex={-1} type="file" />
+            <button onClick={() => setAddOpen(true)} type="button"><Plus size={15} /> Add email</button>
+            <button onClick={() => fileInput.current?.click()} type="button"><Upload size={15} /> Import CSV</button>
+            <button disabled={!filteredRecipients.length} onClick={exportContacts} type="button"><Download size={15} /> Export CSV</button>
+          </div>
+        </div>
+        <div className="marketing-audience-table-wrap">
+          {filteredRecipients.length ? (
+            <table className="marketing-audience-recipient-table marketing-audience-email-table">
+              <caption className="sr-only">Contacts in {audience.name}</caption>
+              <thead><tr><th scope="col">Name</th><th scope="col">Email address</th><th scope="col">Phone number</th><th scope="col">Branch</th><th scope="col">Source</th></tr></thead>
+              <tbody>{visibleRecipients.map((recipient, index) => {
+                const name = recipient.fullName || recipient.name || "Email contact";
+                return <tr key={recipient.id || `${recipient.email || recipient.mobile}-${firstRecipient + index}`}><td><span className="marketing-recipient-avatar" aria-hidden="true">{name.trim().charAt(0).toUpperCase() || "?"}</span><strong>{name}</strong></td><td><Mail aria-hidden="true" size={14} /><span>{recipient.email || "—"}</span></td><td><MessageSquareText aria-hidden="true" size={14} /><span>{recipient.mobile || "—"}</span></td><td>{recipient.branch || "—"}</td><td><span className={`marketing-audience-source${recipient.audienceMember ? " imported" : ""}`}>{recipient.audienceMember ? recipient.source || "Manual" : "Client record"}</span></td></tr>;
+              })}</tbody>
+            </table>
+          ) : <MarketingEmpty title={query ? "No matching contacts" : "No contacts yet"} copy={query ? "Try a different name, email address, phone number, branch or source." : "Add an email manually or import a CSV to build this audience."} action={!query ? "Add email" : undefined} onAction={() => setAddOpen(true)} />}
+        </div>
+        <footer>
+          <span>Showing {firstRecipient.toLocaleString("en-PH")}–{lastRecipient.toLocaleString("en-PH")} of {filteredRecipients.length.toLocaleString("en-PH")}</span>
+          <div><button disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">Previous</button><span>Page {currentPage} of {totalPages}</span><button disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} type="button">Next</button></div>
+        </footer>
+      </section>
+      {addOpen ? <AddAudienceEmailDialog audience={audience} branches={branches} branchScope={branchScope} onAdd={onAdd} onClose={() => setAddOpen(false)} /> : null}
+      {importDraft ? <ImportAudienceEmailsDialog audience={audience} branches={branches} branchScope={branchScope} draft={importDraft} onClose={() => setImportDraft(null)} onImport={onImport} /> : null}
+    </div>
+  );
+}
+
+function audienceDefaultBranch(branches, branchScope) {
+  if (branchScope && branchScope !== "All branches") return branchScope;
+  return branches.length === 1 ? branches[0].name : "";
+}
+
+function AddAudienceEmailDialog({ audience, branches, branchScope, onAdd, onClose }) {
+  const [form, setForm] = useState(() => ({ name: "", email: "", branch: audienceDefaultBranch(branches, branchScope), consentConfirmed: false }));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!validAudienceEmail(form.email)) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onAdd({ ...form, audience: audience.id, source: "Manual" });
+      onClose();
+    } catch (submitError) {
+      setError(submitError.message || "The email could not be added.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div aria-label={`Add email to ${audience.name}`} aria-modal="true" className="marketing-action-dialog marketing-audience-action-dialog" role="dialog">
+      <button aria-label="Close add email dialog" className="marketing-email-preview-backdrop" onClick={onClose} type="button" />
+      <form onSubmit={submit}>
+        <header><div><span>Audience contact</span><h2>Add email</h2></div><button aria-label="Close add email dialog" onClick={onClose} type="button"><X size={18} /></button></header>
+        <div className="marketing-action-dialog-body">
+          <p>Add a consented email-only contact to <strong>{audience.name}</strong>. This does not create a clinic client record.</p>
+          <label><span>Name <small>Optional</small></span><input autoFocus maxLength={160} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="Jane Doe" value={form.name} /></label>
+          <label><span>Email address</span><input autoComplete="email" onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="jane@example.com" required type="email" value={form.email} /></label>
+          <label><span>Clinic branch</span><select disabled={branchScope !== "All branches"} onChange={(event) => setForm((current) => ({ ...current, branch: event.target.value }))} required value={form.branch}><option value="" disabled>Select a branch</option>{branches.map((branch) => <option key={branch.id || branch.name} value={branch.name}>{branch.name}</option>)}</select></label>
+          <label className="marketing-audience-consent-check"><input checked={form.consentConfirmed} onChange={(event) => setForm((current) => ({ ...current, consentConfirmed: event.target.checked }))} required type="checkbox" /><span><strong>Consent confirmed</strong><small>This person agreed to receive marketing email from this clinic.</small></span></label>
+          {error ? <div className="marketing-inline-error"><CircleAlert size={15} />{error}</div> : null}
+        </div>
+        <footer><button disabled={saving} onClick={onClose} type="button">Cancel</button><button className="marketing-primary-button" disabled={saving || !form.branch || !form.consentConfirmed || !validAudienceEmail(form.email)} type="submit"><Plus size={15} />{saving ? "Adding…" : "Add email"}</button></footer>
+      </form>
+    </div>
+  );
+}
+
+function ImportAudienceEmailsDialog({ audience, branches, branchScope, draft, onClose, onImport }) {
+  const [branch, setBranch] = useState(() => audienceDefaultBranch(branches, branchScope));
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const scopedContacts = useMemo(() => draft.contacts.map((contact) => ({
+    ...contact,
+    branch: branchScope === "All branches" ? contact.branch : "",
+  })), [branchScope, draft.contacts]);
+  const needsDefaultBranch = scopedContacts.some((contact) => !contact.branch);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await onImport({ audience: audience.id, branch, consentConfirmed, members: scopedContacts });
+      onClose();
+    } catch (submitError) {
+      setError(submitError.message || "The emails could not be imported.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div aria-label={`Import emails to ${audience.name}`} aria-modal="true" className="marketing-action-dialog marketing-audience-action-dialog" role="dialog">
+      <button aria-label="Close import emails dialog" className="marketing-email-preview-backdrop" onClick={onClose} type="button" />
+      <form onSubmit={submit}>
+        <header><div><span>CSV import</span><h2>Import emails</h2></div><button aria-label="Close import emails dialog" onClick={onClose} type="button"><X size={18} /></button></header>
+        <div className="marketing-action-dialog-body">
+          <div className="marketing-audience-import-summary"><Upload size={20} /><span><strong>{draft.contacts.length.toLocaleString("en-PH")} valid email{draft.contacts.length === 1 ? "" : "s"}</strong><small>{draft.filename}{draft.invalid ? ` · ${draft.invalid} invalid row${draft.invalid === 1 ? "" : "s"} will be skipped` : ""}</small></span></div>
+          <p>The CSV may contain <strong>Name</strong>, <strong>Email</strong>, and <strong>Branch</strong> columns. A row&apos;s Branch value takes priority over the default below.</p>
+          <label><span>{needsDefaultBranch ? "Default clinic branch" : "Fallback clinic branch"}</span><select disabled={branchScope !== "All branches"} onChange={(event) => setBranch(event.target.value)} required={needsDefaultBranch} value={branch}><option value="" disabled>Select a branch</option>{branches.map((item) => <option key={item.id || item.name} value={item.name}>{item.name}</option>)}</select><small>Used for imported rows whose Branch cell is blank.</small></label>
+          <label className="marketing-audience-consent-check"><input checked={consentConfirmed} onChange={(event) => setConsentConfirmed(event.target.checked)} required type="checkbox" /><span><strong>Consent confirmed for every imported contact</strong><small>Each person agreed to receive marketing email from this clinic.</small></span></label>
+          {error ? <div className="marketing-inline-error"><CircleAlert size={15} />{error}</div> : null}
+        </div>
+        <footer><button disabled={saving} onClick={onClose} type="button">Cancel</button><button className="marketing-primary-button" disabled={saving || !consentConfirmed || (needsDefaultBranch && !branch)} type="submit"><Upload size={15} />{saving ? "Importing…" : `Import ${draft.contacts.length} email${draft.contacts.length === 1 ? "" : "s"}`}</button></footer>
+      </form>
     </div>
   );
 }
@@ -1357,7 +1648,7 @@ function MarketingSettingsPage({ canApproveMarketing, notify, openModal, saveMar
   );
 }
 
-function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
+function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canApproveMarketing, clients, draft, loadMedia, notify, onBack, onOpenGlobalNavigation, onSaveCampaign, onSaveTemplate, onScheduleCampaign, setDraft, settings, templates, uploadImage }) {
   const [selectedId, setSelectedId] = useState(draft.blocks[2]?.id || draft.blocks[0]?.id || "");
   const [preview, setPreview] = useState("desktop");
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
@@ -1384,8 +1675,8 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
   const htmlFileInput = useRef(null);
   const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
   const recipients = useMemo(
-    () => audienceRecipients(clients, draft.segment, draft.channel),
-    [clients, draft.channel, draft.segment],
+    () => audienceRecipients(clients, audienceMembers, draft.segment, draft.channel, draft.branch),
+    [audienceMembers, clients, draft.branch, draft.channel, draft.segment],
   );
   const estimate = recipients.length;
   const warnings = campaignWarnings(draft);
@@ -1738,6 +2029,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
       const message = snapshot.channel === "Email" ? emailSummary : snapshot.message;
       const savedCampaign = await onSaveCampaign?.({
         id: pendingCampaignId,
+        branch: snapshot.branch,
         name: snapshot.name,
         segment: snapshot.segment,
         channel: snapshot.channel,
@@ -1890,6 +2182,7 @@ function CampaignBuilder({ askConfirm, canApproveMarketing, clients, draft, load
           <button className="marketing-global-menu" onClick={onOpenGlobalNavigation} type="button" aria-label="Return to MACE applications"><Menu size={20} /></button>
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
           <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value={draft.status || "Draft"} /></h1></div>
+          <label className="marketing-builder-branch"><span>Branch</span><select aria-label="Campaign branch" value={draft.branch || ""} onChange={(event) => updateDraft({ branch: event.target.value })}><option value="" disabled>Select a branch</option>{draft.id && draft.branch === "All branches" ? <option value="All branches">Organization-wide legacy</option> : null}{branches.map((branch) => <option key={branch.id || branch.name} value={branch.name}>{branch.name}</option>)}</select></label>
         </div>
         <div className="marketing-builder-actions"><span>{saveState}</span>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-preview-email-button" onClick={() => setEmailPreviewOpen(true)} type="button"><Eye size={16} aria-hidden="true" /> Preview email</button> : null}<button onClick={() => { void saveDraft().catch(() => undefined); }} type="button">Save draft</button>{draft.step >= 2 && draft.channel !== "SMS" ? <button className="marketing-send-test-button" onClick={() => setSendTestOpen(true)} type="button">Send test</button> : null}<button className="marketing-primary-button" onClick={() => { void continueStep(); }} type="button">{draft.step === 4 ? "Confirm schedule" : "Continue"}</button></div>
       </header>
