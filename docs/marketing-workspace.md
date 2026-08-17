@@ -20,7 +20,7 @@ The canonical workspace routes are:
 - `#/marketing/reports`
 - `#/marketing/settings`
 
-The campaign builder uses `#/marketing/campaigns/new`. The legacy `#/sms` entry point is replaced with `#/marketing` through browser history, so bookmarks keep working without leaving `sms` visible in the address bar.
+The campaign builder uses `/marketing/campaigns/new`. Legacy `#/marketing/...` and `#/sms` entry points are replaced with clean `/marketing/...` paths through browser history, so existing bookmarks keep working.
 
 ## Current delivery boundary
 

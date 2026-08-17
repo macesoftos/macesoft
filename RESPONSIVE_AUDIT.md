@@ -19,23 +19,23 @@ Key improvements:
 | Module | Route | Mobile Portrait | Mobile Landscape | Tablet Portrait | Tablet Landscape | Desktop | No Overflow | Touch Friendly | Workflow Tested | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Overview | `#/overview` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Pass |
-| Appointments | `#/appointments` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
-| POS | `#/pos` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Cart/payment smoke | Pass |
-| Clients | `#/clients` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Add-client modal | Pass |
-| Leads | `#/leads` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
+| Appointments | `/appointments` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
+| POS | `/pos` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Cart/payment smoke | Pass |
+| Clients | `/clients` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Add-client modal | Pass |
+| Leads | `/leads` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Card View | `#/card-view` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Room View | `#/room-view` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
-| Treatments | `#/treatments` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
+| Treatments | `/treatments` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Services | `#/services` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Packages | `#/packages` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Online Booking | `#/booking` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Staff Schedule | `#/staff-view` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
-| Staff Management | `#/staff` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
+| Staff Management | `/staff` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Branches | `#/branches` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Inventory | `#/inventory` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | More menu navigation | Pass |
 | Expenses | `#/expenses` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Reports | `#/reports` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
-| Marketing | `#/sms` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
+| Marketing | `/marketing` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Settings | `#/settings` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 | Support | `#/support` | Pass | Pass | Pass | Pass | Pass | Pass | Pass | Navigation | Pass |
 
