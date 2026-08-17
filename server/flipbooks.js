@@ -344,6 +344,7 @@ export function createFlipbookRouters({
 
   internal.post("/", raw({ type: ["application/pdf", "application/octet-stream"], limit: maximumBytes }), asyncRoute(async (request, response) => {
     const actor = assertMutationAllowed(request, "flipbooks");
+    if (actor.access?.scope === "all") throw httpError("Select a specific branch before uploading a flipbook.", 400);
     const buffer = validatePdfBuffer(request.body, maximumBytes);
     const title = boundedText(requestHeaderText(request, "x-flipbook-title"), "Flipbook title", 160);
     if (!title) throw httpError("Flipbook title is required.", 400);

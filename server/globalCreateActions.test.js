@@ -61,3 +61,14 @@ test("unsupported routes do not invent creation actions", () => {
     assert.deepEqual(getGlobalCreateActions({ moduleId, sessionModules: everyModule }), []);
   }
 });
+
+test("invite user appears only with explicit invitation authority", () => {
+  assert.deepEqual(
+    getGlobalCreateActions({ moduleId: "staff", sessionModules: ["staff"] }).map((action) => action.id),
+    ["staff"],
+  );
+  assert.deepEqual(
+    getGlobalCreateActions({ moduleId: "staff", sessionModules: ["staff"], canInviteUsers: true }).map((action) => action.id),
+    ["invite", "staff"],
+  );
+});

@@ -77,6 +77,7 @@ test("protected API families resolve to their required workspace modules", () =>
   assert.equal(requiredModuleForApiRequest("/api/rooms/room-1"), "room-view");
   assert.equal(requiredModuleForApiRequest("/api/treatments/treatment-1/photos"), "treatments");
   assert.equal(requiredModuleForApiRequest("/api/flipbooks/book-1/publish"), "flipbooks");
+  assert.equal(requiredModuleForApiRequest("/api/invitations"), "staff");
   assert.equal(requiredModuleForApiRequest("/api/auth/session"), "");
   assert.equal(requiredModuleForApiRequest("/api/resources/clients"), "");
 });
@@ -86,6 +87,7 @@ test("staff login connection endpoints are gated behind the staff module", () =>
   assert.equal(requiredModuleForApiRequest("/api/staff/staff-1/account"), "staff");
   assert.equal(isPublicApiRequest("GET", "/api/accounts"), false);
   assert.equal(isPublicApiRequest("PUT", "/api/staff/staff-1/account"), false);
+  assert.equal(isPublicApiRequest("PATCH", "/api/accounts/account-1/access"), false);
 });
 
 test("a personal workspace only accepts the matching staff identity", () => {

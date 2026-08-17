@@ -93,9 +93,11 @@ import {
   changeAccountPassword,
   acceptInvitation,
   createInvitation,
+  editInvitation,
   createBranchRecord,
+  archiveBranchRecord,
+  reactivateBranchRecord,
   createRoomRecord,
-  deleteBranchRecord,
   deleteRoomRecord,
   updateBranchRecord,
   addLeadActivity,
@@ -135,10 +137,12 @@ import {
   sendMarketingCampaign,
   scheduleMarketingCampaign,
   approveMarketingCampaign,
+  selectActiveBranch,
   setApiSessionContext,
   submitPublicBooking,
   submitPublicLead,
   updateLeadStage,
+  updateAccountAccess,
   uploadTreatmentPhoto,
   moveMarketingCampaignToDeleted,
   deleteTreatmentPhoto,
@@ -728,7 +732,8 @@ function App() {
   const initialHashModule = typeof window === "undefined" ? "" : moduleFromHash(window.location.hash);
   const [activeModule, setActiveModuleState] = useStoredState("active-module", initialPathModule || initialHashModule || defaultModuleId);
   const [currentPath, setCurrentPath] = useState(() => typeof window === "undefined" ? "/" : normalizedPathname(window.location.pathname));
-  const [branchScope, setBranchScope] = useStoredState("branch-scope", "All branches");
+  const [branchScope, setBranchScope] = useState("All branches");
+  const [branchSwitching, setBranchSwitching] = useState(false);
   const uploadMarketingImage = useCallback(
     (dataUrl, originalName = "") => uploadImageAsset(dataUrl, "marketing-image", branchScope === "All branches" ? session?.branch || "All branches" : branchScope, originalName),
     [branchScope, session?.branch],
@@ -740,6 +745,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [appointmentCreateDate, setAppointmentCreateDate] = useState(() => todayDate());
   const [branchCreateRequest, setBranchCreateRequest] = useState(0);
+  const [inviteCreateRequest, setInviteCreateRequest] = useState(0);
   const [confirm, setConfirm] = useState(null);
   const [toast, setToast] = useState(null);
   const [receiptToPrint, setReceiptToPrint] = useState(null);
@@ -795,9 +801,11 @@ function App() {
       moduleId: activeModule,
       sessionModules,
       canManageOrganization: canManageOrganization(session?.role),
+      canInviteUsers: canManageOrganization(session?.role)
+        || (["Branch Manager", "Admin"].includes(session?.role) && session?.access?.permissions?.includes("staff.invite")),
       context: { appointmentDate: appointmentCreateDate, roomBranch: branchScope },
     }),
-    [activeModule, appointmentCreateDate, branchScope, session?.role, sessionModules],
+    [activeModule, appointmentCreateDate, branchScope, session?.access?.permissions, session?.role, sessionModules],
   );
 
   const clearWorkspaceData = useCallback(() => {
@@ -927,10 +935,28 @@ function App() {
   }, [clearWorkspaceData]);
 
   useEffect(() => {
-    if (session?.branch && !canManageOrganization(session.role) && session.branch !== "All branches" && branchScope !== session.branch) {
-      setBranchScope(session.branch);
+    if (!session?.access) return;
+    setBranchScope(session.access.scope === "all" ? "All branches" : session.access.activeBranch?.name || session.branch);
+  }, [session]);
+
+  const switchBranch = useCallback(async (branchId) => {
+    if (!session || branchId === session.access?.activeBranchId) return;
+    setBranchSwitching(true);
+    clearWorkspaceData();
+    try {
+      const result = await selectActiveBranch(branchId);
+      setSession(result.account);
+      setGlobalSearch("");
+      notify(result.account.access?.scope === "all"
+        ? "Showing organization-wide data."
+        : `Switched to ${result.account.access?.activeBranch?.name}.`);
+    } catch (error) {
+      setSession((current) => current ? { ...current } : current);
+      notify(error.message || "Unable to switch branches.", "error");
+    } finally {
+      setBranchSwitching(false);
     }
-  }, [branchScope, session, setBranchScope]);
+  }, [clearWorkspaceData, session]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1111,6 +1137,8 @@ function App() {
     if (typeof window === "undefined") return;
     if (isPublicFormView) return;
     if (publicFlipbookToken) return;
+    const publicQuery = new URLSearchParams(window.location.search);
+    if (normalizedPathname(window.location.pathname) === "/accept-invitation" || publicQuery.has("invitation") || publicQuery.has("token")) return;
     if (moduleFromPath(window.location.pathname)) return;
     if (!moduleFromHash(window.location.hash)) {
       setActiveModule(activeModule, { replace: true, keepDrawerOpen: true });
@@ -1148,7 +1176,7 @@ function App() {
         const [, bootstrap, accountResult] = await Promise.all([
           checkApiHealth(),
           loadBootstrap(),
-          canManageOrganization(session.role)
+          (canManageOrganization(session.role) || session.organizationPermissions?.includes("branches.manage"))
             ? loadOrganizationAccounts().catch(() => ({ accounts: [] }))
             : Promise.resolve({ accounts: [] }),
         ]);
@@ -1215,9 +1243,9 @@ function App() {
   useEffect(() => {
     if (!session) return;
     if (!sessionModules.includes(activeModule)) {
-      setActiveModule(sessionModules.includes(defaultModuleId) ? defaultModuleId : sessionModules[0], { replace: true });
+      setIsMobileMoreOpen(false);
     }
-  }, [activeModule, session, sessionModules, setActiveModule]);
+  }, [activeModule, session, sessionModules]);
 
   useEffect(() => {
     if (session && isAdmin(session.role) && activeModule === "my-workspace") {
@@ -1536,13 +1564,21 @@ function App() {
     return result.branch;
   }
 
-  async function deleteBranch(branch, confirmationName, reassignTo = "") {
-    const result = await deleteBranchRecord(branch.id, confirmationName, reassignTo);
-    if (result.reassignedTo) reassignLocalBranchRecords(branch.name, result.reassignedTo);
-    removeById(setBranchRecords, result.id);
-    if (branchScope === branch.name) setBranchScope(result.reassignedTo || "All branches");
+  async function archiveBranch(branch) {
+    const result = await archiveBranchRecord(branch.id);
+    replaceBranchRecord(result.branch);
+    if (branchScope === branch.name) void switchBranch("all");
     applyAuditLog(result.auditLog);
-    notify(result.reassignedTo ? `${branch.name} deleted; linked records moved to ${result.reassignedTo}.` : `${branch.name} deleted.`);
+    notify(`${branch.name} archived. Historical records were preserved.`);
+    return result.branch;
+  }
+
+  async function reactivateBranch(branch) {
+    const result = await reactivateBranchRecord(branch.id);
+    replaceBranchRecord(result.branch);
+    applyAuditLog(result.auditLog);
+    notify(`${branch.name} reactivated.`);
+    return result.branch;
   }
 
   function replaceBranchRecord(branch) {
@@ -1577,6 +1613,11 @@ function App() {
   function handleGlobalCreateAction(action) {
     if (action.handler === "branch-create") {
       setBranchCreateRequest((current) => current + 1);
+      return;
+    }
+    if (action.handler === "invite-user") {
+      setActiveModule("staff");
+      setInviteCreateRequest((current) => current + 1);
       return;
     }
     if (action.modal) openModal(action.modal, action.payload ?? {});
@@ -2033,6 +2074,19 @@ function App() {
   }
 
   async function saveStaff(values) {
+    const existingStaff = values.id ? staff.find((item) => item.id === values.id) : null;
+    if (existingStaff && existingStaff.branch !== values.branch) {
+      const approved = await new Promise((resolve) => {
+        askConfirm({
+          title: `Transfer ${existingStaff.name}?`,
+          copy: `Access will move from ${existingStaff.branch} to ${values.branch}. Future schedules must be created in the new branch; historical appointments, treatments, attendance, and audit records keep their original branch.`,
+          actionLabel: "Transfer employee",
+          onConfirm: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      if (!approved) return;
+    }
     const record = {
       ...values,
       id: values.id || createId("st"),
@@ -2088,10 +2142,12 @@ function App() {
   }
 
   async function saveCampaign(values, { existing, silent = false } = {}) {
+    const campaignBranch = values.branch || (branchScope !== "All branches" ? branchScope : "");
+    if (!campaignBranch) throw new Error("Choose an active branch for this campaign.");
     const record = {
       ...values,
       id: values.id || createId("cmp"),
-      branch: values.branch || (branchScope !== "All branches" ? branchScope : session.branch),
+      branch: campaignBranch,
       sent: Number(values.sent || 0),
       booked: Number(values.booked || 0),
       credits: Number(values.credits || 0),
@@ -2275,10 +2331,13 @@ function App() {
     return <FaceTrackKiosk session={session} />;
   }
 
+  const publicParams = new URLSearchParams(window.location.search);
+  const invitationToken = publicParams.get("token") || publicParams.get("invitation");
+  if (invitationToken && ["/accept-invitation", "/"].includes(normalizedPathname(window.location.pathname))) {
+    return <AcceptInvitationScreen token={invitationToken} session={session} onLogin={handleLogin} onLogout={handleLogout} />;
+  }
+
   if (!session) {
-    const publicParams = new URLSearchParams(window.location.search);
-    const invitationToken = publicParams.get("invitation");
-    if (invitationToken) return <AcceptInvitationScreen token={invitationToken} settings={settings} />;
     const resetToken = publicParams.get("reset");
     if (resetToken) return <ResetPasswordScreen token={resetToken} />;
     return <LoginScreen notice={sessionNotice} onLogin={handleLogin} settings={settings} />;
@@ -2296,6 +2355,24 @@ function App() {
             <ShieldCheck size={28} aria-hidden="true" />
             <strong>Access role unavailable</strong>
             <p className="login-helper">Your account is signed in, but its role is not configured for this workspace. Ask an Owner or Super Admin to assign an approved role.</p>
+            <button className="ghost-button full" type="button" onClick={handleLogout}>Sign out</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!sessionModules.includes(activeModule)) {
+    const blockedLabel = navItems.find((item) => item.id === activeModule)?.label || "This module";
+    return (
+      <main className="login-page module-unavailable-page">
+        <section className="login-panel">
+          <div className="login-card auth-loading-card">
+            <LockKeyhole size={30} aria-hidden="true" />
+            <p className="eyebrow">{branchScope}</p>
+            <strong>Module not available for this branch</strong>
+            <p className="login-helper">{blockedLabel} is disabled for the active branch or is not included in your role permissions.</p>
+            <button className="primary-button full" type="button" onClick={() => setActiveModule(sessionModules.includes(defaultModuleId) ? defaultModuleId : sessionModules[0], { replace: true })}>Open an available workspace</button>
             <button className="ghost-button full" type="button" onClick={handleLogout}>Sign out</button>
           </div>
         </section>
@@ -2326,7 +2403,9 @@ function App() {
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = sessionModules.includes("pos");
   const canManageAppointments = sessionModules.includes("appointments");
-  const canAccessAllBranches = canManageOrganization(session.role);
+  const canAccessAllBranches = Boolean(session.access?.organizationWide);
+  const selectableBranches = (session.access?.branches || []).filter((branch) => branch.branchStatus === "Active");
+  const showBranchSelector = canAccessAllBranches || selectableBranches.length > 1;
   const shellClassName = [
     "app-shell",
     showSidebar ? "app-shell-with-sidebar" : "app-shell-full",
@@ -2459,26 +2538,24 @@ function App() {
                 onRefresh={refreshNotifications}
                 unreadCount={notificationFeed.unreadCount}
               />
-              <label className="branch-select">
-                <Store size={17} aria-hidden="true" />
-                <select
-                  value={canAccessAllBranches ? branchScope : session.branch}
-                  onChange={(event) => setBranchScope(event.target.value)}
-                  aria-label="Select branch"
-                  disabled={!canAccessAllBranches}
-                  title={canAccessAllBranches ? "Filter workspace by branch" : `Access is limited to ${session.branch}`}
-                >
-                  {canAccessAllBranches ? (
-                    <>
-                      <option>All branches</option>
-                      {branchRecords.map((branch) => <option key={branch.id}>{branch.name}</option>)}
-                    </>
-                  ) : (
-                    <option>{session.branch}</option>
-                  )}
-                </select>
-                <ChevronDown size={15} aria-hidden="true" />
-              </label>
+              {showBranchSelector ? (
+                <label className={`branch-select ${branchSwitching ? "is-loading" : ""}`}>
+                  <Store size={17} aria-hidden="true" />
+                  <select
+                    value={session.access?.activeBranchId || ""}
+                    onChange={(event) => void switchBranch(event.target.value)}
+                    aria-label="Select active branch"
+                    disabled={branchSwitching}
+                    title="Change the server-authorized workspace branch"
+                  >
+                    {canAccessAllBranches && <option value="all">All Branches</option>}
+                    {selectableBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                  </select>
+                  {branchSwitching ? <RefreshCw className="spin" size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+                </label>
+              ) : (
+                <div className="active-branch-label" title="Your assigned branch"><Store size={17} aria-hidden="true" /><span>{branchScope}</span></div>
+              )}
               <AccountMenu session={session} onLogout={handleLogout} />
             </div>
             </header>
@@ -2693,6 +2770,8 @@ function App() {
           {activeModule === "sms" && (
             <MarketingWorkspace
               approveCampaign={approveCampaign}
+              branches={branchRecords.filter((branch) => branch.status === "Active")}
+              branchScope={branchScope}
               canApproveMarketing={canManageOrganization(session.role)}
               clients={scopedClients}
               templates={smsTemplates}
@@ -2730,6 +2809,8 @@ function App() {
               notify={notify}
               onOpenStaff={(person) => openRecordPage("staff", person.id)}
               onCloseDetail={() => setActiveModule("staff")}
+              createRequest={inviteCreateRequest}
+              onCreateRequestHandled={setInviteCreateRequest}
             />
           )}
           {activeModule === "branches" && (
@@ -2739,12 +2820,14 @@ function App() {
               staff={staff}
               transactions={transactions}
               appointments={appointments}
-              canManage={canManageOrganization(session.role)}
-              canDelete={isAdmin(session.role)}
+              accounts={organizationAccounts}
+              canManage={canManageOrganization(session.role) || session.organizationPermissions?.includes("branches.manage")}
               onCreateBranch={createBranch}
               onUpdateBranch={updateBranch}
-              onDeleteBranch={deleteBranch}
+              onArchiveBranch={archiveBranch}
+              onReactivateBranch={reactivateBranch}
               onManageCompany={() => openModal("settings", settings)}
+              onManageEmployees={(branch) => { void switchBranch(branch.id).then(() => setActiveModule("staff")); }}
               createRequest={branchCreateRequest}
               onCreateRequestHandled={setBranchCreateRequest}
             />
@@ -2835,7 +2918,7 @@ function App() {
         appointments={appointments}
       />
 
-      {confirm && <ConfirmDialog confirm={confirm} onCancel={() => setConfirm(null)} />}
+      {confirm && <ConfirmDialog confirm={confirm} onCancel={() => { confirm.onCancel?.(); setConfirm(null); }} onConfirmComplete={() => setConfirm(null)} />}
       {toast && <Toast toast={toast} />}
       </div>
       <PrintableReceipt receipt={receiptToPrint} settings={settings} />
@@ -10277,29 +10360,64 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify, onOpenStaff, onCloseDetail }) {
-  const canInvite = canManageOrganization(session.role);
+function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify, onOpenStaff, onCloseDetail, createRequest = 0, onCreateRequestHandled }) {
+  const canInvite = canManageOrganization(session.role)
+    || (["Branch Manager", "Admin"].includes(session.role) && session.access?.permissions?.includes("staff.invite"));
+  const canManageAccounts = canManageOrganization(session.role)
+    || (["Branch Manager", "Admin"].includes(session.role) && session.access?.permissions?.includes("staff.manage"));
   const [invitations, setInvitations] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [capabilities, setCapabilities] = useState({ roles: [], roleModules: {}, permissions: [], branches: [], organizationManager: false, invitationExpiryDays: 7 });
+  const [workspaceTab, setWorkspaceTab] = useState("Active Users");
+  const [branchFilter, setBranchFilter] = useState("All");
+  const [roleFilter, setRoleFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [moduleFilter, setModuleFilter] = useState("All");
   const [linkTarget, setLinkTarget] = useState(null);
   const [linkChoice, setLinkChoice] = useState("");
   const [linking, setLinking] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [editingInvitation, setEditingInvitation] = useState(null);
+  const [accessTarget, setAccessTarget] = useState(null);
+  const [accessForm, setAccessForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const selectedStaff = staff.find((person) => person.id === detailStaffId) ?? null;
-  const roles = Object.keys(roleAccess).filter((role) => isBusinessOwner(session.role) || !isBusinessOwner(role));
-  const clinicBranches = branchRecords.map((branch) => branch.name);
-  const defaultMemberBranch = clinicBranches.includes(session.branch) ? session.branch : clinicBranches[0] || "";
-  const emptyInvitation = () => ({ name: "", email: "", role: "Doctor", branch: defaultMemberBranch, department: "", specialty: "", message: "" });
+  const roles = capabilities.roles.length ? capabilities.roles : Object.keys(roleAccess).filter((role) => (
+    canManageOrganization(session.role)
+      || (!canManageOrganization(role) && (!["Branch Manager", "Admin"].includes(role) || session.access?.permissions?.includes("staff.invite_managers")))
+  ));
+  const allowedBranches = capabilities.branches.length
+    ? capabilities.branches
+    : branchRecords.filter((branch) => branch.status === "Active").map((branch) => ({ id: branch.id, name: branch.name, enabledModules: branch.enabledModules || [] }));
+  const defaultBranchId = session.access?.activeBranchId !== "all"
+    ? session.access?.activeBranchId
+    : allowedBranches[0]?.id || "";
+  const moduleLabel = (moduleId) => navItems.find((item) => item.id === moduleId)?.label || moduleId;
+  const moduleOptionsFor = useCallback((role, branchIds) => {
+    const defaults = capabilities.roleModules?.[role] || roleAccess[role] || [];
+    const selected = allowedBranches.filter((branch) => branchIds.includes(branch.id));
+    return defaults.filter((moduleId) => !selected.length || selected.every((branch) => branch.enabledModules.includes(moduleId)));
+  }, [allowedBranches, capabilities.roleModules]);
+  const emptyInvitation = useCallback(() => {
+    const role = roles.includes("Employee") ? "Employee" : roles.find((item) => !canManageOrganization(item)) || roles[0] || "Employee";
+    const branchIds = canManageOrganization(role) ? [] : [defaultBranchId].filter(Boolean);
+    return {
+      firstName: "",
+      lastName: "",
+      email: "",
+      role,
+      branchIds,
+      department: "",
+      specialty: "",
+      position: "",
+      modules: moduleOptionsFor(role, branchIds),
+      permissions: [],
+      message: "",
+      confirmOrganizationAccess: false,
+    };
+  }, [defaultBranchId, moduleOptionsFor, roles]);
   const [form, setForm] = useState(emptyInvitation);
-
-  useEffect(() => {
-    if (!defaultMemberBranch) return;
-    setForm((current) => canManageOrganization(current.role) || current.branch
-      ? current
-      : { ...current, branch: defaultMemberBranch });
-  }, [defaultMemberBranch]);
 
   const refresh = useCallback(async () => {
     if (!canInvite) return;
@@ -10307,6 +10425,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
       const [invitationResult, accountResult] = await Promise.all([loadInvitations(), loadOrganizationAccounts()]);
       setInvitations(invitationResult.invitations || []);
       setAccounts(accountResult.accounts || []);
+      setCapabilities(invitationResult.capabilities || {});
     } catch (loadError) { notify(loadError.message, "error"); }
   }, [canInvite, notify]);
 
@@ -10335,15 +10454,49 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  function openInvitation(invitation = null) {
+    setError("");
+    setEditingInvitation(invitation);
+    if (invitation) {
+      setForm({
+        firstName: invitation.firstName || invitation.name?.split(" ")[0] || "",
+        lastName: invitation.lastName || invitation.name?.split(" ").slice(1).join(" ") || "",
+        email: invitation.email,
+        role: invitation.role,
+        branchIds: invitation.branchIds || [],
+        department: invitation.department || "",
+        specialty: invitation.specialty || "",
+        position: invitation.position || "",
+        modules: invitation.modules || [],
+        permissions: invitation.permissions || [],
+        message: invitation.message || "",
+        confirmOrganizationAccess: canManageOrganization(invitation.role),
+      });
+    } else {
+      setForm(emptyInvitation());
+    }
+    setShowInvite(true);
+  }
+
+  useEffect(() => {
+    if (!createRequest) return;
+    openInvitation();
+    onCreateRequestHandled?.(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createRequest]);
+
   async function submitInvitation(event) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const result = await createInvitation(form);
-      setInvitations((current) => [result.invitation, ...current]);
+      const result = editingInvitation
+        ? await editInvitation(editingInvitation.id, form)
+        : await createInvitation(form);
+      setInvitations((current) => [result.invitation, ...current.filter((item) => item.id !== result.invitation.id)]);
       applyAuditLog(result.auditLog);
       setShowInvite(false);
+      setEditingInvitation(null);
       setForm(emptyInvitation());
-      notify(result.invitation.status === "Failed" ? "Invitation saved, but email delivery failed. Configure SMTP and resend." : "Invitation sent.", result.invitation.status === "Failed" ? "warning" : "success");
+      notify(result.deliveryError || (editingInvitation ? "Invitation updated and resent." : "Invitation sent."), result.deliveryError ? "warning" : "success");
     } catch (saveError) { setError(saveError.message); } finally { setSaving(false); }
   }
 
@@ -10351,9 +10504,56 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
     try {
       const result = action === "revoke" ? await revokeInvitation(invitation.id) : await resendInvitation(invitation.id);
       setInvitations((current) => current.map((item) => item.id === result.invitation.id ? result.invitation : item));
-      applyAuditLog(result.auditLog); notify(action === "revoke" ? "Invitation revoked." : "Invitation resent.");
+      applyAuditLog(result.auditLog); notify(result.deliveryError || (action === "revoke" ? "Invitation cancelled." : "Invitation resent."), result.deliveryError ? "warning" : "success");
     } catch (actionError) { notify(actionError.message, "error"); }
   }
+
+  function openAccess(account) {
+    const branchIds = canManageOrganization(account.role) ? [] : (account.access?.branches || []).map((branch) => branch.id);
+    setAccessTarget(account);
+    setAccessForm({
+      role: account.role,
+      status: account.status,
+      branchIds,
+      modules: account.access?.modules || moduleOptionsFor(account.role, branchIds),
+      permissions: account.access?.activeBranch?.permissions || [],
+      confirmAccessChange: true,
+      confirmOrganizationAccess: false,
+    });
+    setError("");
+  }
+
+  async function saveAccess(event) {
+    event.preventDefault(); setSaving(true); setError("");
+    try {
+      const result = await updateAccountAccess(accessTarget.id, accessForm);
+      setAccounts((current) => current.map((account) => account.id === result.account.id ? result.account : account));
+      (result.auditLogs || []).forEach(applyAuditLog);
+      if (result.account.id === session.id) setSession(result.account);
+      notify("User access updated.");
+      setAccessTarget(null);
+      setAccessForm(null);
+    } catch (saveError) { setError(saveError.message); } finally { setSaving(false); }
+  }
+
+  const normalizedSearch = globalSearch.trim().toLowerCase();
+  const accountRows = accounts.filter((account) => {
+    const branchNames = account.organizationWideAccess ? [] : (account.access?.branches || []).map((branch) => branch.name);
+    const modules = account.access?.modules || [];
+    return (workspaceTab === "Inactive Users" ? account.status !== "Active" : account.status === "Active")
+      && (!normalizedSearch || `${account.name} ${account.email} ${account.role} ${branchNames.join(" ")}`.toLowerCase().includes(normalizedSearch))
+      && (branchFilter === "All" || branchNames.includes(branchFilter))
+      && (roleFilter === "All" || account.role === roleFilter)
+      && (moduleFilter === "All" || modules.includes(moduleFilter));
+  });
+  const invitationRows = invitations.filter((invitation) => (
+    (!normalizedSearch || `${invitation.name} ${invitation.email} ${invitation.role}`.toLowerCase().includes(normalizedSearch))
+    && (branchFilter === "All" || invitation.branches?.some((branch) => branch.name === branchFilter))
+    && (roleFilter === "All" || invitation.role === roleFilter)
+    && (statusFilter === "All" || invitation.status === statusFilter)
+    && (moduleFilter === "All" || invitation.modules?.includes(moduleFilter))
+  ));
+  const filterModules = [...new Set(Object.values(capabilities.roleModules || roleAccess).flat())];
 
   if (detailStaffId) {
     if (!selectedStaff) return <RecordDetailNotFound label="Staff member" onBack={onCloseDetail} />;
@@ -10371,13 +10571,45 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
   return (
     <section className="module-grid staff-management-grid">
       <div className="surface-panel">
-        <SectionHeader icon={BriefcaseBusiness} title="Staff Management" action={`${staff.length} employees`} />
+        <SectionHeader icon={Users} title="Users & Invitations" action={`${accounts.length} users · ${invitations.filter((item) => item.status === "Pending").length} pending`} />
+        <div className="workspace-tabs" role="tablist" aria-label="User access status">
+          {["Active Users", "Pending Invitations", "Inactive Users"].map((tab) => <button key={tab} type="button" role="tab" aria-selected={workspaceTab === tab} className={workspaceTab === tab ? "active" : ""} onClick={() => setWorkspaceTab(tab)}>{tab}</button>)}
+        </div>
+        <div className="user-access-filters">
+          <label><span>Branch</span><select value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><option>All</option>{allowedBranches.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
+          <label><span>Role</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option>All</option>{Object.keys(roleAccess).map((role) => <option key={role}>{role}</option>)}</select></label>
+          {workspaceTab === "Pending Invitations" && <label><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option>All</option>{["Pending", "Accepted", "Expired", "Revoked"].map((status) => <option key={status}>{status}</option>)}</select></label>}
+          <label><span>Module access</span><select value={moduleFilter} onChange={(event) => setModuleFilter(event.target.value)}><option>All</option>{filterModules.map((moduleId) => <option key={moduleId} value={moduleId}>{moduleLabel(moduleId)}</option>)}</select></label>
+          {canInvite && <button className="primary-button small" type="button" onClick={() => openInvitation()}><Mail size={16} /> Invite user</button>}
+        </div>
+        {workspaceTab === "Pending Invitations" ? <SmartTable rows={invitationRows} columns={[
+          { key: "name", label: "User", render: (row) => <div><strong>{row.name}</strong><small>{row.email}</small></div> },
+          { key: "branch", label: "Branch", render: (row) => row.branches?.map((branch) => branch.name).join(", ") || "Organization-wide" },
+          { key: "role", label: "Role" },
+          { key: "status", label: "Status", render: (row) => <div><StatusBadge status={row.status} /><small>{row.deliveryStatus === "Failed" ? "Email failed" : row.deliveryStatus}</small></div> },
+          { key: "invitedBy", label: "Invited by", render: (row) => row.invitedBy?.name || "—" },
+          { key: "createdAt", label: "Invited", render: (row) => new Date(row.createdAt).toLocaleDateString("en-PH") },
+          { key: "expiresAt", label: "Expires", render: (row) => new Date(row.expiresAt).toLocaleDateString("en-PH") },
+          { key: "actions", label: "Actions", render: (row) => {
+            const canAct = capabilities.organizationManager || row.invitedBy?.id === session.id;
+            return <div className="inline-actions">{canAct && row.status === "Pending" && <button type="button" onClick={() => openInvitation(row)}><Edit3 size={14} /> Edit</button>}{canAct && ["Pending", "Expired"].includes(row.status) && <button type="button" onClick={() => runInvitationAction("resend", row)}><RefreshCw size={14} /> Resend</button>}{canAct && row.status === "Pending" && <button type="button" onClick={() => runInvitationAction("revoke", row)}><X size={14} /> Cancel</button>}</div>;
+          }, exportValue: () => "" },
+        ]} /> : <SmartTable rows={accountRows} columns={[
+          { key: "name", label: "User", render: (row) => <div><strong>{row.name}</strong><small>{row.email}</small></div> },
+          { key: "branch", label: "Branch", render: (row) => row.organizationWideAccess ? "Organization-wide" : row.access?.branches?.map((branch) => branch.name).join(", ") || "Unassigned" },
+          { key: "role", label: "Role" },
+          { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
+          { key: "createdAt", label: "Joined", render: (row) => row.createdAt ? new Date(row.createdAt).toLocaleDateString("en-PH") : "—" },
+          { key: "actions", label: "Actions", render: (row) => <div className="inline-actions">{row.staffId && staff.some((person) => person.id === row.staffId) && <button type="button" onClick={() => onOpenStaff?.(staff.find((person) => person.id === row.staffId))}><Eye size={14} /> View</button>}{canManageAccounts && (canManageOrganization(session.role) || (!canManageOrganization(row.role) && (!["Branch Manager", "Admin"].includes(row.role) || capabilities.canInviteManagers))) && <button type="button" onClick={() => openAccess(row)}><ShieldCheck size={14} /> Manage access</button>}</div>, exportValue: () => "" },
+        ]} />}
+      </div>
+      {workspaceTab === "Active Users" && <div className="surface-panel">
+        <SectionHeader icon={BriefcaseBusiness} title="Employee Profiles" action={`${staff.length} employees`} />
         <SmartTable
           rows={staff}
-          globalSearch={globalSearch}
           toolbarActions={(
             <div className="inline-actions">
-              {canInvite && <button className="primary-button small" type="button" onClick={() => setShowInvite(true)}><Mail size={16} /> Invite member</button>}
+              {canInvite && <button className="primary-button small" type="button" onClick={() => openInvitation()}><Mail size={16} /> Invite user</button>}
             </div>
           )}
           columns={[
@@ -10397,11 +10629,11 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
                   return (
                     <div className="staff-login-cell">
                       <div><strong>{linked.email}</strong><small>{linked.role}</small></div>
-                      {canInvite && <button type="button" disabled={linking} onClick={() => void applyLink(row, "")}><X size={14} /> Unlink</button>}
+                      {canManageAccounts && <button type="button" disabled={linking} onClick={() => void applyLink(row, "")}><X size={14} /> Unlink</button>}
                     </div>
                   );
                 }
-                if (!canInvite) return <span className="staff-login-empty">Not connected</span>;
+                if (!canManageAccounts) return <span className="staff-login-empty">Not connected</span>;
                 return (
                   <button type="button" disabled={linking} onClick={() => { setLinkTarget(row); setLinkChoice(""); }}>
                     <UserCheck size={14} /> Connect login
@@ -10417,47 +10649,62 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
               render: (row) => (
                 <div className="inline-actions">
                   <button type="button" onClick={() => onOpenStaff?.(row)}><Eye size={15} /> View</button>
-                  <button type="button" onClick={() => toggleAttendance(row.id)}><Clock size={15} /> Clock</button>
-                  <button type="button" onClick={() => openModal("staff", row)}><Edit3 size={15} /> Edit</button>
+                  {canManageAccounts && <button type="button" onClick={() => toggleAttendance(row.id)}><Clock size={15} /> Clock</button>}
+                  {canManageAccounts && <button type="button" onClick={() => openModal("staff", row)}><Edit3 size={15} /> Edit</button>}
                 </div>
               ),
               exportValue: () => "",
             },
           ]}
         />
-      </div>
-      {canInvite && <div className="surface-panel">
-        <SectionHeader icon={Mail} title="Member Invitations" action={`${invitations.length} records`} />
-        <SmartTable rows={invitations} columns={[
-          { key: "name", label: "Member", render: (row) => <div><strong>{row.name}</strong><small>{row.email}</small></div> },
-          { key: "role", label: "Role" },
-          { key: "department", label: "Department / specialty", render: (row) => row.department || row.specialty || "—" },
-          { key: "expiresAt", label: "Expires", render: (row) => new Date(row.expiresAt).toLocaleDateString("en-PH") },
-          { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-          { key: "actions", label: "Actions", render: (row) => <div className="inline-actions">{["Pending", "Expired", "Failed"].includes(row.status) && <button type="button" onClick={() => runInvitationAction("resend", row)}><RefreshCw size={14} /> Resend</button>}{row.status === "Pending" && <button type="button" onClick={() => runInvitationAction("revoke", row)}><X size={14} /> Revoke</button>}</div>, exportValue: () => "" },
-        ]} />
       </div>}
       {showInvite && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Invite member"><form className="modal-card invitation-modal" onSubmit={submitInvitation}>
-        <button className="modal-close" type="button" onClick={() => setShowInvite(false)}><X size={18} /></button>
-        <SectionHeader icon={Mail} title="Invite organization member" action="Secure link · 7 days" />
+        <button className="modal-close" type="button" onClick={() => { setShowInvite(false); setEditingInvitation(null); }}><X size={18} /></button>
+        <SectionHeader icon={Mail} title={editingInvitation ? "Edit pending invitation" : "Invite organization member"} action={`Secure link · ${capabilities.invitationExpiryDays || 7} days`} />
         <div className="form-grid">
-          <label><span>Name</span><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label><span>Email</span><input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+          <label><span>First name</span><input required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></label>
+          <label><span>Last name</span><input required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></label>
+          <label><span>Email</span><input required type="email" disabled={Boolean(editingInvitation)} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+          <label><span>Job title / position</span><input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} /></label>
           <label><span>Role</span><select value={form.role} onChange={(e) => {
             const role = e.target.value;
-            setForm((current) => ({
-              ...current,
-              role,
-              branch: canManageOrganization(role) ? "All branches" : (clinicBranches.includes(current.branch) ? current.branch : defaultMemberBranch),
-            }));
+            const branchIds = canManageOrganization(role) ? [] : (form.branchIds.length ? form.branchIds : [defaultBranchId].filter(Boolean));
+            setForm((current) => ({ ...current, role, branchIds, modules: moduleOptionsFor(role, branchIds), permissions: [], confirmOrganizationAccess: false }));
           }}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
-          <label><span>Branch</span><select required value={canManageOrganization(form.role) ? "All branches" : form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>{canManageOrganization(form.role) ? <option>All branches</option> : <><option value="" disabled>Select a branch</option>{clinicBranches.map((branch) => <option key={branch}>{branch}</option>)}</>}</select></label>
           <label><span>Department</span><input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
           <label><span>Specialty</span><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></label>
+          <fieldset className="full-span invitation-options"><legend>Branch assignment</legend>{canManageOrganization(form.role) ? <p>Organization-wide access is granted by this role. No “All Branches” assignment will be stored.</p> : <div>{allowedBranches.map((branch) => <label key={branch.id}><input type="checkbox" disabled={!capabilities.organizationManager} checked={form.branchIds.includes(branch.id)} onChange={(event) => {
+            const branchIds = event.target.checked ? [...form.branchIds, branch.id] : form.branchIds.filter((id) => id !== branch.id);
+            setForm((current) => ({ ...current, branchIds, modules: current.modules.filter((moduleId) => moduleOptionsFor(current.role, branchIds).includes(moduleId)) }));
+          }} /><span>{branch.name}{!capabilities.organizationManager ? " · Assigned branch" : ""}</span></label>)}</div>}</fieldset>
+          <fieldset className="full-span invitation-options"><legend>Modules</legend><p>Only modules enabled for every selected branch and allowed by the role are shown.</p><div>{moduleOptionsFor(form.role, form.branchIds).map((moduleId) => <label key={moduleId}><input type="checkbox" checked={form.modules.includes(moduleId)} onChange={(event) => setForm((current) => ({ ...current, modules: event.target.checked ? [...current.modules, moduleId] : current.modules.filter((id) => id !== moduleId) }))} /><span>{moduleLabel(moduleId)}</span></label>)}</div></fieldset>
+          {capabilities.permissions?.length > 0 && <fieldset className="full-span invitation-options"><legend>Additional permissions</legend><div>{capabilities.permissions.map((permission) => <label key={permission.id}><input type="checkbox" checked={form.permissions.includes(permission.id)} onChange={(event) => setForm((current) => ({ ...current, permissions: event.target.checked ? [...current.permissions, permission.id] : current.permissions.filter((id) => id !== permission.id) }))} /><span>{permission.label}</span></label>)}</div></fieldset>}
+          {canManageOrganization(form.role) && <label className="full-span confirmation-check"><input required type="checkbox" checked={form.confirmOrganizationAccess} onChange={(event) => setForm({ ...form, confirmOrganizationAccess: event.target.checked })} /><span>I understand this grants organization-wide access to all active branches.</span></label>}
           <label className="full-span"><span>Optional message</span><textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} /></label>
         </div>
         {error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}
-        <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowInvite(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Sending..." : "Send invitation"}</button></div>
+        <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => { setShowInvite(false); setEditingInvitation(null); }}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Sending..." : editingInvitation ? "Save and resend" : "Send invitation"}</button></div>
+      </form></div>}
+      {accessTarget && accessForm && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage user access"><form className="modal-card invitation-modal" onSubmit={saveAccess}>
+        <button className="modal-close" type="button" onClick={() => setAccessTarget(null)}><X size={18} /></button>
+        <SectionHeader icon={ShieldCheck} title={`Manage ${accessTarget.name}`} action={accessTarget.email} />
+        <div className="form-grid">
+          <label><span>Status</span><select value={accessForm.status} onChange={(event) => setAccessForm({ ...accessForm, status: event.target.value })}><option>Active</option><option>Inactive</option></select></label>
+          <label><span>Role</span><select value={accessForm.role} onChange={(event) => {
+            const role = event.target.value;
+            const branchIds = canManageOrganization(role) ? [] : (accessForm.branchIds.length ? accessForm.branchIds : [defaultBranchId].filter(Boolean));
+            setAccessForm({ ...accessForm, role, branchIds, modules: moduleOptionsFor(role, branchIds), permissions: [], confirmOrganizationAccess: false });
+          }}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+          <fieldset className="full-span invitation-options"><legend>Branch access</legend>{canManageOrganization(accessForm.role) ? <p>This role has organization-wide access without a branch assignment.</p> : <div>{allowedBranches.map((branch) => <label key={branch.id}><input type="checkbox" disabled={!capabilities.organizationManager} checked={accessForm.branchIds.includes(branch.id)} onChange={(event) => {
+            const branchIds = event.target.checked ? [...accessForm.branchIds, branch.id] : accessForm.branchIds.filter((id) => id !== branch.id);
+            setAccessForm({ ...accessForm, branchIds, modules: accessForm.modules.filter((moduleId) => moduleOptionsFor(accessForm.role, branchIds).includes(moduleId)) });
+          }} /><span>{branch.name}</span></label>)}</div>}</fieldset>
+          <fieldset className="full-span invitation-options"><legend>Modules</legend><div>{moduleOptionsFor(accessForm.role, accessForm.branchIds).map((moduleId) => <label key={moduleId}><input type="checkbox" checked={accessForm.modules.includes(moduleId)} onChange={(event) => setAccessForm({ ...accessForm, modules: event.target.checked ? [...accessForm.modules, moduleId] : accessForm.modules.filter((id) => id !== moduleId) })} /><span>{moduleLabel(moduleId)}</span></label>)}</div></fieldset>
+          {capabilities.permissions?.length > 0 && <fieldset className="full-span invitation-options"><legend>Permissions</legend><div>{capabilities.permissions.map((permission) => <label key={permission.id}><input type="checkbox" checked={accessForm.permissions.includes(permission.id)} onChange={(event) => setAccessForm({ ...accessForm, permissions: event.target.checked ? [...accessForm.permissions, permission.id] : accessForm.permissions.filter((id) => id !== permission.id) })} /><span>{permission.label}</span></label>)}</div></fieldset>}
+          {canManageOrganization(accessForm.role) && accessForm.role !== accessTarget.role && <label className="full-span confirmation-check"><input required type="checkbox" checked={accessForm.confirmOrganizationAccess} onChange={(event) => setAccessForm({ ...accessForm, confirmOrganizationAccess: event.target.checked })} /><span>Confirm organization-wide administrator access.</span></label>}
+        </div>
+        {error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}
+        <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setAccessTarget(null)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Saving..." : "Save access"}</button></div>
       </form></div>}
       {linkTarget && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Connect login"><form className="modal-card" onSubmit={(event) => { event.preventDefault(); void applyLink(linkTarget, linkChoice); }}>
         <button className="modal-close" type="button" onClick={() => setLinkTarget(null)}><X size={18} /></button>
@@ -10528,42 +10775,73 @@ function StaffRecordPage({ person, account, onClock, onEdit }) {
   );
 }
 
-function AcceptInvitationScreen({ token }) {
+function AcceptInvitationScreen({ token, session, onLogin, onLogout }) {
   const [invitation, setInvitation] = useState(null);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [redirectPath, setRedirectPath] = useState("/");
   const [loading, setLoading] = useState(true);
-  useEffect(() => { inspectInvitation(token).then((result) => setInvitation(result.invitation)).catch((e) => setError(e.message)).finally(() => setLoading(false)); }, [token]);
+  useEffect(() => { inspectInvitation(token).then((result) => setInvitation(result.invitation)).catch((e) => setError(e.message)).finally(() => setLoading(false)); }, [session?.email, token]);
+  const emailMismatch = Boolean(session?.email && invitation?.email && session.email.toLowerCase() !== invitation.email.toLowerCase());
+  async function signIn(event) {
+    event.preventDefault(); setError(""); setLoading(true);
+    try { await onLogin(invitation.email, password); setPassword(""); } catch (e) { setError(e.message); } finally { setLoading(false); }
+  }
   async function submit(event) {
     event.preventDefault(); setError("");
-    if (password !== confirmPassword) return setError("Passwords do not match.");
+    if (!invitation.accountExists && password !== confirmPassword) return setError("Passwords do not match.");
     setLoading(true);
-    try { await acceptInvitation(token, password); setDone(true); window.history.replaceState({}, "", window.location.pathname); } catch (e) { setError(e.message); } finally { setLoading(false); }
+    try {
+      const result = await acceptInvitation(token, { password, termsAccepted, privacyAccepted });
+      setRedirectPath(result.redirectPath || "/");
+      setDone(true);
+      window.history.replaceState({}, "", "/accept-invitation");
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
-  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
-    {done ? <><p className="eyebrow">Invitation accepted</p><h2>Your workspace is ready</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Organization invitation</p><h2>{loading && !invitation ? "Checking invitation..." : `Welcome, ${invitation?.name || "member"}`}</h2>{invitation && <p className="login-helper">Join as {invitation.role} · link expires {new Date(invitation.expiresAt).toLocaleDateString("en-PH")}</p>}<label><span>Create password</span><input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label><span>Confirm password</span><input type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading || !invitation || invitation.status !== "Pending"}>{loading ? "Joining..." : "Accept invitation"}</button></>}
+  if (invitation?.accountExists && !session) {
+    return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={signIn}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" /><p className="eyebrow">Sign in to continue</p><h2>This invitation is for an existing MACE user</h2><p className="login-helper">Sign in as <strong>{invitation.email}</strong>, then review and accept the invitation.</p><label><span>Email</span><input value={invitation.email} readOnly /></label><label><span>Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button></form></section></main>;
+  }
+  return <main className="login-page"><section className="login-panel"><form className="login-card invitation-accept-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+    {done ? <><p className="eyebrow">Invitation accepted</p><h2>Your workspace is ready</h2><p className="login-helper">Your approved role, branch access, modules, and permissions are active.</p><a className="primary-button full" href={redirectPath}>Continue to your dashboard</a></> : <><p className="eyebrow">Secure organization invitation</p><h2>{loading && !invitation ? "Checking invitation..." : invitation ? `Welcome, ${invitation.firstName || invitation.name}` : "Invitation unavailable"}</h2>{invitation && <div className="invitation-summary"><div><span>Organization</span><strong>{invitation.organization?.name}</strong></div><div><span>Branch</span><strong>{invitation.branches?.map((branch) => branch.name).join(", ") || "Organization-wide"}</strong></div><div><span>Role</span><strong>{invitation.role}</strong></div><div><span>Expires</span><strong>{new Date(invitation.expiresAt).toLocaleDateString("en-PH")}</strong></div></div>}{invitation && invitation.status !== "Pending" && <div className="inline-state danger"><AlertCircle size={16} />{invitation.status === "Expired" ? "This invitation has expired. Ask an administrator to resend it." : invitation.status === "Revoked" ? "This invitation was cancelled. Contact your administrator." : "This invitation has already been accepted."}</div>}{emailMismatch && <div className="inline-state danger"><AlertCircle size={16} />This invitation belongs to {invitation.email}, but you are signed in as {session.email}.</div>}{emailMismatch && <button className="ghost-button full" type="button" onClick={onLogout}>Sign out and use the invited email</button>}{invitation && !invitation.accountExists && !session && <><label><span>Create password</span><input required type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label><span>Confirm password</span><input required type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p></>} {invitation?.status === "Pending" && !emailMismatch && <><label className="confirmation-check"><input required type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I accept the applicable Terms of Service.</span></label><label className="confirmation-check"><input required type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} /><span>I acknowledge the Privacy Policy.</span></label></>}{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading || !invitation || invitation.status !== "Pending" || emailMismatch}>{loading ? "Joining..." : "Accept invitation"}</button></>}
   </form></section></main>;
 }
 
-function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, canManage, canDelete, onCreateBranch, onUpdateBranch, onDeleteBranch, onManageCompany, createRequest = 0, onCreateRequestHandled }) {
+function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, accounts, canManage, onCreateBranch, onUpdateBranch, onArchiveBranch, onReactivateBranch, onManageCompany, onManageEmployees, createRequest = 0, onCreateRequestHandled }) {
   const [showCreate, setShowCreate] = useState(false);
   const [branchToEdit, setBranchToEdit] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [branchToDelete, setBranchToDelete] = useState(null);
-  const [deleteConfirmation, setDeleteConfirmation] = useState("");
-  const [deleteDestination, setDeleteDestination] = useState("");
-  const [deleteError, setDeleteError] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const [form, setForm] = useState({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+  const [branchToArchive, setBranchToArchive] = useState(null);
+  const [archiveError, setArchiveError] = useState("");
+  const [archiving, setArchiving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const branchModuleOptions = useMemo(() => navItems.filter((item) => !["my-workspace", "applications", "branches", "settings"].includes(item.id)), []);
+  const emptyForm = useCallback(() => ({
+    name: "", code: "", city: "", address: "", phone: "", email: "", timezone: "Asia/Manila",
+    hours: "", roomCount: 0, devices: "", image: "", status: "Active", managerIds: [],
+    enabledModules: branchModuleOptions.map((module) => module.id),
+  }), [branchModuleOptions]);
+  const [form, setForm] = useState(() => ({
+    name: "", code: "", city: "", address: "", phone: "", email: "", timezone: "Asia/Manila",
+    hours: "", roomCount: 0, devices: "", image: "", status: "Active", managerIds: [], enabledModules: [],
+  }));
   const [photoError, setPhotoError] = useState("");
   const today = new Date().toISOString().slice(0, 10);
   const totalSales = transactions.reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const activeBranches = branchRecords.filter((branch) => branch.status === "Active");
+  const filteredBranches = branchRecords.filter((branch) => {
+    if (statusFilter !== "All" && branch.status !== statusFilter) return false;
+    const haystack = `${branch.name} ${branch.code} ${branch.city} ${branch.address} ${branch.email}`.toLowerCase();
+    return haystack.includes(search.trim().toLowerCase());
+  });
 
   function resetEditor() {
-    setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+    setForm(emptyForm());
     setPhotoError("");
     setSaveError("");
     setBranchToEdit(null);
@@ -10571,12 +10849,12 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   }
 
   const openCreate = useCallback(() => {
-    setForm({ name: "", city: "", address: "", phone: "", hours: "", roomCount: 0, devices: "", image: "" });
+    setForm(emptyForm());
     setPhotoError("");
     setSaveError("");
     setBranchToEdit(null);
     setShowCreate(true);
-  }, []);
+  }, [emptyForm]);
 
   useEffect(() => {
     if (!createRequest || !canManage) return;
@@ -10587,13 +10865,19 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   function openEdit(branch) {
     setForm({
       name: branch.name || "",
+      code: branch.code || "",
       city: branch.city || "",
       address: branch.address || "",
       phone: branch.phone || "",
+      email: branch.email || "",
+      timezone: branch.timezone || "Asia/Manila",
       hours: branch.hours || "",
       roomCount: branch.rooms?.length ?? 0,
       devices: Array.isArray(branch.devices) ? branch.devices.join(", ") : "",
       image: branch.image || "",
+      status: branch.status || "Active",
+      managerIds: (branch.managers || []).map((manager) => manager.id),
+      enabledModules: branch.enabledModules?.length ? branch.enabledModules : branchModuleOptions.map((module) => module.id),
     });
     setPhotoError("");
     setSaveError("");
@@ -10646,36 +10930,17 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
     reader.readAsDataURL(file);
   }
 
-  function openDelete(branch) {
-    setBranchToDelete(branch);
-    setDeleteConfirmation("");
-    setDeleteDestination("");
-    setDeleteError("");
-  }
-
-  function closeDelete() {
-    if (deleting) return;
-    setBranchToDelete(null);
-    setDeleteConfirmation("");
-    setDeleteDestination("");
-    setDeleteError("");
-  }
-
-  async function submitDelete(event) {
-    event.preventDefault();
-    if (!branchToDelete || deleteConfirmation !== branchToDelete.name) return;
-    setDeleting(true);
-    setDeleteError("");
+  async function confirmArchive() {
+    if (!branchToArchive) return;
+    setArchiving(true);
+    setArchiveError("");
     try {
-      await onDeleteBranch(branchToDelete, deleteConfirmation, deleteDestination);
-      setBranchToDelete(null);
-      setDeleteConfirmation("");
-      setDeleteDestination("");
-      setDeleteError("");
+      await onArchiveBranch(branchToArchive);
+      setBranchToArchive(null);
     } catch (error) {
-      setDeleteError(error?.message || "Unable to delete this branch.");
+      setArchiveError(error?.message || "Unable to archive this branch.");
     } finally {
-      setDeleting(false);
+      setArchiving(false);
     }
   }
 
@@ -10696,10 +10961,15 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
       </div>
 
       <div className="branch-summary-grid">
-        <article><Store size={19} /><div><strong>{branchRecords.length}</strong><span>Active branches</span></div></article>
+        <article><Store size={19} /><div><strong>{activeBranches.length}</strong><span>Active branches</span></div></article>
         <article><Users size={19} /><div><strong>{staff.length}</strong><span>Assigned employees</span></div></article>
         <article><CalendarDays size={19} /><div><strong>{appointments.filter((item) => item.date === today).length}</strong><span>Bookings today</span></div></article>
         <article><CircleDollarSign size={19} /><div><strong>{money.format(totalSales)}</strong><span>Recorded sales</span></div></article>
+      </div>
+
+      <div className="branch-list-toolbar surface-panel">
+        <label className="search-box"><Search size={17} aria-hidden="true" /><input aria-label="Search branches" placeholder="Search branches, codes, or locations" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        <label><span className="sr-only">Filter branch status</span><select aria-label="Filter branch status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option>All</option><option>Active</option><option>Inactive</option><option>Archived</option></select></label>
       </div>
 
       {!branchRecords.length ? (
@@ -10715,33 +10985,30 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
           {canManage && <button className="primary-button" type="button" onClick={openCreate}><Plus size={17} /> Add first branch</button>}
         </div>
       ) : (
-        <div className="branch-grid">
-          {branchRecords.map((item) => {
+        <div className="surface-panel branch-management-table-wrap">
+          {!filteredBranches.length ? <EmptyState title="No matching branches" copy="Try another search or status filter." /> : <table className="branch-management-table">
+            <thead><tr><th>Branch</th><th>Contact</th><th>Manager</th><th>Employees</th><th>Modules</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody>{filteredBranches.map((item) => {
             const assignedStaff = staff.filter((person) => person.branch === item.name).length;
-            const branchSales = transactions.filter((sale) => sale.branch === item.name).reduce((sum, sale) => sum + Number(sale.total || 0), 0);
             return (
-              <article className="branch-card" key={item.id}>
-                {item.image && <img className="branch-cover-photo" src={item.image} alt={`${item.name} clinic`} />}
-                <div className="branch-card-header">
-                  <div className="branch-avatar"><Store size={22} /></div>
-                  <div><span>{item.city || "Location pending"}</span><h2>{item.name}</h2></div>
-                  <StatusBadge status="Active" />
-                </div>
-                <p className="branch-address"><MapPin size={15} /> {item.address || "Add the complete clinic address"}</p>
-                <dl>
-                  <div><dt>Rooms</dt><dd>{item.rooms?.length ?? 0}</dd></div>
-                  <div><dt>Employees</dt><dd>{assignedStaff}</dd></div>
-                  <div><dt>Sales</dt><dd>{money.format(branchSales)}</dd></div>
-                </dl>
-                <div className="branch-meta-row"><Clock size={15} /><span>{item.hours || "Operating hours not set"}</span></div>
-                <div className="workflow-chips">{(item.devices || []).map((device) => <span key={device}>{device}</span>)}</div>
-                {(canManage || canDelete) && <div className="branch-card-actions">
-                  {canManage && <button className="branch-edit-trigger" type="button" onClick={() => openEdit(item)}><Edit3 size={15} /> Edit branch</button>}
-                  {canDelete && <button className="branch-delete-trigger" type="button" onClick={() => openDelete(item)}><Trash2 size={15} /> Delete branch</button>}
-                </div>}
-              </article>
+              <tr key={item.id}>
+                <td><div className="branch-table-name"><strong>{item.name}</strong><span>{item.code || "No code"} · {item.address || item.city || "Address pending"}</span></div></td>
+                <td><div className="branch-table-name"><span>{item.phone || "No phone"}</span><span>{item.email || "No email"}</span></div></td>
+                <td>{item.managers?.length ? item.managers.map((manager) => manager.name).join(", ") : "Unassigned"}</td>
+                <td>{item.employeeCount ?? assignedStaff}</td>
+                <td>{item.enabledModules?.length || 0} enabled</td>
+                <td><StatusBadge status={item.status || "Active"} /></td>
+                <td><div className="branch-row-actions">
+                  <button type="button" onClick={() => openEdit(item)}><Eye size={14} /> View</button>
+                  {canManage && <button type="button" onClick={() => openEdit(item)}><Edit3 size={14} /> Edit</button>}
+                  {canManage && <button type="button" onClick={() => openEdit(item)}><LayoutGrid size={14} /> Modules</button>}
+                  {canManage && <button type="button" onClick={() => onManageEmployees(item)}><Users size={14} /> Employees</button>}
+                  {canManage && item.status === "Archived" && <button type="button" onClick={() => void onReactivateBranch(item)}><RefreshCw size={14} /> Reactivate</button>}
+                  {canManage && item.status !== "Archived" && <button className="danger-text" type="button" onClick={() => { setArchiveError(""); setBranchToArchive(item); }}><Trash2 size={14} /> Archive</button>}
+                </div></td>
+              </tr>
             );
-          })}
+          })}</tbody></table>}
         </div>
       )}
 
@@ -10762,12 +11029,18 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             </div>
             <div className="form-grid">
               <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE Makati" /></label>
+              <label><span>Unique branch code</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} placeholder="e.g. MACE-MKT" /></label>
               <label><span>City</span><input required value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label>
               <label className="full-span"><span>Complete address</span><input required value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Building, street, city" /></label>
               <label><span>Phone</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Branch contact number" /></label>
+              <label><span>Email address</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="branch@macebydrmace.com" /></label>
+              <label><span>Time zone</span><select value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })}><option>Asia/Manila</option><option>Asia/Singapore</option><option>Asia/Tokyo</option><option>UTC</option></select></label>
               <label><span>Operating hours</span><input value={form.hours} onChange={(event) => setForm({ ...form, hours: event.target.value })} placeholder="9:00 AM - 7:00 PM" /></label>
               <label><span>Number of rooms</span><input min="0" max="50" type="number" value={form.roomCount} onChange={(event) => setForm({ ...form, roomCount: event.target.value })} /></label>
               <label><span>Devices</span><input value={form.devices} onChange={(event) => setForm({ ...form, devices: event.target.value })} placeholder="Comma-separated" /></label>
+              <label><span>Status</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option>Active</option><option>Inactive</option><option>Archived</option></select></label>
+              <label className="full-span"><span>Assigned manager(s)</span><select multiple value={form.managerIds} onChange={(event) => setForm({ ...form, managerIds: Array.from(event.target.selectedOptions, (option) => option.value) })}>{(accounts || []).filter((account) => account.status === "Active" && !canManageOrganization(account.role)).map((account) => <option key={account.id} value={account.id}>{account.name} · {account.email}</option>)}</select><small>Use Ctrl/Cmd to select more than one manager.</small></label>
+              <fieldset className="full-span branch-module-fieldset"><legend>Enabled modules</legend><div>{branchModuleOptions.map((module) => <label key={module.id}><input type="checkbox" checked={form.enabledModules.includes(module.id)} onChange={(event) => setForm((current) => ({ ...current, enabledModules: event.target.checked ? [...current.enabledModules, module.id] : current.enabledModules.filter((id) => id !== module.id) }))} /><span>{module.label}</span></label>)}</div></fieldset>
             </div>
             {saveError && <div className="inline-state danger"><AlertCircle size={16} /><span>{saveError}</span></div>}
             <div className="modal-actions"><button className="ghost-button" type="button" onClick={resetEditor} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving..." : branchToEdit ? "Save branch changes" : "Create branch"}</button></div>
@@ -10775,27 +11048,15 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
         </div>
       )}
 
-      {branchToDelete && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Delete ${branchToDelete.name}`}>
-          <form className="modal-card branch-delete-modal" onSubmit={submitDelete}>
-            <button className="modal-close" type="button" aria-label="Close" onClick={closeDelete} disabled={deleting}><X size={18} /></button>
-            <div className="branch-delete-heading"><div className="branch-delete-icon"><Trash2 size={20} /></div><div><p className="eyebrow">Danger zone</p><h2>Delete {branchToDelete.name}</h2></div></div>
-            <p>This permanently removes the branch and its rooms. Choose another branch below to preserve and move all linked records in the same audited transaction.</p>
-            <label className="branch-delete-reassignment">
-              <span>Move linked records to</span>
-              <select value={deleteDestination} onChange={(event) => setDeleteDestination(event.target.value)}>
-                <option value="">Do not reassign — delete empty branch only</option>
-                {branchRecords.filter((branch) => branch.id !== branchToDelete.id).map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}
-              </select>
-              {deleteDestination && <small>Employees, accounts, appointments, inventory, sales, leads, expenses, uploads, and service assignments will move to {deleteDestination}.</small>}
-            </label>
-            <div className="branch-delete-confirmation">
-              <span>Type <strong>{branchToDelete.name}</strong> to confirm.</span>
-              <input autoFocus value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} aria-label="Branch name confirmation" autoComplete="off" />
-            </div>
-            {deleteError && <div className="inline-state danger"><AlertCircle size={16} /><span>{deleteError}</span></div>}
-            <div className="modal-actions"><button className="ghost-button" type="button" onClick={closeDelete} disabled={deleting}>Cancel</button><button className="branch-delete-button" type="submit" disabled={deleting || deleteConfirmation !== branchToDelete.name}>{deleting ? "Deleting..." : "Delete branch permanently"}</button></div>
-          </form>
+      {branchToArchive && (
+        <div className="modal-backdrop" role="alertdialog" aria-modal="true" aria-label={`Archive ${branchToArchive.name}`}>
+          <div className="modal-card branch-delete-modal">
+            <button className="modal-close" type="button" aria-label="Close" onClick={() => setBranchToArchive(null)} disabled={archiving}><X size={18} /></button>
+            <div className="branch-delete-heading"><div className="branch-delete-icon"><Trash2 size={20} /></div><div><p className="eyebrow">Preserve history</p><h2>Archive {branchToArchive.name}?</h2></div></div>
+            <p>The branch will disappear from active switching and new operational work. Clients, appointments, rooms, reports, audit history, and other records remain intact.</p>
+            {archiveError && <div className="inline-state danger"><AlertCircle size={16} /><span>{archiveError}</span></div>}
+            <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setBranchToArchive(null)} disabled={archiving}>Cancel</button><button className="branch-delete-button" type="button" onClick={() => void confirmArchive()} disabled={archiving}>{archiving ? "Archiving..." : "Archive branch"}</button></div>
+          </div>
         </div>
       )}
     </section>
@@ -11319,10 +11580,11 @@ function ModalHost({
 }) {
   if (!modal) return null;
 
-  const branchOptions = branches.map((branch) => branch.name);
-  const defaultClinicBranch = branchScope !== "All branches" && branchOptions.includes(branchScope) ? branchScope : branchOptions[0];
-  const defaultRecordBranch = canManageOrganization(session?.role) && branchScope === "All branches" ? "All branches" : defaultClinicBranch;
-  const recordBranchOptions = canManageOrganization(session?.role) ? ["All branches", ...branchOptions] : branchOptions;
+  const activeBranches = branches.filter((branch) => branch.status === "Active");
+  const branchOptions = activeBranches.map((branch) => branch.name);
+  const defaultClinicBranch = branchScope !== "All branches" && branchOptions.includes(branchScope) ? branchScope : "";
+  const defaultRecordBranch = defaultClinicBranch;
+  const recordBranchOptions = branchOptions;
   const clientOptions = clients.map((client) => ({ value: client.id, label: client.fullName }));
   const serviceOptions = services.map((service) => ({ value: service.id, label: service.name }));
   const employeeServiceSuggestions = [
@@ -11357,7 +11619,8 @@ function ModalHost({
         payload={modal.payload}
         clients={clients}
         services={services}
-        branches={branches}
+        branches={activeBranches}
+        branchScope={branchScope}
         staff={staff}
         appointments={appointments}
         packages={packages}
@@ -11371,7 +11634,7 @@ function ModalHost({
     return (
       <RoomModal
         payload={modal.payload}
-        branches={branches}
+        branches={activeBranches}
         onClose={closeModal}
         onSubmit={saveRoom}
       />
@@ -11653,10 +11916,11 @@ function ModalHost({
     },
     treatment: {
       title: modal.payload?.id ? "Edit Treatment Record" : "New Treatment Record",
-      initial: { clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name, room: "Room 1", preNotes: "", postNotes: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
+      initial: { branch: defaultClinicBranch, clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name, room: "Room 1", preNotes: "", postNotes: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
       submitLabel: "Save treatment",
       onSubmit: saveTreatment,
       fields: [
+        field("branch", "Branch", "select", branchOptions),
         field("clientId", "Client", "select", clientOptions),
         field("date", "Treatment date", "date"),
         field("service", "Service / procedure", "select", services.map((service) => service.name)),
@@ -11995,13 +12259,13 @@ function field(name, label, type = "text", options = null, className = "", requi
   return { name, label, type, options, className, required };
 }
 
-function AppointmentModal({ payload, clients, services, branches, staff, appointments = [], packages = [], onClose, onSubmit }) {
+function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit }) {
   const [form, setForm] = useState({
     date: todayDate(),
     time: "",
     clientId: "",
     serviceId: "",
-    branch: branches[0]?.name || "",
+    branch: branchScope !== "All branches" ? branchScope : "",
     room: "",
     staff: "",
     duration: 60,
@@ -12023,6 +12287,11 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
   const [showTimezoneSelect, setShowTimezoneSelect] = useState(false);
   const selectedService = services.find((item) => item.id === form.serviceId);
   const selectedBranch = branches.find((item) => item.name === form.branch);
+  const availableClients = clients.filter((client) => !form.branch || client.branch === form.branch);
+  const availableServices = services.filter((service) => {
+    const offered = Array.isArray(service.branches) ? service.branches : [];
+    return !form.branch || !offered.length || offered.includes("All branches") || offered.includes(form.branch);
+  });
   const availableRooms = selectedBranch?.rooms || uniqueRoomsFromBranches();
   const availableStaff = staff.filter((person) => person.branch === form.branch || person.branch === "All branches" || !person.branch);
   const patient = clients.find((client) => client.id === form.clientId);
@@ -12052,7 +12321,7 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
     setForm((current) => ({
       ...current,
       [name]: value,
-      ...(name === "branch" ? { room: "", staff: "" } : {}),
+      ...(name === "branch" ? { room: "", staff: "", clientId: "", packageName: "" } : {}),
       ...(name === "serviceId" ? { duration: Number(services.find((item) => item.id === value)?.duration || current.duration || 60) } : {}),
     }));
   }
@@ -12078,8 +12347,8 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
         <div className="appointment-booking-body">
           {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
           <section className="booking-form-section"><div className="booking-step">1</div><div className="booking-section-content"><h3>Client and service</h3>
-            <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">Search or select a client</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
-            <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">Select a service</option>{services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
+            <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">{form.branch ? "Search or select a client" : "Select a branch first"}</option>{availableClients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
+            <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">{form.branch ? "Select a service" : "Select a branch first"}</option>{availableServices.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
             <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
             {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{money.format(selectedService.price || 0)}</strong></div>}
             {patientPackages.length > 0 && <label className="stacked-field"><span>Package / membership</span><select value={form.packageName} onChange={(event) => update("packageName", event.target.value)}><option value="">Pay per visit</option>{patientPackages.map((item) => <option value={item.name} key={item.id}>{item.name} · {item.remaining ?? item.balance ?? 0} remaining</option>)}</select></label>}
@@ -12088,7 +12357,7 @@ function AppointmentModal({ payload, clients, services, branches, staff, appoint
             <label className="stacked-field"><span>Date <RequiredMark /></span><input aria-label="Date, required" type="date" value={form.date} onChange={(event) => update("date", event.target.value)} /></label>
             <label className="stacked-field"><span>Time <RequiredMark /></span><input aria-label="Time, required" type="time" step="900" value={form.time} onChange={(event) => update("time", event.target.value)} /></label>
             <label className="stacked-field"><span>Duration</span><select value={form.duration} onChange={(event) => update("duration", Number(event.target.value))}>{[15, 30, 45, 60, 75, 90, 120, 180].map((minutes) => <option value={minutes} key={minutes}>{minutes} minutes</option>)}</select></label>
-            <label className="stacked-field"><span>Branch <RequiredMark /></span><select aria-label="Branch, required" value={form.branch} onChange={(event) => update("branch", event.target.value)}>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select></label>
+            <label className="stacked-field"><span>Branch <RequiredMark /></span><select aria-label="Branch, required" value={form.branch} onChange={(event) => update("branch", event.target.value)}><option value="" disabled>Select a branch</option>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select></label>
           </div><div className="booking-timezone-row"><span><strong>Timezone:</strong> {form.timezone === "Asia/Singapore" ? "Asia/Singapore (GMT+8)" : "Asia/Manila (GMT+8)"}</span><button type="button" onClick={() => setShowTimezoneSelect((current) => !current)}>{showTimezoneSelect ? "Done" : "Change"}</button>{showTimezoneSelect && <select aria-label="Timezone" value={form.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Manila">Asia/Manila (GMT+8)</option><option value="Asia/Singapore">Asia/Singapore (GMT+8)</option></select>}</div></div></section>
           <section className="booking-form-section"><div className="booking-step">3</div><div className="booking-section-content"><h3>Staff and room</h3><div className="booking-two-column">
             <label className="stacked-field"><span>Staff <RequiredMark /></span><select aria-label="Staff, required" value={form.staff} onChange={(event) => update("staff", event.target.value)}><option value="">Select available staff</option>{availableStaff.map((person) => <option key={person.id || person.name}>{person.name}</option>)}</select></label>
@@ -12113,7 +12382,9 @@ function RoomModal({ payload = {}, branches = [], onClose, onSubmit }) {
   const [form, setForm] = useState({ name: "", branchId: initialBranch?.id ?? "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const selectedBranch = branches.find((branch) => branch.id === form.branchId);
+  // The modal can render before bootstrap finishes. Keep the controlled select
+  // and submit target aligned when active branches arrive asynchronously.
+  const selectedBranch = branches.find((branch) => branch.id === form.branchId) ?? initialBranch;
 
   async function submit(event) {
     event.preventDefault();
@@ -12157,7 +12428,7 @@ function RoomModal({ payload = {}, branches = [], onClose, onSubmit }) {
             <span>Branch <RequiredMark /></span>
             <select
               aria-label="Room branch, required"
-              value={form.branchId}
+              value={selectedBranch?.id ?? ""}
               onChange={(event) => setForm((current) => ({ ...current, branchId: event.target.value }))}
               disabled={saving || branches.length <= 1}
             >
@@ -12428,6 +12699,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
         <textarea id={fieldId} value={value ?? ""} onChange={(event) => onChange(event.target.value)} required={required} />
       ) : item.type === "select" ? (
         <select id={fieldId} value={value ?? ""} onChange={(event) => onChange(event.target.value)} required={required}>
+          {required && value === "" && <option value="" disabled>Select {item.label.toLowerCase()}</option>}
           {(item.options ?? []).map((option) => {
             const value = typeof option === "string" ? option : option.value;
             const label = typeof option === "string" ? option : option.label;
@@ -12461,7 +12733,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
   );
 }
 
-function ConfirmDialog({ confirm, onCancel }) {
+function ConfirmDialog({ confirm, onCancel, onConfirmComplete }) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal-card confirm-card">
@@ -12474,7 +12746,7 @@ function ConfirmDialog({ confirm, onCancel }) {
             type="button"
             onClick={() => {
               confirm.onConfirm();
-              onCancel();
+              onConfirmComplete();
             }}
           >
             {confirm.actionLabel ?? "Confirm"}

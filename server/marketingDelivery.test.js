@@ -9,8 +9,8 @@ import {
   scheduleMarketingState,
 } from "./marketingDelivery.js";
 
-test("admins and owners approve their own Marketing schedules automatically", () => {
-  for (const role of ["Admin", "Super Admin", "Owner", "Business Owner"]) {
+test("organization owners approve their own Marketing schedules automatically", () => {
+  for (const role of ["Super Admin", "Owner", "Business Owner"]) {
     const now = new Date("2026-08-14T12:00:00.000Z");
     const scheduledAt = new Date("2026-08-14T13:00:00.000Z");
     const result = scheduleMarketingState({ actorId: `actor-${role}`, actorRole: role, campaign: { managerApproval: true }, scheduledAt, now });
@@ -22,6 +22,7 @@ test("admins and owners approve their own Marketing schedules automatically", ()
     assert.equal(result.data.approvedById, `actor-${role}`);
     assert.equal(result.data.approvedAt, now);
   }
+  assert.equal(marketingApprovalRequired({ managerApproval: true }, "Admin"), true);
 });
 
 test("staff schedules wait for an administrator when approval is required", () => {
