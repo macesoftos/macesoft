@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeMarketingMediaName, serializeMarketingMediaAsset } from "./marketingMedia.js";
+import {
+  normalizeMarketingMediaName,
+  normalizeMarketingMediaSelection,
+  serializeMarketingMediaAsset,
+} from "./marketingMedia.js";
 
 test("Marketing media names discard local paths and control characters", () => {
   assert.equal(normalizeMarketingMediaName("C:\\fakepath\\ summer\n glow.jpg "), "summer glow.jpg");
@@ -17,8 +21,18 @@ test("Marketing media serialization exposes reusable public URLs without storage
     byteSize: 2048,
     branch: "Mace Davao",
     createdAt: new Date("2026-08-14T00:00:00.000Z"),
+    deletedAt: new Date("2026-08-16T00:00:00.000Z"),
   });
   assert.equal(serialized.name, "Marketing image asset-12.webp");
   assert.equal(serialized.url, "/api/uploads/asset-123456789");
+  assert.deepEqual(serialized.deletedAt, new Date("2026-08-16T00:00:00.000Z"));
   assert.equal(Object.hasOwn(serialized, "objectPath"), false);
+});
+
+test("Marketing media bulk selections are trimmed and deduplicated", () => {
+  assert.deepEqual(normalizeMarketingMediaSelection({ ids: [" asset-1 ", "asset-1", "asset-2", ""] }), {
+    all: false,
+    ids: ["asset-1", "asset-2"],
+  });
+  assert.deepEqual(normalizeMarketingMediaSelection({ all: true, ids: null }), { all: true, ids: [] });
 });

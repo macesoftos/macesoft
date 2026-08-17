@@ -23,7 +23,15 @@ const references = new Set(
     .concat(treatmentPhotos.map((item) => item.assetId)),
 );
 const cutoff = new Date(Date.now() - Math.max(1, Number(process.env.ASSET_ORPHAN_GRACE_HOURS || 24)) * 3_600_000);
-const orphans = await prisma.uploadAsset.findMany({ where: { id: { notIn: [...references] }, createdAt: { lt: cutoff } } });
+// Marketing Media has its own recoverable Deleted lifecycle. Only an explicit
+// permanent delete from that library may remove those objects.
+const orphans = await prisma.uploadAsset.findMany({
+  where: {
+    category: { not: "marketing-image" },
+    id: { notIn: [...references] },
+    createdAt: { lt: cutoff },
+  },
+});
 let removed = 0;
 for (const asset of orphans) {
   const path = asset.objectPath.split("/").map(encodeURIComponent).join("/");

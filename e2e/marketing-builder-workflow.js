@@ -327,5 +327,11 @@ export async function verifyMarketingBuilder(page, expect) {
   if (hasRealObjectStorage) {
     const cleanupResponse = await page.request.delete(`/api/uploads/${canvasAssetId}`, { headers: { "X-Mace-Request": "app" } });
     expect(cleanupResponse.status()).toBe(204);
+    const permanentCleanup = await page.request.delete("/api/marketing/media/permanent", {
+      data: { ids: [canvasAssetId] },
+      headers: { "X-Mace-Request": "app" },
+    });
+    expect(permanentCleanup.status()).toBe(200);
+    expect((await permanentCleanup.json()).count).toBe(1);
   }
 }

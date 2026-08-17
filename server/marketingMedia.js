@@ -24,5 +24,13 @@ export function serializeMarketingMediaAsset(asset) {
     byteSize: Number(asset?.byteSize || 0),
     branch: String(asset?.branch || ""),
     createdAt: asset?.createdAt || null,
+    deletedAt: asset?.deletedAt || null,
   };
+}
+
+export function normalizeMarketingMediaSelection(value = {}) {
+  const ids = Array.isArray(value?.ids)
+    ? [...new Set(value.ids.map((id) => String(id || "").trim()).filter((id) => id && id.length <= 200))]
+    : [];
+  return { all: value?.all === true, ids };
 }
