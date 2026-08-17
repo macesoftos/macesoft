@@ -5164,6 +5164,204 @@ td .inline-actions { flex-wrap: nowrap; }
   border-bottom: 0;
 }
 
+.lead-client-summary {
+  display: grid;
+  gap: 16px;
+}
+
+.lead-client-summary .lead-detail-header {
+  margin-bottom: 0;
+}
+
+.lead-client-summary .eyebrow {
+  margin: 0 0 5px;
+}
+
+.lead-client-summary .lead-detail-header h3 {
+  font-size: clamp(1.35rem, 2.2vw, 1.8rem);
+}
+
+.lead-inquiry-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid rgba(119, 51, 66, 0.2);
+  border-left: 4px solid var(--wine);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fffaf8, #fff);
+}
+
+.lead-inquiry-card > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--wine);
+}
+
+.lead-inquiry-card h4,
+.lead-inquiry-card p,
+.lead-inquiry-card blockquote {
+  margin: 0;
+}
+
+.lead-inquiry-card h4 {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lead-inquiry-card blockquote {
+  color: var(--ink);
+  font-size: 1.08rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.lead-inquiry-card p {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.lead-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--line);
+}
+
+.lead-contact-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  background: #fff;
+}
+
+.lead-contact-grid dt,
+.lead-simple-workflow span {
+  color: var(--faint);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lead-contact-grid dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.lead-contact-grid a {
+  color: var(--wine);
+  text-decoration: none;
+}
+
+.lead-detail-panel > .lead-primary-actions {
+  margin-top: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.lead-simple-workflow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) repeat(2, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.lead-simple-workflow label,
+.lead-simple-workflow > div {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.lead-simple-workflow select {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 800;
+  padding: 0;
+}
+
+.lead-action-disclosure,
+.lead-more-details {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.lead-action-disclosure summary,
+.lead-more-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.lead-action-disclosure summary::-webkit-details-marker,
+.lead-more-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lead-action-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 15px;
+}
+
+.lead-action-disclosure > summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--wine);
+  font-weight: 800;
+}
+
+.lead-action-disclosure > summary small {
+  color: var(--muted);
+}
+
+.lead-action-disclosure[open] > summary,
+.lead-more-details[open] > summary {
+  border-bottom: 1px solid var(--line);
+  background: var(--rose-soft);
+}
+
+.lead-action-disclosure-body,
+.lead-more-details-body {
+  padding: 15px;
+}
+
+.lead-more-details > summary {
+  padding: 13px 15px;
+  color: var(--wine);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.lead-more-details .lead-detail-meta {
+  margin-bottom: 0;
+}
+
 .lead-detail-section {
   display: grid;
   gap: 9px;
@@ -5201,6 +5399,19 @@ td .inline-actions { flex-wrap: nowrap; }
 .lead-integrations-layout {
   display: grid;
   gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .lead-contact-grid,
+  .lead-simple-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .lead-action-disclosure > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
 }
 
 .lead-integrations-layout { gap: 16px; }
