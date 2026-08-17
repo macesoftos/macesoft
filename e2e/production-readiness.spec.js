@@ -58,7 +58,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     await expect(accountMenu).toBeVisible();
   }
 
-  await page.goto("/#/appointments");
+  await page.goto("/appointments");
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
@@ -82,7 +82,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByRole("dialog", { name: "New appointment" })).toBeVisible();
   await page.getByRole("button", { name: "Close form" }).click();
 
-  await page.goto("/#/clients");
+  await page.goto("/clients");
   await createTrigger.click();
   await expect(createMenu.getByRole("menuitem", { name: "New client" })).toBeVisible();
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
@@ -214,7 +214,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await page.goto("/#/appointments");
+    await page.goto("/appointments");
     await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
     await createTrigger.click();
