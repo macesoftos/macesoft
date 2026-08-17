@@ -3319,6 +3319,61 @@ img { max-width: 100%; }
 .branch-meta-row { display: flex; align-items: center; gap: 7px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); }
 .branch-meta-row span { color: var(--muted); }
 .branch-card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+.active-branch-label {
+  align-items: center;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: .82rem;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.branch-list-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.branch-list-toolbar .search-box { flex: 1; max-width: 520px; }
+.branch-list-toolbar select { min-height: 40px; min-width: 150px; }
+.branch-management-table-wrap { overflow-x: auto; padding: 0; }
+.branch-management-table { border-collapse: collapse; min-width: 980px; width: 100%; }
+.branch-management-table th,
+.branch-management-table td { border-bottom: 1px solid var(--line); padding: 14px 12px; text-align: left; vertical-align: middle; }
+.branch-management-table th { color: var(--muted); font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
+.branch-management-table tbody tr:last-child td { border-bottom: 0; }
+.branch-table-name { display: grid; gap: 4px; min-width: 170px; }
+.branch-table-name span { color: var(--muted); font-size: .78rem; max-width: 280px; }
+.branch-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 260px; }
+.branch-row-actions button { align-items: center; background: transparent; border: 0; color: var(--wine); cursor: pointer; display: inline-flex; font-size: .75rem; font-weight: 800; gap: 4px; padding: 5px; }
+.branch-row-actions button:focus-visible { outline: 2px solid var(--wine); outline-offset: 2px; }
+.branch-row-actions .danger-text { color: var(--danger, #a62f35); }
+.branch-module-fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 0; padding: 12px; }
+.branch-module-fieldset legend { color: var(--muted); font-size: .78rem; font-weight: 800; padding: 0 4px; }
+.branch-module-fieldset > div { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.branch-module-fieldset label { align-items: center; display: flex; flex-direction: row; gap: 7px; }
+.branch-module-fieldset input { height: 16px; min-height: 0; width: 16px; }
+.branch-create-modal select[multiple] { min-height: 110px; }
+
+@media (max-width: 760px) {
+  .branch-list-toolbar { align-items: stretch; flex-direction: column; }
+  .branch-list-toolbar .search-box { max-width: none; }
+  .branch-module-fieldset > div { grid-template-columns: 1fr 1fr; }
+  .active-branch-label { max-width: 180px; }
+  .active-branch-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@media (max-width: 480px) {
+  .branch-module-fieldset > div { grid-template-columns: 1fr; }
+}
 .branch-edit-trigger,
 .branch-delete-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid transparent; background: transparent; color: var(--danger); font-size: 0.72rem; font-weight: 750; }
 .branch-edit-trigger { color: var(--wine); }
@@ -3353,6 +3408,72 @@ img { max-width: 100%; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .invitation-modal { width: min(720px, 100%); }
 .invitation-modal .full-span { grid-column: 1 / -1; }
+.workspace-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 18px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.workspace-tabs button {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.workspace-tabs button.active {
+  border-bottom-color: var(--brand, #7b4b36);
+  color: var(--text);
+}
+.user-access-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+.user-access-filters label { display: grid; gap: 5px; }
+.user-access-filters label > span { color: var(--text-muted); font-size: 12px; font-weight: 700; }
+.invitation-options {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.invitation-options legend { padding: 0 6px; font-weight: 800; }
+.invitation-options > p { margin: 0 0 10px; color: var(--text-muted); font-size: 13px; }
+.invitation-options > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.invitation-options label,
+.confirmation-check { display: flex !important; align-items: flex-start; gap: 9px; }
+.invitation-options input,
+.confirmation-check input { width: auto; margin-top: 2px; }
+.invitation-accept-card { width: min(520px, calc(100vw - 32px)); }
+.invitation-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+.invitation-summary > div { padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.invitation-summary span,
+.invitation-summary strong { display: block; }
+.invitation-summary span { margin-bottom: 4px; color: var(--text-muted); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .user-access-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .user-access-filters .primary-button { width: 100%; }
+}
+
+@media (max-width: 600px) {
+  .user-access-filters,
+  .invitation-options > div,
+  .invitation-summary { grid-template-columns: 1fr; }
+  .workspace-tabs { margin-inline: -4px; }
+  .invitation-modal { max-height: calc(100dvh - 24px); overflow-y: auto; }
+}
 
 .report-filters,
 .form-grid {

@@ -6,6 +6,18 @@ datasource db {
   provider = "postgresql"
 }
 
+model Organization {
+  id          String           @id @default(cuid())
+  name        String
+  slug        String           @unique
+  status      String           @default("Active")
+  branches    Branch[]
+  accounts    Account[]
+  invitations UserInvitation[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
 model Client {
   id                String          @id @default(cuid())
   fullName          String
@@ -47,25 +59,40 @@ model Client {
 }
 
 model Branch {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  city      String   @default("")
-  address   String   @default("")
-  phone     String   @default("")
-  hours     String   @default("")
-  staff     Int      @default(0)
-  devices   String   @default("[]")
-  image     String   @default("")
-  rooms     Room[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    String                 @id @default(cuid())
+  organizationId        String
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name                  String                 @unique
+  code                  String
+  city                  String                 @default("")
+  address               String                 @default("")
+  phone                 String                 @default("")
+  email                 String                 @default("")
+  timezone              String                 @default("Asia/Manila")
+  hours                 String                 @default("")
+  operatingHours        String                 @default("{}")
+  status                String                 @default("Active")
+  archivedAt            DateTime?
+  staff                 Int                    @default(0)
+  devices               String                 @default("[]")
+  image                 String                 @default("")
+  rooms                 Room[]
+  memberships           BranchMembership[]
+  modules               BranchModule[]
+  auditLogs             AuditLog[]
+  invitationAssignments UserInvitationBranch[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
 }
 
 model Room {
   id        String   @id @default(cuid())
   name      String
-  branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
   status    String   @default("Available")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -99,34 +126,77 @@ model StaffMember {
 }
 
 model Account {
-  id                   String                       @id @default(cuid())
-  staffId              String?                      @unique
-  staff                StaffMember?                 @relation(fields: [staffId], references: [id], onDelete: SetNull)
-  name                 String
-  email                String                       @unique
-  passwordHash         String
-  role                 String
-  branch               String                       @default("")
-  status               String                       @default("Active")
-  mustChangePassword   Boolean                      @default(true)
-  failedLoginCount     Int                          @default(0)
-  lockedUntil          DateTime?
-  lastLoginAt          DateTime?
-  notificationsReadAt  DateTime?
-  sessions             AuthSession[]
-  attendanceEvents     AttendanceEvent[]
-  faceTrackEnrollments FaceTrackProfile[]           @relation("FaceTrackEnrolledBy")
-  faceTrackRequests    FaceTrackCorrectionRequest[] @relation("FaceTrackRequestedBy")
-  faceTrackReviews     FaceTrackCorrectionRequest[] @relation("FaceTrackReviewedBy")
-  faceTrackChallenges  FaceTrackChallenge[]
-  sentInvitations      UserInvitation[]             @relation("InvitationSender")
-  passwordResetTokens  PasswordResetToken[]
-  flipbooks            Flipbook[]
-  createdAt            DateTime                     @default(now())
-  updatedAt            DateTime                     @updatedAt
+  id                      String                       @id @default(cuid())
+  staffId                 String?                      @unique
+  staff                   StaffMember?                 @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  name                    String
+  email                   String                       @unique
+  passwordHash            String
+  role                    String
+  branch                  String                       @default("")
+  organizationId          String
+  organization            Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationWideAccess  Boolean                      @default(false)
+  organizationPermissions String                       @default("[]")
+  organizationModules     String                       @default("[]")
+  lastBranchId            String?
+  status                  String                       @default("Active")
+  mustChangePassword      Boolean                      @default(true)
+  failedLoginCount        Int                          @default(0)
+  lockedUntil             DateTime?
+  lastLoginAt             DateTime?
+  notificationsReadAt     DateTime?
+  sessions                AuthSession[]
+  attendanceEvents        AttendanceEvent[]
+  faceTrackEnrollments    FaceTrackProfile[]           @relation("FaceTrackEnrolledBy")
+  faceTrackRequests       FaceTrackCorrectionRequest[] @relation("FaceTrackRequestedBy")
+  faceTrackReviews        FaceTrackCorrectionRequest[] @relation("FaceTrackReviewedBy")
+  faceTrackChallenges     FaceTrackChallenge[]
+  sentInvitations         UserInvitation[]             @relation("InvitationSender")
+  acceptedInvitations     UserInvitation[]             @relation("InvitationAcceptor")
+  revokedInvitations      UserInvitation[]             @relation("InvitationRevoker")
+  passwordResetTokens     PasswordResetToken[]
+  flipbooks               Flipbook[]
+  branchMemberships       BranchMembership[]
+  branchAuditEntries      AuditLog[]                   @relation("AuditActor")
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
 
   @@index([role])
   @@index([branch])
+  @@index([organizationId, status])
+}
+
+model BranchMembership {
+  id          String   @id @default(cuid())
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  role        String
+  permissions String   @default("[]")
+  modules     String   @default("[]")
+  status      String   @default("Active")
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([branchId, accountId])
+  @@index([accountId, status])
+  @@index([branchId, role, status])
+}
+
+model BranchModule {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  moduleId  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, moduleId])
+  @@index([branchId, enabled])
 }
 
 model PasswordResetToken {
@@ -143,28 +213,55 @@ model PasswordResetToken {
 }
 
 model UserInvitation {
-  id           String    @id @default(cuid())
-  email        String
-  name         String
-  role         String
-  branch       String    @default("All branches")
-  department   String    @default("")
-  specialty    String    @default("")
-  message      String    @default("")
-  status       String    @default("Pending")
-  tokenHash    String    @unique
-  expiresAt    DateTime
-  acceptedAt   DateTime?
-  revokedAt    DateTime?
-  failedReason String    @default("")
-  invitedById  String
-  invitedBy    Account   @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String                 @id @default(cuid())
+  organizationId  String
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  email           String
+  name            String
+  firstName       String                 @default("")
+  lastName        String                 @default("")
+  role            String
+  branch          String                 @default("")
+  branches        UserInvitationBranch[]
+  department      String                 @default("")
+  specialty       String                 @default("")
+  position        String                 @default("")
+  modules         String                 @default("[]")
+  permissions     String                 @default("[]")
+  message         String                 @default("")
+  status          String                 @default("Pending")
+  deliveryStatus  String                 @default("Not Sent")
+  tokenHash       String?                @unique
+  expiresAt       DateTime
+  resentAt        DateTime?
+  acceptedAt      DateTime?
+  acceptedById    String?
+  acceptedBy      Account?               @relation("InvitationAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
+  revokedAt       DateTime?
+  revokedById     String?
+  revokedBy       Account?               @relation("InvitationRevoker", fields: [revokedById], references: [id], onDelete: SetNull)
+  termsAcceptedAt DateTime?
+  failedReason    String                 @default("")
+  invitedById     String
+  invitedBy       Account                @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
 
-  @@index([email, status])
+  @@index([organizationId, email, status])
   @@index([invitedById, createdAt])
   @@index([expiresAt])
+}
+
+model UserInvitationBranch {
+  id           String         @id @default(cuid())
+  invitationId String
+  invitation   UserInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  branchId     String
+  branch       Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  createdAt    DateTime       @default(now())
+
+  @@unique([invitationId, branchId])
+  @@index([branchId, createdAt])
 }
 
 model AuthSession {
@@ -378,34 +475,34 @@ model Service {
 }
 
 model Appointment {
-  id              String   @id @default(cuid())
-  date            String
-  time            String
-  clientId        String?
-  clientRecord    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  client          String
-  serviceId       String?
-  serviceRecord   Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  service         String
-  branch          String
-  room            String   @default("")
-  staff           String   @default("")
-  duration        Int      @default(0)
-  appointmentType String   @default("Treatment")
-  insurance       String   @default("")
-  tags            String   @default("")
-  packageName     String   @default("")
-  timezone        String   @default("Asia/Manila")
-  recurrence      String   @default("None")
-  recurrenceUntil String   @default("")
-  status          String   @default("Pending")
-  deposit         Float    @default(0)
-  leadId          String   @default("")
-  notes           String   @default("")
-  internalNotes   String   @default("")
-  publicBookingKey String? @unique
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(cuid())
+  date             String
+  time             String
+  clientId         String?
+  clientRecord     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client           String
+  serviceId        String?
+  serviceRecord    Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  service          String
+  branch           String
+  room             String   @default("")
+  staff            String   @default("")
+  duration         Int      @default(0)
+  appointmentType  String   @default("Treatment")
+  insurance        String   @default("")
+  tags             String   @default("")
+  packageName      String   @default("")
+  timezone         String   @default("Asia/Manila")
+  recurrence       String   @default("None")
+  recurrenceUntil  String   @default("")
+  status           String   @default("Pending")
+  deposit          Float    @default(0)
+  leadId           String   @default("")
+  notes            String   @default("")
+  internalNotes    String   @default("")
+  publicBookingKey String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@index([date])
   @@index([branch])
@@ -420,6 +517,7 @@ model Treatment {
   client         String
   date           String
   service        String
+  branch         String           @default("")
   provider       String           @default("")
   room           String           @default("")
   preNotes       String           @default("")
@@ -437,6 +535,7 @@ model Treatment {
   photoLinks     TreatmentPhoto[]
 
   @@index([clientId])
+  @@index([branch])
   @@index([date])
 }
 
@@ -497,24 +596,24 @@ model InventoryMovement {
 }
 
 model Sale {
-  id        String     @id @default(cuid())
-  invoice   String     @unique
-  date      String
-  time      String
-  client    String
-  branch    String
-  staff     String
-  subtotal  Float      @default(0)
-  discount  Float      @default(0)
-  total     Float      @default(0)
-  payments  String     @default("[]")
-  status    String     @default("Paid")
-  leadId    String     @default("")
-  appointmentId String? @unique
-  notes     String     @default("")
-  items     SaleItem[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  invoice       String     @unique
+  date          String
+  time          String
+  client        String
+  branch        String
+  staff         String
+  subtotal      Float      @default(0)
+  discount      Float      @default(0)
+  total         Float      @default(0)
+  payments      String     @default("[]")
+  status        String     @default("Paid")
+  leadId        String     @default("")
+  appointmentId String?    @unique
+  notes         String     @default("")
+  items         SaleItem[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   @@index([date])
   @@index([branch])
@@ -837,32 +936,32 @@ model SmsTemplate {
 }
 
 model MarketingCampaign {
-  id         String    @id @default(cuid())
-  name       String
-  branch     String    @default("All branches")
-  segment    String
-  channel    String
-  templateId String    @default("")
-  subject    String    @default("")
-  message    String    @default("")
-  html       String    @default("")
-  design     Json?
-  sent       Int       @default(0)
-  booked     Int       @default(0)
-  credits    Int       @default(0)
-  status     String    @default("Draft")
-  scheduledAt DateTime?
-  managerApproval Boolean @default(true)
-  deliveryStatus String @default("")
-  scheduledById String @default("")
-  approvedById String @default("")
-  approvedAt DateTime?
-  sentAt DateTime?
-  lastDeliveryError String @default("")
-  deletedAt  DateTime?
-  surveyResponses MarketingSurveyResponse[]
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                String                    @id @default(cuid())
+  name              String
+  branch            String                    @default("All branches")
+  segment           String
+  channel           String
+  templateId        String                    @default("")
+  subject           String                    @default("")
+  message           String                    @default("")
+  html              String                    @default("")
+  design            Json?
+  sent              Int                       @default(0)
+  booked            Int                       @default(0)
+  credits           Int                       @default(0)
+  status            String                    @default("Draft")
+  scheduledAt       DateTime?
+  managerApproval   Boolean                   @default(true)
+  deliveryStatus    String                    @default("")
+  scheduledById     String                    @default("")
+  approvedById      String                    @default("")
+  approvedAt        DateTime?
+  sentAt            DateTime?
+  lastDeliveryError String                    @default("")
+  deletedAt         DateTime?
+  surveyResponses   MarketingSurveyResponse[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
   @@index([deletedAt])
   @@index([branch])
@@ -948,28 +1047,39 @@ model Discount {
 }
 
 model AuditLog {
-  id        String   @id @default(cuid())
-  time      String
-  actor     String
-  role      String
-  area      String
-  action    String
-  details   String
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid())
+  time           String
+  actor          String
+  role           String
+  actorAccountId String?
+  actorAccount   Account? @relation("AuditActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
+  branchId       String?
+  branch         Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  area           String
+  action         String
+  subjectType    String   @default("")
+  subjectId      String   @default("")
+  details        String
+  beforeValues   String   @default("{}")
+  afterValues    String   @default("{}")
+  createdAt      DateTime @default(now())
 
   @@index([area])
   @@index([actor])
+  @@index([branchId, createdAt])
+  @@index([actorAccountId, createdAt])
 }
 
 model AppNotification {
-  id        String   @id @default(cuid())
-  module    String
-  title     String
-  message   String
-  recordId  String   @default("")
-  branches  String[] @default(["All branches"])
-  actor     String   @default("System")
-  createdAt DateTime @default(now())
+  id                  String   @id @default(cuid())
+  module              String
+  title               String
+  message             String
+  recordId            String   @default("")
+  branches            String[] @default(["All branches"])
+  recipientAccountIds String[] @default([])
+  actor               String   @default("System")
+  createdAt           DateTime @default(now())
 
   @@index([createdAt])
   @@index([module, createdAt])

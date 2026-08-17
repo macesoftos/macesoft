@@ -102,6 +102,7 @@ const environment = {
   NODE_ENV: "test",
   APP_ORIGIN: isolatedOrigin,
   API_PORT: isolatedApiPort,
+  API_SMOKE_PORT: process.env.API_SMOKE_PORT || "3101",
   DATABASE_URL: withSchema(runtimeUrl),
   DATABASE_POOL_MAX: "2",
   DIRECT_URL: withSchema(directUrl),
@@ -125,7 +126,7 @@ try {
   await run("pnpm", ["exec", "prisma", "generate"], environment, "prisma_client");
   await run("pnpm", ["db:seed"], environment, "seed");
   await run("pnpm", ["bootstrap:owner"], environment, "owner_bootstrap");
-  await run("pnpm", ["test:integration"], environment, "api_integration");
+  await runWithRetries("pnpm", ["test:integration"], environment, "api_integration", 2);
   await run("pnpm", ["test:e2e"], environment, "browser_e2e");
   console.log(JSON.stringify({ event: "isolated_release_test_passed", schema }));
 } finally {

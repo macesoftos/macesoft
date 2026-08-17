@@ -31,7 +31,7 @@ const API_MODULE_RULES = [
   [/^\/api\/bootstrap$/, "my-workspace"],
   [/^\/api\/modules$/, "applications"],
   [/^\/api\/me(?:\/|$)/, "my-workspace"],
-  [/^\/api\/invitations(?:\/|$)/, "settings"],
+  [/^\/api\/invitations(?:\/|$)/, "staff"],
   [/^\/api\/accounts(?:\/|$)/, "staff"],
   [/^\/api\/staff(?:\/|$)/, "staff"],
   [/^\/api\/rooms(?:\/|$)/, "room-view"],
@@ -67,20 +67,38 @@ export function isAllBranches(branch) {
 }
 
 export function hasOrganizationWideAccess(actor) {
-  return Boolean(actor?.role && String(actor.branch || "").trim() && canManageOrganization(actor.role));
+  return Boolean(actor?.role && (canManageOrganization(actor.role) || actor.organizationWideAccess));
 }
 
 export function hasValidBranchAssignment(actor) {
   const branch = String(actor?.branch || "").trim();
-  if (!actor?.role || !branch) return false;
-  return hasOrganizationWideAccess(actor) || !isAllBranches(branch);
+  if (!actor?.role) return false;
+  if (hasOrganizationWideAccess(actor)) return true;
+  if (Array.isArray(actor?.access?.branches)) {
+    return actor.access.branches.some((item) => item?.status === "Active" && item?.branchStatus === "Active");
+  }
+  if (Array.isArray(actor?.branchMemberships)) {
+    return actor.branchMemberships.some((item) => item?.status === "Active" && item?.branch?.status === "Active");
+  }
+  return Boolean(branch && !isAllBranches(branch));
 }
 
 export function canAccessBranch(actor, targetBranch) {
   const branch = String(targetBranch || "").trim();
   if (!hasValidBranchAssignment(actor) || !branch) return false;
+  if (actor?.access?.scope === "branch") {
+    const active = actor.access.activeBranch;
+    return Boolean(active && (active.id === branch || active.name === branch));
+  }
   if (hasOrganizationWideAccess(actor)) return true;
   if (isAllBranches(branch)) return false;
+  if (Array.isArray(actor?.access?.branches)) {
+    return actor.access.branches.some((item) => (
+      item?.status === "Active"
+      && item?.branchStatus === "Active"
+      && (item.id === branch || item.name === branch)
+    ));
+  }
   return String(actor.branch || "").trim() === branch;
 }
 
@@ -89,7 +107,17 @@ export function canMutateBranch(actor, targetBranch) {
 }
 
 export function moduleAllowed(actor, moduleId, roleAccess) {
-  return Boolean(actor?.role && (roleAccess[actor.role] || []).includes(moduleId));
+  if (!actor?.role) return false;
+  if (Array.isArray(actor?.access?.modules)) return actor.access.modules.includes(moduleId);
+  return (roleAccess[actor.role] || []).includes(moduleId);
+}
+
+export function hasOrganizationPermission(actor, permission) {
+  if (canManageOrganization(actor?.role)) return true;
+  const permissions = Array.isArray(actor?.organizationPermissions)
+    ? actor.organizationPermissions
+    : parseBranchList(actor?.organizationPermissions);
+  return permissions.includes(permission);
 }
 
 function normalizeIdentityValue(value) {
@@ -101,23 +129,47 @@ export function accountMatchesStaffIdentity(account, staff) {
   const branchMatches = hasOrganizationWideAccess(account)
     || normalizeIdentityValue(account.branch) === normalizeIdentityValue(staff.branch);
   return normalizeIdentityValue(account.name) === normalizeIdentityValue(staff.name)
-    && normalizeIdentityValue(account.role) === normalizeIdentityValue(staff.role)
+    && normalizeIdentityValue(account.baseRole || account.role) === normalizeIdentityValue(staff.role)
     && branchMatches;
 }
 
 export function branchWhere(actor, field = "branch") {
+  if (actor?.access?.scope === "all") {
+    const branchNames = actor.access.branches?.map((branch) => branch.name).filter(Boolean) || [];
+    return { [field]: { in: [...new Set([...branchNames, "All branches"])] } };
+  }
+  const activeBranch = String(actor?.access?.activeBranch?.name || "").trim();
+  if (activeBranch) return { [field]: activeBranch };
   if (hasOrganizationWideAccess(actor)) return {};
   if (!hasValidBranchAssignment(actor)) return { [field]: { in: [] } };
   return { [field]: String(actor.branch).trim() };
 }
 
+function parseBranchList(value) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function filterServiceBranches(rows, actor) {
-  if (hasOrganizationWideAccess(actor)) return rows;
+  if (hasOrganizationWideAccess(actor) && !actor?.access) return rows;
+  if (actor?.access?.scope === "all") {
+    const allowed = new Set(actor.access.branches?.map((branch) => branch.name) || []);
+    return rows.filter((row) => {
+      const branches = parseBranchList(row.branches);
+      return !branches.length || branches.includes("All branches") || branches.some((branch) => allowed.has(branch));
+    });
+  }
   if (!hasValidBranchAssignment(actor)) return [];
+  const activeBranch = String(actor?.access?.activeBranch?.name || actor.branch || "").trim();
   return rows.filter((row) => {
     try {
       const branches = Array.isArray(row.branches) ? row.branches : JSON.parse(row.branches || "[]");
-      return !branches.length || branches.includes(actor.branch) || branches.includes("All branches");
+      return !branches.length || branches.includes(activeBranch) || branches.includes("All branches");
     } catch {
       return false;
     }

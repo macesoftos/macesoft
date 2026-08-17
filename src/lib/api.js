@@ -3,9 +3,11 @@ export const apiAuthenticationRequiredEvent = "macesoft:authentication-required"
 export const apiNotificationCreatedEvent = "macesoft:notification-created";
 
 let apiSessionActive = false;
+let apiBranchId = "";
 
 export function setApiSessionContext(session) {
   apiSessionActive = Boolean(session);
+  apiBranchId = session?.access?.activeBranchId || "";
 }
 
 async function requestJson(path, options = {}) {
@@ -15,6 +17,7 @@ async function requestJson(path, options = {}) {
     headers: {
       "Content-Type": "application/json",
       "X-Mace-Request": "app",
+      ...(apiBranchId ? { "X-Mace-Branch-Id": apiBranchId } : {}),
       ...(options.headers ?? {}),
     },
     ...options,
@@ -95,24 +98,39 @@ export function createInvitation(payload) {
   return requestJson("/api/invitations", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function editInvitation(id, payload) {
+  return requestJson(`/api/invitations/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
 export function resendInvitation(id) {
   return requestJson(`/api/invitations/${encodeURIComponent(id)}/resend`, { method: "POST" });
 }
 
 export function revokeInvitation(id) {
-  return requestJson(`/api/invitations/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+  return requestJson(`/api/invitations/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }
 
 export function inspectInvitation(token) {
   return requestJson(`/api/invitations/accept/${encodeURIComponent(token)}`);
 }
 
-export function acceptInvitation(token, password) {
-  return requestJson(`/api/invitations/accept/${encodeURIComponent(token)}`, { method: "POST", body: JSON.stringify({ password }) });
+export function acceptInvitation(token, payload) {
+  return requestJson(`/api/invitations/accept/${encodeURIComponent(token)}`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateAccountAccess(id, payload) {
+  return requestJson(`/api/accounts/${encodeURIComponent(id)}/access`, { method: "PATCH", body: JSON.stringify(payload) });
 }
 
 export function loadMyWorkspace() {
   return requestJson("/api/me/workspace");
+}
+
+export function selectActiveBranch(branchId) {
+  return requestJson("/api/me/active-branch", {
+    method: "POST",
+    body: JSON.stringify({ branchId }),
+  });
 }
 
 export function createBranchRecord(values) {
@@ -133,6 +151,28 @@ export function deleteBranchRecord(id, confirmationName, reassignTo = "") {
   return requestJson(`/api/branches/${encodeURIComponent(id)}`, {
     method: "DELETE",
     body: JSON.stringify({ confirmationName, reassignTo }),
+  });
+}
+
+export function archiveBranchRecord(id) {
+  return requestJson(`/api/branches/${encodeURIComponent(id)}/archive`, { method: "POST", body: "{}" });
+}
+
+export function reactivateBranchRecord(id) {
+  return requestJson(`/api/branches/${encodeURIComponent(id)}/reactivate`, { method: "POST", body: "{}" });
+}
+
+export function updateBranchModules(id, enabledModules) {
+  return requestJson(`/api/branches/${encodeURIComponent(id)}/modules`, {
+    method: "PUT",
+    body: JSON.stringify({ enabledModules }),
+  });
+}
+
+export function updateBranchMemberships(id, assignments, { replace = false } = {}) {
+  return requestJson(`/api/branches/${encodeURIComponent(id)}/memberships`, {
+    method: "PUT",
+    body: JSON.stringify({ assignments, replace }),
   });
 }
 
@@ -268,6 +308,7 @@ export function uploadFlipbookPdf(file, { title, description, pageCount }, onPro
     request.responseType = "json";
     request.setRequestHeader("Content-Type", "application/pdf");
     request.setRequestHeader("X-Mace-Request", "app");
+    if (apiBranchId) request.setRequestHeader("X-Mace-Branch-Id", apiBranchId);
     request.setRequestHeader("X-Flipbook-Title", encodeURIComponent(title));
     request.setRequestHeader("X-Flipbook-Description", encodeURIComponent(description || ""));
     request.setRequestHeader("X-Flipbook-Pages", String(pageCount));

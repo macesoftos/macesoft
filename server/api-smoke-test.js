@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createServer } from "node:net";
+import { prisma } from "./prisma.js";
 
-const port = 3101;
+const port = Number(process.env.API_SMOKE_PORT || 3101);
 const baseUrl = `http://127.0.0.1:${port}`;
 const ownerHeaders = {
   "Content-Type": "application/json",
@@ -8,6 +11,7 @@ const ownerHeaders = {
   "X-Mace-User-Name": "Dr. Mace",
   "X-Mace-Role": "Owner",
   "X-Mace-Branch": "All branches",
+  "X-Mace-Organization-Id": "org-mace",
   "X-Mace-Request": "app",
 };
 const branchHeaders = (role, branch) => ({
@@ -16,8 +20,75 @@ const branchHeaders = (role, branch) => ({
   "X-Mace-User-Name": `${branch} ${role}`,
   "X-Mace-Role": role,
   "X-Mace-Branch": branch,
+  "X-Mace-Organization-Id": "org-mace",
   "X-Mace-Request": "app",
 });
+
+const smtpMessages = [];
+const smtpServer = createServer((socket) => {
+  socket.setEncoding("utf8");
+  socket.write("220 localhost ESMTP MACE smoke test\r\n");
+  let buffer = "";
+  let receivingData = false;
+  let messageLines = [];
+
+  socket.on("data", (chunk) => {
+    buffer += chunk;
+    if (buffer.length > 2_000_000) {
+      socket.destroy(new Error("SMTP smoke message exceeded the safety limit."));
+      return;
+    }
+    while (buffer.includes("\r\n")) {
+      const lineEnd = buffer.indexOf("\r\n");
+      const line = buffer.slice(0, lineEnd);
+      buffer = buffer.slice(lineEnd + 2);
+      if (receivingData) {
+        if (line === ".") {
+          smtpMessages.push(messageLines.join("\r\n"));
+          messageLines = [];
+          receivingData = false;
+          socket.write("250 2.0.0 queued\r\n");
+        } else {
+          messageLines.push(line.startsWith("..") ? line.slice(1) : line);
+        }
+        continue;
+      }
+      if (/^(?:EHLO|HELO)\b/i.test(line)) {
+        socket.write("250-localhost\r\n250-PIPELINING\r\n250-8BITMIME\r\n250 SMTPUTF8\r\n");
+      } else if (/^DATA\b/i.test(line)) {
+        receivingData = true;
+        socket.write("354 End data with <CR><LF>.<CR><LF>\r\n");
+      } else if (/^QUIT\b/i.test(line)) {
+        socket.write("221 2.0.0 bye\r\n");
+        socket.end();
+      } else {
+        socket.write("250 2.0.0 ok\r\n");
+      }
+    }
+  });
+});
+
+await new Promise((resolve, reject) => {
+  smtpServer.once("error", reject);
+  smtpServer.listen(0, "127.0.0.1", () => resolve(undefined));
+});
+const smtpAddress = smtpServer.address();
+if (!smtpAddress || typeof smtpAddress === "string") throw new Error("SMTP smoke server did not start on a TCP port.");
+
+async function waitForSmtpMessage(count) {
+  const startedAt = Date.now();
+  while (smtpMessages.length < count && Date.now() - startedAt < 5_000) await delay(25);
+  assert(smtpMessages.length >= count, `SMTP smoke server did not receive message ${count}.`);
+  return smtpMessages[count - 1]
+    .replace(/=\r?\n/g, "")
+    .replace(/=3D/gi, "=");
+}
+
+function invitationTokenFromMessage(message) {
+  const match = message.match(/accept-invitation\?token=([A-Za-z0-9_-]{32,})/);
+  assert(match, "invitation email did not contain a secure acceptance link");
+  return match[1];
+}
 
 function delay(ms) {
   return new Promise((resolve) => {
@@ -33,7 +104,14 @@ async function request(path, options = {}) {
     },
   });
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { error: `Non-JSON response (${response.status})`, body: text.slice(0, 240) };
+    }
+  }
   return { response, payload };
 }
 
@@ -75,9 +153,24 @@ async function jsonRequestAs(path, body, headers, options = {}) {
 
 const server = spawn(process.execPath, ["server/index.js"], {
   cwd: process.cwd(),
-  env: { ...process.env, NODE_ENV: "test", API_PORT: String(port), LEADS_API_KEY: "smoke-leads-key", API_ALLOW_TRUSTED_HEADERS: "true" },
+  env: {
+    ...process.env,
+    NODE_ENV: "test",
+    API_PORT: String(port),
+    APP_ORIGIN: "http://127.0.0.1:5173",
+    LEADS_API_KEY: "smoke-leads-key",
+    API_ALLOW_TRUSTED_HEADERS: "true",
+    SMTP_HOST: "127.0.0.1",
+    SMTP_PORT: String(smtpAddress.port),
+    SMTP_SECURE: "false",
+    SMTP_USER: "",
+    SMTP_PASS: "",
+    SMTP_FROM: "MACE Smoke Test <no-reply@mace.test>",
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
+
+const invitationSmokeEmails = [];
 
 let serverOutput = "";
 server.stdout.on("data", (chunk) => {
@@ -152,6 +245,19 @@ try {
   const bgcClientId = `cl-smoke-bgc-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
   const serviceId = `svc-smoke-${suffix}`;
+  const appointmentDay = String((Number.parseInt(suffix.slice(-5), 36) % 27) + 1).padStart(2, "0");
+  const appointmentDate = `2099-11-${appointmentDay}`;
+
+  const createdBgcBranch = await jsonRequest("/api/branches", {
+    name: "Mace BGC",
+    code: "BGC",
+    city: "Taguig",
+    address: "Bonifacio Global City",
+    timezone: "Asia/Manila",
+    status: "Active",
+    roomCount: 1,
+  });
+  assert([201, 409].includes(createdBgcBranch.response.status), "BGC branch fixture create failed");
 
   const createdService = await jsonRequest("/api/resources/services", {
     id: serviceId,
@@ -182,6 +288,10 @@ try {
   assert(notificationFeed.payload.unreadCount >= 1, "new service notification was not unread");
 
   const notificationAccounts = await request("/api/accounts", { headers: ownerHeaders });
+  assert(
+    notificationAccounts.response.ok && Array.isArray(notificationAccounts.payload?.accounts),
+    `notification account list failed (${notificationAccounts.response.status}: ${notificationAccounts.payload?.error || "unknown error"})`,
+  );
   const notificationOwner = notificationAccounts.payload.accounts.find((account) => account.role === "Owner");
   assert(notificationOwner?.id, "notification read test could not find an owner account");
   const markedNotifications = await request("/api/notifications/read", {
@@ -191,6 +301,154 @@ try {
   });
   assert(markedNotifications.response.ok, "mark notifications read failed");
   assert(markedNotifications.payload.unreadCount === 0, "mark notifications read did not clear the unread count");
+
+  const invitationHeaders = { ...ownerHeaders, "X-Mace-User-Id": notificationOwner.id };
+  const invitationBranch = bootstrap.payload.branches.find((branch) => branch.name === "Mace Davao");
+  assert(invitationBranch?.id, "invitation smoke test could not find an active branch");
+  const invitationEmail = `invite-${suffix}@release-test.invalid`;
+  invitationSmokeEmails.push(invitationEmail);
+  const invitationPayload = {
+    firstName: "Invitation",
+    lastName: "Smoke",
+    email: invitationEmail,
+    position: "Front Desk Associate",
+    role: "Employee",
+    branchIds: [invitationBranch.id],
+    modules: ["overview", "appointments", "clients"],
+    permissions: [],
+    message: "<strong>Welcome</strong> to the invitation smoke test.\u0000",
+  };
+  const existingAccountInvitation = await jsonRequestAs("/api/invitations", {
+    ...invitationPayload,
+    email: notificationOwner.email,
+  }, invitationHeaders);
+  assert(existingAccountInvitation.response.status === 409, "an existing organization account could be invited again");
+  const createdInvitation = await jsonRequestAs("/api/invitations", invitationPayload, invitationHeaders);
+  assert(
+    createdInvitation.response.status === 201,
+    `invitation create failed (${createdInvitation.response.status}: ${createdInvitation.payload?.error || "unknown error"})`,
+  );
+  assert(createdInvitation.payload.invitation.deliveryStatus === "Sent", "invitation delivery was not recorded as sent");
+  assert(!Object.hasOwn(createdInvitation.payload.invitation, "tokenHash"), "invitation API exposed the token hash");
+  assert(!createdInvitation.payload.invitation.message.includes("<"), "invitation message HTML was not sanitized");
+  const acceptanceToken = invitationTokenFromMessage(await waitForSmtpMessage(1));
+  const storedInvitation = await prisma.userInvitation.findUnique({ where: { id: createdInvitation.payload.invitation.id } });
+  assert(storedInvitation?.tokenHash === createHash("sha256").update(acceptanceToken).digest("hex"), "invitation token was not stored as a SHA-256 hash");
+  assert(storedInvitation.tokenHash !== acceptanceToken, "raw invitation token was persisted");
+
+  const inspectedInvitation = await request(`/api/invitations/accept/${encodeURIComponent(acceptanceToken)}`);
+  assert(inspectedInvitation.response.ok, "public invitation inspection failed");
+  assert(inspectedInvitation.payload.invitation.status === "Pending", "new invitation was not pending");
+  assert(inspectedInvitation.payload.invitation.accountExists === false, "new invite incorrectly required an existing account");
+  const consentBlocked = await request(`/api/invitations/accept/${encodeURIComponent(acceptanceToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "SmokeInvite2026!Pass" }),
+  });
+  assert(consentBlocked.response.status === 400, "invitation acceptance did not require terms and privacy consent");
+  const ownerLogin = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: notificationOwner.email, password: process.env.BOOTSTRAP_OWNER_PASSWORD }),
+  });
+  assert(ownerLogin.response.ok, "invitation wrong-email test could not sign in the owner fixture");
+  const ownerSessionCookie = ownerLogin.response.headers.get("set-cookie")?.split(";")[0];
+  assert(ownerSessionCookie, "owner login did not issue a session cookie");
+  const wrongEmailAcceptance = await request(`/api/invitations/accept/${encodeURIComponent(acceptanceToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: ownerSessionCookie },
+    body: JSON.stringify({ password: "SmokeInvite2026!Pass", termsAccepted: true, privacyAccepted: true }),
+  });
+  assert(wrongEmailAcceptance.response.status === 403, "a session for another email could accept the invitation");
+  const acceptedInvitation = await request(`/api/invitations/accept/${encodeURIComponent(acceptanceToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "SmokeInvite2026!Pass", termsAccepted: true, privacyAccepted: true }),
+  });
+  assert(acceptedInvitation.response.ok, "new recipient could not accept the invitation");
+  assert(acceptedInvitation.payload.invitation.status === "Accepted", "accepted invitation status was not persisted");
+  assert(acceptedInvitation.payload.account.email === invitationEmail, "accepted invitation created the wrong account");
+  assert(acceptedInvitation.payload.account.access.branches.some((branch) => branch.id === invitationBranch.id), "accepted account did not receive its branch membership");
+  assert(acceptedInvitation.payload.account.access.modules.includes("appointments"), "accepted account did not receive its invited modules");
+  const reusedInvitation = await request(`/api/invitations/accept/${encodeURIComponent(acceptanceToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "SmokeInvite2026!Pass", termsAccepted: true, privacyAccepted: true }),
+  });
+  assert(reusedInvitation.response.status === 409, "accepted invitation token was reusable");
+  const acceptanceAudit = await prisma.auditLog.findFirst({
+    where: { subjectType: "Account", subjectId: acceptedInvitation.payload.account.id, action: "Invitation accepted" },
+  });
+  assert(acceptanceAudit, "invitation acceptance audit record was not created");
+  const acceptanceNotification = await prisma.appNotification.findFirst({
+    where: { recordId: acceptedInvitation.payload.account.id, recipientAccountIds: { has: notificationOwner.id } },
+  });
+  assert(acceptanceNotification, "invitation acceptance did not notify a relevant administrator");
+
+  const lifecycleEmail = `invite-lifecycle-${suffix}@release-test.invalid`;
+  invitationSmokeEmails.push(lifecycleEmail);
+  const lifecycleInvitation = await jsonRequestAs("/api/invitations", {
+    ...invitationPayload,
+    firstName: "Lifecycle",
+    email: lifecycleEmail,
+    message: "Invitation lifecycle smoke test",
+  }, invitationHeaders);
+  assert(lifecycleInvitation.response.status === 201, "lifecycle invitation create failed");
+  const originalLifecycleToken = invitationTokenFromMessage(await waitForSmtpMessage(2));
+  const duplicateInvitation = await jsonRequestAs("/api/invitations", {
+    ...invitationPayload,
+    email: lifecycleEmail,
+  }, invitationHeaders);
+  assert(duplicateInvitation.response.status === 409, "duplicate pending invitation was not blocked");
+  const resentInvitation = await jsonRequestAs(
+    `/api/invitations/${encodeURIComponent(lifecycleInvitation.payload.invitation.id)}/resend`,
+    {},
+    invitationHeaders,
+  );
+  assert(resentInvitation.response.ok && resentInvitation.payload.invitation.deliveryStatus === "Sent", "invitation resend failed");
+  const replacementLifecycleToken = invitationTokenFromMessage(await waitForSmtpMessage(3));
+  assert(replacementLifecycleToken !== originalLifecycleToken, "resend did not rotate the invitation token");
+  const invalidatedOriginal = await request(`/api/invitations/accept/${encodeURIComponent(originalLifecycleToken)}`);
+  assert(invalidatedOriginal.response.status === 404, "resend did not invalidate the previous invitation link");
+  const cancelledInvitation = await jsonRequestAs(
+    `/api/invitations/${encodeURIComponent(lifecycleInvitation.payload.invitation.id)}/cancel`,
+    {},
+    invitationHeaders,
+  );
+  assert(cancelledInvitation.response.ok && cancelledInvitation.payload.invitation.status === "Revoked", "pending invitation cancellation failed");
+  const cancelledAcceptance = await request(`/api/invitations/accept/${encodeURIComponent(replacementLifecycleToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "SmokeInvite2026!Pass", termsAccepted: true, privacyAccepted: true }),
+  });
+  assert(cancelledAcceptance.response.status === 410, "cancelled invitation could still be accepted");
+
+  const expiredEmail = `invite-expired-${suffix}@release-test.invalid`;
+  invitationSmokeEmails.push(expiredEmail);
+  const expiredInvitation = await jsonRequestAs("/api/invitations", {
+    ...invitationPayload,
+    firstName: "Expired",
+    email: expiredEmail,
+    message: "Expired invitation smoke test",
+  }, invitationHeaders);
+  assert(expiredInvitation.response.status === 201, "expiration invitation create failed");
+  const expiredToken = invitationTokenFromMessage(await waitForSmtpMessage(4));
+  await prisma.userInvitation.update({
+    where: { id: expiredInvitation.payload.invitation.id },
+    data: { expiresAt: new Date(Date.now() - 1_000) },
+  });
+  const expiredAcceptance = await request(`/api/invitations/accept/${encodeURIComponent(expiredToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "SmokeInvite2026!Pass", termsAccepted: true, privacyAccepted: true }),
+  });
+  assert(expiredAcceptance.response.status === 410, "expired invitation could still be accepted");
+  const expiredStored = await prisma.userInvitation.findUnique({ where: { id: expiredInvitation.payload.invitation.id } });
+  assert(expiredStored?.status === "Expired", "expired invitation status was not persisted");
+  const expirationAudit = await prisma.auditLog.findFirst({
+    where: { subjectType: "UserInvitation", subjectId: expiredInvitation.payload.invitation.id, action: "Invitation expired" },
+  });
+  assert(expirationAudit, "invitation expiration audit record was not created");
 
   const createdClient = await jsonRequest("/api/resources/clients", {
     id: clientId,
@@ -273,7 +531,7 @@ try {
 
   const appointment = await jsonRequest("/api/resources/appointments", {
     id: appointmentId,
-    date: "2026-09-14",
+    date: appointmentDate,
     time: "10:30",
     clientId,
     serviceId,
@@ -283,11 +541,14 @@ try {
     status: "Pending",
     deposit: 0,
   });
-  assert(appointment.response.status === 201, "appointment create failed");
+  assert(
+    appointment.response.status === 201,
+    `appointment create failed (${appointment.response.status}: ${appointment.payload?.error || "unknown error"})`,
+  );
 
   const conflict = await jsonRequest("/api/resources/appointments", {
     id: `ap-conflict-${suffix}`,
-    date: "2026-09-14",
+    date: appointmentDate,
     time: "10:30",
     clientId,
     serviceId,
@@ -399,7 +660,10 @@ try {
   assert(createdStaff.response.status === 201, "staff create failed");
 
   const accountList = await request("/api/accounts", { headers: ownerHeaders });
-  assert(accountList.response.ok, "account list failed");
+  assert(
+    accountList.response.ok,
+    `account list failed (${accountList.response.status}: ${accountList.payload?.error || "unknown error"})`,
+  );
   assert(Array.isArray(accountList.payload.accounts), "account list did not return accounts");
 
   const missingStaffLink = await jsonRequest("/api/staff/st-does-not-exist/account", { accountId: "" }, { method: "PUT" });
@@ -591,4 +855,19 @@ try {
   process.exitCode = 1;
 } finally {
   server.kill("SIGTERM");
+  try {
+    for (const email of invitationSmokeEmails) {
+      const account = await prisma.account.findUnique({ where: { email }, select: { id: true, staffId: true } });
+      // Accepted accounts are intentionally retained with their append-only
+      // audit trail. Release verification runs in a disposable schema, which
+      // is the safe cleanup boundary for this lifecycle test.
+      if (!account) await prisma.userInvitation.deleteMany({ where: { email } });
+    }
+  } catch (cleanupError) {
+    console.error(`Invitation smoke cleanup failed: ${cleanupError.message}`);
+    process.exitCode = 1;
+  } finally {
+    await prisma.$disconnect();
+    await new Promise((resolve) => smtpServer.close(resolve));
+  }
 }
