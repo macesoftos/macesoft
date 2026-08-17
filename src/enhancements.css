@@ -3329,6 +3329,143 @@ td {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+.record-detail-page {
+  display: grid;
+  width: min(100%, 1240px);
+  margin: 0 auto;
+  gap: 16px;
+}
+
+.record-detail-page-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.record-detail-page-header > button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.record-detail-page-header > button:hover {
+  border-color: var(--wine);
+  color: var(--wine);
+}
+
+.record-detail-page-header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.record-detail-page-header span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.record-detail-page-header strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 2vw, 1.55rem);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-detail-not-found {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.record-detail-not-found h2,
+.record-detail-not-found p { margin: 0; }
+.record-detail-not-found p { max-width: 520px; color: var(--muted); }
+
+.appointment-details-drawer.is-standalone {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  animation: none;
+}
+
+.appointment-details-drawer.is-standalone .appointment-details-body {
+  max-height: none;
+  overflow: visible;
+}
+
+.modal-card.client-profile-modal.is-standalone {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.client-profile-modal.is-standalone .client-profile-modal-layout {
+  height: auto;
+  min-height: 620px;
+}
+
+.client-profile-modal.is-standalone .client-profile-detail-pane {
+  overflow: visible;
+}
+
+.record-detail-page > .lead-detail-panel {
+  position: static;
+  top: auto;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+}
+
+.treatment-record-page { display: grid; gap: 18px; }
+.record-detail-identity { display: flex; align-items: center; gap: 14px; }
+
+.staff-record-page { display: grid; gap: 22px; }
+.staff-record-hero { display: flex; align-items: center; gap: 16px; }
+.staff-record-hero > div:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
+.staff-record-hero h2,
+.staff-record-hero p { margin: 0; }
+.staff-record-hero h2 { font-family: var(--font-display); font-size: clamp(1.4rem, 3vw, 2rem); }
+.staff-record-hero > div:nth-child(2) > span { color: var(--muted); }
+.staff-record-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.staff-record-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.staff-record-services { display: grid; gap: 12px; padding-top: 18px; border-top: 1px solid var(--line); }
+.staff-record-services > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.staff-record-services span { padding: 7px 10px; border-radius: 999px; background: var(--paper); color: var(--ink); font-size: 0.75rem; font-weight: 700; }
+.staff-record-link { display: flex; align-items: center; gap: 9px; border: 0; background: none; color: var(--ink); text-align: left; }
+.staff-record-link:hover strong { color: var(--wine); }
+
+@media (max-width: 760px) {
+  .record-detail-page { gap: 12px; }
+  .appointment-details-drawer.is-standalone { border-radius: 10px; }
+  .client-profile-modal.is-standalone .client-profile-modal-layout { min-height: 0; }
+  .staff-record-hero { align-items: flex-start; flex-wrap: wrap; }
+  .staff-record-actions { width: 100%; margin-left: 0; }
+  .staff-record-actions button { flex: 1 1 150px; }
+  .staff-record-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .field-suggestion-hint {
   color: var(--muted, #746b70);
   font-size: 0.72rem;

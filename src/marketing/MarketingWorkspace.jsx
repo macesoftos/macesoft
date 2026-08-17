@@ -52,7 +52,7 @@ import {
   X,
 } from "lucide-react";
 
-import { marketingHash, marketingRouteFromHash } from "./routes.js";
+import { marketingPath, marketingRouteFromHash, marketingRouteFromPath } from "./routes.js";
 import {
   buildVisualEmailHtml,
   emailHtmlToPlainText,
@@ -388,14 +388,16 @@ function campaignDate(campaign) {
 }
 
 function navigateToMarketing(section, mode = "index", replace = false) {
-  const nextUrl = `/${marketingHash(section, mode)}`;
+  const nextUrl = marketingPath(section, mode);
   if (replace) window.history.replaceState(null, "", nextUrl);
   else window.history.pushState(null, "", nextUrl);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function routeFromLocation() {
-  return marketingRouteFromHash(window.location.hash) ?? { section: "overview", mode: "index" };
+  return marketingRouteFromPath(window.location.pathname)
+    ?? marketingRouteFromHash(window.location.hash)
+    ?? { section: "overview", mode: "index" };
 }
 
 function campaignWarnings(draft) {

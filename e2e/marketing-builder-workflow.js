@@ -92,7 +92,7 @@ export async function verifyMarketingBuilder(page, expect) {
     });
   }
 
-  await page.goto("/#/marketing/campaigns/new");
+  await page.goto("/marketing/campaigns/new");
   await expect(page.getByTestId("marketing-workspace")).toBeVisible();
   await expect(page.getByRole("heading", { name: /Summer Skin Reset/i })).toBeVisible();
 
@@ -303,7 +303,7 @@ export async function verifyMarketingBuilder(page, expect) {
   expect(scheduleBody.campaign.deliveryStatus).toBe("Queued");
   await expect(page.getByText("Campaign scheduled and added to the delivery queue.", { exact: true })).toBeVisible();
 
-  await page.goto("/#/marketing/campaigns");
+  await page.goto("/marketing/campaigns");
   const campaignRow = page.getByRole("row").filter({ hasText: "Summer Skin Reset" });
   await expect(campaignRow).toBeVisible();
   await expect(campaignRow.getByText("Scheduled", { exact: true })).toBeVisible();
@@ -311,7 +311,7 @@ export async function verifyMarketingBuilder(page, expect) {
   await campaignRow.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByText("E2E Brightening Treatment", { exact: true })).toBeVisible();
 
-  await page.goto("/#/marketing/templates");
+  await page.goto("/marketing/templates");
   const savedTemplateHeading = page.getByRole("heading", { name: "Release-tested Product email", exact: true });
   await expect(savedTemplateHeading).toBeVisible();
   await savedTemplateHeading.locator("xpath=ancestor::article").getByRole("button", { name: "Preview", exact: true }).click();

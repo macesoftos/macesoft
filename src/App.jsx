@@ -85,7 +85,8 @@ import {
   hashRouteSegments,
   isLegacySmsHash,
   isMarketingHash,
-  marketingHash,
+  marketingPath,
+  marketingRouteFromHash,
 } from "./marketing/routes.js";
 import {
   checkApiHealth,
@@ -586,6 +587,25 @@ function useStoredState(key, initialValue) {
 
 const defaultModuleId = "overview";
 const moduleIdSet = new Set(navItems.map((item) => item.id));
+const modulePathById = new Map(navItems.filter((item) => item.path).map((item) => [item.id, item.path]));
+const moduleIdByPath = new Map(navItems.filter((item) => item.path).map((item) => [item.path, item.id]));
+const recordDetailModules = new Set(["appointments", "clients", "leads", "treatments", "staff"]);
+
+function recordDetailRouteFromPath(pathname) {
+  const path = normalizedPathname(pathname);
+  const match = path.match(/^\/(appointments|clients|leads|treatments|staff)\/([^/]+)$/);
+  if (!match) return null;
+  try {
+    return { moduleId: match[1], recordId: decodeURIComponent(match[2]) };
+  } catch {
+    return null;
+  }
+}
+
+function recordDetailPath(moduleId, recordId) {
+  if (!recordDetailModules.has(moduleId) || !recordId) return modulePathById.get(moduleId) ?? `/#/${moduleId}`;
+  return `/${moduleId}/${encodeURIComponent(recordId)}`;
+}
 
 function modulesForSession(session) {
   const serverModules = session?.access?.modules;
@@ -625,10 +645,12 @@ function normalizedPathname(pathname) {
 
 function moduleFromPath(pathname) {
   const path = normalizedPathname(pathname);
-  if (path === "/pos") return "pos";
-  if (path === "/attendance" || path === "/attendance/kiosk") return "facetrack-attendance";
+  const detailRoute = recordDetailRouteFromPath(path);
+  if (detailRoute) return detailRoute.moduleId;
+  if (path === "/attendance/kiosk") return "facetrack-attendance";
+  if (path === "/marketing" || path.startsWith("/marketing/")) return "sms";
   if (path === "/flipbooks" || path.startsWith("/flipbooks/")) return "flipbooks";
-  return "";
+  return moduleIdByPath.get(path) ?? "";
 }
 
 function publicFlipbookTokenFromPath(pathname) {
@@ -705,6 +727,7 @@ function App() {
   const initialPathModule = typeof window === "undefined" ? "" : moduleFromPath(window.location.pathname);
   const initialHashModule = typeof window === "undefined" ? "" : moduleFromHash(window.location.hash);
   const [activeModule, setActiveModuleState] = useStoredState("active-module", initialPathModule || initialHashModule || defaultModuleId);
+  const [currentPath, setCurrentPath] = useState(() => typeof window === "undefined" ? "/" : normalizedPathname(window.location.pathname));
   const [branchScope, setBranchScope] = useStoredState("branch-scope", "All branches");
   const uploadMarketingImage = useCallback(
     (dataUrl, originalName = "") => uploadImageAsset(dataUrl, "marketing-image", branchScope === "All branches" ? session?.branch || "All branches" : branchScope, originalName),
@@ -995,17 +1018,15 @@ function App() {
       setActiveModuleState(nextModule);
 
       if (typeof window !== "undefined") {
-        const nextUrl = nextModule === "pos"
-          ? "/pos"
-          : nextModule === "facetrack-attendance"
-            ? "/attendance"
-            : nextModule === "flipbooks"
-              ? (normalizedPathname(window.location.pathname).startsWith("/flipbooks")
-                ? `${window.location.pathname}${window.location.search}`
-                : "/flipbooks")
-            : nextModule === "sms"
-              ? `/${marketingHash()}`
-              : `/#/${nextModule}`;
+        const nextUrl = nextModule === "flipbooks"
+          ? (normalizedPathname(window.location.pathname).startsWith("/flipbooks")
+            ? `${window.location.pathname}${window.location.search}`
+            : "/flipbooks")
+          : nextModule === "sms"
+            ? (normalizedPathname(window.location.pathname).startsWith("/marketing")
+              ? `${window.location.pathname}${window.location.search}`
+              : marketingPath())
+            : modulePathById.get(nextModule) ?? `/#/${nextModule}`;
         const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
         if (currentUrl !== nextUrl) {
           if (options.replace) {
@@ -1014,6 +1035,7 @@ function App() {
             window.history.pushState(null, "", nextUrl);
           }
         }
+        setCurrentPath(normalizedPathname(new URL(nextUrl, window.location.origin).pathname));
 
         if (!options.preserveScroll) {
           window.requestAnimationFrame(() => window.scrollTo(0, 0));
@@ -1027,6 +1049,19 @@ function App() {
     },
     [session, sessionModules, setActiveModuleState],
   );
+
+  const openRecordPage = useCallback((moduleId, recordId) => {
+    if (!recordDetailModules.has(moduleId) || !recordId) return;
+    const nextUrl = recordDetailPath(moduleId, recordId);
+    setActiveModuleState(moduleId);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", nextUrl);
+      setCurrentPath(normalizedPathname(window.location.pathname));
+      window.requestAnimationFrame(() => window.scrollTo(0, 0));
+    }
+    setIsSidebarDrawerOpen(false);
+    setIsMobileMoreOpen(false);
+  }, [setActiveModuleState]);
 
   useEffect(() => {
     if (!session || typeof window === "undefined") return undefined;
@@ -1048,14 +1083,16 @@ function App() {
     if (typeof window === "undefined") return undefined;
 
     function syncModuleFromLocation() {
+      setCurrentPath(normalizedPathname(window.location.pathname));
       const routeModule = moduleFromPath(window.location.pathname) || moduleFromHash(window.location.hash);
       if (routeModule) {
         if (routeModule === "sms" && isMarketingHash(window.location.hash)) {
+          const legacyMarketingRoute = marketingRouteFromHash(window.location.hash);
+          const nextPath = marketingPath(legacyMarketingRoute?.section, legacyMarketingRoute?.mode);
+          window.history.replaceState(null, "", nextPath);
+          setCurrentPath(nextPath);
           setActiveModuleState("sms");
           return;
-        }
-        if (routeModule === "pos" && moduleFromHash(window.location.hash) === "pos" && moduleFromPath(window.location.pathname) !== "pos") {
-          window.history.replaceState(null, "", "/pos");
         }
         setActiveModule(routeModule, { replace: true });
       }
@@ -1264,6 +1301,35 @@ function App() {
     () => clients.find((client) => client.id === selectedClientId) ?? clients[0],
     [clients, selectedClientId],
   );
+  const activeRecordRoute = useMemo(() => recordDetailRouteFromPath(currentPath), [currentPath]);
+  const activeRecord = useMemo(() => {
+    if (!activeRecordRoute) return null;
+    const recordsByModule = {
+      appointments,
+      clients,
+      leads,
+      treatments,
+      staff,
+    };
+    return recordsByModule[activeRecordRoute.moduleId]?.find((record) => record.id === activeRecordRoute.recordId) ?? null;
+  }, [activeRecordRoute, appointments, clients, leads, staff, treatments]);
+  const activeRecordTitle = activeRecordRoute?.moduleId === "appointments"
+    ? activeRecord?.client
+    : activeRecordRoute?.moduleId === "clients"
+      ? activeRecord?.fullName
+      : activeRecordRoute?.moduleId === "leads"
+        ? activeRecord?.name
+        : activeRecordRoute?.moduleId === "treatments"
+          ? activeRecord?.service || activeRecord?.client
+          : activeRecordRoute?.moduleId === "staff"
+            ? activeRecord?.name
+            : "";
+
+  useEffect(() => {
+    if (typeof document === "undefined" || isPublicFormView || publicFlipbookToken || isFaceTrackKioskView) return;
+    const pageLabel = activeRecordTitle || navItems.find((item) => item.id === activeModule)?.label || "Dashboard";
+    document.title = `${pageLabel} — MACE ClinicOS`;
+  }, [activeModule, activeRecordTitle, isFaceTrackKioskView, isPublicFormView, publicFlipbookToken]);
 
   const scopedAppointments = useMemo(
     () => appointments.filter((item) => branchScope === "All branches" || item.branch === branchScope),
@@ -2250,10 +2316,11 @@ function App() {
     );
   }
 
-  const activeLabel =
+  const activeLabel = activeRecordTitle || (
     activeModule === "overview"
       ? "Dashboard"
-      : navItems.find((item) => item.id === activeModule)?.label ?? "Dashboard";
+      : navItems.find((item) => item.id === activeModule)?.label ?? "Dashboard"
+  );
   const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
   const showSidebar = visibleNavSections.length > 0 && !isPosView && !isApplicationsView && !isFaceTrackView && !isMarketingView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
@@ -2486,6 +2553,7 @@ function App() {
               globalSearch={globalSearch}
               canManageAppointments={canManageAppointments}
               onOpenRoomView={() => setActiveModule("room-view")}
+              onOpenAppointment={(appointment) => openRecordPage("appointments", appointment.id)}
             />
           )}
           {activeModule === "staff-view" && (
@@ -2510,6 +2578,7 @@ function App() {
           )}
           {activeModule === "appointments" && (
             <AppointmentsModule
+              detailAppointmentId={activeRecordRoute?.moduleId === "appointments" ? activeRecordRoute.recordId : ""}
               appointments={scopedAppointments}
               clients={clients}
               services={services}
@@ -2525,10 +2594,13 @@ function App() {
               onPrintReceipt={printReceipt}
               globalSearch={globalSearch}
               onCreateDateChange={setAppointmentCreateDate}
+              onOpenAppointment={(appointment) => openRecordPage("appointments", appointment.id)}
+              onCloseDetail={() => setActiveModule("appointments")}
             />
           )}
           {activeModule === "clients" && (
             <ClientsModule
+              detailClientId={activeRecordRoute?.moduleId === "clients" ? activeRecordRoute.recordId : ""}
               clients={clients}
               selectedClient={selectedClient}
               selectedClientId={selectedClientId}
@@ -2547,16 +2619,21 @@ function App() {
               sensitiveAllowed={sensitiveAllowed}
               globalSearch={globalSearch}
               notify={notify}
+              onOpenClient={(client) => openRecordPage("clients", client.id)}
+              onCloseDetail={() => setActiveModule("clients")}
             />
           )}
           {activeModule === "treatments" && (
             <TreatmentsModule
+              detailTreatmentId={activeRecordRoute?.moduleId === "treatments" ? activeRecordRoute.recordId : ""}
               treatments={treatments}
               clients={clients}
               openModal={openModal}
               globalSearch={globalSearch}
               onUploadPhoto={addTreatmentPhoto}
               onDeletePhoto={removeTreatmentPhoto}
+              onOpenTreatment={(treatment) => openRecordPage("treatments", treatment.id)}
+              onCloseDetail={() => setActiveModule("treatments")}
             />
           )}
           {activeModule === "services" && (
@@ -2587,6 +2664,7 @@ function App() {
           )}
           {activeModule === "leads" && (
             <LeadsModule
+              detailLeadId={activeRecordRoute?.moduleId === "leads" ? activeRecordRoute.recordId : ""}
               leads={leads}
               clients={clients}
               appointments={appointments}
@@ -2608,6 +2686,8 @@ function App() {
               globalSearch={globalSearch}
               isBooting={isBooting}
               notify={notify}
+              onOpenLead={(lead) => openRecordPage("leads", lead.id)}
+              onCloseDetail={() => setActiveModule("leads")}
             />
           )}
           {activeModule === "sms" && (
@@ -2638,6 +2718,7 @@ function App() {
           )}
           {activeModule === "staff" && (
             <StaffModule
+              detailStaffId={activeRecordRoute?.moduleId === "staff" ? activeRecordRoute.recordId : ""}
               staff={staff}
               branchRecords={branchRecords}
               session={session}
@@ -2647,6 +2728,8 @@ function App() {
               globalSearch={globalSearch}
               applyAuditLog={applyAuditLog}
               notify={notify}
+              onOpenStaff={(person) => openRecordPage("staff", person.id)}
+              onCloseDetail={() => setActiveModule("staff")}
             />
           )}
           {activeModule === "branches" && (
@@ -2851,6 +2934,31 @@ function PageHeader({ eyebrow, title, subtitle, leading = null }) {
       </div>
       {subtitle && <span className="topbar-subtitle">{subtitle}</span>}
     </div>
+  );
+}
+
+function RecordDetailPageHeader({ label, title, onBack, children }) {
+  return (
+    <section className="record-detail-page">
+      <header className="record-detail-page-header">
+        <button type="button" onClick={onBack} aria-label={`Back to ${label}`}><ArrowLeft size={18} /></button>
+        <div><span>{label}</span><strong>{title}</strong></div>
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function RecordDetailNotFound({ label, onBack }) {
+  return (
+    <RecordDetailPageHeader label={label} title="Record not found" onBack={onBack}>
+      <div className="surface-panel record-detail-not-found">
+        <FileText size={30} aria-hidden="true" />
+        <h2>{label} not found</h2>
+        <p>This record may have been removed or is outside your current branch access.</p>
+        <button className="primary-button" type="button" onClick={onBack}><ArrowLeft size={16} /> Back to {label.toLowerCase()}s</button>
+      </div>
+    </RecordDetailPageHeader>
   );
 }
 
@@ -5708,7 +5816,7 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
   );
 }
 
-function CardViewModule({ appointments, services, transactions, staff, branchRecords = [], branchScope = "All branches", updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView }) {
+function CardViewModule({ appointments, services, transactions, staff, branchRecords = [], branchScope = "All branches", updateStatus, openModal, globalSearch, canManageAppointments, onOpenRoomView, onOpenAppointment }) {
   const [date, setDate] = useState(todayDate());
   const [staffFilter, setStaffFilter] = useState("All staff");
   const [roomFilter, setRoomFilter] = useState("All rooms");
@@ -5797,7 +5905,7 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
                   <StatusBadge status={status} />
                   {canManageAppointments ? (
                     <div className="card-actions">
-                      <button type="button" onClick={() => openModal("appointment", appointment)} title={`View ${appointment.client}'s card`}><Eye size={15} aria-hidden="true" /> View</button>
+                      <button type="button" onClick={() => onOpenAppointment(appointment)} title={`View ${appointment.client}'s card`}><Eye size={15} aria-hidden="true" /> View</button>
                       <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`}><UserCheck size={15} aria-hidden="true" /> Arrive</button>
                       <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`}><Check size={15} aria-hidden="true" /> Done</button>
                     </div>
@@ -5847,7 +5955,7 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
                   <td>
                     {canManageAppointments ? (
                       <div className="card-view-list-actions">
-                        <button type="button" onClick={() => openModal("appointment", appointment)} title={`View ${appointment.client}'s card`} aria-label={`View ${appointment.client}'s card`}>
+                        <button type="button" onClick={() => onOpenAppointment(appointment)} title={`View ${appointment.client}'s card`} aria-label={`View ${appointment.client}'s card`}>
                           <Eye size={16} aria-hidden="true" />
                         </button>
                         <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`} aria-label={`Mark ${appointment.client} as arrived`}>
@@ -7061,6 +7169,7 @@ function AppointmentMonthView({ appointments, selectedDate, selectedId, onSelect
 }
 
 function AppointmentsModule({
+  detailAppointmentId = "",
   appointments,
   clients,
   services,
@@ -7076,6 +7185,8 @@ function AppointmentsModule({
   onPrintReceipt,
   globalSearch,
   onCreateDateChange,
+  onOpenAppointment,
+  onCloseDetail,
 }) {
   const defaultFilters = {
     status: "All",
@@ -7220,7 +7331,7 @@ function AppointmentsModule({
         ? `${customKanbanRows.length} appointments · GMT+8`
       : `${new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(selectedDateObject)} · GMT+8`;
   const periodUnitLabel = periodMode === "Custom" ? "custom range" : periodMode.toLowerCase();
-  const selectedAppointment = appointments.find((item) => item.id === selectedId) ?? null;
+  const selectedAppointment = appointments.find((item) => item.id === (detailAppointmentId || selectedId)) ?? null;
   const selectedBranch = normalizedFilters.branch === "All" ? null : normalizedFilters.branch;
   const scopedStaff = appointmentPractitioners
     .filter((person) => !selectedBranch || person.branch === selectedBranch || person.branch === "All branches");
@@ -7381,6 +7492,42 @@ function AppointmentsModule({
     updateStatus(appointment.id, definition.target);
   }
 
+  function openAppointmentDetails(appointment) {
+    if (onOpenAppointment) onOpenAppointment(appointment);
+    else setSelectedId(appointment.id);
+  }
+
+  if (detailAppointmentId) {
+    if (!selectedAppointment) {
+      return <RecordDetailNotFound label="Appointment" onBack={onCloseDetail} />;
+    }
+    const detailClient = clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client);
+    return (
+      <RecordDetailPageHeader label="Appointments" title={selectedAppointment.client} onBack={onCloseDetail}>
+        <AppointmentDetailsDrawer
+          standalone
+          appointment={selectedAppointment}
+          staffLabel={appointmentStaffLabel(selectedAppointment)}
+          staff={staff}
+          client={detailClient}
+          services={services}
+          transactions={transactions}
+          auditLogs={auditLogs}
+          treatments={treatments}
+          packages={packages}
+          onClose={onCloseDetail}
+          onEdit={(appointment) => openModal("appointment", appointment)}
+          onStatus={updateStatus}
+          onAssign={(appointment, staffName) => onUpdateAppointment({ ...appointment, staff: staffName || "Any available" }, { silent: true })}
+          onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))}
+          onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))}
+          onReminder={(appointment) => prepareReminder(appointment, "SMS")}
+          onEmail={(appointment) => prepareReminder(appointment, "Email")}
+        />
+      </RecordDetailPageHeader>
+    );
+  }
+
   return (
     <section className="appointments-workspace appointment-scheduler-redesign">
       <div className="surface-panel appointment-filter-panel">
@@ -7531,10 +7678,10 @@ function AppointmentsModule({
             </div>
           </div>
           {scheduleFeedback && <div className={`appointment-schedule-feedback ${scheduleFeedback.type}`}><span>{scheduleFeedback.message}</span><button type="button" onClick={() => setScheduleFeedback(null)} aria-label="Dismiss message"><X size={14} /></button></div>}
-          {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={appointmentPractitionerKey} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
-          {activeView === "Week" && <AppointmentWeekView appointments={weekRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
-          {activeView === "Month" && <AppointmentMonthView appointments={monthRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
-          {activeView === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={setSelectedId} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={appointmentPractitionerKey} selectedDate={selectedDate} selectedId={selectedId} onSelect={(id) => { const appointment = appointments.find((item) => item.id === id); if (appointment) openAppointmentDetails(appointment); }} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
+          {activeView === "Week" && <AppointmentWeekView appointments={weekRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={(id) => { const appointment = appointments.find((item) => item.id === id); if (appointment) openAppointmentDetails(appointment); }} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
+          {activeView === "Month" && <AppointmentMonthView appointments={monthRows} selectedDate={selectedDate} selectedId={selectedId} onSelect={(id) => { const appointment = appointments.find((item) => item.id === id); if (appointment) openAppointmentDetails(appointment); }} onOpenDay={(date) => { selectDate(date); setView("Day"); }} />}
+          {activeView === "Rooms" && <AppointmentScheduleGrid resources={roomResources} appointments={dayRows} services={services} getResource={(item) => item.room} selectedDate={selectedDate} selectedId={selectedId} onSelect={(id) => { const appointment = appointments.find((item) => item.id === id); if (appointment) openAppointmentDetails(appointment); }} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
           {activeView === "Timeline" && <AvailabilityTimeline resourceLabel="Doctor / Staff" resources={practitionerNames} appointments={dayRows} services={services} getResource={appointmentPractitionerKey} />}
           {activeView === "Kanban" && (
             <div className="appointment-kanban-workspace">
@@ -7563,7 +7710,7 @@ function AppointmentsModule({
                         const scheduleLabel = resolvedKanbanScope === "Day"
                           ? formatScheduleTime(parseTimeToMinutes(appointment.time))
                           : `${formatDate(appointment.date)} · ${formatScheduleTime(parseTimeToMinutes(appointment.time))}`;
-                        return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => setSelectedId(appointment.id)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {scheduleLabel} · {appointmentStaffLabel(appointment)}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
+                        return <article className={`appointment-kanban-card ${statusClass(appointment.status)}`} draggable key={appointment.id} onDragStart={(event) => { event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverStatus(""); }}><button type="button" onClick={() => openAppointmentDetails(appointment)}><span className="appointment-kanban-card-heading"><span className="appointment-client-initials">{initialsFor(appointment.client)}</span><span><strong>{appointment.client}</strong><small>{appointment.service}</small></span></span><span className="appointment-kanban-meta"><Clock size={14} /> {scheduleLabel} · {appointmentStaffLabel(appointment)}</span><span className="appointment-kanban-payment"><WalletCards size={14} /> {money.format(payment.due)} due</span></button></article>;
                       })}{!items.length && <span className="appointment-kanban-empty">No appointments</span>}</div>
                     </section>
                   );
@@ -7574,7 +7721,7 @@ function AppointmentsModule({
         </div>
       </div>
 
-      {contextMenu && <div className="appointment-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} role="menu"><button type="button" onClick={() => { setSelectedId(contextMenu.appointment.id); setContextMenu(null); }}><Eye size={15} /> View details</button><button type="button" onClick={() => openModal("appointment", contextMenu.appointment)}><Edit3 size={15} /> Edit appointment</button><button type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Checked In")}><UserCheck size={15} /> Check in</button><button type="button" onClick={() => openPayment(paymentDraftForAppointment(contextMenu.appointment))}><CreditCard size={15} /> Collect payment</button><button className="danger" type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button></div>}
+      {contextMenu && <div className="appointment-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} role="menu"><button type="button" onClick={() => { openAppointmentDetails(contextMenu.appointment); setContextMenu(null); }}><Eye size={15} /> View details</button><button type="button" onClick={() => openModal("appointment", contextMenu.appointment)}><Edit3 size={15} /> Edit appointment</button><button type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Checked In")}><UserCheck size={15} /> Check in</button><button type="button" onClick={() => openPayment(paymentDraftForAppointment(contextMenu.appointment))}><CreditCard size={15} /> Collect payment</button><button className="danger" type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button></div>}
 
       <AppointmentDetailsDrawer appointment={selectedAppointment} staffLabel={selectedAppointment ? appointmentStaffLabel(selectedAppointment) : ""} staff={staff} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onAssign={(appointment, staffName) => onUpdateAppointment({ ...appointment, staff: staffName || "Any available" }, { silent: true })} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
 
@@ -7585,6 +7732,7 @@ function AppointmentsModule({
 }
 
 function AppointmentDetailsDrawer({
+  standalone = false,
   appointment,
   staffLabel,
   staff = [],
@@ -7694,8 +7842,8 @@ function AppointmentDetailsDrawer({
 
   return (
     <>
-    <button className="appointment-drawer-backdrop" type="button" onClick={onClose} aria-label="Close appointment details" />
-    <aside className="surface-panel appointment-details-drawer" aria-label="Appointment details">
+    {!standalone && <button className="appointment-drawer-backdrop" type="button" onClick={onClose} aria-label="Close appointment details" />}
+    <aside className={`surface-panel appointment-details-drawer ${standalone ? "is-standalone" : ""}`} aria-label="Appointment details">
       <header className="appointment-details-hero">
         <div className="appointment-patient-heading">
           <ClientAvatar client={client || { fullName: appointment.client }} size="large" />
@@ -7709,7 +7857,7 @@ function AppointmentDetailsDrawer({
             </div>
           </div>
         </div>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="Close appointment details"><X size={18} /></button>
+        {!standalone && <button className="icon-button" type="button" onClick={onClose} aria-label="Close appointment details"><X size={18} /></button>}
       </header>
 
       <div className="appointment-details-body">
@@ -7881,6 +8029,7 @@ function AppointmentContentGroup({ title, rows, empty }) {
 }
 
 function ClientsModule({
+  detailClientId = "",
   clients,
   selectedClientId,
   setSelectedClientId,
@@ -7894,6 +8043,8 @@ function ClientsModule({
   sensitiveAllowed,
   globalSearch,
   notify,
+  onOpenClient,
+  onCloseDetail,
 }) {
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryBranch, setDirectoryBranch] = useState("All branches");
@@ -7903,7 +8054,7 @@ function ClientsModule({
   const [selectedClientIds, setSelectedClientIds] = useState(() => new Set());
   const [profileClientId, setProfileClientId] = useState(null);
   const importInputRef = useRef(null);
-  const profileClient = clients.find((client) => client.id === profileClientId);
+  const profileClient = clients.find((client) => client.id === (detailClientId || profileClientId));
   const profileTreatments = treatments.filter((item) => item.clientId === profileClient?.id);
   const profileAppointments = appointments.filter((item) => item.clientId === profileClient?.id);
   const profileTransactions = transactions.filter((item) => item.client === profileClient?.fullName);
@@ -8014,7 +8165,8 @@ function ClientsModule({
 
   function openClientProfile(client) {
     setSelectedClientId(client.id);
-    setProfileClientId(client.id);
+    if (onOpenClient) onOpenClient(client);
+    else setProfileClientId(client.id);
   }
 
   function toggleVisibleSelection() {
@@ -8081,6 +8233,27 @@ function ClientsModule({
     } catch (error) {
       notify(error.message || "Unable to import that CSV file.", "error");
     }
+  }
+
+  if (detailClientId) {
+    if (!profileClient) return <RecordDetailNotFound label="Client" onBack={onCloseDetail} />;
+    return (
+      <RecordDetailPageHeader label="Clients" title={profileClient.fullName} onBack={onCloseDetail}>
+        <ClientProfileDialog
+          standalone
+          client={profileClient}
+          treatments={profileTreatments}
+          appointments={profileAppointments}
+          transactions={profileTransactions}
+          packages={profilePackages}
+          sensitiveAllowed={sensitiveAllowed}
+          onClose={onCloseDetail}
+          onEdit={() => openModal("client", profileClient)}
+          onAddTreatment={() => openModal("treatment", { clientId: profileClient.id })}
+          onDelete={() => deleteClient(profileClient)}
+        />
+      </RecordDetailPageHeader>
+    );
   }
 
   return (
@@ -8290,6 +8463,7 @@ function ClientsModule({
 }
 
 function ClientProfileDialog({
+  standalone = false,
   client,
   treatments,
   appointments,
@@ -8306,10 +8480,9 @@ function ClientProfileDialog({
     .filter((label, index, labels) => labels.findIndex((item) => normalize(item) === normalize(label)) === index)
     .join(" / ");
 
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${client.fullName} details`}>
-      <div className="modal-card client-profile-panel client-profile-modal">
-        <button className="modal-close" type="button" onClick={onClose} aria-label="Close client details"><X size={18} /></button>
+  const profileContent = (
+      <div className={`modal-card client-profile-panel client-profile-modal ${standalone ? "is-standalone" : ""}`}>
+        {!standalone && <button className="modal-close" type="button" onClick={onClose} aria-label="Close client details"><X size={18} /></button>}
         <div className="client-profile-modal-layout">
           <div className={`client-profile-image-pane ${client.photo ? "has-photo" : "missing-photo"}`}>
             <ClientAvatar client={client} size="large" />
@@ -8355,8 +8528,10 @@ function ClientProfileDialog({
           </div>
         </div>
       </div>
-    </div>
   );
+
+  if (standalone) return profileContent;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${client.fullName} details`}>{profileContent}</div>;
 }
 
 function prepareTreatmentPhotoDataUrl(file) {
@@ -8485,7 +8660,7 @@ function TreatmentPhotoPanel({ record, onUploadPhoto, onDeletePhoto }) {
   );
 }
 
-function TreatmentsModule({ treatments, clients, openModal, globalSearch, onUploadPhoto, onDeletePhoto }) {
+function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openModal, globalSearch, onUploadPhoto, onDeletePhoto, onOpenTreatment, onCloseDetail }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All records");
   const [provider, setProvider] = useState("All providers");
@@ -8533,12 +8708,30 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch, onUplo
     setSelectedId(filteredTreatments[0]?.id ?? "");
   }, [filteredTreatments, selectedId]);
 
-  const selectedRecord = filteredTreatments.find((record) => record.id === selectedId) ?? filteredTreatments[0];
+  const selectedRecord = treatments.find((record) => record.id === detailTreatmentId)
+    ?? filteredTreatments.find((record) => record.id === selectedId)
+    ?? filteredTreatments[0];
   const resetFilters = () => {
     setQuery("");
     setFilter("All records");
     setProvider("All providers");
   };
+
+  if (detailTreatmentId) {
+    if (!selectedRecord) return <RecordDetailNotFound label="Treatment record" onBack={onCloseDetail} />;
+    return (
+      <RecordDetailPageHeader label="Treatments" title={selectedRecord.service || selectedRecord.client} onBack={onCloseDetail}>
+        <TreatmentRecordPage
+          record={selectedRecord}
+          client={clients.find((item) => item.id === selectedRecord.clientId)}
+          followUpDue={followUpDue(selectedRecord)}
+          onEdit={() => openModal("treatment", selectedRecord)}
+          onUploadPhoto={onUploadPhoto}
+          onDeletePhoto={onDeletePhoto}
+        />
+      </RecordDetailPageHeader>
+    );
+  }
 
   return (
     <section className="treatments-workspace">
@@ -8589,7 +8782,7 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch, onUplo
                 const client = clients.find((item) => item.id === record.clientId);
                 const isSelected = record.id === selectedRecord?.id;
                 return (
-                  <button className={`treatment-index-item ${isSelected ? "selected" : ""}`} key={record.id} type="button" onClick={() => setSelectedId(record.id)} aria-pressed={isSelected}>
+                  <button className={`treatment-index-item ${isSelected ? "selected" : ""}`} key={record.id} type="button" onClick={() => onOpenTreatment ? onOpenTreatment(record) : setSelectedId(record.id)} aria-pressed={isSelected}>
                     <ClientAvatar client={client || { fullName: record.client }} size="small" />
                     <span className="treatment-index-copy">
                       <strong>{record.client || "Unlinked client"}</strong>
@@ -8625,7 +8818,7 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch, onUplo
                   </div>
                   <div className="treatment-detail-actions">
                     <StatusBadge status={selectedRecord.consent || "Pending"} />
-                    <button className="secondary-button small" type="button" onClick={() => openModal("treatment", selectedRecord)}><Edit3 size={15} /> Edit record</button>
+                    <button className="secondary-button small" type="button" onClick={() => onOpenTreatment ? onOpenTreatment(selectedRecord) : openModal("treatment", selectedRecord)}><Eye size={15} /> Open record</button>
                   </div>
                 </div>
 
@@ -8674,6 +8867,59 @@ function TreatmentsModule({ treatments, clients, openModal, globalSearch, onUplo
           </div>
           </>
         )}
+      </div>
+    </section>
+  );
+}
+
+function TreatmentRecordPage({ record, client, followUpDue, onEdit, onUploadPhoto, onDeletePhoto }) {
+  return (
+    <section className="surface-panel treatment-detail treatment-record-page">
+      <div className="treatment-detail-header">
+        <div className="record-detail-identity">
+          <ClientAvatar client={client || { fullName: record.client }} size="large" />
+          <div>
+            <span className="treatment-record-id">Record · {record.id}</span>
+            <h3>{record.service || "Treatment record"}</h3>
+            <p>{record.client} · {formatDate(record.date)}</p>
+          </div>
+        </div>
+        <div className="treatment-detail-actions">
+          <StatusBadge status={record.consent || "Pending"} />
+          <button className="secondary-button small" type="button" onClick={onEdit}><Edit3 size={15} /> Edit record</button>
+        </div>
+      </div>
+
+      <div className="treatment-clinical-summary">
+        <article><span>Provider</span><strong>{record.provider || "Not assigned"}</strong></article>
+        <article><span>Treatment room</span><strong>{record.room || "Not recorded"}</strong></article>
+        <article><span>Follow-up</span><strong className={followUpDue ? "due" : ""}>{record.followUp ? formatDate(record.followUp) : "Not scheduled"}</strong></article>
+        <article><span>Client feedback</span><strong>{record.satisfaction || "Not recorded"}</strong></article>
+      </div>
+
+      <div className="treatment-note-grid">
+        <section><div><ClipboardCheck size={17} /><strong>Pre-treatment assessment</strong></div><p>{record.preNotes || "No pre-treatment assessment was recorded."}</p></section>
+        <section><div><Activity size={17} /><strong>Outcome & clinical notes</strong></div><p>{record.outcome || record.postNotes || "No outcome notes were recorded."}</p></section>
+      </div>
+
+      <div className="treatment-documentation-grid">
+        <section>
+          <div className="treatment-section-heading"><FileText size={17} /><div><strong>Procedure traceability</strong><span>Products, devices, and lot details</span></div></div>
+          <dl>
+            <div><dt>Consumables</dt><dd>{record.consumables || "None recorded"}</dd></div>
+            <div><dt>Device settings</dt><dd>{record.deviceSettings || "Not applicable"}</dd></div>
+            <div><dt>Lot / batch</dt><dd>{record.batch || "Not recorded"}</dd></div>
+          </dl>
+        </section>
+        <TreatmentPhotoPanel key={record.id} record={record} onUploadPhoto={onUploadPhoto} onDeletePhoto={onDeletePhoto} />
+      </div>
+
+      <div className={`treatment-followup-banner ${followUpDue ? "due" : ""}`}>
+        <CalendarDays size={19} aria-hidden="true" />
+        <div>
+          <strong>{record.followUp ? (followUpDue ? "Follow-up requires attention" : "Follow-up scheduled") : "No follow-up scheduled"}</strong>
+          <span>{record.followUp ? `${formatDate(record.followUp)} · ${record.postNotes || "Review the client's response and aftercare."}` : "Add a follow-up date when continued care is required."}</span>
+        </div>
       </div>
     </section>
   );
@@ -8873,6 +9119,7 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
 }
 
 function LeadsModule({
+  detailLeadId = "",
   leads,
   clients,
   appointments,
@@ -8894,6 +9141,8 @@ function LeadsModule({
   globalSearch,
   isBooting,
   notify,
+  onOpenLead,
+  onCloseDetail,
 }) {
   const [storedTab, setStoredTab] = useStoredState("leads-directory-tab", "all");
   const [leadQuery, setLeadQuery] = useState("");
@@ -8961,7 +9210,9 @@ function LeadsModule({
     });
   }, [activeTabConfig.statuses, filters, globalSearch, leadQuery, normalizedLeads, sort]);
 
-  const selectedLead = normalizedLeads.find((lead) => lead.id === selectedLeadId) ?? filteredLeads[0] ?? normalizedLeads[0];
+  const selectedLead = detailLeadId
+    ? normalizedLeads.find((lead) => lead.id === detailLeadId) ?? null
+    : normalizedLeads.find((lead) => lead.id === selectedLeadId) ?? filteredLeads[0] ?? normalizedLeads[0];
   const menuLead = actionMenu ? normalizedLeads.find((lead) => lead.id === actionMenu.leadId) : null;
   const quickActionLead = quickAction ? normalizedLeads.find((lead) => lead.id === quickAction.leadId) : null;
   const pageCount = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
@@ -9076,7 +9327,8 @@ function LeadsModule({
   function openLeadDetails(lead) {
     setSelectedLeadId(lead.id);
     setDetailFocus("");
-    setDetailsOpen(true);
+    if (onOpenLead) onOpenLead(lead);
+    else setDetailsOpen(true);
     setActionMenu(null);
   }
 
@@ -9198,6 +9450,42 @@ function LeadsModule({
     } catch {
       notify(`Copy this inquiry link: ${captureUrl}`, "warning");
     }
+  }
+
+  if (detailLeadId) {
+    if (!selectedLead) return <RecordDetailNotFound label="Lead" onBack={onCloseDetail} />;
+    return (
+      <RecordDetailPageHeader label="Leads" title={selectedLead.name} onBack={onCloseDetail}>
+        <LeadDetailPanel
+          lead={selectedLead}
+          clients={clients}
+          appointments={appointments}
+          services={services}
+          staff={staff}
+          branches={branches}
+          lossReason={lossReason}
+          setLossReason={setLossReason}
+          quickNote={quickNote}
+          setQuickNote={setQuickNote}
+          followUpDraft={followUpDraft}
+          setFollowUpDraft={setFollowUpDraft}
+          bookingDraft={bookingDraft}
+          setBookingDraft={setBookingDraft}
+          conversionNotes={conversionNotes}
+          setConversionNotes={setConversionNotes}
+          busyAction={busyAction}
+          runLeadAction={runLeadAction}
+          changeStage={changeStage}
+          addActivity={addActivity}
+          scheduleFollowUp={scheduleFollowUp}
+          bookAppointment={bookAppointment}
+          convertLead={convertLead}
+          mergeLead={mergeLead}
+          openModal={openModal}
+          focusBooking={detailFocus === "booking"}
+        />
+      </RecordDetailPageHeader>
+    );
   }
 
   return (
@@ -9989,7 +10277,7 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify }) {
+function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify, onOpenStaff, onCloseDetail }) {
   const canInvite = canManageOrganization(session.role);
   const [invitations, setInvitations] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -9999,6 +10287,7 @@ function StaffModule({ staff, branchRecords = [], session, setSession, openModal
   const [showInvite, setShowInvite] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const selectedStaff = staff.find((person) => person.id === detailStaffId) ?? null;
   const roles = Object.keys(roleAccess).filter((role) => isBusinessOwner(session.role) || !isBusinessOwner(role));
   const clinicBranches = branchRecords.map((branch) => branch.name);
   const defaultMemberBranch = clinicBranches.includes(session.branch) ? session.branch : clinicBranches[0] || "";
@@ -10065,6 +10354,20 @@ function StaffModule({ staff, branchRecords = [], session, setSession, openModal
       applyAuditLog(result.auditLog); notify(action === "revoke" ? "Invitation revoked." : "Invitation resent.");
     } catch (actionError) { notify(actionError.message, "error"); }
   }
+
+  if (detailStaffId) {
+    if (!selectedStaff) return <RecordDetailNotFound label="Staff member" onBack={onCloseDetail} />;
+    return (
+      <RecordDetailPageHeader label="Staff Management" title={selectedStaff.name} onBack={onCloseDetail}>
+        <StaffRecordPage
+          person={selectedStaff}
+          account={accountByStaffId.get(selectedStaff.id)}
+          onClock={() => toggleAttendance(selectedStaff.id)}
+          onEdit={() => openModal("staff", selectedStaff)}
+        />
+      </RecordDetailPageHeader>
+    );
+  }
   return (
     <section className="module-grid staff-management-grid">
       <div className="surface-panel">
@@ -10078,7 +10381,7 @@ function StaffModule({ staff, branchRecords = [], session, setSession, openModal
             </div>
           )}
           columns={[
-            { key: "name", label: "Name", className: "staff-name-column", render: (row) => <div className="staff-name-with-photo"><ClientAvatar client={{ fullName: row.name, photo: row.photo }} size="small" /><strong>{row.name}</strong></div> },
+            { key: "name", label: "Name", className: "staff-name-column", render: (row) => <button className="staff-record-link" type="button" onClick={() => onOpenStaff?.(row)}><ClientAvatar client={{ fullName: row.name, photo: row.photo }} size="small" /><strong>{row.name}</strong></button> },
             { key: "role", label: "Role" },
             { key: "branch", label: "Branch" },
             { key: "schedule", label: "Schedule" },
@@ -10113,6 +10416,7 @@ function StaffModule({ staff, branchRecords = [], session, setSession, openModal
               className: "staff-actions-column",
               render: (row) => (
                 <div className="inline-actions">
+                  <button type="button" onClick={() => onOpenStaff?.(row)}><Eye size={15} /> View</button>
                   <button type="button" onClick={() => toggleAttendance(row.id)}><Clock size={15} /> Clock</button>
                   <button type="button" onClick={() => openModal("staff", row)}><Edit3 size={15} /> Edit</button>
                 </div>
@@ -10184,6 +10488,42 @@ function StaffModule({ staff, branchRecords = [], session, setSession, openModal
           </>
         )}
       </form></div>}
+    </section>
+  );
+}
+
+function StaffRecordPage({ person, account, onClock, onEdit }) {
+  const services = splitList(person.services);
+  return (
+    <section className="surface-panel staff-record-page">
+      <header className="staff-record-hero">
+        <ClientAvatar client={{ fullName: person.name, photo: person.photo }} size="large" />
+        <div>
+          <p className="eyebrow">{person.role || "Clinic team"}</p>
+          <h2>{person.name}</h2>
+          <span>{person.branch || "Branch not assigned"}</span>
+        </div>
+        <div className="staff-record-actions">
+          <button className="secondary-button" type="button" onClick={onClock}><Clock size={16} /> Update attendance</button>
+          <button className="primary-button" type="button" onClick={onEdit}><Edit3 size={16} /> Edit profile</button>
+        </div>
+      </header>
+
+      <div className="record-grid staff-record-summary">
+        <RecordItem label="Status" value={person.status} />
+        <RecordItem label="Attendance" value={person.attendance} />
+        <RecordItem label="Schedule" value={person.schedule} />
+        <RecordItem label="Employment date" value={formatDate(person.employmentDate)} />
+        <RecordItem label="Phone" value={person.phone} />
+        <RecordItem label="Commission" value={`${Number(person.commissionRate || 0)}%${person.commissionType ? ` · ${person.commissionType}` : ""}`} />
+        <RecordItem label="Login" value={account?.email || "Not connected"} />
+        <RecordItem label="Login role" value={account?.role || "Not connected"} />
+      </div>
+
+      <section className="staff-record-services">
+        <div><Sparkles size={18} /><strong>Assigned services</strong></div>
+        <div>{services.length ? services.map((service) => <span key={service}>{service}</span>) : <small>No services assigned.</small>}</div>
+      </section>
     </section>
   );
 }
