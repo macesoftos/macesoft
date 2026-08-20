@@ -157,6 +157,7 @@ const demoAccess = {
   enabled: String(import.meta.env.VITE_DEMO_MODE || "").trim().toLowerCase() === "true",
   email: String(import.meta.env.VITE_DEMO_EMAIL || "demo@macesoft.app").trim(),
   password: String(import.meta.env.VITE_DEMO_PASSWORD || "MaceDemo2026!"),
+  productName: String(import.meta.env.VITE_DEMO_PRODUCT_NAME || "MaceSoft ClinicOS Demo").trim(),
 };
 const retiredSensitiveStorageKeys = [
   "clients", "appointments", "services", "inventory", "transactions", "treatments", "packages",
@@ -2492,7 +2493,7 @@ function App() {
                 </button>
               )}
               <PageHeader
-                eyebrow={demoAccess.enabled ? "MACE ClinicOS · Demo workspace" : "MACE ClinicOS"}
+                eyebrow={demoAccess.enabled ? `${demoAccess.productName} · Staging` : "MACE ClinicOS"}
                 title={activeLabel}
                 subtitle={
                   activeModule === "leads"
@@ -3918,7 +3919,14 @@ function LoginScreen({ notice, onLogin, settings }) {
     <main className="login-page">
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
-          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+          {demoAccess.enabled ? (
+            <div className="demo-login-wordmark" aria-label={demoAccess.productName}>
+              <strong>MaceSoft</strong>
+              <span>ClinicOS Demo</span>
+            </div>
+          ) : (
+            <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+          )}
           <div>
             <p className="eyebrow">{demoAccess.enabled ? "Interactive sales demo" : "Secure role login"}</p>
             <h2>Sign in to your workspace</h2>

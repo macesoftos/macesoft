@@ -103,6 +103,14 @@ try {
   await prisma.client.update({ where: { id: "cl-andrea" }, data: { lastVisit: dateInManila(-14), nextVisit: dateInManila(), preferredStaff: "Dr. Mace" } });
   await prisma.client.update({ where: { id: "cl-trisha" }, data: { lastVisit: dateInManila(-1), nextVisit: dateInManila(), preferredStaff: "Nurse Bea" } });
 
+  const appSetting = await prisma.systemSetting.findUnique({ where: { key: "app" } });
+  const settingValue = JSON.parse(appSetting?.value || "{}");
+  await prisma.systemSetting.upsert({
+    where: { key: "app" },
+    create: { key: "app", value: JSON.stringify({ ...settingValue, productName: "MaceSoft ClinicOS Demo", receiptFooter: "Staging demo · Fictional sample data only" }) },
+    update: { value: JSON.stringify({ ...settingValue, productName: "MaceSoft ClinicOS Demo", receiptFooter: "Staging demo · Fictional sample data only" }) },
+  });
+
   await prisma.auditLog.upsert({
     where: { id: "audit-demo-seed" },
     create: { id: "audit-demo-seed", time: new Date().toLocaleString("en-PH"), actor: "Demo setup", role: "System", area: "Setup", action: "Sales demo refreshed", details: `Fictional sample records loaded into ${schema}.` },

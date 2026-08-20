@@ -5487,6 +5487,30 @@ td .inline-actions { flex-wrap: nowrap; }
   margin: 0 auto 64px;
 }
 
+.demo-login-wordmark {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  margin: 0 auto 64px;
+  color: var(--ink);
+  text-align: center;
+}
+
+.demo-login-wordmark strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2.55rem;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+
+.demo-login-wordmark span {
+  color: var(--wine);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
 .login-card {
   display: flex;
   flex-direction: column;

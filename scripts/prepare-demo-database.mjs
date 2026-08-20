@@ -38,7 +38,7 @@ function run(command, args, stage) {
     child.on("exit", (code) => {
       if (code === 0) {
         console.log(JSON.stringify({ event: "demo_prepare_stage_completed", stage }));
-        resolve();
+        resolve(undefined);
       } else {
         reject(new Error(`${stage} exited with code ${code}.`));
       }
