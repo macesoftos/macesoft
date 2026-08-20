@@ -359,9 +359,10 @@
 .pos-page-chips {
   min-width: 0;
   display: flex;
+  align-items: center;
   justify-content: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .pos-page-chips button {
@@ -373,6 +374,13 @@
   border-color: var(--wine);
   background: var(--wine);
   color: #fff;
+}
+
+.pos-page-ellipsis {
+  flex: 0 0 18px;
+  color: var(--muted);
+  font-weight: 900;
+  text-align: center;
 }
 
 .pos-page-count {

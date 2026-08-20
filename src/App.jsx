@@ -5644,7 +5644,13 @@ function POSModule({
 }
 
 function POSCatalogPagination({ page, pageCount, start, end, total, onPageChange }) {
-  const pageNumbers = Array.from({ length: pageCount }, (_, index) => index + 1);
+  const pageItems = pageCount <= 5
+    ? Array.from({ length: pageCount }, (_, index) => index + 1)
+    : page <= 3
+      ? [1, 2, 3, 4, "ellipsis-end", pageCount]
+      : page >= pageCount - 2
+        ? [1, "ellipsis-start", pageCount - 3, pageCount - 2, pageCount - 1, pageCount]
+        : [1, "ellipsis-start", page - 1, page, page + 1, "ellipsis-end", pageCount];
 
   return (
     <nav className="pos-catalog-pagination" aria-label="POS catalog pagination">
@@ -5658,16 +5664,19 @@ function POSCatalogPagination({ page, pageCount, start, end, total, onPageChange
         Previous
       </button>
       <div className="pos-page-chips" aria-label="Catalog pages">
-        {pageNumbers.map((pageNumber) => (
+        {pageItems.map((item) => typeof item === "number" ? (
           <button
-            className={pageNumber === page ? "active" : ""}
-            key={pageNumber}
+            className={item === page ? "active" : ""}
+            key={item}
             type="button"
-            onClick={() => onPageChange(pageNumber)}
-            aria-current={pageNumber === page ? "page" : undefined}
+            onClick={() => onPageChange(item)}
+            aria-current={item === page ? "page" : undefined}
+            aria-label={`Page ${item}`}
           >
-            {pageNumber}
+            {item}
           </button>
+        ) : (
+          <span className="pos-page-ellipsis" key={item} aria-hidden="true">…</span>
         ))}
       </div>
       <button
