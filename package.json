@@ -32,7 +32,9 @@
     "assets:cleanup": "node scripts/cleanup-assets.mjs",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "node server/seed.js"
+    "db:seed": "node server/seed.js",
+    "db:seed:demo": "node scripts/seed-demo.mjs",
+    "demo:prepare": "node scripts/prepare-demo-database.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

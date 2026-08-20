@@ -95,6 +95,7 @@ export async function verifyMarketingBuilder(page, expect) {
   await page.goto("/marketing/campaigns/new");
   await expect(page.getByTestId("marketing-workspace")).toBeVisible();
   await expect(page.getByRole("heading", { name: /Summer Skin Reset/i })).toBeVisible();
+  await page.getByLabel("Campaign branch").selectOption({ label: "Mace Davao" });
 
   const canvasImage = page.locator(".marketing-email-block.type-image").first();
   const imageTransfer = await imageFileTransfer(page);
@@ -143,7 +144,7 @@ export async function verifyMarketingBuilder(page, expect) {
   await imageSettings.getByRole("button", { name: "Browse Library" }).click();
   const mediaDialog = page.getByRole("dialog", { name: "Content studio" });
   await expect(mediaDialog.getByRole("heading", { name: "Content studio", exact: true })).toBeVisible();
-  await expect(mediaDialog.getByRole("button", { name: /canvas-drop-e2e\.png/i }).first()).toBeVisible();
+  await expect(mediaDialog.getByRole("button", { name: /canvas-drop-e2e\.png/i }).first()).toBeVisible({ timeout: 15_000 });
   await expect(mediaDialog.getByRole("button", { name: "Insert image", exact: true })).toBeEnabled();
   const mediaStacking = await page.evaluate(() => {
     const dialog = document.querySelector(".marketing-media-dialog");
@@ -303,7 +304,9 @@ export async function verifyMarketingBuilder(page, expect) {
   expect(scheduleBody.campaign.deliveryStatus).toBe("Queued");
   await expect(page.getByText("Campaign scheduled and added to the delivery queue.", { exact: true })).toBeVisible();
 
+  const campaignListBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
   await page.goto("/marketing/campaigns");
+  expect((await campaignListBootstrap).status()).toBe(200);
   const campaignRow = page.getByRole("row").filter({ hasText: "Summer Skin Reset" });
   await expect(campaignRow).toBeVisible();
   await expect(campaignRow.getByText("Scheduled", { exact: true })).toBeVisible();

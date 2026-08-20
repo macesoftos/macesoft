@@ -153,6 +153,11 @@ import {
 } from "./lib/api.js";
 
 const storageKey = (key) => `mace-clinicos-${key}`;
+const demoAccess = {
+  enabled: String(import.meta.env.VITE_DEMO_MODE || "").trim().toLowerCase() === "true",
+  email: String(import.meta.env.VITE_DEMO_EMAIL || "demo@macesoft.app").trim(),
+  password: String(import.meta.env.VITE_DEMO_PASSWORD || "MaceDemo2026!"),
+};
 const retiredSensitiveStorageKeys = [
   "clients", "appointments", "services", "inventory", "transactions", "treatments", "packages",
   "gift-certificates", "leads", "staff", "expenses", "discounts", "sms-templates", "campaigns",
@@ -2487,7 +2492,7 @@ function App() {
                 </button>
               )}
               <PageHeader
-                eyebrow="MACE ClinicOS"
+                eyebrow={demoAccess.enabled ? "MACE ClinicOS · Demo workspace" : "MACE ClinicOS"}
                 title={activeLabel}
                 subtitle={
                   activeModule === "leads"
@@ -3915,9 +3920,15 @@ function LoginScreen({ notice, onLogin, settings }) {
         <form className="login-card" onSubmit={submit}>
           <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
           <div>
-            <p className="eyebrow">Secure role login</p>
+            <p className="eyebrow">{demoAccess.enabled ? "Interactive sales demo" : "Secure role login"}</p>
             <h2>Sign in to your workspace</h2>
           </div>
+          {demoAccess.enabled && (
+            <div className="demo-access-card">
+              <div><strong>Explore with sample data</strong><span>No real clinic or patient records are used here.</span></div>
+              <button className="secondary-button" type="button" onClick={() => { setEmail(demoAccess.email); setPassword(demoAccess.password); }}>Use demo account</button>
+            </div>
+          )}
           <label>
             <span>Email</span>
             <input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />

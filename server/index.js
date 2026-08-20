@@ -72,6 +72,17 @@ import {
   sanitizeMarketingHtml,
 } from "./marketingHtml.js";
 import {
+  normalizeMarketingMediaName,
+  normalizeMarketingMediaSelection,
+  serializeMarketingMediaAsset,
+} from "./marketingMedia.js";
+import {
+  approveMarketingState,
+  marketingApprovalRequired,
+  marketingDeliveryStates,
+  scheduleMarketingState,
+} from "./marketingDelivery.js";
+import {
   marketingAudienceMemberAsClient,
   marketingAudienceMemberMatchesSegment,
   normalizeMarketingAudienceMember,
@@ -95,17 +106,6 @@ import {
   sanitizeInvitationMessage,
   uniqueStrings,
 } from "./invitations.js";
-import {
-  normalizeMarketingMediaName,
-  normalizeMarketingMediaSelection,
-  serializeMarketingMediaAsset,
-} from "./marketingMedia.js";
-import {
-  approveMarketingState,
-  marketingApprovalRequired,
-  marketingDeliveryStates,
-  scheduleMarketingState,
-} from "./marketingDelivery.js";
 import {
   createMarketingSurveyToken,
   marketingSurveyResponseId,

@@ -398,6 +398,10 @@ function audienceRecipients(clients, members, segment, channel, branch = "") {
     .sort((left, right) => String(left.fullName || left.name || left.email || left.mobile || "").localeCompare(String(right.fullName || right.name || right.email || right.mobile || "")));
 }
 
+function campaignDraftSignature(value) {
+  return JSON.stringify({ ...value, updatedAt: undefined });
+}
+
 function campaignDate(campaign) {
   const value = campaign.scheduledAt || campaign.sentAt || campaign.updatedAt || campaign.createdAt;
   if (!value) return "—";
@@ -1414,7 +1418,9 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   const draftRef = useRef(draft);
   const saveChainRef = useRef(Promise.resolve());
   const saveRequestRef = useRef(0);
-  const lastSavedSignatureRef = useRef(draft.id ? JSON.stringify({ ...draft, updatedAt: undefined }) : "");
+  const autosaveTimerRef = useRef(null);
+  const finalizingScheduleRef = useRef(false);
+  const lastSavedSignatureRef = useRef(draft.id ? campaignDraftSignature(draft) : "");
   const htmlFileInput = useRef(null);
   const selectedBlock = findEmailBlock(draft.blocks, selectedId) ?? draft.blocks[0];
   const recipients = useMemo(
@@ -1437,7 +1443,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
     () => previewPersonalizedHtml(draft.editorMode === "html" ? importedHtmlResult.html : visualEmailHtml),
     [draft.editorMode, importedHtmlResult.html, visualEmailHtml],
   );
-  const draftSignature = useMemo(() => JSON.stringify({ ...draft, updatedAt: undefined }), [draft]);
+  const draftSignature = useMemo(() => campaignDraftSignature(draft), [draft]);
 
   useEffect(() => { draftRef.current = draft; campaignIdRef.current = draft.id || campaignIdRef.current; }, [draft]);
 
@@ -1754,15 +1760,16 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   }
 
   const saveDraft = useCallback(({ silent = false, statusOverride = "" } = {}) => {
-    const snapshot = draftRef.current;
-    const pendingCampaignId = campaignIdRef.current || snapshot.id || createBlockId("cmp");
+    const currentDraft = draftRef.current;
+    const pendingCampaignId = campaignIdRef.current || currentDraft.id || createBlockId("cmp");
     campaignIdRef.current = pendingCampaignId;
+    const snapshot = { ...currentDraft, id: pendingCampaignId };
     const requestId = ++saveRequestRef.current;
-    const signature = JSON.stringify({ ...snapshot, id: pendingCampaignId, updatedAt: undefined });
+    const submittedSignature = campaignDraftSignature(snapshot);
     setSaveState("Saving…");
     const run = async () => {
-      const campaignSnapshot = { ...snapshot, id: pendingCampaignId };
-      const generatedHtml = snapshot.channel === "SMS" ? "" : buildVisualEmailHtml(campaignSnapshot, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin);
+      if (!snapshot.branch) throw new Error("Choose an active branch for this campaign.");
+      const generatedHtml = snapshot.channel === "SMS" ? "" : buildVisualEmailHtml(snapshot, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin);
       const emailResult = snapshot.channel === "SMS"
         ? { html: "", error: "", removed: 0 }
         : sanitizeImportedEmailHtml(snapshot.editorMode === "html" ? snapshot.html : generatedHtml);
@@ -1798,11 +1805,25 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
       if (savedCampaign?.id) {
         campaignPersistedRef.current = true;
         campaignIdRef.current = savedCampaign.id;
-        setDraft((current) => ({ ...current, id: savedCampaign.id, status: savedCampaign.status || current.status, updatedAt: savedCampaign.updatedAt || new Date().toISOString() }));
-      }
-      if (requestId === saveRequestRef.current) {
-        lastSavedSignatureRef.current = signature;
-        setSaveState(`Saved to campaign · ${new Date().toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`);
+        const latest = draftRef.current;
+        const latestSubmittedShape = { ...latest, id: pendingCampaignId };
+        const hasNewerChanges = campaignDraftSignature(latestSubmittedShape) !== submittedSignature;
+        const next = {
+          ...latest,
+          id: savedCampaign.id,
+          status: hasNewerChanges ? latest.status : (savedCampaign.status || latest.status),
+          updatedAt: hasNewerChanges ? latest.updatedAt : (savedCampaign.updatedAt || new Date().toISOString()),
+        };
+        draftRef.current = next;
+        setDraft(next);
+        if (requestId === saveRequestRef.current) {
+          if (hasNewerChanges) {
+            setSaveState("Unsaved changes");
+          } else {
+            lastSavedSignatureRef.current = campaignDraftSignature(next);
+            setSaveState(`Saved to campaign · ${new Date().toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`);
+          }
+        }
       }
       if (!silent) notify?.("Campaign saved.");
       return savedCampaign;
@@ -1817,10 +1838,14 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   }, [approvalRequired, notify, onSaveCampaign, setDraft, settings]);
 
   useEffect(() => {
-    if (!draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
+    if (finalizingScheduleRef.current || !draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;
     setSaveState("Unsaved changes");
     const timer = window.setTimeout(() => { void saveDraft({ silent: true }).catch(() => undefined); }, 1100);
-    return () => window.clearTimeout(timer);
+    autosaveTimerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (autosaveTimerRef.current === timer) autosaveTimerRef.current = null;
+    };
   }, [draft.name, draft.segment, draftSignature, saveDraft]);
 
   useEffect(() => {
@@ -1839,6 +1864,10 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
       return;
     }
     if (draft.step === 4) {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
       if (!draft.scheduledAt || Number.isNaN(new Date(draft.scheduledAt).getTime())) {
         notify?.("Choose a valid delivery date and time.", "error");
         return;
@@ -1847,24 +1876,26 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
         notify?.("Choose a delivery time in the future.", "error");
         return;
       }
+      finalizingScheduleRef.current = true;
       try {
         const savedCampaign = await saveDraft({ statusOverride: "Draft" });
         if (!onScheduleCampaign) throw new Error("Campaign scheduling is not available right now.");
         const result = await onScheduleCampaign(savedCampaign.id, new Date(draft.scheduledAt).toISOString());
-        setDraft((current) => {
-          const next = {
-            ...current,
-            managerApproval: result.campaign.managerApproval,
-            scheduledAt: localDateTimeInput(result.campaign.scheduledAt || current.scheduledAt),
-            status: result.campaign.status,
-            updatedAt: result.campaign.updatedAt || new Date().toISOString(),
-          };
-          draftRef.current = next;
-          lastSavedSignatureRef.current = JSON.stringify({ ...next, updatedAt: undefined });
-          return next;
-        });
+        const next = {
+          ...draftRef.current,
+          id: result.campaign.id || savedCampaign.id || draftRef.current.id,
+          managerApproval: result.campaign.managerApproval,
+          scheduledAt: localDateTimeInput(result.campaign.scheduledAt || draftRef.current.scheduledAt),
+          status: result.campaign.status,
+          updatedAt: result.campaign.updatedAt || new Date().toISOString(),
+        };
+        draftRef.current = next;
+        lastSavedSignatureRef.current = campaignDraftSignature(next);
+        setDraft(next);
+        finalizingScheduleRef.current = false;
         notify?.(result.approvalRequired ? "Campaign submitted to an administrator for approval." : "Campaign scheduled and added to the delivery queue.");
       } catch (error) {
+        finalizingScheduleRef.current = false;
         notify?.(error.message || "Unable to schedule this campaign.", "error");
         return;
       }

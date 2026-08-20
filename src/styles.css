@@ -5510,6 +5510,35 @@ td .inline-actions { flex-wrap: nowrap; }
   line-height: 1.5;
 }
 
+.demo-access-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(119, 51, 66, 0.22);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(119, 51, 66, 0.09), rgba(196, 154, 95, 0.12));
+}
+
+.demo-access-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.demo-access-card strong {
+  color: var(--wine);
+  font-size: 0.88rem;
+}
+
+.demo-access-card span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.demo-access-card .secondary-button {
+  width: 100%;
+}
+
 .login-card label {
   display: grid;
   gap: 6px;
