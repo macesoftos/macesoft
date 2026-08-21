@@ -4,14 +4,13 @@ import {
   createFaceTrackChallenge,
   enrollFaceTrackProfile,
   loadFaceTrackOverview,
-  recordFaceTrackAttendance,
   reviewFaceTrackCorrection,
   reviewFaceTrackOvertime,
   saveFaceTrackPolicy,
   submitFaceTrackCorrection,
 } from "../lib/api.js";
-import { isAdmin } from "../organizationRoles.js";
 import "./facetrack-attendance.css";
+import "./facetrack-clock-flow.css";
 
 const MODEL_URL = "/facetrack-models";
 
@@ -38,7 +37,7 @@ function Status({ value }) {
   return <span className={`facetrack-status ${String(value).toLowerCase().replaceAll("_", "-")}`}>{String(value).replaceAll("_", " ")}</span>;
 }
 
-function CameraDialog({ mode, staffId, staffName, onClose, onComplete }) {
+function CameraDialog({ staffId, staffName, onClose, onComplete }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const faceApiRef = useRef(null);
@@ -101,17 +100,15 @@ function CameraDialog({ mode, staffId, staffName, onClose, onComplete }) {
   }
 
   async function verify() {
-    if (mode === "enroll" && !consent) return setError("Employee consent is required before biometric enrollment.");
+    if (!consent) return setError("Employee consent is required before biometric enrollment.");
     setBusy(true);
     setError("");
     try {
-      const challenge = await createFaceTrackChallenge(mode === "enroll" ? "ENROLL" : "CLOCK");
+      const challenge = await createFaceTrackChallenge("ENROLL");
       const descriptors = await captureSamples();
       setPhase("Verifying identity securely…");
-      const result = mode === "enroll"
-        ? await enrollFaceTrackProfile({ staffId, descriptors, challengeId: challenge.challengeId, consent: true })
-        : await recordFaceTrackAttendance({ descriptors, challengeId: challenge.challengeId, idempotencyKey: crypto.randomUUID() });
-      setPhase(mode === "enroll" ? "Face profile enrolled." : `${result.action === "TIME_IN" ? "Time In" : "Time Out"} recorded.`);
+      const result = await enrollFaceTrackProfile({ staffId, descriptors, challengeId: challenge.challengeId, consent: true });
+      setPhase("Face profile enrolled.");
       window.setTimeout(() => onComplete(result), 500);
     } catch (nextError) {
       setError(nextError.message || "Face verification failed.");
@@ -124,7 +121,7 @@ function CameraDialog({ mode, staffId, staffName, onClose, onComplete }) {
   return (
     <div className="facetrack-dialog-backdrop" role="presentation">
       <section className="facetrack-camera-dialog" role="dialog" aria-modal="true" aria-label="Face verification">
-        <header><div><span className="facetrack-kicker">{mode === "enroll" ? "Biometric enrollment" : "Attendance verification"}</span><h2>{staffName || "FaceTrack Attendance"}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X /></button></header>
+        <header><div><span className="facetrack-kicker">Biometric enrollment</span><h2>{staffName || "FaceTrack Attendance"}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X /></button></header>
         <div className="facetrack-video-wrap">
           <video muted playsInline ref={videoRef} />
           <div className="facetrack-face-guide" aria-hidden="true" />
@@ -132,8 +129,8 @@ function CameraDialog({ mode, staffId, staffName, onClose, onComplete }) {
         </div>
         <p className="facetrack-camera-instruction">{phase}</p>
         {error && <div className="facetrack-error"><AlertCircle size={17} /> {error}</div>}
-        {mode === "enroll" && <label className="facetrack-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I confirm that the employee understands and consents to encrypted face-template processing for attendance.</span></label>}
-        <button className="facetrack-primary" disabled={!ready || busy} type="button" onClick={verify}><Camera size={18} /> {busy ? "Checking live face…" : mode === "enroll" ? "Enroll face profile" : "Verify and record time"}</button>
+        <label className="facetrack-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I confirm that the employee understands and consents to encrypted face-template processing for attendance.</span></label>
+        <button className="facetrack-primary" disabled={!ready || busy} type="button" onClick={verify}><Camera size={18} /> {busy ? "Checking live face…" : "Enroll face profile"}</button>
         <small>Raw camera images are processed on this device and are not uploaded or stored.</small>
       </section>
     </div>
@@ -235,7 +232,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
     { id: "attendance", label: "Timesheets", icon: Clock },
     { id: "requests", label: "Corrections", icon: FilePenLine, count: pendingRequests },
     { id: "profiles", label: "Face profiles", icon: UserCheck },
-    ...(data.admin ? [{ id: "kiosk", label: "Clinic iPad", icon: TabletSmartphone, external: true }] : []),
+    ...(data.admin ? [{ id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true }] : []),
     ...(data.admin ? [
       { id: "settings", label: "Policies", icon: Settings },
       { id: "audit", label: "Audit trail", icon: ShieldCheck },
@@ -265,11 +262,21 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
 
         {tab === "dashboard" && <>
           <section className="facetrack-hero">
-            <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Verified attendance</span><h2>Accurate time, ready for payroll.</h2><p>Face-verified Time In and Time Out with automatic late, overtime, and approval tracking.</p></div>
+            <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Face recognition attendance</span><h2>Scan a face to Time In or Time Out.</h2><p>The first successful face scan records Time In. The employee's next successful scan records Time Out automatically.</p></div>
             <div className="facetrack-hero-actions">
-              {!isAdmin(session.role) && session.staffId && <button className="facetrack-primary light" disabled={!myEnrolled} onClick={() => setCamera({ mode: "clock", staffId: session.staffId, staffName: session.name })} type="button"><Camera /> {myEnrolled ? "Time In / Time Out" : "Enrollment required"}</button>}
-              {!isAdmin(session.role) && session.staffId && !myEnrolled && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Enrollment help</button>}
+              {data.admin && <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button>}
+              {data.admin && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Manage face profiles</button>}
+              {!data.admin && <div className="facetrack-kiosk-only"><TabletSmartphone size={20} /><span>Use the registered office face scanner to Time In or Time Out. Personal devices cannot record attendance.</span></div>}
             </div>
+          </section>
+          <section className="facetrack-clock-flow" aria-label="How face recognition attendance works">
+            <header><span className="facetrack-kicker">How employees clock in and out</span><h3>One face scanner, automatic attendance action</h3></header>
+            <ol>
+              <li><span>1</span><div><strong>Enroll once</strong><p>An administrator securely enrolls the employee under Face profiles with their consent.</p></div></li>
+              <li><span>2</span><div><strong>Look at the camera</strong><p>No name selection is shown. FaceTrack recognizes the employee from the clinic's enrolled face profiles.</p></div></li>
+              <li><span>3</span><div><strong>Attendance is recorded</strong><p>No manual choice is needed: the first verified scan is Time In and the next verified scan is Time Out.</p></div></li>
+            </ol>
+            {data.admin && <footer><TabletSmartphone size={18} /><span>Register the office device once, then leave the face scanner open for employees.</span><button onClick={() => window.location.assign("/attendance/kiosk")} type="button">Open scanner</button></footer>}
           </section>
           <section className="facetrack-stats">
             <article><UserCheck /><div><strong>{stats.clockedIn || 0}</strong><span>Clocked in</span></div></article>
@@ -298,7 +305,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
 
       {tab === "audit" && data.admin && <section className="facetrack-table-panel"><header><div><span className="facetrack-kicker">Append-only history</span><h2>FaceTrack audit trail</h2></div><span>{data.auditEntries?.length || 0} entries</span></header><div className="facetrack-table-scroll"><table><thead><tr><th>Date and time</th><th>Employee</th><th>Actor</th><th>Action</th><th>Reason / comment</th></tr></thead><tbody>{data.auditEntries?.length ? data.auditEntries.map((entry) => <tr key={entry.id}><td>{dateTime(entry.createdAt)}</td><td><strong>{entry.attendanceRecord?.staff?.name}</strong><span>{entry.attendanceRecord?.workDate}</span></td><td><strong>{entry.actorName}</strong><span>{entry.actorRole}</span></td><td>{entry.action.startsWith("CLOCK:") ? "FACE VERIFIED CLOCK EVENT" : entry.action.replaceAll("_", " ")}</td><td>{entry.reason || entry.comment || "—"}</td></tr>) : <tr><td className="facetrack-empty" colSpan="5">No audit entries yet.</td></tr>}</tbody></table></div></section>}
 
-      {camera && <CameraDialog {...camera} onClose={() => setCamera(null)} onComplete={(result) => { setCamera(null); notify(result.action ? `${result.action === "TIME_IN" ? "Time In" : "Time Out"} recorded successfully.` : "Face profile enrolled."); refresh(); }} />}
+      {camera && <CameraDialog {...camera} onClose={() => setCamera(null)} onComplete={() => { setCamera(null); notify("Face profile enrolled."); refresh(); }} />}
       {correction && <CorrectionDialog record={correction} onClose={() => setCorrection(null)} onSaved={() => { setCorrection(null); notify("Correction request sent for administrator approval."); refresh(); }} />}
       </div>
     </div>

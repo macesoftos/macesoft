@@ -11,7 +11,7 @@ import { ORGANIZATION_MANAGER_ROLES } from "../organizationRoles.js";
 import "./facetrack-kiosk.css";
 
 const MODEL_URL = "/facetrack-models";
-const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Branch Manager"]);
+const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Manager"]);
 
 function displayTime(value) {
   return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(value);
@@ -36,6 +36,18 @@ export default function FaceTrackKiosk({ session }) {
   const [now, setNow] = useState(new Date());
   const [setup, setSetup] = useState({ name: "Clinic entrance iPad", branch: session?.branch === "All branches" ? "" : session?.branch || "", pin: "" });
   const [saving, setSaving] = useState(false);
+  const kioskBranches = session?.access?.scope === "all"
+    ? session?.access?.branches || []
+    : [session?.access?.activeBranch].filter(Boolean);
+  const availableBranches = kioskBranches
+    .filter((branch) => branch.branchStatus === "Active")
+    .map((branch) => ({ id: branch.id, name: branch.name }));
+
+  useEffect(() => {
+    if (!setup.branch && availableBranches.length) {
+      setSetup((current) => ({ ...current, branch: availableBranches[0].name }));
+    }
+  }, [availableBranches, setup.branch]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -172,14 +184,14 @@ export default function FaceTrackKiosk({ session }) {
 
   if (view === "setup") {
     const canSetUp = session && ADMIN_ROLES.has(session.role);
-    return <main className="kiosk-setup-page"><section className="kiosk-setup-card"><span className="kiosk-logo"><TabletSmartphone /></span><p className="kiosk-kicker">FaceTrack shared iPad</p><h1>Set up clinic kiosk</h1><p>Register this iPad to one clinic branch. Employees will not need to sign in.</p>{canSetUp ? <form onSubmit={registerKiosk}><label><span>Device name</span><input required value={setup.name} onChange={(event) => setSetup({ ...setup, name: event.target.value })} /></label><label><span>Clinic branch</span><input required value={setup.branch} onChange={(event) => setSetup({ ...setup, branch: event.target.value })} placeholder="Example: Mace Davao" /></label><label><span>6-digit administrator PIN</span><input required inputMode="numeric" pattern="[0-9]{6}" maxLength="6" type="password" value={setup.pin} onChange={(event) => setSetup({ ...setup, pin: event.target.value.replace(/\D/g, "") })} /></label>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}<button disabled={saving} type="submit"><ShieldCheck />{saving ? "Registering iPad..." : "Register and open kiosk"}</button></form> : <div className="kiosk-setup-signin"><LockKeyhole /><p>An Admin, Business Owner, or Branch Manager must sign in before registering this iPad.</p><a href="/attendance">Go to administrator sign in</a></div>}<small>After setup, enable iPad Guided Access to keep this screen open.</small></section></main>;
+    return <main className="kiosk-setup-page"><section className="kiosk-setup-card"><span className="kiosk-logo"><TabletSmartphone /></span><p className="kiosk-kicker">FaceTrack shared iPad</p><h1>Set up clinic kiosk</h1><p>Register this iPad to one clinic branch. Employees will not need to sign in.</p>{canSetUp ? <form onSubmit={registerKiosk}><label><span>Device name</span><input required value={setup.name} onChange={(event) => setSetup({ ...setup, name: event.target.value })} /></label><label><span>Clinic branch</span><select required value={setup.branch} onChange={(event) => setSetup({ ...setup, branch: event.target.value })}><option value="" disabled>Select an authorized branch</option>{availableBranches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label><label><span>6-digit administrator PIN</span><input required inputMode="numeric" pattern="[0-9]{6}" maxLength="6" type="password" value={setup.pin} onChange={(event) => setSetup({ ...setup, pin: event.target.value.replace(/\D/g, "") })} /></label>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}<button disabled={saving || !availableBranches.length} type="submit"><ShieldCheck />{saving ? "Registering iPad..." : "Register and open kiosk"}</button></form> : <div className="kiosk-setup-signin"><LockKeyhole /><p>An Admin, Business Owner, or Branch Manager must sign in before registering this iPad.</p><a href="/attendance">Go to administrator sign in</a></div>}<small>After setup, enable iPad Guided Access to keep this screen open.</small></section></main>;
   }
 
   return <main className={`facetrack-kiosk ${view}`}>
     <header className="kiosk-header"><div className="kiosk-device"><span><TabletSmartphone /></span><div><strong>{device?.name}</strong><small>{device?.branch} · {enrolledEmployees} enrolled</small></div></div><div className="kiosk-clock"><strong>{displayTime(now)}</strong><span>{displayDate(now)}</span></div><button type="button" onClick={exitKiosk}><LockKeyhole /> Admin</button></header>
     <section className="kiosk-body">
       <div className="kiosk-camera-card"><div className="kiosk-video-wrap"><video muted playsInline ref={videoRef} /><div className="kiosk-face-guide" />{!cameraReady && <div className="kiosk-camera-placeholder"><Camera /><strong>Camera is off</strong><span>Tap Start camera to allow access.</span></div>}{view === "scanning" && <div className="kiosk-scanning"><span /><strong>Checking live face</strong></div>}</div><p>{phase}</p></div>
-      <aside className="kiosk-action-panel"><span className="kiosk-kicker">Shared attendance</span><h1>Time In / Time Out</h1><p>Stand directly in front of the iPad. FaceTrack will recognize you and select the correct attendance action.</p><div className="kiosk-privacy"><ShieldCheck /><span>Live face template only. Raw camera images are not uploaded or stored.</span></div>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}{cameraReady ? <button className="kiosk-scan-button" disabled={view === "scanning"} type="button" onClick={verifyFace}><UserCheck />{view === "scanning" ? "Verifying..." : "Verify face"}</button> : <button className="kiosk-scan-button" type="button" onClick={startCamera}><Camera />Start camera</button>}<small>Only employees enrolled for {device?.branch} can use this kiosk.</small></aside>
+      <aside className="kiosk-action-panel"><span className="kiosk-kicker">Face recognition attendance</span><h1>Time In / Time Out</h1><p>Stand directly in front of the iPad. FaceTrack recognizes who you are—there is no name list. Your first recognized scan records Time In; your next recognized scan records Time Out.</p><div className="kiosk-privacy"><ShieldCheck /><span>Live face template only. Raw camera images are not uploaded or stored.</span></div>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}{cameraReady ? <button className="kiosk-scan-button" disabled={view === "scanning"} type="button" onClick={verifyFace}><UserCheck />{view === "scanning" ? "Recognizing employee..." : "Recognize face — Time In / Out"}</button> : <button className="kiosk-scan-button" type="button" onClick={startCamera}><Camera />Start face scanner</button>}<small>No employee selection or manual attendance button is needed. Only employees enrolled for {device?.branch} can use this kiosk.</small></aside>
     </section>
     {view === "success" && result && <section className="kiosk-success" aria-live="assertive"><span className="kiosk-success-icon"><CheckCircle2 /></span>{result.employee.photo ? <img src={result.employee.photo} alt="" /> : <span className="kiosk-result-avatar">{result.employee.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>}<p>{result.employee.name}</p><h2>{result.action === "TIME_IN" ? "Time In recorded" : "Time Out recorded"}</h2><div><Clock3 /><strong>{displayTime(new Date(result.occurredAt))}</strong></div><small>{result.employee.branch} · Returning to scanner...</small></section>}
   </main>;

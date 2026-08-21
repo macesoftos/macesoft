@@ -10,6 +10,7 @@ import {
   assertRequestedModules,
   assertRequestedPermissions,
   assignableInvitationRoles,
+  canInviteAcrossBranches,
   canInviteUsers,
   canManageInvitation,
   invitationScopeWhere,
@@ -41,6 +42,8 @@ test("owners, explicitly authorized managers, and employees have the correct inv
   assert.equal(canInviteUsers(manager), true);
   assert.equal(canInviteUsers({ role: "Branch Manager", access: { permissions: [] } }), false);
   assert.equal(canInviteUsers({ role: "Employee", access: { permissions: ["staff.invite"] } }), false);
+  assert.equal(canInviteAcrossBranches(manager), false);
+  assert.equal(canInviteAcrossBranches({ ...manager, access: { ...manager.access, permissions: ["staff.invite", "staff.invite_cross_branch"] } }), true);
 
   assert.ok(assignableInvitationRoles(owner, roleAccess).includes("Super Admin"));
   assert.ok(assignableInvitationRoles(owner, roleAccess).includes("Branch Manager"));
@@ -72,11 +75,11 @@ test("managers cannot grant permissions or modules they do not possess", () => {
   );
   assert.throws(
     () => assertRequestedModules(owner, "Branch Manager", ["reports"], [davao], roleAccess),
-    /disabled/i,
+    /not available|disabled/i,
   );
   assert.deepEqual(
-    assertRequestedModules(manager, "Employee", ["my-workspace", "appointments", "clients"], [davao], roleAccess),
-    ["my-workspace", "appointments", "clients"],
+    assertRequestedModules(manager, "Employee", ["pos"], [davao], roleAccess),
+    ["pos"],
   );
 });
 
@@ -84,13 +87,35 @@ test("invitation queries and mutations remain organization and branch scoped", (
   assert.deepEqual(invitationScopeWhere(owner), { organizationId: "org-mace" });
   assert.deepEqual(invitationScopeWhere(manager), {
     organizationId: "org-mace",
-    branches: { some: { branchId: "branch-davao" } },
+    branches: { some: { branchId: { in: ["branch-davao"] } } },
   });
   const ownedInvitation = { organizationId: "org-mace", invitedById: "manager", branches: [{ branchId: "branch-davao" }] };
   assert.equal(canManageInvitation(manager, ownedInvitation), true);
   assert.equal(canManageInvitation({ ...manager, id: "other-manager" }, ownedInvitation), false);
   assert.equal(canManageInvitation(manager, { ...ownedInvitation, organizationId: "org-other" }), false);
   assert.equal(canManageInvitation(manager, { ...ownedInvitation, branches: [{ branchId: "branch-other" }] }), false);
+
+  const crossBranchAdmin = {
+    ...manager,
+    role: "Admin",
+    access: { ...manager.access, permissions: ["staff.invite", "staff.invite_cross_branch"] },
+  };
+  assert.deepEqual(invitationScopeWhere(crossBranchAdmin), {
+    organizationId: "org-mace",
+    branches: { some: {} },
+  });
+  assert.equal(canManageInvitation(crossBranchAdmin, {
+    ...ownedInvitation,
+    invitedById: crossBranchAdmin.id,
+    branches: [{ branchId: "branch-makati" }],
+  }), true);
+});
+
+test("branch roles expose POS only except delegated administration surfaces", () => {
+  assert.deepEqual(roleAccess.Employee, ["pos"]);
+  assert.deepEqual(roleAccess.Cashier, ["pos"]);
+  assert.deepEqual(roleAccess.Admin, ["pos", "staff", "facetrack-attendance"]);
+  assert.deepEqual(roleAccess["Branch Manager"], ["pos", "staff", "facetrack-attendance"]);
 });
 
 test("email and optional messages are normalized without executable markup", () => {
@@ -120,4 +145,12 @@ test("the secure invitation migration preserves old invitations and adds normali
   assert.match(migration, /ALTER COLUMN "tokenHash" DROP NOT NULL/);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
   assert.doesNotMatch(migration, /DELETE FROM "UserInvitation"/);
+});
+
+test("the branch POS migration clamps old access and delegates cross-branch invitations to admins", () => {
+  const migration = readFileSync(new URL("../prisma/migrations/20260821143000_branch_pos_access/migration.sql", import.meta.url), "utf8");
+  assert.match(migration, /UPDATE "BranchMembership"[\s\S]*\["pos"\]/);
+  assert.match(migration, /staff\.invite_cross_branch/);
+  assert.doesNotMatch(migration, /INSERT INTO "BranchMembership"/);
+  assert.doesNotMatch(migration, /DELETE FROM/);
 });

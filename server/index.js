@@ -88,6 +88,7 @@ import {
   scheduleMarketingState,
 } from "./marketingDelivery.js";
 import {
+  BRANCH_ADMIN_REQUIRED_PERMISSIONS,
   INVITATION_DELIVERY_STATUSES,
   INVITATION_PERMISSION_LABELS,
   INVITATION_PERMISSIONS,
@@ -98,6 +99,7 @@ import {
   assertRequestedModules,
   assertRequestedPermissions,
   assignableInvitationRoles,
+  canInviteAcrossBranches,
   canInviteUsers,
   canManageInvitation,
   invitationScopeWhere,
@@ -1583,6 +1585,7 @@ const resourceConfigs = {
     orderBy: [{ updatedAt: "desc" }, { fullName: "asc" }],
     normalize: normalizeClientPayload,
     branchField: "branch",
+    posSelect: { id: true, fullName: true, mobile: true, branch: true },
   },
   appointments: {
     delegate: "appointment",
@@ -1605,6 +1608,10 @@ const resourceConfigs = {
     normalize: normalizeServicePayload,
     serialize: serializeService,
     serviceBranches: true,
+    posSelect: {
+      id: true, name: true, category: true, duration: true, price: true,
+      branches: true, active: true, pos: true,
+    },
   },
   inventory: {
     delegate: "inventoryItem",
@@ -1614,6 +1621,10 @@ const resourceConfigs = {
     orderBy: [{ item: "asc" }],
     normalize: normalizeInventoryPayload,
     branchField: "branch",
+    posSelect: {
+      id: true, item: true, sku: true, brand: true, category: true, type: true,
+      stock: true, branch: true, price: true, image: true,
+    },
   },
   treatments: {
     delegate: "treatment",
@@ -1638,6 +1649,10 @@ const resourceConfigs = {
     branchField: "branch",
     relatedClient: true,
     allowLegacyOrganizationScope: true,
+    posSelect: {
+      id: true, name: true, clientId: true, client: true, sessions: true, used: true,
+      expires: true, branch: true, transferable: true, status: true, price: true,
+    },
   },
   giftCertificates: {
     delegate: "giftCertificate",
@@ -1648,6 +1663,10 @@ const resourceConfigs = {
     normalize: normalizeGiftCertificatePayload,
     branchField: "branch",
     allowLegacyOrganizationScope: true,
+    posSelect: {
+      id: true, code: true, client: true, branch: true, balance: true,
+      expires: true, status: true,
+    },
   },
   leads: {
     delegate: "lead",
@@ -1680,6 +1699,7 @@ const resourceConfigs = {
     beforeWrite: validateLinkedStaffIdentity,
     afterWrite: syncStaffBranchAssignment,
     branchField: "branch",
+    posSelect: { id: true, name: true, role: true, branch: true, status: true },
   },
   expenses: {
     delegate: "expense",
@@ -1697,6 +1717,10 @@ const resourceConfigs = {
     label: (record) => record.name,
     orderBy: [{ name: "asc" }],
     normalize: normalizeDiscountPayload,
+    posSelect: {
+      id: true, name: true, type: true, value: true, permission: true,
+      applicable: true, expiry: true, active: true, usage: true,
+    },
   },
   smsTemplates: {
     delegate: "smsTemplate",
@@ -1758,10 +1782,15 @@ function configForResource(resource) {
 
 async function listResource(resource, actor = null) {
   const config = configForResource(resource);
-  if (actor && !moduleAllowed(actor, config.module, roleAccess)) return [];
+  const directModuleAllowed = !actor || moduleAllowed(actor, config.module, roleAccess);
+  const posSupportAllowed = Boolean(actor && config.posSelect && moduleAllowed(actor, "pos", roleAccess));
+  if (!directModuleAllowed && !posSupportAllowed) return [];
   let where = {};
   if (actor) {
     if (config.branchField) where = branchWhere(actor, config.branchField);
+    if (config.branchField && config.allowLegacyOrganizationScope && actor.access?.scope === "branch") {
+      where = { OR: [where, { [config.branchField]: "All branches" }] };
+    }
     if (config.stableBranchField) {
       where = actor.access?.scope === "all"
         ? { OR: [
@@ -1774,11 +1803,10 @@ async function listResource(resource, actor = null) {
       where = { clientRecord: { is: branchWhere(actor) } };
     }
   }
-  const rows = await prisma[config.delegate].findMany({
-    where,
-    orderBy: config.orderBy,
-    include: config.include,
-  });
+  const query = { where, orderBy: config.orderBy };
+  if (!directModuleAllowed && posSupportAllowed) query.select = config.posSelect;
+  else if (config.include) query.include = config.include;
+  const rows = await prisma[config.delegate].findMany(query);
 
   const scopedRows = actor && config.serviceBranches ? filterServiceBranches(rows, actor) : rows;
   return config.serialize ? scopedRows.map(config.serialize) : scopedRows;
@@ -3261,7 +3289,7 @@ async function invitationBranches(actor, role, payload, fallbackBranches = []) {
   if (!branchIds.length) branchIds = fallbackBranches.map((item) => item.branchId || item.id).filter(Boolean);
   if (!branchIds.length) throw apiError("Choose at least one active clinic branch.", 400);
 
-  if (!canManageOrganization(actor.role)) {
+  if (!canManageOrganization(actor.role) && !canInviteAcrossBranches(actor)) {
     const activeBranchId = actor.access?.activeBranchId;
     if (branchIds.length !== 1 || branchIds[0] !== activeBranchId) {
       throw apiError("You can only invite members to your currently active branch.", 403);
@@ -3286,8 +3314,14 @@ async function normalizeInvitationInput(actor, payload, current = null) {
     name: payload?.name ?? current?.name,
   });
   const branches = await invitationBranches(actor, role, payload, current?.branches || []);
-  const permissions = assertRequestedPermissions(actor, payload?.permissions ?? parseJsonList(current?.permissions));
+  const requestedPermissions = payload?.permissions ?? parseJsonList(current?.permissions);
+  const permissions = assertRequestedPermissions(actor, role === "Admin"
+    ? [...new Set([...requestedPermissions, ...BRANCH_ADMIN_REQUIRED_PERMISSIONS])]
+    : requestedPermissions);
   const modules = assertRequestedModules(actor, role, payload?.modules ?? (current ? parseJsonList(current.modules) : undefined), branches, roleAccess);
+  if (!canManageOrganization(role) && !modules.includes("pos")) {
+    throw apiError("Branch users must retain POS access.", 400);
+  }
   return {
     ...names,
     role,
@@ -3685,7 +3719,7 @@ app.get("/api/invitations", asyncRoute(async (request, response) => {
       orderBy: { createdAt: "desc" },
     }),
     prisma.branch.findMany({
-      where: canManageOrganization(actor.role)
+      where: canManageOrganization(actor.role) || canInviteAcrossBranches(actor)
         ? { organizationId: actor.organizationId, status: "Active" }
         : { id: actor.access?.activeBranchId, organizationId: actor.organizationId, status: "Active" },
       include: { modules: true },
@@ -3703,6 +3737,7 @@ app.get("/api/invitations", asyncRoute(async (request, response) => {
     capabilities: {
       canInvite: true,
       canInviteManagers: canManageOrganization(actor.role) || actorPermissions(actor).includes("staff.invite_managers"),
+      canSelectBranches: canManageOrganization(actor.role) || canInviteAcrossBranches(actor),
       organizationManager: canManageOrganization(actor.role),
       roles,
       roleModules: Object.fromEntries(roles.map((role) => [role, roleAccess[role] || []])),
@@ -3723,12 +3758,25 @@ app.post("/api/invitations", invitationSendLimiter, asyncRoute(async (request, r
   if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.");
   const input = await normalizeInvitationInput(actor, request.body);
   await expireInvitations();
-  const account = await prisma.account.findUnique({ where: { email }, select: { id: true, organizationId: true } });
+  const account = await prisma.account.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      organizationId: true,
+      role: true,
+      organizationWideAccess: true,
+      branchMemberships: { where: { status: "Active" }, select: { branchId: true } },
+    },
+  });
   if (account) {
-    if (account.organizationId === actor.organizationId) {
-      throw apiError("This user already belongs to the organization. Use Manage access to add a branch or change their role.", 409);
+    if (account.organizationId !== actor.organizationId) throw apiError("This email cannot be invited to this organization.", 409);
+    if (canManageOrganization(account.role) || account.organizationWideAccess) {
+      throw apiError("This user already has organization-wide access.", 409);
     }
-    throw apiError("This email cannot be invited to this organization.", 409);
+    const activeBranchIds = new Set(account.branchMemberships.map((membership) => membership.branchId));
+    if (input.branches.every((branch) => activeBranchIds.has(branch.id))) {
+      throw apiError("This user already has access to the selected branch. Choose another branch.", 409);
+    }
   }
   const duplicate = await prisma.userInvitation.findFirst({
     where: { organizationId: actor.organizationId, email, status: "Pending" },
@@ -3974,6 +4022,19 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
   );
   const invitationPermissions = assertRequestedPermissions({ role: "Owner" }, parseJsonList(invitation.permissions));
   const result = await prisma.$transaction(async (tx) => {
+    if (existingAccount) {
+      const existingAssignment = await tx.branchMembership.findFirst({
+        where: {
+          accountId: existingAccount.id,
+          branchId: { in: invitation.branches.map((assignment) => assignment.branchId) },
+          status: "Active",
+        },
+        select: { id: true },
+      });
+      if (existingAssignment) {
+        throw apiError("This account already has access to one of the invited branches.", 409);
+      }
+    }
     const acceptedClaim = await tx.userInvitation.updateMany({
       where: {
         id: invitation.id,
@@ -4018,12 +4079,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
       account = await tx.account.update({
         where: { id: account.id },
         data: {
-          role: invitation.role,
-          organizationWideAccess: canManageOrganization(invitation.role),
-          organizationModules: canManageOrganization(invitation.role) ? jsonText(invitationModules, []) : account.organizationModules,
-          branch: primaryBranch?.name || account.branch,
           lastBranchId: primaryBranch?.id || account.lastBranchId,
-          status: "Active",
         },
       });
     }
@@ -4036,14 +4092,14 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
           role: invitation.role,
           permissions: jsonText(invitationPermissions, []),
           modules: jsonText(invitationModules, []),
-          isPrimary: branchRecord.id === primaryBranch?.id,
+          isPrimary: !existingAccount && branchRecord.id === primaryBranch?.id,
         },
         update: {
           role: invitation.role,
           permissions: jsonText(invitationPermissions, []),
           modules: jsonText(invitationModules, []),
           status: "Active",
-          isPrimary: branchRecord.id === primaryBranch?.id,
+          isPrimary: !existingAccount && branchRecord.id === primaryBranch?.id,
         },
       });
     }
@@ -4172,16 +4228,22 @@ app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
   if (branchChanged && request.body?.confirmAccessChange !== true) {
     throw apiError("Confirm the branch access change before saving.", 400);
   }
-  const permissions = assertRequestedPermissions(actor, request.body?.permissions ?? (
+  const requestedPermissions = request.body?.permissions ?? (
     target.branchMemberships.find((membership) => membership.status === "Active")?.permissions
       ? parseJsonList(target.branchMemberships.find((membership) => membership.status === "Active").permissions)
       : []
-  ));
+  );
+  const permissions = assertRequestedPermissions(actor, nextRole === "Admin"
+    ? [...new Set([...requestedPermissions, ...BRANCH_ADMIN_REQUIRED_PERMISSIONS])]
+    : requestedPermissions);
   const requestedModules = request.body?.modules ?? (() => {
     const stored = target.branchMemberships.find((membership) => membership.status === "Active")?.modules;
     return stored && parseJsonList(stored).length ? parseJsonList(stored) : undefined;
   })();
   const modules = assertRequestedModules(actor, nextRole, requestedModules, branches, roleAccess);
+  if (!canManageOrganization(nextRole) && !modules.includes("pos")) {
+    throw apiError("Branch users must retain POS access.", 400);
+  }
   const primaryBranch = branches[0] || null;
 
   const result = await prisma.$transaction(async (tx) => {

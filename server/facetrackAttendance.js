@@ -4,7 +4,7 @@ import express from "express";
 import { ORGANIZATION_MANAGER_ROLES } from "../src/organizationRoles.js";
 import { accountMatchesStaffIdentity, branchWhere, canAccessBranch } from "./accessControl.js";
 
-const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Branch Manager"]);
+const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Manager"]);
 const MODULE_ID = "facetrack-attendance";
 const verificationAttempts = new Map();
 const kioskVerificationAttempts = new Map();
@@ -362,8 +362,8 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const account = requireAccount(request);
     enforceVerificationRateLimit(request);
     const purpose = clean(request.body?.purpose).toUpperCase();
-    if (!["ENROLL", "CLOCK"].includes(purpose)) throw apiError("Unsupported verification purpose.");
-    if (purpose === "ENROLL") requireAdmin(request);
+    if (purpose !== "ENROLL") throw apiError("Attendance verification is available only on the registered office device.", 403);
+    requireAdmin(request);
     const challenge = await prisma.faceTrackChallenge.create({
       data: { accountId: account.id, purpose, nonceHash: createHash("sha256").update(randomBytes(32)).digest("hex"), expiresAt: new Date(Date.now() + 2 * 60_000) },
     });
@@ -391,52 +391,9 @@ export function createFaceTrackAttendanceRouter(prisma) {
     response.status(201).json({ profile });
   }));
 
-  router.post("/clock", asyncRoute(async (request, response) => {
-    const account = requireAccount(request);
-    enforceVerificationRateLimit(request);
-    const staff = await matchingStaffForAccount(prisma, account);
-    if (!staff) throw apiError("This account is not linked to its matching employee profile.", 409);
-    const idempotencyKey = clean(request.body?.idempotencyKey);
-    if (idempotencyKey.length < 12) throw apiError("A valid attendance request key is required.");
-    const descriptor = averageDescriptors(request.body?.descriptors);
-    const [profile, policy] = await Promise.all([
-      prisma.faceTrackProfile.findUnique({ where: { staffId: staff.id } }),
-      policyFor(prisma),
-    ]);
-    if (!policy.enabled) throw apiError("FaceTrack Attendance is currently disabled.", 503);
-    if (!profile?.active) throw apiError("Enroll your face profile before recording attendance.", 409);
-    if (!staff || staff.status === "Inactive") throw apiError("This employee profile is not active.", 403);
-    const distance = euclideanDistance(decryptDescriptor(profile.encryptedDescriptor), descriptor);
-    if (distance > policy.matchThreshold) throw apiError("Face not recognized. Ask an administrator to verify your enrollment.", 403);
-    const confidence = Math.max(0, Math.min(1, 1 - distance));
-    const now = new Date();
-    const schedule = scheduleFor(staff, policy, now);
-    const record = await prisma.$transaction(async (tx) => {
-      await consumeChallenge(tx, account.id, request.body?.challengeId, "CLOCK");
-      const replay = await tx.faceTrackAuditEntry.findFirst({ where: { action: `CLOCK:${idempotencyKey}` } });
-      if (replay) throw apiError("This attendance request was already processed.", 409);
-      const openRecord = await tx.faceTrackAttendanceRecord.findFirst({ where: { staffId: staff.id, timeOut: null }, orderBy: { scheduledStart: "desc" } });
-      const existing = openRecord || await tx.faceTrackAttendanceRecord.findUnique({ where: { staffId_workDate: { staffId: staff.id, workDate: schedule.workDate } } });
-      let updated;
-      let action;
-      if (!existing) {
-        action = "TIME_IN";
-        const base = { staffId: staff.id, branch: staff.branch, timezone: policy.timezone, ...schedule, originalTimeIn: now, timeIn: now, timeInConfidence: confidence };
-        updated = await tx.faceTrackAttendanceRecord.create({ data: { ...base, ...calculatedFields(base, policy) } });
-      } else if (!existing.timeOut) {
-        if (now.getTime() - new Date(existing.timeIn).getTime() < 60_000) throw apiError("Please wait before recording Time Out.", 409);
-        action = "TIME_OUT";
-        const base = { ...existing, originalTimeOut: now, timeOut: now, timeOutConfidence: confidence };
-        updated = await tx.faceTrackAttendanceRecord.update({ where: { id: existing.id }, data: { originalTimeOut: now, timeOut: now, timeOutConfidence: confidence, ...calculatedFields(base, policy) } });
-      } else {
-        throw apiError("Today’s Time In and Time Out are already complete.", 409);
-      }
-      await tx.faceTrackProfile.update({ where: { id: profile.id }, data: { lastVerifiedAt: now } });
-      await tx.staffMember.update({ where: { id: staff.id }, data: { attendance: action === "TIME_IN" ? "Clocked in" : "Clocked out" } });
-      await tx.faceTrackAuditEntry.create({ data: { attendanceRecordId: updated.id, actorAccountId: account.id, actorName: account.name, actorRole: account.role, action: `CLOCK:${idempotencyKey}`, finalValues: JSON.stringify({ action, occurredAt: now, confidence }) } });
-      return { ...updated, action, staff };
-    });
-    response.status(201).json({ record: serializeRecord(record), action: record.action, confidence });
+  router.post("/clock", asyncRoute(async (request) => {
+    requireAccount(request);
+    throw apiError("Attendance must be recorded on the registered office face scanner.", 403);
   }));
 
   router.get("/kiosks", asyncRoute(async (request, response) => {
@@ -458,20 +415,28 @@ export function createFaceTrackAttendanceRouter(prisma) {
     if (!branch || branch === "All branches") throw apiError("Assign the kiosk to one clinic branch.");
     if (!canAccessBranch(admin, branch)) throw apiError("You can only register a kiosk for an authorized branch.", 403);
     if (!/^\d{6}$/.test(pin)) throw apiError("Create a 6-digit administrator PIN for this kiosk.");
+    const activeDevice = await prisma.faceTrackKioskDevice.findFirst({ where: { branch, active: true }, select: { id: true } });
+    if (activeDevice) throw apiError("This branch already has an active attendance iPad. Disable it before registering another device.", 409);
     const branchStaff = await prisma.staffMember.count({ where: { branch } });
     if (!branchStaff) throw apiError("The selected branch does not have any employees.", 409);
     const token = randomBytes(32).toString("base64url");
-    const device = await prisma.faceTrackKioskDevice.create({
-      data: {
-        name,
-        branch,
-        tokenHash: kioskTokenHash(token),
-        pinHash: hashSecret(pin),
-        createdById: admin.id,
-        createdByName: admin.name,
-      },
-      select: { id: true, name: true, branch: true, active: true, createdAt: true },
-    });
+    let device;
+    try {
+      device = await prisma.faceTrackKioskDevice.create({
+        data: {
+          name,
+          branch,
+          tokenHash: kioskTokenHash(token),
+          pinHash: hashSecret(pin),
+          createdById: admin.id,
+          createdByName: admin.name,
+        },
+        select: { id: true, name: true, branch: true, active: true, createdAt: true },
+      });
+    } catch (error) {
+      if (error?.code === "P2002") throw apiError("This branch already has an active attendance device.", 409);
+      throw error;
+    }
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     if (request.authSession?.id) await prisma.authSession.delete({ where: { id: request.authSession.id } });
     response.setHeader("Set-Cookie", [

@@ -50,7 +50,8 @@ test("branch manager receives only active memberships and enabled branch modules
   const access = resolveAccountBranchAccess(account, "branch-makati", roleAccess);
   const actor = { ...account, branch: access.activeBranch.name, access };
   assert.deepEqual(access.branches.map((branch) => branch.id), ["branch-davao", "branch-makati"]);
-  assert.equal(access.modules.includes("my-workspace"), true);
+  assert.equal(access.modules.includes("pos"), true);
+  assert.equal(access.modules.includes("staff"), true);
   assert.equal(access.modules.includes("reports"), false);
   assert.equal(moduleAllowed(actor, "reports", roleAccess), false);
   assert.equal(canAccessBranch(actor, "Mace Makati"), true);
@@ -70,6 +71,8 @@ test("employees cannot manufacture branch access with an unknown request header"
     branchMemberships: [{ branch: davao, branchId: davao.id, role: "Employee", status: "Active", isPrimary: true, permissions: "[]" }],
   };
   assert.throws(() => resolveAccountBranchAccess(account, "branch-makati", roleAccess), /do not have access/i);
+  const access = resolveAccountBranchAccess(account, "branch-davao", roleAccess);
+  assert.deepEqual(access.modules, ["pos"]);
 });
 
 test("branch codes are canonical and safe for case-insensitive uniqueness", () => {

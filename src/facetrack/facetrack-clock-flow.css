@@ -1,0 +1,110 @@
+.facetrack-clock-flow {
+  background: #fff;
+  border: 1px solid #e8dde2;
+  border-radius: 18px;
+  padding: 20px;
+}
+
+.facetrack-clock-flow header h3 {
+  margin: 5px 0 0;
+  font-size: 1.15rem;
+}
+
+.facetrack-clock-flow ol {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.facetrack-clock-flow li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #faf6f8;
+}
+
+.facetrack-clock-flow li > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #771f42;
+  color: #fff;
+  font-weight: 800;
+}
+
+.facetrack-clock-flow li strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.facetrack-clock-flow li p {
+  margin: 5px 0 0;
+  color: #71666d;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.facetrack-clock-flow footer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f1e5ea;
+  color: #5d263b;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.facetrack-clock-flow footer button {
+  margin-left: auto;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: #771f42;
+  color: #fff;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.facetrack-kiosk-only {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 320px;
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.facetrack-kiosk-only svg {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .facetrack-clock-flow ol {
+    grid-template-columns: 1fr;
+  }
+
+  .facetrack-clock-flow footer {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .facetrack-clock-flow footer button {
+    width: 100%;
+    margin-left: 0;
+  }
+}
