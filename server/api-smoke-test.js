@@ -942,6 +942,57 @@ try {
   });
   assert(impossibleCheckout.response.status === 409, "POS insufficient-stock validation failed");
 
+  const manualDiscountOpenCart = await jsonRequest("/api/pos/carts", {
+    clientId: "",
+    client: "Walk-in",
+    branch: "Mace Davao",
+    staff: "Dr. Mace",
+    items: [],
+    discountId: "",
+    manualDiscountType: "Fixed amount",
+    manualDiscountValue: 250,
+    saleDate: payrollToday,
+    testMode: false,
+  });
+  assert(manualDiscountOpenCart.response.status === 201, "manual-discount open cart create failed");
+  assert(manualDiscountOpenCart.payload.cart.manualDiscountType === "Fixed amount", "open POS cart did not preserve manual discount type");
+  assert(manualDiscountOpenCart.payload.cart.manualDiscountValue === 250, "open POS cart did not preserve manual discount value");
+  await request(`/api/pos/carts/${manualDiscountOpenCart.payload.cart.id}`, { method: "DELETE", headers: ownerHeaders });
+
+  const manualDiscountCart = {
+    clientId,
+    clientName: "Automated Smoke Client Updated",
+    branch: "Mace Davao",
+    staff: "Dr. Mace",
+    invoicePrefix: "MACE",
+    cart: [{
+      key: `service-${serviceId}-manual-discount`,
+      serviceId,
+      type: "Service",
+      name: "Automated Smoke Consultation",
+      qty: 1,
+    }],
+  };
+  const excessiveManualDiscount = await jsonRequest("/api/pos/checkout", {
+    draft: { ...manualDiscountCart, manualDiscount: { type: "Percentage", value: 101 } },
+    payment: { payments: [{ method: "Cash", amount: 1 }] },
+  });
+  assert(excessiveManualDiscount.response.status === 400, "POS allowed a manual percentage above 100%");
+
+  const manualDiscountCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: { ...manualDiscountCart, manualDiscount: { type: "Percentage", value: 10 } },
+    payment: { payments: [{ method: "Cash", amount: 1350 }] },
+  });
+  assert(manualDiscountCheckout.response.status === 201, "manual-discount POS checkout failed");
+  assert(manualDiscountCheckout.payload.sale.subtotal === 1500, "manual discount changed the sale subtotal");
+  assert(manualDiscountCheckout.payload.sale.discount === 150, "manual percentage discount was calculated incorrectly");
+  assert(manualDiscountCheckout.payload.sale.total === 1350, "manual discount was not deducted from the POS total");
+  assert(manualDiscountCheckout.payload.auditLog?.details.includes("Manual discount: 10%"), "manual discount was omitted from the POS audit trail");
+  const manualDiscountSaleId = manualDiscountCheckout.payload.sale.id;
+  const voidedManualDiscountSale = await jsonRequest(`/api/transactions/${manualDiscountSaleId}/void`, {});
+  assert(voidedManualDiscountSale.response.ok, "manual-discount sale void failed");
+  await request(`/api/resources/transactions/${manualDiscountSaleId}`, { method: "DELETE", headers: ownerHeaders });
+
   const variablePriceCart = {
     clientId,
     clientName: "Automated Smoke Client Updated",

@@ -1005,19 +1005,21 @@ model GiftCertificate {
 }
 
 model PosCart {
-  id          String   @id @default(cuid())
-  clientId    String   @default("")
-  client      String   @default("Walk-in")
-  branch      String
-  staff       String   @default("")
-  items       String   @default("[]")
-  discountId  String   @default("")
-  saleDate    String   @default("")
-  testMode    Boolean  @default(false)
-  createdById String   @default("")
-  createdBy   String   @default("")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  clientId            String   @default("")
+  client              String   @default("Walk-in")
+  branch              String
+  staff               String   @default("")
+  items               String   @default("[]")
+  discountId          String   @default("")
+  manualDiscountType  String   @default("")
+  manualDiscountValue Float    @default(0)
+  saleDate            String   @default("")
+  testMode            Boolean  @default(false)
+  createdById         String   @default("")
+  createdBy           String   @default("")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([branch, updatedAt])
   @@index([clientId, branch])
