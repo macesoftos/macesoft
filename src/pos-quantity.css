@@ -1621,6 +1621,12 @@
   padding: 14px;
 }
 
+.payment-modal .payment-reference-field input[readonly] {
+  background: #f5f1ed;
+  color: #5f5148;
+  cursor: default;
+}
+
 .package-installment-allocation {
   display: grid;
   gap: 12px;

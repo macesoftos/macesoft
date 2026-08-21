@@ -117,6 +117,18 @@ import {
   verifyMarketingSurveyToken,
 } from "./marketingSurveySecurity.js";
 
+function createSystemPaymentReference(prefix, date) {
+  return `${prefix}-${String(date || posCalendarDate()).replace(/-/g, "")}-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+function systemPaymentReference(value, prefix, date) {
+  const normalized = normalizePaymentReference(value);
+  const expectedPrefix = `${prefix}-${String(date || posCalendarDate()).replace(/-/g, "")}-`;
+  return normalized.startsWith(expectedPrefix) && /^[A-Z]+-\d{8}-[A-F0-9]{8}$/.test(normalized)
+    ? normalized
+    : createSystemPaymentReference(prefix, date);
+}
+
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
 const allowedOrigins = clean(process.env.APP_ORIGIN)
@@ -6629,7 +6641,7 @@ app.post("/api/packages/:id/payments", asyncRoute(async (request, response) => {
   const amount = numberValue(request.body?.amount, "Installment amount", { min: 0.01 });
   const date = clean(request.body?.date) || posCalendarDate();
   const method = requireText(request.body?.method, "Payment method");
-  const referenceNumber = normalizePaymentReference(request.body?.referenceNumber);
+  const referenceNumber = createSystemPaymentReference("PKG", date);
   const nextPayment = clean(request.body?.nextPayment);
   const notes = clean(request.body?.notes);
   const today = posCalendarDate();
@@ -6657,7 +6669,7 @@ app.post("/api/packages/:id/payments", asyncRoute(async (request, response) => {
       date,
       amount,
       method,
-      ...(referenceNumber ? { referenceNumber } : {}),
+      referenceNumber,
       ...(notes ? { notes } : {}),
       receivedBy: actor.name,
     };
@@ -6677,7 +6689,7 @@ app.post("/api/packages/:id/payments", asyncRoute(async (request, response) => {
       const sourceSale = await tx.sale.findUnique({ where: { id: current.sourceSaleId } });
       if (sourceSale && sourceSale.status !== "Void") {
         const payments = parseJsonList(sourceSale.payments);
-        payments.push({ id: paymentId, method, amount, ...(referenceNumber ? { referenceNumber } : {}), packageInstallmentId: current.id });
+        payments.push({ id: paymentId, method, amount, referenceNumber, packageInstallmentId: current.id });
         const collected = payments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
         sale = await tx.sale.update({
           where: { id: sourceSale.id },
@@ -7006,12 +7018,12 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 
   const payments = Array.isArray(paymentData.payments) ? paymentData.payments : [];
   const normalizedPayments = payments.map((payment) => {
-    const referenceNumber = normalizePaymentReference(payment.referenceNumber);
+    const referenceNumber = systemPaymentReference(payment.referenceNumber, "PAY", saleDate);
     return {
       id: clean(payment.id) || randomBytes(12).toString("hex"),
       method: requireText(payment.method, "Payment method"),
       amount: numberValue(payment.amount, "Payment amount", { min: 0 }),
-      ...(referenceNumber ? { referenceNumber } : {}),
+      referenceNumber,
       ...(clean(payment.giftCertificateId) ? { giftCertificateId: clean(payment.giftCertificateId) } : {}),
       ...(clean(payment.packageId) ? { packageId: clean(payment.packageId) } : {}),
       ...(clean(payment.employeeId) ? { employeeId: clean(payment.employeeId) } : {}),
