@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { faceTrackInternals } from "./facetrackAttendance.js";
 
@@ -71,4 +72,17 @@ test("rejects an ambiguous kiosk face match", () => {
     { id: "employee-a", descriptor: Array(128).fill(0.1) },
     { id: "employee-b", descriptor: Array(128).fill(0.102) },
   ], Array(128).fill(0.101), 0.5), /ambiguous/);
+});
+
+test("attendance is restricted to one registered office device per branch", () => {
+  const source = readFileSync(new URL("./facetrackAttendance.js", import.meta.url), "utf8");
+  const attendancePage = readFileSync(new URL("../src/facetrack/FaceTrackAttendance.jsx", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../prisma/migrations/20260821170000_one_facetrack_office_device/migration.sql", import.meta.url), "utf8");
+  assert.match(source, /ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Manager"/);
+  assert.match(source, /Attendance must be recorded on the registered office face scanner/);
+  assert.match(attendancePage, /Use the registered office face scanner to Time In or Time Out/);
+  assert.match(source, /already has an active attendance iPad/);
+  assert.match(migration, /CREATE UNIQUE INDEX "FaceTrackKioskDevice_one_active_per_branch_key"/);
+  assert.match(migration, /WHERE "active" = true/);
+  assert.match(source, /staff: \{ branch: device\.branch/);
 });

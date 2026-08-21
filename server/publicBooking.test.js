@@ -37,9 +37,9 @@ test("rejects invalid contact details, dates, and missing consent", () => {
   assert.throws(() => normalizePublicBookingRequest({ ...validBooking, email: "not-an-email" }), /valid email/i);
   assert.throws(() => normalizePublicBookingRequest({ ...validBooking, date: "2026-08-13" }, { today: "2026-08-14" }), /current or future/i);
   assert.throws(() => normalizePublicBookingRequest({ ...validBooking, date: "2026-02-31" }, { today: "2026-01-01" }), /valid current or future/i);
-  assert.throws(() => normalizePublicBookingRequest({ ...validBooking, time: "25:90" }), /valid appointment time/i);
-  assert.throws(() => normalizePublicBookingRequest({ ...validBooking, submissionId: "short" }), /fresh booking request/i);
-  assert.throws(() => normalizePublicBookingRequest({ ...validBooking, privacyConsent: false }), /consent/i);
+  assert.throws(() => normalizePublicBookingRequest({ ...validBooking, time: "25:90" }, { today: "2026-08-14" }), /valid appointment time/i);
+  assert.throws(() => normalizePublicBookingRequest({ ...validBooking, submissionId: "short" }, { today: "2026-08-14" }), /fresh booking request/i);
+  assert.throws(() => normalizePublicBookingRequest({ ...validBooking, privacyConsent: false }, { today: "2026-08-14" }), /consent/i);
 });
 
 test("quietly accepts honeypot submissions without creating booking data", () => {

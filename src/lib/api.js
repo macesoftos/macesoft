@@ -426,13 +426,6 @@ export function enrollFaceTrackProfile(payload) {
   });
 }
 
-export function recordFaceTrackAttendance(payload) {
-  return requestJson("/api/facetrack-attendance/clock", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function createFaceTrackKiosk(payload) {
   return requestJson("/api/facetrack-attendance/kiosks", {
     method: "POST",

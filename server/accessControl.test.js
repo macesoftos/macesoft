@@ -68,7 +68,9 @@ test("module and branch access enforce least privilege", () => {
 });
 
 test("protected API families resolve to their required workspace modules", () => {
-  assert.equal(requiredModuleForApiRequest("/api/bootstrap"), "my-workspace");
+  assert.equal(requiredModuleForApiRequest("/api/bootstrap"), "pos");
+  assert.equal(requiredModuleForApiRequest("/api/me/active-branch"), "pos");
+  assert.equal(requiredModuleForApiRequest("/api/me/workspace"), "my-workspace");
   assert.equal(requiredModuleForApiRequest("/api/settings"), "settings");
   assert.equal(requiredModuleForApiRequest("/api/settings?tab=tax"), "settings");
   assert.equal(requiredModuleForApiRequest("/api/marketing/send"), "sms");

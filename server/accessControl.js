@@ -28,8 +28,9 @@ const PUBLIC_API_RULES = [
 
 /** @type {Array<[RegExp, string]>} */
 const API_MODULE_RULES = [
-  [/^\/api\/bootstrap$/, "my-workspace"],
+  [/^\/api\/bootstrap$/, "pos"],
   [/^\/api\/modules$/, "applications"],
+  [/^\/api\/me\/active-branch$/, "pos"],
   [/^\/api\/me(?:\/|$)/, "my-workspace"],
   [/^\/api\/invitations(?:\/|$)/, "staff"],
   [/^\/api\/accounts(?:\/|$)/, "staff"],

@@ -5,12 +5,20 @@ export const INVITATION_DELIVERY_STATUSES = Object.freeze(["Not Sent", "Sent", "
 export const BRANCH_MANAGER_ROLES = Object.freeze(["Branch Manager", "Admin"]);
 export const INVITATION_PERMISSIONS = Object.freeze([
   "staff.invite",
+  "staff.invite_cross_branch",
   "staff.invite_managers",
+  "staff.manage",
+]);
+
+export const BRANCH_ADMIN_REQUIRED_PERMISSIONS = Object.freeze([
+  "staff.invite",
+  "staff.invite_cross_branch",
   "staff.manage",
 ]);
 
 export const INVITATION_PERMISSION_LABELS = Object.freeze({
   "staff.invite": "Invite employees",
+  "staff.invite_cross_branch": "Invite employees to other branches",
   "staff.invite_managers": "Invite branch managers",
   "staff.manage": "Manage employee access",
 });
@@ -44,6 +52,21 @@ export function canInviteUsers(actor) {
 export function canInviteManagers(actor) {
   return canManageOrganization(actor?.role)
     || (isBranchManager(actor?.role) && actorPermissions(actor).includes("staff.invite_managers"));
+}
+
+export function canInviteAcrossBranches(actor) {
+  return canManageOrganization(actor?.role)
+    || (isBranchManager(actor?.role) && actorPermissions(actor).includes("staff.invite_cross_branch"));
+}
+
+export function invitationBranchIdsForActor(actor) {
+  if (canManageOrganization(actor?.role)) return [];
+  if (canInviteAcrossBranches(actor)) {
+    return uniqueStrings((actor?.access?.branches || [])
+      .filter((branch) => branch?.status === "Active" && branch?.branchStatus === "Active")
+      .map((branch) => branch.id));
+  }
+  return uniqueStrings([actor?.access?.activeBranchId]);
 }
 
 export function assignableInvitationRoles(actor, roleAccess) {
@@ -119,9 +142,13 @@ export function assertRequestedModules(actor, role, requested, branches, roleAcc
 
 export function invitationScopeWhere(actor) {
   if (canManageOrganization(actor?.role)) return { organizationId: actor.organizationId };
+  if (canInviteAcrossBranches(actor)) {
+    return { organizationId: actor.organizationId, branches: { some: {} } };
+  }
+  const branchIds = invitationBranchIdsForActor(actor);
   return {
     organizationId: actor.organizationId,
-    branches: { some: { branchId: actor?.access?.activeBranchId } },
+    branches: { some: { branchId: { in: branchIds } } },
   };
 }
 
@@ -130,8 +157,12 @@ export function canManageInvitation(actor, invitation) {
   if (canManageOrganization(actor?.role)) return true;
   if (!canInviteUsers(actor)) return false;
   const branchIds = (invitation.branches || []).map((item) => item.branchId);
-  return branchIds.length === 1
-    && branchIds[0] === actor?.access?.activeBranchId
+  if (canInviteAcrossBranches(actor)) {
+    return branchIds.length > 0 && invitation.invitedById === actor.id;
+  }
+  const allowedBranchIds = new Set(invitationBranchIdsForActor(actor));
+  return branchIds.length > 0
+    && branchIds.every((branchId) => allowedBranchIds.has(branchId))
     && invitation.invitedById === actor.id;
 }
 

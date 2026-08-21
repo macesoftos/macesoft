@@ -314,7 +314,7 @@ try {
     position: "Front Desk Associate",
     role: "Employee",
     branchIds: [invitationBranch.id],
-    modules: ["overview", "appointments", "clients"],
+    modules: ["pos"],
     permissions: [],
     message: "<strong>Welcome</strong> to the invitation smoke test.\u0000",
   };
@@ -369,7 +369,7 @@ try {
   assert(acceptedInvitation.payload.invitation.status === "Accepted", "accepted invitation status was not persisted");
   assert(acceptedInvitation.payload.account.email === invitationEmail, "accepted invitation created the wrong account");
   assert(acceptedInvitation.payload.account.access.branches.some((branch) => branch.id === invitationBranch.id), "accepted account did not receive its branch membership");
-  assert(acceptedInvitation.payload.account.access.modules.includes("appointments"), "accepted account did not receive its invited modules");
+  assert(acceptedInvitation.payload.account.access.modules.length === 1 && acceptedInvitation.payload.account.access.modules.includes("pos"), "accepted branch account was not restricted to POS");
   const reusedInvitation = await request(`/api/invitations/accept/${encodeURIComponent(acceptanceToken)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -385,6 +385,45 @@ try {
   });
   assert(acceptanceNotification, "invitation acceptance did not notify a relevant administrator");
 
+  const bgcBranch = await prisma.branch.findFirst({ where: { name: "Mace BGC", status: "Active" } });
+  assert(bgcBranch?.id, "existing-user branch invitation could not find Mace BGC");
+  await prisma.branchMembership.update({
+    where: { branchId_accountId: { branchId: invitationBranch.id, accountId: acceptedInvitation.payload.account.id } },
+    data: {
+      role: "Admin",
+      permissions: JSON.stringify(["staff.invite", "staff.invite_cross_branch", "staff.manage"]),
+      modules: JSON.stringify(["pos", "staff", "facetrack-attendance"]),
+    },
+  });
+  const existingUserLogin = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: invitationEmail, password: "SmokeInvite2026!Pass" }),
+  });
+  assert(existingUserLogin.response.ok && existingUserLogin.payload.account.role === "Admin", "delegated branch Admin could not sign in");
+  const existingUserCookie = existingUserLogin.response.headers.get("set-cookie")?.split(";")[0];
+  assert(existingUserCookie, "existing invited user login did not issue a session cookie");
+  const secondBranchInvitation = await jsonRequestAs("/api/invitations", {
+    ...invitationPayload,
+    branchIds: [bgcBranch.id],
+  }, { "Content-Type": "application/json", "X-Mace-Request": "app", Cookie: existingUserCookie });
+  assert(
+    secondBranchInvitation.response.status === 201,
+    `delegated branch Admin could not invite an existing user to another branch (${secondBranchInvitation.response.status}: ${secondBranchInvitation.payload?.error || "unknown error"})`,
+  );
+  const secondBranchToken = invitationTokenFromMessage(await waitForSmtpMessage(2));
+  const acceptedSecondBranch = await request(`/api/invitations/accept/${encodeURIComponent(secondBranchToken)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: existingUserCookie },
+    body: JSON.stringify({ termsAccepted: true, privacyAccepted: true }),
+  });
+  assert(acceptedSecondBranch.response.ok, "existing user could not accept access to another branch");
+  assert(acceptedSecondBranch.payload.account.access.activeBranchId === bgcBranch.id, "accepted existing user did not enter the invited branch");
+  assert(acceptedSecondBranch.payload.account.access.branches.length === 2, "accepted existing user did not retain both branch memberships");
+  assert(acceptedSecondBranch.payload.account.role === "Employee", "second-branch invitation overwrote the existing account role");
+  const retainedAdminBranch = acceptedSecondBranch.payload.account.access.branches.find((branch) => branch.id === invitationBranch.id);
+  assert(retainedAdminBranch?.role === "Admin", "second-branch invitation overwrote the user's first-branch role");
+
   const lifecycleEmail = `invite-lifecycle-${suffix}@release-test.invalid`;
   invitationSmokeEmails.push(lifecycleEmail);
   const lifecycleInvitation = await jsonRequestAs("/api/invitations", {
@@ -394,7 +433,7 @@ try {
     message: "Invitation lifecycle smoke test",
   }, invitationHeaders);
   assert(lifecycleInvitation.response.status === 201, "lifecycle invitation create failed");
-  const originalLifecycleToken = invitationTokenFromMessage(await waitForSmtpMessage(2));
+  const originalLifecycleToken = invitationTokenFromMessage(await waitForSmtpMessage(3));
   const duplicateInvitation = await jsonRequestAs("/api/invitations", {
     ...invitationPayload,
     email: lifecycleEmail,
@@ -406,7 +445,7 @@ try {
     invitationHeaders,
   );
   assert(resentInvitation.response.ok && resentInvitation.payload.invitation.deliveryStatus === "Sent", "invitation resend failed");
-  const replacementLifecycleToken = invitationTokenFromMessage(await waitForSmtpMessage(3));
+  const replacementLifecycleToken = invitationTokenFromMessage(await waitForSmtpMessage(4));
   assert(replacementLifecycleToken !== originalLifecycleToken, "resend did not rotate the invitation token");
   const invalidatedOriginal = await request(`/api/invitations/accept/${encodeURIComponent(originalLifecycleToken)}`);
   assert(invalidatedOriginal.response.status === 404, "resend did not invalidate the previous invitation link");
@@ -432,7 +471,7 @@ try {
     message: "Expired invitation smoke test",
   }, invitationHeaders);
   assert(expiredInvitation.response.status === 201, "expiration invitation create failed");
-  const expiredToken = invitationTokenFromMessage(await waitForSmtpMessage(4));
+  const expiredToken = invitationTokenFromMessage(await waitForSmtpMessage(5));
   await prisma.userInvitation.update({
     where: { id: expiredInvitation.payload.invitation.id },
     data: { expiresAt: new Date(Date.now() - 1_000) },
@@ -475,20 +514,25 @@ try {
   const davaoReceptionist = branchHeaders("Receptionist", "Mace Davao");
   const bgcReceptionist = branchHeaders("Receptionist", "Mace BGC");
   const invalidAllBranchesReceptionist = branchHeaders("Receptionist", "All branches");
-  const davaoClients = await request("/api/resources/clients", { headers: davaoReceptionist });
-  const bgcClients = await request("/api/resources/clients", { headers: bgcReceptionist });
-  assert(davaoClients.response.ok && davaoClients.payload.some((client) => client.id === clientId), "Davao workspace did not include its own client");
-  assert(!davaoClients.payload.some((client) => client.id === bgcClientId), "Davao workspace exposed a BGC client");
-  assert(bgcClients.response.ok && bgcClients.payload.some((client) => client.id === bgcClientId), "BGC workspace did not include its own client");
-  assert(!bgcClients.payload.some((client) => client.id === clientId), "BGC workspace exposed a Davao client");
+  const blockedDavaoClients = await request("/api/resources/clients", { headers: davaoReceptionist });
+  const blockedBgcClients = await request("/api/resources/clients", { headers: bgcReceptionist });
+  assert(blockedDavaoClients.response.status === 403, "POS-only Davao user could open the Clients module API");
+  assert(blockedBgcClients.response.status === 403, "POS-only BGC user could open the Clients module API");
+  const davaoPos = await request("/api/bootstrap", { headers: davaoReceptionist });
+  const bgcPos = await request("/api/bootstrap", { headers: bgcReceptionist });
+  assert(davaoPos.response.ok && davaoPos.payload.clients.some((client) => client.id === clientId), "Davao POS did not include its own customer selector data");
+  assert(!davaoPos.payload.clients.some((client) => client.id === bgcClientId), "Davao POS exposed a BGC customer");
+  assert(bgcPos.response.ok && bgcPos.payload.clients.some((client) => client.id === bgcClientId), "BGC POS did not include its own customer selector data");
+  assert(!bgcPos.payload.clients.some((client) => client.id === clientId), "BGC POS exposed a Davao customer");
+  assert(!Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === clientId), "medicalNotes"), "POS bootstrap exposed clinical client fields");
 
   const crossBranchUpdate = await jsonRequestAs(`/api/resources/clients/${bgcClientId}`, {
     ...createdBgcClient.payload.record,
     fullName: "Cross-branch update must fail",
   }, davaoReceptionist, { method: "PUT" });
   assert(crossBranchUpdate.response.status === 403, "Davao user could update a BGC client");
-  const invalidAllBranchesList = await request("/api/resources/clients", { headers: invalidAllBranchesReceptionist });
-  assert(invalidAllBranchesList.response.ok && invalidAllBranchesList.payload.length === 0, "an operational All branches account received client records");
+  const invalidAllBranchesList = await request("/api/bootstrap", { headers: invalidAllBranchesReceptionist });
+  assert(invalidAllBranchesList.response.ok && invalidAllBranchesList.payload.clients.length === 0, "an operational All branches account received client records");
 
   const davaoCampaignId = `cmp-smoke-davao-${suffix}`;
   const bgcCampaignId = `cmp-smoke-bgc-${suffix}`;
@@ -512,8 +556,7 @@ try {
   }
   const davaoMarketing = branchHeaders("Marketing Staff", "Mace Davao");
   const davaoCampaigns = await request("/api/resources/campaigns", { headers: davaoMarketing });
-  assert(davaoCampaigns.response.ok && davaoCampaigns.payload.some((campaign) => campaign.id === davaoCampaignId), "Davao workspace did not include its campaign");
-  assert(!davaoCampaigns.payload.some((campaign) => campaign.id === bgcCampaignId), "Davao workspace exposed a BGC campaign");
+  assert(davaoCampaigns.response.status === 403, "POS-only Marketing Staff could open campaign data");
   const crossBranchCampaignDelete = await request(`/api/marketing/campaigns/${bgcCampaignId}`, { method: "DELETE", headers: davaoMarketing });
   assert(crossBranchCampaignDelete.response.status === 403, "Davao user could delete a BGC campaign");
 

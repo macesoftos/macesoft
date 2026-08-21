@@ -12,6 +12,12 @@ const branch = {
   rooms: [],
   roomRecords: [],
 };
+const secondBranch = {
+  ...branch,
+  id: "branch-makati",
+  name: "Mace Makati",
+  code: "MAKATI",
+};
 
 function ownerSession() {
   return {
@@ -101,7 +107,7 @@ test("owner invitation form exposes authorized roles, concrete branches, and res
   await expect(dialog.getByLabel("First name")).toBeVisible();
   await expect(dialog.getByLabel("Last name")).toBeVisible();
   await expect(dialog.getByRole("group", { name: "Branch assignment" }).getByText(branch.name)).toBeVisible();
-  await expect(dialog.getByRole("group", { name: "Modules" }).getByText("Appointments")).toBeVisible();
+  await expect(dialog.getByRole("group", { name: "Modules" }).getByText("POS", { exact: true })).toBeVisible();
   await dialog.getByLabel("Role").selectOption("Super Admin");
   await expect(dialog.getByText(/No “All Branches” assignment will be stored/)).toBeVisible();
   await expect(dialog.getByText(/grants organization-wide access/)).toBeVisible();
@@ -134,6 +140,44 @@ test("branch manager sees only employee roles and a locked assigned branch", asy
   const branchCheckbox = dialog.getByRole("checkbox", { name: /Mace Davao/ });
   await expect(branchCheckbox).toBeChecked();
   await expect(branchCheckbox).toBeDisabled();
+});
+
+test("delegated Admin can select another branch when inviting a POS user", async ({ page }) => {
+  const session = {
+    ...managerSession(),
+    role: "Admin",
+    access: {
+      ...managerSession().access,
+      permissions: ["staff.invite", "staff.invite_cross_branch"],
+      activeBranch: { ...managerSession().access.activeBranch, role: "Admin", permissions: ["staff.invite", "staff.invite_cross_branch"], modules: roleAccess.Admin },
+      branches: [
+        { ...managerSession().access.branches[0], role: "Admin", permissions: ["staff.invite", "staff.invite_cross_branch"], modules: roleAccess.Admin },
+        { id: secondBranch.id, name: secondBranch.name, role: "Admin", permissions: ["staff.invite", "staff.invite_cross_branch"], modules: roleAccess.Admin, status: "Active", branchStatus: "Active" },
+      ],
+      modules: roleAccess.Admin,
+    },
+  };
+  const capabilities = {
+    organizationManager: false,
+    canSelectBranches: true,
+    canInviteManagers: false,
+    invitationExpiryDays: 7,
+    roles: ["Employee", "Cashier"],
+    roleModules: { Employee: roleAccess.Employee, Cashier: roleAccess.Cashier },
+    permissions: [{ id: "staff.invite", label: "Invite employees" }],
+    branches: [branch, secondBranch].map((item) => ({ id: item.id, name: item.name, enabledModules: ["pos", "staff", "facetrack-attendance"] })),
+  };
+  await mockWorkspace(page, session, capabilities);
+  await page.goto("/staff");
+  await page.getByRole("button", { name: "Invite user" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Invite member" });
+  const secondBranchCheckbox = dialog.getByRole("checkbox", { name: secondBranch.name });
+  await expect(secondBranchCheckbox).toBeEnabled();
+  await secondBranchCheckbox.check();
+  await expect(secondBranchCheckbox).toBeChecked();
+  const posCheckbox = dialog.getByRole("checkbox", { name: "POS" });
+  await expect(posCheckbox).toBeChecked();
+  await expect(posCheckbox).toBeDisabled();
 });
 
 test("a new recipient can review and accept a pending invitation once", async ({ page }) => {
