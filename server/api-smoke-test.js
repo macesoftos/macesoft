@@ -245,6 +245,7 @@ try {
   const clientId = `cl-smoke-${suffix}`;
   const bgcClientId = `cl-smoke-bgc-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
+  const treatmentId = `tr-smoke-${suffix}`;
   const serviceId = `svc-smoke-${suffix}`;
   const variablePriceServiceId = `svc-variable-${suffix}`;
   const packageServiceId = `svc-package-${suffix}`;
@@ -272,7 +273,10 @@ try {
     price: 1500,
     recommendedIntervalDays: 21,
     commission: "",
-    consumables: [],
+    consumables: [
+      { item: "Sterile Syringe Kit", qty: 1 },
+      { item: "Botox Units", qty: 0.5 },
+    ],
     branches: ["Mace Davao"],
     staff: ["Doctor", "Nurse"],
     room: "Room 1",
@@ -283,6 +287,10 @@ try {
     aftercare: "Keep the treated area clean and avoid direct sun exposure for 48 hours.",
   });
   assert(createdService.response.status === 201, "service create failed");
+  assert(
+    createdService.payload.record.consumables?.some((entry) => entry.item === "Botox Units" && entry.qty === 0.5),
+    "service consumable defaults were not persisted",
+  );
   assert(createdService.payload.notification?.title === "New service", "service create did not emit a notification");
 
   const createdVariablePriceService = await jsonRequest("/api/resources/services", {
@@ -540,6 +548,30 @@ try {
     marketingOptIn: true,
   });
   assert(createdClient.response.status === 201, "client create failed");
+
+  const syringeStockBeforeTreatment = Number((await prisma.inventoryItem.findUnique({ where: { id: "inv-syringe" } }))?.stock ?? NaN);
+  const botoxStockBeforeTreatment = Number((await prisma.inventoryItem.findUnique({ where: { id: "inv-botox" } }))?.stock ?? NaN);
+  assert(Number.isFinite(syringeStockBeforeTreatment) && Number.isFinite(botoxStockBeforeTreatment), "treatment consumable fixtures were missing");
+  const createdTreatment = await jsonRequest("/api/resources/treatments", {
+    id: treatmentId,
+    clientId,
+    date: posCalendarDate(),
+    service: "Automated Smoke Consultation",
+    branch: "Mace Davao",
+    provider: "N/A",
+    room: "Room 1",
+    consent: "Signed",
+    consumables: createdService.payload.record.consumables,
+  });
+  assert(createdTreatment.response.status === 201, "treatment with structured consumables failed");
+  assert(
+    Number((await prisma.inventoryItem.findUnique({ where: { id: "inv-syringe" } }))?.stock) === syringeStockBeforeTreatment - 1,
+    "treatment did not deduct the actual syringe quantity",
+  );
+  assert(
+    Number((await prisma.inventoryItem.findUnique({ where: { id: "inv-botox" } }))?.stock) === botoxStockBeforeTreatment - 0.5,
+    "treatment did not deduct the actual fractional Botox quantity",
+  );
 
   const createdBgcClient = await jsonRequest("/api/resources/clients", {
     id: bgcClientId,
@@ -1359,6 +1391,7 @@ try {
     method: "DELETE",
     headers: ownerHeaders,
   });
+  await request(`/api/resources/treatments/${treatmentId}`, { method: "DELETE", headers: ownerHeaders });
   await prisma.payrollCommissionEarning.deleteMany({ where: { saleId: { in: [payrollSaleId, payrollPackageSaleId] } } });
   await prisma.payrollSalaryDeduction.deleteMany({ where: { saleId: payrollSaleId } });
   await prisma.payrollRun.deleteMany({ where: { id: payrollRun.id } });

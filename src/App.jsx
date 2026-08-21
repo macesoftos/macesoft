@@ -1966,7 +1966,7 @@ function App() {
       pos: values.pos !== false,
       branches: splitList(values.branches),
       staff: splitList(values.staff),
-      consumables: [],
+      consumables: Array.isArray(values.consumables) ? values.consumables : [],
     };
     const result = await saveResourceRecord("services", record, { existing: Boolean(values.id) });
     upsertById(setServices, result.record);
@@ -10306,6 +10306,11 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
     <section className="module-grid two">
       <div className="surface-panel full-span">
         <SectionHeader icon={Boxes} title="Inventory Management" action={`${lowStock.length} alerts`} />
+        <div className="inventory-workflow-note">
+          <div><ShoppingBag size={18} /><span><strong>Retail products</strong>Stock is deducted automatically after a completed POS sale and restored if the sale is voided.</span></div>
+          <div><Activity size={18} /><span><strong>Treatment consumables</strong>Save the actual syringe, ml, vial, or item quantity used in the treatment record to deduct stock.</span></div>
+          <div><PackagePlus size={18} /><span><strong>Deliveries</strong>Use Receive stock to add quantity and record the delivery date, supplier, receiver, and optional check number.</span></div>
+        </div>
         <SmartTable
           rows={inventory}
           globalSearch={globalSearch}
@@ -10341,7 +10346,7 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
         />
       </div>
       <div className="surface-panel full-span">
-        <SectionHeader icon={RefreshCw} title="Inventory Movement" action="Audit ready" />
+        <SectionHeader icon={RefreshCw} title="Stock & Delivery History" action="Audit ready" />
         <SmartTable
           rows={movements}
           pageSize={5}
@@ -12988,6 +12993,21 @@ function ModalHost({
   const canManageProductPhotos = canManageOrganization(session?.role);
   const paymentMethodNames = activePaymentMethodNames(settings);
   const installmentPaymentMethods = paymentMethodNames.filter((method) => !["Package", "Gift Certificate", "Salary Deduction"].includes(method));
+  const consumableInventoryOptions = Array.from(
+    inventory
+      .filter((item) => item.type === "Consumable")
+      .reduce((options, item) => {
+        const key = item.item.trim().toLowerCase();
+        if (!options.has(key)) options.set(key, { value: item.item, label: item.item, unit: item.unit || "unit" });
+        return options;
+      }, new Map())
+      .values(),
+  );
+  const serviceConsumablesByName = Object.fromEntries(
+    services.map((service) => [service.name, Array.isArray(service.consumables) ? service.consumables : []]),
+  );
+  const initialTreatmentService = modal.payload?.service || services[0]?.name || "";
+  const initialTreatmentConsumables = serviceConsumablesByName[initialTreatmentService] || [];
 
   if (modal.type === "account") {
     return <AccountSecurityModal account={session} onClose={closeModal} onChangePassword={changePassword} />;
@@ -13229,6 +13249,7 @@ function ModalHost({
         contraindications: "",
         aftercare: "",
         ...modal.payload,
+        consumables: Array.isArray(modal.payload?.consumables) ? modal.payload.consumables : [],
         branches: Array.isArray(modal.payload?.branches) ? modal.payload.branches.join(", ") : modal.payload?.branches ?? branchOptions.join(", "),
         staff: Array.isArray(modal.payload?.staff) ? modal.payload.staff.join(", ") : modal.payload?.staff ?? "Doctor, Nurse, Aesthetician",
       },
@@ -13254,6 +13275,7 @@ function ModalHost({
         field("description", "Description", "textarea", null, "span-2"),
         field("contraindications", "Contraindication notes", "textarea", null, "span-2"),
         field("aftercare", "Aftercare notes", "textarea", null, "span-2"),
+        { ...field("consumables", "Standard consumables per service", "consumables", consumableInventoryOptions, "span-2", false), usageMode: "default" },
       ],
     },
     "inventory-receive": {
@@ -13316,7 +13338,7 @@ function ModalHost({
         field("packQty", "Packaging qty", "number"),
         field("stock", "Current stock", "number"),
         field("branch", "Branch", "select", branchOptions),
-        field("location", "Stock location"),
+        field("location", "Storage location (stock room / shelf)"),
         field("reorder", "Reorder level", "number"),
         field("cost", "Cost", "number"),
         field("price", "Retail price", "number"),
@@ -13429,9 +13451,10 @@ function ModalHost({
     },
     treatment: {
       title: modal.payload?.id ? "Edit Treatment Record" : "New Treatment Record",
-      initial: { branch: defaultClinicBranch, clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name || "N/A", room: "Room 1", preNotes: "", postNotes: "", aftercare: "", arrivalTime: "", treatmentStartTime: "", completedTime: "", checkoutTime: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
+      initial: { branch: defaultClinicBranch, clientId: clients[0]?.id, date: todayDate(), service: initialTreatmentService, provider: staff[0]?.name || "N/A", room: "Room 1", preNotes: "", postNotes: "", aftercare: "", arrivalTime: "", treatmentStartTime: "", completedTime: "", checkoutTime: "", consumables: initialTreatmentConsumables, deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
       submitLabel: "Save treatment",
       onSubmit: saveTreatment,
+      serviceConsumablesByName,
       fields: [
         field("branch", "Branch", "select", branchOptions),
         field("clientId", "Client", "select", clientOptions),
@@ -13443,7 +13466,7 @@ function ModalHost({
         field("treatmentStartTime", "Treatment start", "time", null, "", false),
         field("completedTime", "Treatment completed", "time", null, "", false),
         field("checkoutTime", "Checkout time", "time", null, "", false),
-        field("consumables", "Consumables used (Item: quantity, ...)", "text", null, "span-2", false),
+        { ...field("consumables", "Consumables actually used", "consumables", consumableInventoryOptions, "span-2", false), usageMode: "actual" },
         field("deviceSettings", "Device settings"),
         field("batch", "Lot / batch"),
         field("consent", "Consent", "select", ["Pending", "Signed"]),
@@ -14313,7 +14336,7 @@ function EntityModal({ config, onClose }) {
 
   async function submit(event) {
     event.preventDefault();
-    const optionalFieldTypes = ["checkbox", "textarea", "photo"];
+    const optionalFieldTypes = ["checkbox", "textarea", "photo", "consumables"];
     const missing = config.fields.find((item) => (item.required ?? (!optionalFieldTypes.includes(item.type) && item.name !== "id")) && form[item.name] === "");
     if (missing) {
       setError(`${missing.label} is required.`);
@@ -14339,7 +14362,7 @@ function EntityModal({ config, onClose }) {
         {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
         <div className="form-grid">
           {config.fields.map((item) => {
-            const optionalFieldTypes = ["checkbox", "textarea", "photo"];
+            const optionalFieldTypes = ["checkbox", "textarea", "photo", "consumables"];
             const required = item.required ?? (!optionalFieldTypes.includes(item.type) && item.name !== "id");
             return (
               <FormField
@@ -14353,6 +14376,9 @@ function EntityModal({ config, onClose }) {
                     const next = { ...current, [item.name]: value };
                     if (item.name === "templateId" && value && config.templateMessages) {
                       next.message = config.templateMessages[value] ?? current.message;
+                    }
+                    if (item.name === "service" && config.serviceConsumablesByName) {
+                      next.consumables = config.serviceConsumablesByName[value] ?? [];
                     }
                     return next;
                   })
@@ -14489,6 +14515,69 @@ function FormField({ field: item, form, required = false, value, onChange }) {
             ) : null}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (item.type === "consumables") {
+    const parsedRows = Array.isArray(value)
+      ? value
+      : String(value || "")
+        .split(/[;,\n]+/)
+        .map((entry) => {
+          const match = entry.trim().match(/^(.+?)(?:\s*[:x]\s*(\d+(?:\.\d+)?))?$/i);
+          return { item: match?.[1]?.trim() || "", qty: Number(match?.[2] || 1) };
+        })
+        .filter((entry) => entry.item);
+    const rows = parsedRows.map((entry) => ({ item: entry.item || entry.name || "", qty: Number(entry.qty || 0) }));
+    const options = item.options ?? [];
+    const selectedNames = new Set(rows.map((entry) => entry.item));
+
+    function updateRow(index, patch) {
+      onChange(rows.map((entry, rowIndex) => rowIndex === index ? { ...entry, ...patch } : entry));
+    }
+
+    function addRow() {
+      const nextOption = options.find((option) => !selectedNames.has(option.value));
+      if (nextOption) onChange([...rows, { item: nextOption.value, qty: 1 }]);
+    }
+
+    return (
+      <div className={`consumable-usage-field ${item.className ?? ""}`}>
+        <FieldLabel required={required}>{item.label}</FieldLabel>
+        <small className="field-suggestion-hint">
+          {item.usageMode === "actual"
+            ? "Defaults come from the service. Adjust them to the exact quantity used; saving deducts this quantity from inventory."
+            : "Set the usual quantity for one session. Staff can adjust the actual quantity on each treatment record."}
+        </small>
+        {rows.length ? (
+          <div className="consumable-usage-rows">
+            {rows.map((row, index) => {
+              const selectedOption = options.find((option) => option.value === row.item);
+              return (
+                <div className="consumable-usage-row" key={`${row.item}-${index}`}>
+                  <select aria-label={`Consumable item ${index + 1}`} value={row.item} onChange={(event) => updateRow(index, { item: event.target.value })}>
+                    <option value="">Select inventory item</option>
+                    {options.map((option) => (
+                      <option key={option.value} value={option.value} disabled={selectedNames.has(option.value) && option.value !== row.item}>{option.label}</option>
+                    ))}
+                  </select>
+                  <label>
+                    <span>Quantity</span>
+                    <input aria-label={`Consumable quantity ${index + 1}`} type="number" min="0.01" step="0.01" inputMode="decimal" value={row.qty || ""} onChange={(event) => updateRow(index, { qty: Number(event.target.value) })} />
+                  </label>
+                  <span className="consumable-unit">{selectedOption?.unit || "unit"}</span>
+                  <button className="ghost-button small" type="button" onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))} aria-label={`Remove ${row.item || "consumable"}`}>
+                    <Trash2 size={15} aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : <span className="multi-select-empty">No consumables configured.</span>}
+        <button className="secondary-button small consumable-add-button" type="button" onClick={addRow} disabled={!options.some((option) => !selectedNames.has(option.value))}>
+          <Plus size={15} aria-hidden="true" /> Add consumable
+        </button>
       </div>
     );
   }

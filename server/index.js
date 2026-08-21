@@ -1039,7 +1039,7 @@ function normalizeServicePayload(payload, existingId = "") {
     serviceValue: numberValue(serviceType === "Package" ? payload.serviceValue ?? (packageSessions ? packagePrice / packageSessions : price) : price, "Service value", { min: 0 }),
     recommendedIntervalDays: numberValue(payload.recommendedIntervalDays, "Recommended interval", { min: 0, integer: true }),
     commission: clean(payload.commission),
-    consumables: jsonList([]),
+    consumables: jsonText(treatmentConsumableUsage(payload.consumables), []),
     branches: jsonList(payload.branches),
     staff: jsonList(payload.staff),
     room: clean(payload.room),
@@ -3653,24 +3653,9 @@ async function inventoryDeductionsForSale(items, branch) {
       continue;
     }
 
-    for (const consumableName of item.consumables ?? []) {
-      const stockItem = await prisma.inventoryItem.findFirst({
-        where: {
-          item: consumableName,
-          OR: [{ branch }, { branch: "All branches" }],
-        },
-        orderBy: [{ branch: "desc" }],
-      });
-
-      if (stockItem) {
-        deductions.push({
-          inventoryId: stockItem.id,
-          item: stockItem.item,
-          branch: stockItem.branch || branch,
-          qty: item.qty,
-        });
-      }
-    }
+    // Treatment consumables are deducted from the actual usage recorded in the
+    // treatment record. Keeping checkout limited to retail inventory prevents
+    // a service from consuming stock twice when clinical documentation is saved.
   }
 
   return deductions;
