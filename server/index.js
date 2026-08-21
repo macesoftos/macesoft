@@ -54,6 +54,7 @@ import {
   assertPackageRedeemable,
 } from "./posTenders.js";
 import { assertDiscountUsable, assertPackageOwnedByClient, inventoryWhereForBranch } from "./posSecurity.js";
+import { posCalendarDate } from "./posDate.js";
 import { normalizePaymentReference } from "./paymentReference.js";
 import {
   canonicalTreatmentPhotoKind,
@@ -3461,7 +3462,7 @@ async function buildSaleDraftItems(cart, branch) {
 async function calculateCheckout(draft, { actor, branch }) {
   const items = await buildSaleDraftItems(draft.cart, branch);
   const subtotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
-  const saleDate = clean(draft.saleDate) || new Date().toISOString().slice(0, 10);
+  const saleDate = clean(draft.saleDate) || posCalendarDate();
   const promotions = await prisma.promotion.findMany({ where: { active: true, startDate: { lte: saleDate }, endDate: { gte: saleDate } } });
   const appliedPromotionNames = new Set();
   let promotionDiscount = 0;
@@ -6697,7 +6698,7 @@ function normalizePosCartPayload(payload, actor, existing = null) {
   const branch = requireText(payload?.branch || existing?.branch, "Branch");
   const items = Array.isArray(payload?.items) ? payload.items : parseJsonList(existing?.items);
   if (items.length > 100) throw apiError("A POS cart can contain at most 100 service or product lines.");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = posCalendarDate();
   const saleDate = clean(payload?.saleDate || existing?.saleDate) || today;
   if (saleDate && !/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) throw apiError("Choose a valid transaction date.");
   if (saleDate > today) throw apiError("Future-dated POS transactions are not allowed.");
@@ -6769,7 +6770,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   const branch = requireText(draft.branch, "Branch");
   assertMutationAllowed(request, "pos", branch);
   const actor = actorFromRequest(request);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = posCalendarDate();
   const saleDate = clean(draft.saleDate) || today;
   const testMode = draft.testMode === true;
   const postUnpaid = clean(paymentData.status) === "Unpaid";

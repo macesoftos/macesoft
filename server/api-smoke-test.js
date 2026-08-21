@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:net";
+import { posCalendarDate } from "./posDate.js";
 import { prisma } from "./prisma.js";
 
 const port = Number(process.env.API_SMOKE_PORT || 3101);
@@ -769,8 +770,9 @@ try {
   }, { method: "PUT" });
   assert(payrollProfile.response.ok && payrollProfile.payload.profile.monthlySalary === 26_000, "payroll profile update failed");
 
-  const payrollToday = new Date().toISOString().slice(0, 10);
-  const payrollYesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const payrollToday = posCalendarDate();
+  const payrollTodayUtc = Date.parse(`${payrollToday}T00:00:00.000Z`);
+  const payrollYesterday = new Date(payrollTodayUtc - 86_400_000).toISOString().slice(0, 10);
   const paidLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
     workDate: payrollToday,
@@ -783,7 +785,7 @@ try {
   assert(paidLeave.response.status === 201 && paidLeave.payload.schedule.paid, "paid leave schedule entry failed");
   const overdrawnLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
-    workDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+    workDate: new Date(payrollTodayUtc + 86_400_000).toISOString().slice(0, 10),
     branch: "Mace Davao",
     type: "Vacation Leave",
     paid: true,
@@ -792,7 +794,7 @@ try {
   assert(overdrawnLeave.response.status === 201, "second paid leave credit could not be used");
   const thirdPaidLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
-    workDate: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+    workDate: new Date(payrollTodayUtc + 2 * 86_400_000).toISOString().slice(0, 10),
     branch: "Mace Davao",
     type: "Emergency Leave",
     paid: true,
