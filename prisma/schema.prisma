@@ -740,6 +740,8 @@ model SaleItem {
   qty                     Float                     @default(1)
   price                   Float                     @default(0)
   originalPrice           Float                     @default(0)
+  priceModel              String                    @default("Fixed price")
+  priceUnit               String                    @default("")
   discount                Float                     @default(0)
   provider                String                    @default("N/A")
   serviceId               String                    @default("")
@@ -972,11 +974,13 @@ model ClinicPackage {
   serviceValue   Float    @default(0)
   paymentHistory String   @default("[]")
   sessionHistory String   @default("[]")
+  sourceSaleId   String   @default("")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   @@index([clientId])
   @@index([status])
+  @@index([sourceSaleId])
 }
 
 model GiftCertificate {

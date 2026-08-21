@@ -172,15 +172,26 @@ const money = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 0,
 });
 
+function serviceCatalogPrice(service) {
+  return Number(service?.serviceType === "Package" && Number(service?.packagePrice) > 0 ? service.packagePrice : service?.price || 0);
+}
+
+function serviceUsesFinalPrice(service) {
+  return ["Starts at", "Price after consultation/assessment"].includes(String(service?.priceModel || ""));
+}
+
+function servicePriceUnitLabel(service) {
+  return String(service?.priceUnit || "unit").replace(/^Per\s+/i, "").toLowerCase();
+}
+
 function servicePriceLabel(service) {
-  const price = Number(service?.serviceType === "Package" && Number(service?.packagePrice) > 0 ? service.packagePrice : service?.price || 0);
+  const price = serviceCatalogPrice(service);
   const formatted = money.format(price);
   const model = String(service?.priceModel || "Fixed price");
   if (model === "Price after consultation/assessment") return "Price after consultation";
   if (model === "Starts at") return `Starts at ${formatted}`;
   if (model === "Per unit") {
-    const unit = String(service?.priceUnit || "unit").replace(/^Per\s+/i, "").toLowerCase();
-    return `${formatted} per ${unit}`;
+    return `${formatted} per ${servicePriceUnitLabel(service)}`;
   }
   return formatted;
 }
@@ -1729,7 +1740,7 @@ function App() {
     setCart((current) => {
       const found = current.find((entry) => entry.key === item.key);
       if (found) {
-        return current.map((entry) => (entry.key === item.key ? { ...entry, qty: entry.qty + 1 } : entry));
+        return current.map((entry) => (entry.key === item.key ? { ...entry, qty: Number(entry.qty || 0) + 1 } : entry));
       }
       return [...current, { ...item, qty: 1 }];
     });
@@ -1738,7 +1749,12 @@ function App() {
   function updateCartQty(key, qty) {
     setCart((current) =>
       current
-        .map((item) => (item.key === key ? { ...item, qty: Math.max(1, Number(qty) || 1) } : item))
+        .map((item) => {
+          if (item.key !== key) return item;
+          const fractionalUnit = item.priceModel === "Per unit" && servicePriceUnitLabel(item) === "ml";
+          const minimum = fractionalUnit ? 0.01 : 1;
+          return { ...item, qty: Math.max(minimum, Number(qty) || minimum) };
+        })
         .filter((item) => item.qty > 0),
     );
   }
@@ -3219,7 +3235,7 @@ function PrintableReceipt({ receipt, settings }) {
                   <tr key={`${item.name}-${index}`}>
                     <td>
                       <strong>{item.name}</strong>
-                      <span>{item.type} / {money.format(price)}{item.provider && item.provider !== "N/A" ? ` / Provider: ${item.provider}` : ""}</span>
+                      <span>{item.type} / {money.format(price)}{item.priceUnit ? ` ${String(item.priceUnit).toLowerCase()}` : ""}{item.provider && item.provider !== "N/A" ? ` / Provider: ${item.provider}` : ""}</span>
                     </td>
                     <td>{qty}</td>
                     <td>{money.format(price * qty)}</td>
@@ -5695,6 +5711,8 @@ function POSModule({
         type: item.type,
         qty: Number(item.qty || 1),
         price: Number(item.price || 0),
+        priceModel: item.priceModel || "Fixed price",
+        priceUnit: item.priceUnit || "",
         provider: item.provider || "N/A",
         aftercare: item.aftercare || "",
         recommendedIntervalDays: Number(item.recommendedIntervalDays || 0),
@@ -5920,7 +5938,26 @@ function POSModule({
                     tabIndex={catalogFocusIndex === index ? 0 : -1}
                     onFocus={() => setCatalogFocusIndex(index)}
                     onKeyDown={(event) => handleCatalogItemKeyDown(event, index)}
-                    onClick={() => void addPosCartItem({ key: `service-${service.id}-${createId("line")}`, serviceId: service.id, serviceType: service.serviceType, type: "Service", name: service.name, category: service.category, price: service.price, provider: "N/A", aftercare: service.aftercare || "", recommendedIntervalDays: Number(service.recommendedIntervalDays || 0) })}
+                    onClick={() => {
+                      const catalogPrice = serviceCatalogPrice(service);
+                      void addPosCartItem({
+                        key: `service-${service.id}-${createId("line")}`,
+                        serviceId: service.id,
+                        serviceType: service.serviceType,
+                        type: "Service",
+                        name: service.name,
+                        category: service.category,
+                        price: catalogPrice,
+                        resolvedPrice: serviceUsesFinalPrice(service) ? catalogPrice : undefined,
+                        basePrice: catalogPrice,
+                        priceModel: service.priceModel || "Fixed price",
+                        priceUnit: service.priceUnit || "",
+                        packageSessions: Number(service.packageSessions || 0),
+                        provider: "N/A",
+                        aftercare: service.aftercare || "",
+                        recommendedIntervalDays: Number(service.recommendedIntervalDays || 0),
+                      });
+                    }}
                     type="button"
                   >
                     <strong>{service.name}</strong>
@@ -6022,7 +6059,11 @@ function POSModule({
           </button>
         </div>
         <div className="cart-list">
-          {cart.map((item, index) => (
+          {cart.map((item, index) => {
+            const unitPriced = item.type === "Service" && item.priceModel === "Per unit";
+            const unitLabel = servicePriceUnitLabel(item);
+            const fractionalUnit = unitPriced && unitLabel === "ml";
+            return (
             <article
               className={`cart-row ${cartFocusIndex === index ? "keyboard-selected" : ""}`}
               key={item.key}
@@ -6045,8 +6086,38 @@ function POSModule({
                     </select>
                   </label>
                 )}
+                {item.type === "Service" && serviceUsesFinalPrice(item) && (
+                  <label className="cart-final-price-input">
+                    <span>{item.priceModel === "Starts at" ? "Final price" : "Price after consultation"}</span>
+                    <input
+                      aria-label={`Final price for ${item.name}`}
+                      type="number"
+                      min={item.priceModel === "Starts at" ? Number(item.basePrice || 0) : 0}
+                      step="0.01"
+                      value={item.resolvedPrice ?? item.price}
+                      onChange={(event) => setCart((current) => current.map((entry) => entry.key === item.key ? {
+                        ...entry,
+                        price: event.target.value,
+                        resolvedPrice: event.target.value,
+                      } : entry))}
+                    />
+                    {item.priceModel === "Starts at" && <small>Minimum {money.format(Number(item.basePrice || 0))}</small>}
+                  </label>
+                )}
               </div>
-              <div className="quantity-stepper" aria-label={`Quantity for ${item.name}`}>
+              {unitPriced ? (
+                <label className="cart-unit-quantity">
+                  <span>{unitLabel}</span>
+                  <input
+                    aria-label={`Quantity in ${unitLabel} for ${item.name}`}
+                    type="number"
+                    min={fractionalUnit ? "0.01" : "1"}
+                    step={fractionalUnit ? "0.01" : "1"}
+                    value={item.qty}
+                    onChange={(event) => updateCartQty(item.key, event.target.value)}
+                  />
+                </label>
+              ) : <div className="quantity-stepper" aria-label={`Quantity for ${item.name}`}>
                 <button
                   type="button"
                   onClick={() => updateCartQty(item.key, Number(item.qty || 1) - 1)}
@@ -6065,13 +6136,14 @@ function POSModule({
                 >
                   <Plus size={14} aria-hidden="true" />
                 </button>
-              </div>
+              </div>}
               <b>{money.format(Number(item.price) * Number(item.qty || 1))}</b>
               <button type="button" onClick={() => removeCartItem(item.key)} title={`Remove ${item.name}`} aria-label={`Remove ${item.name}`}>
                 <Trash2 size={16} aria-hidden="true" />
               </button>
             </article>
-          ))}
+            );
+          })}
           {!cart.length && <EmptyState title="Cart is empty" copy="Add a service or product to begin checkout." />}
         </div>
         <div className="invoice-fields">
@@ -6327,6 +6399,17 @@ function POSServicePriceScreen({ branch, saveService, services, staff }) {
     setForm((current) => ({ ...current, [name]: value }));
   }
 
+  function changeServiceType(serviceType) {
+    setForm((current) => ({
+      ...current,
+      serviceType,
+      ...(serviceType === "Package" ? {
+        category: "Packages",
+        packagePrice: Number(current.packagePrice || current.price || 0),
+      } : {}),
+    }));
+  }
+
   function resetForm() {
     setEditingId("");
     setError("");
@@ -6381,7 +6464,7 @@ function POSServicePriceScreen({ branch, saveService, services, staff }) {
         id: editingId || undefined,
         name,
         duration: Number(form.duration || 0),
-        price,
+        price: form.serviceType === "Package" && Number(form.packagePrice) > 0 ? Number(form.packagePrice) : price,
         packageSessions: Number(form.packageSessions || 0),
         packagePrice: Number(form.packagePrice || 0),
         serviceValue: Number(form.serviceValue || 0),
@@ -6438,7 +6521,7 @@ function POSServicePriceScreen({ branch, saveService, services, staff }) {
           </label>
           <label>
             <span>Service type</span>
-            <select value={form.serviceType} onChange={(event) => updateForm("serviceType", event.target.value)}>
+            <select value={form.serviceType} onChange={(event) => changeServiceType(event.target.value)}>
               {["Regular Service", "Package", "Add-on"].map((type) => <option key={type}>{type}</option>)}
             </select>
           </label>
@@ -6452,24 +6535,24 @@ function POSServicePriceScreen({ branch, saveService, services, staff }) {
             <span>Base price</span>
             <input type="number" min="0" value={form.price} onChange={(event) => updateForm("price", event.target.value)} placeholder="0" />
           </label>
-          <label>
+          {form.priceModel === "Per unit" && <label>
             <span>Pricing unit</span>
             <select value={form.priceUnit} onChange={(event) => updateForm("priceUnit", event.target.value)}>
-              {["", "Per syringe", "Per ml", "Per vial", "Per ampule"].map((unit) => <option key={unit} value={unit}>{unit || "Not applicable"}</option>)}
+              {["", "Per syringe", "Per ml", "Per vial", "Per ampoule"].map((unit) => <option key={unit} value={unit}>{unit || "Select a unit"}</option>)}
             </select>
-          </label>
-          <label>
+          </label>}
+          {form.serviceType === "Package" && <label>
             <span>Package sessions</span>
-            <input type="number" min="0" value={form.packageSessions} onChange={(event) => updateForm("packageSessions", event.target.value)} />
-          </label>
-          <label>
+            <input type="number" min="1" step="1" value={form.packageSessions} onChange={(event) => updateForm("packageSessions", event.target.value)} />
+          </label>}
+          {form.serviceType === "Package" && <label>
             <span>Package price</span>
             <input type="number" min="0" value={form.packagePrice} onChange={(event) => updateForm("packagePrice", event.target.value)} />
-          </label>
-          <label>
+          </label>}
+          {form.serviceType === "Package" && <label>
             <span>Service value / session</span>
             <input type="number" min="0" value={form.serviceValue} onChange={(event) => updateForm("serviceValue", event.target.value)} />
-          </label>
+          </label>}
           <label>
             <span>Recommended interval (days)</span>
             <input type="number" min="0" value={form.recommendedIntervalDays} onChange={(event) => updateForm("recommendedIntervalDays", event.target.value)} />
@@ -12702,7 +12785,7 @@ function ModalHost({
         field("duration", "Duration minutes", "number"),
         field("priceModel", "Pricing model", "select", ["Fixed price", "Starts at", "Price after consultation/assessment", "Per unit"]),
         field("price", "Base price", "number"),
-        field("priceUnit", "Pricing unit", "select", ["", "Per syringe", "Per ml", "Per vial", "Per ampule"], "", false),
+        field("priceUnit", "Pricing unit", "select", ["", "Per syringe", "Per ml", "Per vial", "Per ampoule"], "", false),
         field("packageSessions", "Package sessions", "number", null, "", false),
         field("packagePrice", "Package price", "number", null, "", false),
         field("serviceValue", "Service value per session", "number", null, "", false),
