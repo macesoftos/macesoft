@@ -115,7 +115,7 @@ export function calculatePayrollLine({
     const scheduledByDefault = workDays.has(weekday);
     const type = entry?.type || (scheduledByDefault ? "Work Day" : "Day Off");
     const scheduledMinutes = scheduledMinutesFor(record, entry, rates.standardMinutes);
-    const row = { workDate, type, scheduledMinutes, regularMinutes: 0, overtimeMinutes: 0, undertimeMinutes: 0 };
+    const row = { workDate, branch: entry?.branch || record?.branch || "", type, scheduledMinutes, regularMinutes: 0, overtimeMinutes: 0, undertimeMinutes: 0 };
 
     if (type === "Day Off") {
       summary.dayOffDays += 1;

@@ -782,11 +782,19 @@ try {
     name: payrollStaffName,
     role: "Nurse",
     branch: "Mace Davao",
-    branches: ["Mace Davao"],
+    branches: ["Mace Davao", "Mace BGC"],
     commissionRate: 0,
+    employmentStatus: "Probationary",
+    birthDate: "1994-06-15",
+    address: "Davao City",
+    emergencyContact: "Payroll Emergency Contact",
+    emergencyPhone: "09171234567",
     status: "Available",
   });
   assert(payrollStaff.response.status === 201, "payroll employee fixture create failed");
+  assert(payrollStaff.payload.record.employmentStatus === "Probationary" && payrollStaff.payload.record.birthDate === "1994-06-15", "staff employment status or birth date was not saved");
+  assert(payrollStaff.payload.record.address === "Davao City" && payrollStaff.payload.record.emergencyPhone === "09171234567", "staff address or emergency contact was not saved");
+  assert(payrollStaff.payload.record.branches.includes("Mace Davao") && payrollStaff.payload.record.branches.includes("Mace BGC"), "staff multi-branch assignment was not saved");
   const payrollSwapStaffId = `st-payroll-swap-${suffix}`;
   const payrollSwapStaffName = `Payroll Swap Nurse ${suffix}`;
   const payrollSwapStaff = await jsonRequest("/api/resources/staff", {
@@ -823,9 +831,12 @@ try {
   const payrollToday = posCalendarDate();
   const payrollTodayUtc = Date.parse(`${payrollToday}T00:00:00.000Z`);
   const payrollYesterday = new Date(payrollTodayUtc - 86_400_000).toISOString().slice(0, 10);
+  const payrollScheduleOffset = 10 + (Number.parseInt(suffix.slice(-4), 36) % 30);
+  const payrollScheduleUtc = payrollTodayUtc - payrollScheduleOffset * 86_400_000;
+  const payrollScheduleDate = new Date(payrollScheduleUtc).toISOString().slice(0, 10);
   const paidLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
-    workDate: payrollToday,
+    workDate: payrollScheduleDate,
     branch: "Mace Davao",
     type: "Sick Leave",
     paid: true,
@@ -835,7 +846,7 @@ try {
   assert(paidLeave.response.status === 201 && paidLeave.payload.schedule.paid, "paid leave schedule entry failed");
   const conflictingLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollSwapStaffId,
-    workDate: payrollToday,
+    workDate: payrollScheduleDate,
     branch: "Mace Davao",
     type: "Vacation Leave",
     paid: false,
@@ -844,7 +855,7 @@ try {
   assert(conflictingLeave.response.status === 409, "a second employee could be placed on leave at the same branch and date");
   const overdrawnLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
-    workDate: new Date(payrollTodayUtc + 86_400_000).toISOString().slice(0, 10),
+    workDate: new Date(payrollScheduleUtc + 86_400_000).toISOString().slice(0, 10),
     branch: "Mace Davao",
     type: "Vacation Leave",
     paid: true,
@@ -853,7 +864,7 @@ try {
   assert(overdrawnLeave.response.status === 201, "second paid leave credit could not be used");
   const thirdPaidLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
-    workDate: new Date(payrollTodayUtc + 2 * 86_400_000).toISOString().slice(0, 10),
+    workDate: new Date(payrollScheduleUtc + 2 * 86_400_000).toISOString().slice(0, 10),
     branch: "Mace Davao",
     type: "Emergency Leave",
     paid: true,
@@ -861,8 +872,8 @@ try {
   });
   assert(thirdPaidLeave.response.status === 409, "paid leave could exceed the configured credit balance");
 
-  const originalDayOff = new Date(payrollTodayUtc + 3 * 86_400_000).toISOString().slice(0, 10);
-  const coworkerDayOff = new Date(payrollTodayUtc + 4 * 86_400_000).toISOString().slice(0, 10);
+  const originalDayOff = new Date(payrollScheduleUtc + 3 * 86_400_000).toISOString().slice(0, 10);
+  const coworkerDayOff = new Date(payrollScheduleUtc + 4 * 86_400_000).toISOString().slice(0, 10);
   const dayOffSwap = await jsonRequest("/api/payroll/schedule-swaps", {
     staffId: payrollStaffId,
     originalDayOff,
@@ -919,8 +930,47 @@ try {
   const payrollSaleId = payrollCheckout.payload.sale.id;
   assert(await prisma.payrollSalaryDeduction.count({ where: { saleId: payrollSaleId, staffId: payrollStaffId, status: "Pending" } }) === 1, "POS salary deduction was not recorded immediately");
 
+  const payrollPackage = await jsonRequest("/api/resources/packages", {
+    name: `Payroll session package ${suffix}`,
+    clientId,
+    client: "Automated Smoke Client Updated",
+    sessions: 2,
+    used: 0,
+    branch: "Mace Davao",
+    status: "Active",
+    price: 4000,
+    serviceValue: 2000,
+  });
+  assert(payrollPackage.response.status === 201, "payroll package fixture create failed");
+  const payrollPackageId = payrollPackage.payload.record.id;
+  const payrollPackageLineKey = `service-${packageServiceId}-payroll-redemption`;
+  const payrollPackageCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: {
+      clientId,
+      clientName: "Automated Smoke Client Updated",
+      branch: "Mace Davao",
+      staff: "Dr. Mace",
+      invoicePrefix: "MACE",
+      cart: [
+        { key: payrollPackageLineKey, serviceId: packageServiceId, type: "Service", name: "Automated Three Session Package", qty: 1, provider: payrollStaffName },
+        { key: `service-${variablePriceServiceId}-payroll-cash`, serviceId: variablePriceServiceId, type: "Service", name: "Automated Variable Consultation", qty: 1, resolvedPrice: 1000, provider: payrollStaffName },
+      ],
+    },
+    payment: {
+      payments: [
+        { method: "Package", amount: 3000, packageId: payrollPackageId, packageLineKey: payrollPackageLineKey },
+        { method: "Cash", amount: 1000 },
+      ],
+      notes: "Mixed package-session and regular-service commission test",
+    },
+  });
+  assert(payrollPackageCheckout.response.status === 201, `package commission checkout failed (${payrollPackageCheckout.response.status}: ${payrollPackageCheckout.payload?.error || "unknown error"})`);
+  const payrollPackageSaleId = payrollPackageCheckout.payload.sale.id;
+  const storedPackagePayment = payrollPackageCheckout.payload.sale.payments.find((payment) => payment.method === "Package");
+  assert(storedPackagePayment?.packageServiceId === packageServiceId && storedPackagePayment?.packageProvider === payrollStaffName, "package payment was not linked to its exact service and provider");
+
   const payrollRunCreate = await jsonRequest("/api/payroll/runs", {
-    cutoffStart: payrollYesterday,
+    cutoffStart: payrollScheduleDate,
     cutoffEnd: payrollToday,
     payDate: payrollToday,
     branch: "Mace Davao",
@@ -930,10 +980,14 @@ try {
   let payrollRun = payrollRunCreate.payload.run;
   const payrollLine = payrollRun.lines.find((line) => line.staffId === payrollStaffId);
   assert(payrollLine, "payroll run omitted the configured employee");
-  assert(payrollLine.paidLeaveDays === 1, "payroll did not include paid leave");
+  assert(payrollLine.paidLeaveDays === 2, "payroll did not include both paid leave entries");
   assert(payrollLine.overtimeMinutes === 60 && payrollLine.overtimePay === 156.25, "approved overtime was not calculated correctly");
-  assert(payrollLine.commissions === 150, "10% Nurse commission was not calculated from the service value");
+  assert(payrollLine.commissions === 450, "Nurse commissions did not combine the package session value and regular service value correctly");
   assert(payrollLine.salaryDeductions === 1500, "POS salary deduction was not included in the cutoff");
+  const packageCommissionRows = await prisma.payrollCommissionEarning.findMany({ where: { saleId: payrollPackageSaleId }, orderBy: { serviceName: "asc" } });
+  assert(packageCommissionRows.length === 2, "mixed package checkout did not create two distinct service commissions");
+  assert(packageCommissionRows.find((earning) => earning.serviceId === packageServiceId)?.baseAmount === 2000, "package commission did not use the configured per-session service value");
+  assert(packageCommissionRows.find((earning) => earning.serviceId === variablePriceServiceId)?.baseAmount === 1000, "regular service commission was incorrectly replaced by the package session value");
 
   const payrollAdjustment = await jsonRequest(`/api/payroll/runs/${payrollRun.id}/lines/${payrollLine.id}/adjustments`, {
     type: "Incentive",
@@ -1221,6 +1275,14 @@ try {
     invoicePrefix: "MACE",
     cart: [
       {
+        key: `service-${serviceId}-package-redemption`,
+        serviceId,
+        type: "Service",
+        name: "Automated Smoke Consultation",
+        qty: 1,
+        provider: "N/A",
+      },
+      {
         key: "product-inv-cleanser-kit",
         inventoryId: "inv-cleanser-kit",
         type: "Product",
@@ -1244,13 +1306,19 @@ try {
   });
   assert(missingCertificate.response.status === 400, "gift certificate payment without certificate was not blocked");
 
+  const missingPackageService = await jsonRequest("/api/pos/checkout", {
+    draft: { ...tenderCart, cart: tenderCart.cart.filter((item) => item.type === "Product") },
+    payment: { payments: [{ method: "Package", amount: 1500, packageId }] },
+  });
+  assert(missingPackageService.response.status === 400, "package payment without a covered service line was not blocked");
+
   const tenderCheckout = await jsonRequest("/api/pos/checkout", {
     draft: tenderCart,
     payment: {
       payments: [
         { method: "Gift Certificate", amount: 500, giftCertificateId: certificateId },
-        { method: "Package", amount: 500, packageId },
-        { method: "Cash", amount: 500 },
+        { method: "Package", amount: 1500, packageId, packageLineKey: `service-${serviceId}-package-redemption` },
+        { method: "Cash", amount: 1000 },
       ],
       notes: "Tender smoke test",
     },
@@ -1291,13 +1359,15 @@ try {
     method: "DELETE",
     headers: ownerHeaders,
   });
-  await prisma.payrollCommissionEarning.deleteMany({ where: { saleId: payrollSaleId } });
+  await prisma.payrollCommissionEarning.deleteMany({ where: { saleId: { in: [payrollSaleId, payrollPackageSaleId] } } });
   await prisma.payrollSalaryDeduction.deleteMany({ where: { saleId: payrollSaleId } });
   await prisma.payrollRun.deleteMany({ where: { id: payrollRun.id } });
   await prisma.faceTrackAttendanceRecord.deleteMany({ where: { staffId: payrollStaffId } });
   await prisma.payrollScheduleEntry.deleteMany({ where: { staffId: { in: [payrollStaffId, payrollSwapStaffId] } } });
   await prisma.payrollEmployeeProfile.deleteMany({ where: { staffId: payrollStaffId } });
   await request(`/api/resources/transactions/${payrollSaleId}`, { method: "DELETE", headers: ownerHeaders });
+  await request(`/api/resources/transactions/${payrollPackageSaleId}`, { method: "DELETE", headers: ownerHeaders });
+  await request(`/api/resources/packages/${payrollPackageId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/staff/${payrollStaffId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/staff/${payrollSwapStaffId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/services/${serviceId}`, {

@@ -29,11 +29,11 @@ test("monthly payroll deducts absence and undertime while paying approved overti
     profile: monthlyProfile,
     dates: ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06"],
     attendanceRecords: [
-      { workDate: "2026-08-03", timeIn: "2026-08-03T02:00:00Z", workedMinutes: 480, overtimeStatus: "APPROVED", approvedOvertimeMinutes: 60 },
+      { workDate: "2026-08-03", branch: "Mace Bajada", timeIn: "2026-08-03T02:00:00Z", workedMinutes: 480, overtimeStatus: "APPROVED", approvedOvertimeMinutes: 60 },
       { workDate: "2026-08-04", timeIn: "2026-08-04T02:00:00Z", workedMinutes: 420, overtimeStatus: "NOT_APPLICABLE", approvedOvertimeMinutes: 0 },
     ],
     scheduleEntries: [
-      { workDate: "2026-08-05", type: "Sick Leave", paid: true, status: "Approved", scheduledMinutes: 480 },
+      { workDate: "2026-08-05", branch: "Mace Davao", type: "Sick Leave", paid: true, status: "Approved", scheduledMinutes: 480 },
       { workDate: "2026-08-06", type: "Day Off", paid: false, status: "Approved", scheduledMinutes: 480 },
     ],
     incentives: 500,
@@ -48,6 +48,8 @@ test("monthly payroll deducts absence and undertime while paying approved overti
   assert.equal(result.dayOffDays, 1);
   assert.equal(result.undertimeMinutes, 60);
   assert.equal(result.overtimeMinutes, 60);
+  assert.equal(result.details.daily.find((day) => day.workDate === "2026-08-03").branch, "Mace Bajada");
+  assert.equal(result.details.daily.find((day) => day.workDate === "2026-08-05").branch, "Mace Davao");
   assert.equal(result.basePay, 12_875);
   assert.equal(result.overtimePay, 156.25);
   assert.equal(result.grossPay, 13_831.25);
