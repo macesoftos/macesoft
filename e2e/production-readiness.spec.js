@@ -24,7 +24,7 @@ test("anonymous users cannot read clinic data", async ({ request }) => {
 });
 
 test("an authenticated owner can open a scoped workspace and sign out", async ({ page }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(420_000);
   await page.goto("/");
   await page.getByLabel("Email").fill(ownerEmail);
   await page.getByLabel("Password").fill(ownerPassword);
@@ -309,6 +309,8 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   expect((await profileUpdate).status()).toBe(200);
 
   await page.getByRole("button", { name: "Commission Rules" }).click();
+  const commissionSetup = page.locator(".payroll-two-column.rules > aside");
+  await expect(commissionSetup).toHaveCSS("position", "sticky");
   await expect(page.getByText("Nurse standard 10%", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Schedule & Leave" }).click();
   await expect(page.getByRole("heading", { name: "Schedule or leave" })).toBeVisible();
@@ -331,9 +333,15 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     await expect(page.locator(".payroll-workspace")).toBeVisible();
     await expect(page.getByRole("button", { name: "Payroll Runs" })).toBeVisible();
     await expect(page.getByText("Pending salary deductions", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Commission Rules" }).evaluate((button) => button.click());
+    await expect(page.locator(".payroll-two-column.rules > aside")).toHaveCSS("position", "static");
   }
 
   await page.setViewportSize({ width: 1440, height: 900 });
+
+  await gotoAuthenticatedWorkspace(page, "/payroll");
+  await page.getByRole("button", { name: "Back to dashboard" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
 
   await gotoAuthenticatedWorkspace(page, "/#/support");
   await expect(page.getByRole("button", { name: "Create new" })).toHaveCount(0);

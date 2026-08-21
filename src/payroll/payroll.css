@@ -85,6 +85,7 @@
 .payroll-two-column { display: grid; grid-template-columns: minmax(280px, 0.37fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
 .payroll-two-column.schedule, .payroll-two-column.rules { grid-template-columns: minmax(320px, 0.42fr) minmax(0, 1fr); }
 .payroll-run-sidebar { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
+.payroll-two-column.rules > aside { position: sticky; top: 5.75rem; max-height: calc(100vh - 6.75rem); max-height: calc(100dvh - 6.75rem); overflow: auto; }
 
 .payroll-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.85rem; }
 .payroll-section-heading h2 { margin: 0.12rem 0 0; font-size: 1.1rem; }
@@ -201,6 +202,7 @@
   .payroll-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .payroll-run-layout, .payroll-two-column, .payroll-two-column.schedule, .payroll-two-column.rules { grid-template-columns: 1fr; }
   .payroll-run-sidebar { position: static; max-height: none; }
+  .payroll-two-column.rules > aside { position: static; max-height: none; overflow: visible; }
   .payroll-run-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .payroll-breakdown { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
