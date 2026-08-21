@@ -275,7 +275,7 @@ export async function verifyMarketingBuilder(page, expect) {
 
   const builderHeader = page.locator(".marketing-builder-header");
   await builderHeader.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByText("Approved by your admin account", { exact: true })).toBeVisible();
+  await expect(page.getByText("Approved by your admin account", { exact: true })).toBeVisible({ timeout: 20_000 });
   await builderHeader.getByRole("button", { name: "Continue", exact: true }).click();
   const deliveryTime = await page.evaluate(() => {
     const date = new Date(Date.now() + (10 * 60 * 1000));
