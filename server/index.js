@@ -3447,6 +3447,7 @@ async function buildSaleDraftItems(cart, branch) {
       prepared.push({
         source: service,
         sourceId: service.id,
+        lineKey: clean(item.key) || `service-${service.id}-${prepared.length}`,
         name: service.name,
         type: "Service",
         qty,
@@ -3473,6 +3474,7 @@ async function buildSaleDraftItems(cart, branch) {
       prepared.push({
         source: product,
         sourceId: product.id,
+        lineKey: clean(item.key) || `product-${product.id}-${prepared.length}`,
         name: product.item,
         type: "Product",
         qty,
@@ -3506,7 +3508,15 @@ function normalizeManualDiscount(value) {
   if (type === "Percentage" && discountValue > 100) {
     throw apiError("Manual percentage discount cannot exceed 100%.");
   }
-  return { type, value: discountValue };
+  const rawScope = clean(value?.scope || "Transaction").toLowerCase();
+  const scope = ["transaction", "entire transaction", "cart"].includes(rawScope)
+    ? "Transaction"
+    : ["service", "specific service", "service line"].includes(rawScope)
+      ? "Service"
+      : "";
+  if (!scope) throw apiError("Manual discount scope must be Transaction or Service.");
+  const targetKey = scope === "Service" ? requireText(value?.targetKey, "Discounted service") : "";
+  return { type, value: discountValue, scope, targetKey };
 }
 
 async function calculateCheckout(draft, { actor, branch }) {
@@ -3551,15 +3561,32 @@ async function calculateCheckout(draft, { actor, branch }) {
       ? Math.round((subtotal * Number(discount.value || 0)) / 100)
       : Number(discount.value || 0)
     : 0;
-  const manualDiscountAmount = manualDiscount
-    ? manualDiscount.type === "Percentage"
-      ? Math.round((subtotal * manualDiscount.value) / 100)
-      : manualDiscount.value
-    : 0;
-  if (manualDiscountAmount > subtotal) {
-    throw apiError("Manual discount cannot exceed the cart subtotal.");
+  const manualDiscountTarget = manualDiscount?.scope === "Service"
+    ? items.filter((item) => item.type === "Service" && item.lineKey === manualDiscount.targetKey)
+    : [];
+  if (manualDiscount?.scope === "Service" && manualDiscountTarget.length !== 1) {
+    throw apiError("Choose one valid service line for the manual discount.");
   }
-  const transactionDiscountAmount = manualDiscount ? manualDiscountAmount : savedDiscountAmount;
+  const manualDiscountBase = manualDiscount?.scope === "Service"
+    ? manualDiscountTarget[0].price * manualDiscountTarget[0].qty
+    : subtotal;
+  const resolvedManualDiscount = manualDiscount
+    ? {
+      ...manualDiscount,
+      targetName: manualDiscount?.scope === "Service" ? manualDiscountTarget[0].name : "",
+    }
+    : null;
+  const manualDiscountAmount = resolvedManualDiscount
+    ? resolvedManualDiscount.type === "Percentage"
+      ? Math.round((manualDiscountBase * resolvedManualDiscount.value) / 100)
+      : resolvedManualDiscount.value
+    : 0;
+  if (manualDiscountAmount > manualDiscountBase) {
+    throw apiError(resolvedManualDiscount?.scope === "Service"
+      ? "Manual discount cannot exceed the selected service total."
+      : "Manual discount cannot exceed the cart subtotal.");
+  }
+  const transactionDiscountAmount = resolvedManualDiscount ? manualDiscountAmount : savedDiscountAmount;
   const requestedDepositCredit = numberValue(draft.depositCredit, "Deposit credit", { min: 0 });
   const appointmentId = clean(draft.appointmentId);
   let depositCredit = 0;
@@ -3584,7 +3611,7 @@ async function calculateCheckout(draft, { actor, branch }) {
     items,
     subtotal,
     discount,
-    manualDiscount,
+    manualDiscount: resolvedManualDiscount,
     transactionDiscountAmount,
     depositCredit,
     appointmentId: creditedAppointmentId,
@@ -6785,8 +6812,14 @@ function normalizePosCartPayload(payload, actor, existing = null) {
   const manualDiscount = normalizeManualDiscount({
     type: payload?.manualDiscountType ?? existing?.manualDiscountType,
     value: payload?.manualDiscountValue ?? existing?.manualDiscountValue,
+    scope: payload?.manualDiscountScope ?? existing?.manualDiscountScope,
+    targetKey: payload?.manualDiscountTargetKey ?? existing?.manualDiscountTargetKey,
   });
   if (discountId && manualDiscount) throw apiError("Choose either a saved discount rule or a manual discount, not both.");
+  if (manualDiscount?.scope === "Service") {
+    const discountedServiceLines = items.filter((item) => clean(item?.type) === "Service" && clean(item?.key) === manualDiscount.targetKey);
+    if (discountedServiceLines.length !== 1) throw apiError("Choose one valid service line for the manual discount.");
+  }
   return {
     clientId: clean(payload?.clientId),
     client: clean(payload?.client) || "Walk-in",
@@ -6796,6 +6829,8 @@ function normalizePosCartPayload(payload, actor, existing = null) {
     discountId,
     manualDiscountType: manualDiscount?.type || "",
     manualDiscountValue: manualDiscount?.value || 0,
+    manualDiscountScope: manualDiscount?.scope || "Transaction",
+    manualDiscountTargetKey: manualDiscount?.targetKey || "",
     saleDate,
     testMode,
   };
@@ -7150,7 +7185,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     }
     const tenderNotes = [
       ...(checkout.manualDiscount ? [
-        `Manual discount: ${checkout.manualDiscount.type === "Percentage" ? `${checkout.manualDiscount.value}%` : checkout.manualDiscount.value} (${checkout.transactionDiscountAmount} applied)`,
+        `Manual discount: ${checkout.manualDiscount.type === "Percentage" ? `${checkout.manualDiscount.value}%` : checkout.manualDiscount.value}${checkout.manualDiscount.scope === "Service" ? ` on ${checkout.manualDiscount.targetName}` : " on entire transaction"} (${checkout.transactionDiscountAmount} applied)`,
       ] : checkout.discount ? [`Discount rule: ${checkout.discount.name} (${checkout.transactionDiscountAmount} applied)`] : []),
       ...(checkout.appliedPromotions.length ? [`Promotions: ${checkout.appliedPromotions.join(", ")}`] : []),
       ...settledCertificates.map((certificate) => `GC ${certificate.code} balance ${certificate.balance}`),
