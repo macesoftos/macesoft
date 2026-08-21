@@ -8767,6 +8767,8 @@ function ClientsModule({
   appointments,
   transactions,
   packages,
+  consentTemplates = [],
+  consentSubmissions = [],
   openModal,
   importClients,
   deleteClient,
