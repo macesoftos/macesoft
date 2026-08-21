@@ -9,9 +9,11 @@ if (!ownerEmail || !ownerPassword) {
 }
 
 async function gotoAuthenticatedWorkspace(page, path) {
-  const bootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.status() === 200);
   await page.goto(path);
-  await bootstrap;
+  await expect.poll(async () => page.evaluate(async () => {
+    const response = await fetch("/api/bootstrap", { credentials: "include" });
+    return response.status;
+  }), { timeout: 30_000 }).toBe(200);
 }
 
 test("anonymous users cannot read clinic data", async ({ request }) => {
@@ -260,20 +262,21 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByRole("button", { name: "Create new" })).toHaveCount(0);
 
   const serviceId = `svc-e2e-${Date.now()}`;
-  const serviceCreation = await page.evaluate(async (id) => {
+  const serviceName = `Automated E2E Consultation ${serviceId}`;
+  const serviceCreation = await page.evaluate(async ({ id, name }) => {
     const response = await fetch("/api/resources/services", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
       body: JSON.stringify({
         id,
-        name: "Automated E2E Consultation",
+        name,
         category: "Consultations",
         duration: 45,
         price: 1500,
         commission: "",
         consumables: [],
-        branches: ["Mace Davao"],
+        branches: ["All branches"],
         staff: ["Doctor"],
         room: "Room 1",
         active: true,
@@ -284,7 +287,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
       }),
     });
     return response.status;
-  }, serviceId);
+  }, { id: serviceId, name: serviceName });
   expect(serviceCreation).toBe(201);
 
   const refreshedBootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.request().method() === "GET");
@@ -303,17 +306,17 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.keyboard.press("F2");
   const catalogSearch = page.getByLabel("Search POS catalog");
   await expect(catalogSearch).toBeFocused();
-  await page.keyboard.type("Automated E2E Consultation");
-  await expect(page.getByRole("button", { name: /Automated E2E Consultation/i })).toBeVisible();
+  await page.keyboard.type(serviceName);
+  await expect(page.getByRole("button", { name: new RegExp(serviceName, "i") }).first()).toBeVisible();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
 
-  await expect(page.getByRole("group", { name: /Automated E2E Consultation, quantity 1/i })).toBeVisible();
+  await expect(page.getByRole("group", { name: new RegExp(`${serviceName}, quantity 1`, "i") })).toBeVisible();
   await page.keyboard.press("F6");
   await page.keyboard.press("=");
-  await expect(page.getByRole("group", { name: /Automated E2E Consultation, quantity 2/i })).toBeFocused();
+  await expect(page.getByRole("group", { name: new RegExp(`${serviceName}, quantity 2`, "i") })).toBeFocused();
   await page.keyboard.press("-");
-  await expect(page.getByRole("group", { name: /Automated E2E Consultation, quantity 1/i })).toBeFocused();
+  await expect(page.getByRole("group", { name: new RegExp(`${serviceName}, quantity 1`, "i") })).toBeFocused();
 
   await page.keyboard.press("F8");
   await page.keyboard.press("1");

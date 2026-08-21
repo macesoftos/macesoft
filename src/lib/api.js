@@ -35,7 +35,7 @@ async function requestJson(path, options = {}) {
     if (response.status === 401 && apiSessionActive && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(apiAuthenticationRequiredEvent));
     }
-    throw new Error(payload?.error || "The clinic API request failed.");
+    throw Object.assign(new Error(payload?.error || "The clinic API request failed."), { status: response.status, payload });
   }
 
   if (!isJson) {
@@ -624,6 +624,22 @@ export function postInventoryMovement(id, movement) {
   });
 }
 
+export function submitPublicRegistration(payload) {
+  return requestJson("/api/public-registration", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function createPosCart(cart) {
+  return requestJson("/api/pos/carts", { method: "POST", body: JSON.stringify(cart) });
+}
+
+export function updatePosCart(id, cart) {
+  return requestJson(`/api/pos/carts/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(cart) });
+}
+
+export function deletePosCart(id) {
+  return requestJson(`/api/pos/carts/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export function loadLeadIntegrations() {
   return requestJson("/api/leads/integrations");
 }
@@ -683,6 +699,12 @@ export function redeemPackageRecord(id) {
 export function voidTransactionRecord(id) {
   return requestJson(`/api/transactions/${encodeURIComponent(id)}/void`, {
     method: "POST",
+  });
+}
+
+export function deleteTestTransactionRecord(id) {
+  return requestJson(`/api/transactions/${encodeURIComponent(id)}/test`, {
+    method: "DELETE",
   });
 }
 
