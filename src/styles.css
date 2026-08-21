@@ -8529,6 +8529,95 @@ td,
   padding-top: 0.4rem;
   color: var(--muted-text, #64748b);
 }
+.inventory-workflow-note {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.inventory-workflow-note > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--line, #ddd4c8);
+  border-radius: 10px;
+  background: var(--surface-soft, #f8f4ef);
+  color: var(--muted, #75695f);
+}
+
+.inventory-workflow-note svg {
+  flex: 0 0 auto;
+  color: var(--primary, #8b1538);
+}
+
+.inventory-workflow-note span,
+.inventory-workflow-note strong {
+  display: block;
+}
+
+.inventory-workflow-note strong {
+  margin-bottom: 2px;
+  color: var(--ink, #241b18);
+}
+
+.consumable-usage-field {
+  display: grid;
+  gap: 9px;
+}
+
+.consumable-usage-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.consumable-usage-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(105px, 0.34fr) auto auto;
+  align-items: end;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line, #ddd4c8);
+  border-radius: 9px;
+  background: var(--surface-soft, #f8f4ef);
+}
+
+.consumable-usage-row > label {
+  display: grid;
+  gap: 4px;
+}
+
+.consumable-usage-row > label span {
+  color: var(--muted, #75695f);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.consumable-unit {
+  align-self: center;
+  min-width: 54px;
+  color: var(--muted, #75695f);
+  font-size: 0.78rem;
+}
+
+.consumable-add-button {
+  justify-self: start;
+}
+
+@media (max-width: 760px) {
+  .inventory-workflow-note {
+    grid-template-columns: 1fr;
+  }
+
+  .consumable-usage-row {
+    grid-template-columns: 1fr minmax(100px, 0.4fr) auto;
+  }
+
+  .consumable-usage-row > select {
+    grid-column: 1 / -1;
+  }
+}
 .public-registration-page {
   min-height: 100vh;
   padding: clamp(1rem, 4vw, 3rem);
