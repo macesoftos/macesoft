@@ -23,6 +23,7 @@ import {
   normalizeRoomName,
 } from "./roomManagement.js";
 import { createFaceTrackAttendanceRouter } from "./facetrackAttendance.js";
+import { createPayrollRouter } from "./payroll.js";
 import { assertProductionEnvironment } from "./productionConfig.js";
 import {
   accountMatchesStaffIdentity,
@@ -4039,6 +4040,7 @@ app.use("/api/flipbooks", flipbookRouters.internal);
 app.use("/api/public/flipbooks", flipbookRouters.public);
 
 app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
+app.use("/api/payroll", createPayrollRouter(prisma, { apiError, asyncRoute, writeAudit }));
 
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();
@@ -6535,6 +6537,16 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     response.json({ record: serializeSale(sale), auditLog: null });
     return;
   }
+  const lockedPayrollSource = await prisma.$transaction(async (tx) => {
+    const [commission, deduction] = await Promise.all([
+      tx.payrollCommissionEarning.findFirst({ where: { saleId: sale.id, status: "Included" }, select: { id: true } }),
+      tx.payrollSalaryDeduction.findFirst({ where: { saleId: sale.id, status: "Included" }, select: { id: true } }),
+    ]);
+    return Boolean(commission || deduction);
+  });
+  if (lockedPayrollSource) {
+    throw apiError("This transaction is included in finalized payroll and can no longer be voided. Reverse it through a later payroll adjustment.", 409);
+  }
 
   const actor = actorFromRequest(request);
   const result = await prisma.$transaction(async (tx) => {
@@ -6626,6 +6638,18 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
       ...restoredCertificates.map((certificate) => `GC ${certificate.code} restored to ${certificate.balance}`),
       ...restoredPackages.map((pkg) => `${pkg.name} back to ${pkg.used}/${pkg.sessions} sessions`),
     ];
+    const [reversedCommissionEarnings, reversedSalaryDeductions] = await Promise.all([
+      tx.payrollCommissionEarning.updateMany({
+        where: { saleId: sale.id, status: "Pending" },
+        data: { status: "Reversed", payrollLineId: null },
+      }),
+      tx.payrollSalaryDeduction.updateMany({
+        where: { saleId: sale.id, status: "Pending" },
+        data: { status: "Reversed", payrollLineId: null },
+      }),
+    ]);
+    if (reversedCommissionEarnings.count) reversalNotes.push(`${reversedCommissionEarnings.count} pending payroll commission(s) reversed`);
+    if (reversedSalaryDeductions.count) reversalNotes.push(`${reversedSalaryDeductions.count} pending salary deduction(s) reversed`);
     const auditLog = await writeAudit(tx, request, {
       area: "POS",
       action: "Transaction voided",
@@ -6762,6 +6786,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   const normalizedPayments = payments.map((payment) => {
     const referenceNumber = normalizePaymentReference(payment.referenceNumber);
     return {
+      id: clean(payment.id) || randomBytes(12).toString("hex"),
       method: requireText(payment.method, "Payment method"),
       amount: numberValue(payment.amount, "Payment amount", { min: 0 }),
       ...(referenceNumber ? { referenceNumber } : {}),
@@ -6943,6 +6968,27 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       },
       include: { items: true },
     });
+
+    for (const payment of operationalPayments) {
+      if (payment.method !== "Salary Deduction" || !payment.employeeId) continue;
+      await tx.payrollSalaryDeduction.upsert({
+        where: { sourceKey: payment.id },
+        create: {
+          sourceKey: payment.id,
+          staffId: payment.employeeId,
+          saleId: sale.id,
+          saleInvoice: sale.invoice,
+          sourceDate: sale.date,
+          branch: sale.branch,
+          amount: payment.amount,
+          details: JSON.stringify({
+            paymentMethod: payment.method,
+            referenceNumber: payment.referenceNumber || "",
+          }),
+        },
+        update: {},
+      });
+    }
 
     for (let index = 0; index < settledCertificates.length; index += 1) {
       const certificate = settledCertificates[index];

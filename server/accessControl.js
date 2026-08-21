@@ -50,6 +50,7 @@ const API_MODULE_RULES = [
   [/^\/api\/packages(?:\/|$)/, "packages"],
   [/^\/api\/transactions(?:\/|$)/, "pos"],
   [/^\/api\/pos(?:\/|$)/, "pos"],
+  [/^\/api\/payroll(?:\/|$)/, "payroll"],
 ];
 
 export function isPublicApiRequest(method, path) {

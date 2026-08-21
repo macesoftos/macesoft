@@ -714,3 +714,63 @@ export function completePosCheckout(draft, payment) {
     body: JSON.stringify({ draft, payment }),
   });
 }
+
+export function loadPayrollOverview() {
+  return requestJson("/api/payroll/overview");
+}
+
+export function loadPayrollRun(id) {
+  return requestJson(`/api/payroll/runs/${encodeURIComponent(id)}`);
+}
+
+export function savePayrollProfile(staffId, profile) {
+  return requestJson(`/api/payroll/profiles/${encodeURIComponent(staffId)}`, {
+    method: "PUT",
+    body: JSON.stringify(profile),
+  });
+}
+
+export function savePayrollSchedule(schedule) {
+  return requestJson("/api/payroll/schedules", {
+    method: "POST",
+    body: JSON.stringify(schedule),
+  });
+}
+
+export function deletePayrollSchedule(id) {
+  return requestJson(`/api/payroll/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function createCommissionRule(rule) {
+  return requestJson("/api/payroll/rules", { method: "POST", body: JSON.stringify(rule) });
+}
+
+export function updateCommissionRule(id, rule) {
+  return requestJson(`/api/payroll/rules/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(rule) });
+}
+
+export function createPayrollRun(run) {
+  return requestJson("/api/payroll/runs", { method: "POST", body: JSON.stringify(run) });
+}
+
+export function recalculatePayrollRun(id) {
+  return requestJson(`/api/payroll/runs/${encodeURIComponent(id)}/recalculate`, { method: "POST" });
+}
+
+export function addPayrollAdjustment(runId, lineId, adjustment) {
+  return requestJson(`/api/payroll/runs/${encodeURIComponent(runId)}/lines/${encodeURIComponent(lineId)}/adjustments`, {
+    method: "POST",
+    body: JSON.stringify(adjustment),
+  });
+}
+
+export function deletePayrollAdjustment(runId, adjustmentId) {
+  return requestJson(`/api/payroll/runs/${encodeURIComponent(runId)}/adjustments/${encodeURIComponent(adjustmentId)}`, { method: "DELETE" });
+}
+
+export function updatePayrollRunStatus(id, status) {
+  return requestJson(`/api/payroll/runs/${encodeURIComponent(id)}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+}
