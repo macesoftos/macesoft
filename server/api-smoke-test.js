@@ -270,6 +270,7 @@ try {
     category: "Consultations",
     duration: 45,
     price: 1500,
+    recommendedIntervalDays: 21,
     commission: "",
     consumables: [],
     branches: ["Mace Davao"],
@@ -279,7 +280,7 @@ try {
     pos: true,
     description: "Created by the API smoke test.",
     contraindications: "",
-    aftercare: "",
+    aftercare: "Keep the treated area clean and avoid direct sun exposure for 48 hours.",
   });
   assert(createdService.response.status === 201, "service create failed");
   assert(createdService.payload.notification?.title === "New service", "service create did not emit a notification");
@@ -1018,6 +1019,8 @@ try {
   assert(manualDiscountCheckout.payload.sale.subtotal === 3000, "targeted manual discount changed the sale subtotal");
   assert(manualDiscountCheckout.payload.sale.discount === 150, "targeted manual percentage discount affected more than the selected service");
   assert(manualDiscountCheckout.payload.sale.total === 2850, "targeted manual discount was not deducted from the POS total");
+  assert(manualDiscountCheckout.payload.sale.items.every((item) => item.aftercare === "Keep the treated area clean and avoid direct sun exposure for 48 hours."), "POS sale items did not preserve service aftercare for receipt reprints");
+  assert(manualDiscountCheckout.payload.sale.items.every((item) => item.recommendedIntervalDays === 21), "POS sale items did not preserve the service interval for receipt reprints");
   assert(manualDiscountCheckout.payload.auditLog?.details.includes("Manual discount: 10% on Automated Smoke Consultation"), "targeted manual discount was omitted from the POS audit trail");
   const manualDiscountSaleId = manualDiscountCheckout.payload.sale.id;
   const voidedManualDiscountSale = await jsonRequest(`/api/transactions/${manualDiscountSaleId}/void`, {});

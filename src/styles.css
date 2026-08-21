@@ -8106,6 +8106,11 @@ td,
 .print-receipt-aftercare > div {
   display: grid;
   gap: 2px;
+  break-inside: avoid;
+}
+
+.print-receipt-aftercare-copy {
+  white-space: pre-line;
 }
 
 .pos-open-carts-bar {

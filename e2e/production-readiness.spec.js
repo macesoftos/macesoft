@@ -359,6 +359,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
         category: "Consultations",
         duration: 45,
         price: 1500,
+        recommendedIntervalDays: 21,
         commission: "",
         consumables: [],
         branches: ["All branches"],
@@ -368,7 +369,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
         pos: true,
         description: "Created by the browser test.",
         contraindications: "",
-        aftercare: "",
+        aftercare: "Keep the treated area clean and avoid direct sun exposure for 48 hours.",
       }),
     });
     return response.status;
@@ -403,13 +404,24 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.keyboard.press("-");
   await expect(page.getByRole("group", { name: new RegExp(`${serviceName}, quantity 1`, "i") })).toBeFocused();
 
+  await page.getByRole("button", { name: "Expand discount settings" }).click();
   await page.getByLabel("Discount source").selectOption("__manual__");
   await page.getByLabel("Manual discount scope").selectOption("Service");
   await expect(page.getByLabel("Discounted service")).toContainText(serviceName);
   await page.getByLabel("Manual discount type").selectOption("Percentage");
   await page.getByLabel("Manual discount value").fill("10");
   await expect(page.getByText(`10% of ${serviceName}`, { exact: true })).toBeVisible();
-  await page.getByRole("heading", { name: "Build checkout" }).click();
+  await page.getByRole("button", { name: "Collapse discount settings" }).click();
+  await expect(page.getByLabel("Discount source")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Expand discount settings" })).toContainText(`10% on ${serviceName}`);
+
+  await page.evaluate(() => {
+    Object.defineProperty(window, "print", { configurable: true, value: () => {} });
+  });
+  await page.getByRole("button", { name: "Print receipt", exact: true }).first().click();
+  await expect(page.locator(".print-receipt-aftercare")).toContainText("Keep the treated area clean and avoid direct sun exposure for 48 hours.");
+  await expect(page.locator(".print-receipt-aftercare")).toContainText("Recommended interval: 21 days");
+  await expect(page.locator(".print-receipt-aftercare")).toContainText("Suggested next session:");
 
   await page.keyboard.press("F8");
   await page.keyboard.press("1");
@@ -418,6 +430,9 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.keyboard.press("Control+Enter");
   expect((await checkoutResponse).status()).toBe(201);
   await expect(page.getByRole("dialog", { name: "Payment form" })).toBeHidden();
+  await page.getByRole("button", { name: "Receipt", exact: true }).first().click();
+  await expect(page.locator(".print-receipt-aftercare")).toContainText("Keep the treated area clean and avoid direct sun exposure for 48 hours.");
+  await expect(page.locator(".print-receipt-aftercare")).toContainText("Recommended interval: 21 days");
 
   await page.keyboard.press("Alt+P");
   await expect(page.getByRole("heading", { name: "My Workspace" })).toBeVisible();

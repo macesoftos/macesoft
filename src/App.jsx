@@ -3186,13 +3186,24 @@ function App() {
       {confirm && <ConfirmDialog confirm={confirm} onCancel={() => { confirm.onCancel?.(); setConfirm(null); }} onConfirmComplete={() => setConfirm(null)} />}
       {toast && <Toast toast={toast} />}
       </div>
-      <PrintableReceipt receipt={receiptToPrint} settings={settings} />
+      <PrintableReceipt receipt={receiptToPrint} settings={settings} services={services} />
     </>
   );
 }
 
-function PrintableReceipt({ receipt, settings }) {
-  const items = receipt?.items ?? [];
+function PrintableReceipt({ receipt, settings, services = [] }) {
+  const items = (receipt?.items ?? []).map((item) => {
+    if (item.type !== "Service") return item;
+    const service = services.find((entry) => item.serviceId && entry.id === item.serviceId)
+      || services.find((entry) => normalize(entry.name) === normalize(item.name));
+    return {
+      ...item,
+      serviceId: item.serviceId || service?.id || "",
+      aftercare: String(item.aftercare || "").trim() || String(service?.aftercare || "").trim(),
+      recommendedIntervalDays: Number(item.recommendedIntervalDays || service?.recommendedIntervalDays || 0),
+    };
+  });
+  const serviceProtocolItems = items.filter((item) => item.type === "Service" && (item.aftercare || Number(item.recommendedIntervalDays) > 0));
   const payments = receipt?.payments ?? [];
   const subtotal = Number(receipt?.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1), 0));
   const discount = Number(receipt?.discount || 0);
@@ -3245,14 +3256,22 @@ function PrintableReceipt({ receipt, settings }) {
             </tbody>
           </table>
 
-          {items.some((item) => item.type === "Service" && (item.aftercare || Number(item.recommendedIntervalDays) > 0)) && (
+          {serviceProtocolItems.length > 0 && (
             <section className="print-receipt-aftercare">
-              <strong>Aftercare & recommended next session</strong>
-              {items.filter((item) => item.type === "Service").map((item, index) => {
+              <strong>Aftercare instructions & service interval</strong>
+              {serviceProtocolItems.map((item, index) => {
+                const intervalDays = Number(item.recommendedIntervalDays || 0);
                 const nextDate = Number(item.recommendedIntervalDays) > 0 && receipt.date
-                  ? isoDate(addDays(new Date(`${receipt.date}T12:00:00`), Number(item.recommendedIntervalDays)))
+                  ? isoDate(addDays(new Date(`${receipt.date}T12:00:00`), intervalDays))
                   : "";
-                return <div key={`${item.name}-aftercare-${index}`}><b>{item.name}</b>{item.aftercare && <span>{item.aftercare}</span>}{nextDate && <span>Recommended next session: {formatDate(nextDate)} ({item.recommendedIntervalDays} days)</span>}</div>;
+                return (
+                  <div key={`${item.serviceId || item.name}-aftercare-${index}`}>
+                    <b>{item.name}</b>
+                    {item.aftercare && <span className="print-receipt-aftercare-copy">{item.aftercare}</span>}
+                    {intervalDays > 0 && <span>Recommended interval: {intervalDays} days</span>}
+                    {nextDate && <span>Suggested next session: {formatDate(nextDate)}</span>}
+                  </div>
+                );
               })}
             </section>
           )}
@@ -5292,6 +5311,7 @@ function POSModule({
   const [manualDiscountValue, setManualDiscountValue] = useState("");
   const [manualDiscountScope, setManualDiscountScope] = useState("Transaction");
   const [manualDiscountTargetKey, setManualDiscountTargetKey] = useState("");
+  const [isDiscountPanelExpanded, setIsDiscountPanelExpanded] = useState(false);
   const [saleDate, setSaleDate] = useState(todayDate());
   const [testMode, setTestMode] = useState(false);
   const [activeCartId, setActiveCartId] = useState("");
@@ -5479,6 +5499,13 @@ function POSModule({
   }, 0);
   const discountAmount = Math.min(subtotal, transactionDiscountAmount + promotionDiscountAmount);
   const total = Math.max(0, subtotal - discountAmount);
+  const discountPanelSummary = manualDiscount
+    ? `${manualDiscount.type === "Percentage" ? `${manualDiscount.value || 0}%` : money.format(manualDiscount.value || 0)}${manualDiscount.scope === "Service" ? ` on ${manualDiscountTargetItem?.name || "selected service"}` : " on entire transaction"}`
+    : discount
+      ? discount.name
+      : promotionDiscountAmount > 0
+        ? `Automatic promotion · ${money.format(promotionDiscountAmount)}`
+        : "No discount";
   const client = clients.find((item) => item.id === clientId);
   const todaysTransactions = transactions.filter((transaction) => transaction.date === todayDate());
   const transactionSummaryRows = todaysTransactions.length ? todaysTransactions : transactions;
@@ -5797,6 +5824,7 @@ function POSModule({
       branch,
       staff: staffName || "Unassigned",
       items: cart.map((item) => ({
+        serviceId: item.serviceId || "",
         name: item.name,
         type: item.type,
         qty: Number(item.qty || 1),
@@ -6239,97 +6267,120 @@ function POSModule({
           {!cart.length && <EmptyState title="Cart is empty" copy="Add a service or product to begin checkout." />}
         </div>
         <div className="invoice-fields">
-          <label className="stacked-field">
-            <span>Discount source</span>
-            <select
-              aria-label="Discount source"
-              value={manualDiscountType ? "__manual__" : discountId}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === "__manual__") {
-                  setDiscountId("");
-                  setManualDiscountType((current) => current || "Fixed amount");
-                  return;
-                }
-                setDiscountId(value);
-                setManualDiscountType("");
-                setManualDiscountValue("");
-                setManualDiscountScope("Transaction");
-                setManualDiscountTargetKey("");
-              }}
+          <section className={`discount-panel${manualDiscountInvalid ? " has-error" : ""}`}>
+            <button
+              className="discount-panel-toggle"
+              type="button"
+              aria-expanded={isDiscountPanelExpanded}
+              aria-controls="pos-discount-settings"
+              aria-label={`${isDiscountPanelExpanded ? "Collapse" : "Expand"} discount settings`}
+              onClick={() => setIsDiscountPanelExpanded((current) => !current)}
             >
-              <option value="">No discount</option>
-              <option value="__manual__">Manual discount</option>
-              <optgroup label="Saved discount rules">
-                {discounts.filter((item) => item.active).map((item) => (
-                  <option key={item.id} value={item.id}>{item.name} - {item.type}</option>
-                ))}
-              </optgroup>
-            </select>
-          </label>
-          {manualDiscountType && (
-            <div className="manual-discount-fields">
+              <span className="discount-panel-heading">
+                <strong>Discount</strong>
+                <small>{discountPanelSummary}</small>
+              </span>
+              <span className="discount-panel-action">
+                {isDiscountPanelExpanded ? "Minimize" : "Edit"}
+                <ChevronDown size={17} className={isDiscountPanelExpanded ? "is-expanded" : ""} aria-hidden="true" />
+              </span>
+            </button>
+            {isDiscountPanelExpanded && (
+              <div className="discount-panel-content" id="pos-discount-settings">
               <label className="stacked-field">
-                <span>Apply discount to</span>
+                <span>Discount source</span>
                 <select
-                  aria-label="Manual discount scope"
-                  value={manualDiscountScope}
+                  aria-label="Discount source"
+                  value={manualDiscountType ? "__manual__" : discountId}
                   onChange={(event) => {
-                    const scope = event.target.value;
-                    setManualDiscountScope(scope);
-                    setManualDiscountTargetKey(scope === "Service" ? serviceDiscountOptions[0]?.key || "" : "");
+                    const value = event.target.value;
+                    if (value === "__manual__") {
+                      setDiscountId("");
+                      setManualDiscountType((current) => current || "Fixed amount");
+                      return;
+                    }
+                    setDiscountId(value);
+                    setManualDiscountType("");
+                    setManualDiscountValue("");
+                    setManualDiscountScope("Transaction");
+                    setManualDiscountTargetKey("");
                   }}
                 >
-                  <option value="Transaction">Entire transaction</option>
-                  <option value="Service" disabled={!serviceDiscountOptions.length}>Specific service</option>
-                </select>
-              </label>
-              {manualDiscountScope === "Service" && (
-                <label className="stacked-field">
-                  <span>Discounted service</span>
-                  <select
-                    aria-label="Discounted service"
-                    value={manualDiscountTargetKey}
-                    onChange={(event) => setManualDiscountTargetKey(event.target.value)}
-                  >
-                    <option value="">Choose service</option>
-                    {serviceDiscountOptions.map((item) => (
-                      <option key={item.key} value={item.key}>
-                        {item.name} — {money.format(Number(item.price || 0) * Number(item.qty || 1))}
-                      </option>
+                  <option value="">No discount</option>
+                  <option value="__manual__">Manual discount</option>
+                  <optgroup label="Saved discount rules">
+                    {discounts.filter((item) => item.active).map((item) => (
+                      <option key={item.id} value={item.id}>{item.name} - {item.type}</option>
                     ))}
-                  </select>
-                </label>
-              )}
-              <label className="stacked-field">
-                <span>Manual discount type</span>
-                <select aria-label="Manual discount type" value={manualDiscountType} onChange={(event) => setManualDiscountType(event.target.value)}>
-                  <option value="Fixed amount">Peso amount</option>
-                  <option value="Percentage">Percentage</option>
+                  </optgroup>
                 </select>
               </label>
-              <label className="stacked-field">
-                <span>{manualDiscountType === "Percentage" ? "Percent" : "Amount"}</span>
-                <input
-                  aria-label="Manual discount value"
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  max={manualDiscountType === "Percentage" ? "100" : manualDiscountBase}
-                  step="0.01"
-                  value={manualDiscountValue}
-                  onChange={(event) => setManualDiscountValue(event.target.value)}
-                  placeholder={manualDiscountType === "Percentage" ? "e.g. 10" : "e.g. 500"}
-                />
-              </label>
-              <small className={manualDiscountInvalid ? "field-error" : ""}>
-                {manualDiscountValidationMessage || (manualDiscountType === "Percentage"
-                  ? `${normalizedManualDiscountValue || 0}% of ${manualDiscountScope === "Service" ? manualDiscountTargetItem?.name || "the selected service" : "the subtotal"}`
-                  : `${money.format(normalizedManualDiscountValue || 0)} off ${manualDiscountScope === "Service" ? manualDiscountTargetItem?.name || "the selected service" : "the subtotal"}`)}
-              </small>
-            </div>
-          )}
-          {promotionDiscountAmount > 0 && <small className="automatic-promotion-note">Eligible promotion applied automatically: {money.format(promotionDiscountAmount)}.</small>}
+              {manualDiscountType && (
+                <div className="manual-discount-fields">
+                  <label className="stacked-field">
+                    <span>Apply discount to</span>
+                    <select
+                      aria-label="Manual discount scope"
+                      value={manualDiscountScope}
+                      onChange={(event) => {
+                        const scope = event.target.value;
+                        setManualDiscountScope(scope);
+                        setManualDiscountTargetKey(scope === "Service" ? serviceDiscountOptions[0]?.key || "" : "");
+                      }}
+                    >
+                      <option value="Transaction">Entire transaction</option>
+                      <option value="Service" disabled={!serviceDiscountOptions.length}>Specific service</option>
+                    </select>
+                  </label>
+                  {manualDiscountScope === "Service" && (
+                    <label className="stacked-field">
+                      <span>Discounted service</span>
+                      <select
+                        aria-label="Discounted service"
+                        value={manualDiscountTargetKey}
+                        onChange={(event) => setManualDiscountTargetKey(event.target.value)}
+                      >
+                        <option value="">Choose service</option>
+                        {serviceDiscountOptions.map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.name} — {money.format(Number(item.price || 0) * Number(item.qty || 1))}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className="stacked-field">
+                    <span>Manual discount type</span>
+                    <select aria-label="Manual discount type" value={manualDiscountType} onChange={(event) => setManualDiscountType(event.target.value)}>
+                      <option value="Fixed amount">Peso amount</option>
+                      <option value="Percentage">Percentage</option>
+                    </select>
+                  </label>
+                  <label className="stacked-field">
+                    <span>{manualDiscountType === "Percentage" ? "Percent" : "Amount"}</span>
+                    <input
+                      aria-label="Manual discount value"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max={manualDiscountType === "Percentage" ? "100" : manualDiscountBase}
+                      step="0.01"
+                      value={manualDiscountValue}
+                      onChange={(event) => setManualDiscountValue(event.target.value)}
+                      placeholder={manualDiscountType === "Percentage" ? "e.g. 10" : "e.g. 500"}
+                    />
+                  </label>
+                  <small className={manualDiscountInvalid ? "field-error" : ""}>
+                    {manualDiscountValidationMessage || (manualDiscountType === "Percentage"
+                      ? `${normalizedManualDiscountValue || 0}% of ${manualDiscountScope === "Service" ? manualDiscountTargetItem?.name || "the selected service" : "the subtotal"}`
+                      : `${money.format(normalizedManualDiscountValue || 0)} off ${manualDiscountScope === "Service" ? manualDiscountTargetItem?.name || "the selected service" : "the subtotal"}`)}
+                  </small>
+                </div>
+              )}
+              {promotionDiscountAmount > 0 && <small className="automatic-promotion-note">Eligible promotion applied automatically: {money.format(promotionDiscountAmount)}.</small>}
+              </div>
+            )}
+          </section>
         </div>
         <div className="checkout-sticky-footer">
           <div className="checkout-summary-card">
@@ -7488,6 +7539,7 @@ function LegacyAppointmentsModule({
 
   function receiptForAppointment(appointment) {
     const payment = appointmentPaymentSummary(appointment, services, transactions);
+    const service = serviceForAppointment(appointment, services);
     return {
       id: appointment.id,
       invoice: `Appointment ${appointment.id}`,
@@ -7496,7 +7548,15 @@ function LegacyAppointmentsModule({
       client: appointment.client,
       branch: appointment.branch,
       staff: appointment.staff,
-      items: [{ name: appointment.service, type: "Service", qty: 1, price: payment.price }],
+      items: [{
+        serviceId: service?.id || appointment.serviceId || "",
+        name: service?.name || appointment.service,
+        type: "Service",
+        qty: 1,
+        price: payment.price,
+        aftercare: service?.aftercare || "",
+        recommendedIntervalDays: Number(service?.recommendedIntervalDays || 0),
+      }],
       subtotal: payment.price,
       discount: payment.deposit,
       total: payment.due,
@@ -8433,6 +8493,7 @@ function AppointmentsModule({
 
   function receiptForAppointment(appointment) {
     const payment = appointmentPaymentSummary(appointment, services, transactions);
+    const service = serviceForAppointment(appointment, services);
     return {
       id: appointment.id,
       invoice: `Appointment ${appointment.id}`,
@@ -8441,7 +8502,15 @@ function AppointmentsModule({
       client: appointment.client,
       branch: appointment.branch,
       staff: appointment.staff,
-      items: [{ name: appointment.service, type: "Service", qty: 1, price: payment.price }],
+      items: [{
+        serviceId: service?.id || appointment.serviceId || "",
+        name: service?.name || appointment.service,
+        type: "Service",
+        qty: 1,
+        price: payment.price,
+        aftercare: service?.aftercare || "",
+        recommendedIntervalDays: Number(service?.recommendedIntervalDays || 0),
+      }],
       subtotal: payment.price,
       discount: payment.deposit,
       total: payment.due,
