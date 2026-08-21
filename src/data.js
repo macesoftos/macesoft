@@ -21,10 +21,10 @@ export const serviceCategories = [
 ];
 
 export const roleAccess = {
-  "Super Admin": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
+  "Super Admin": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
   Admin: ["pos", "staff", "facetrack-attendance"],
-  Owner: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
-  "Business Owner": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "reports", "booking", "settings", "support"],
+  Owner: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
+  "Business Owner": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
   "Branch Manager": ["pos", "staff", "facetrack-attendance"],
   Receptionist: ["pos"],
   Cashier: ["pos"],

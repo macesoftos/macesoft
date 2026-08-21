@@ -7,15 +7,17 @@ datasource db {
 }
 
 model Organization {
-  id          String           @id @default(cuid())
-  name        String
-  slug        String           @unique
-  status      String           @default("Active")
-  branches    Branch[]
-  accounts    Account[]
-  invitations UserInvitation[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id              String           @id @default(cuid())
+  name            String
+  slug            String           @unique
+  status          String           @default("Active")
+  branches        Branch[]
+  accounts        Account[]
+  invitations     UserInvitation[]
+  payrollRuns     PayrollRun[]
+  commissionRules CommissionRule[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 model Client {
@@ -115,32 +117,37 @@ model Room {
 }
 
 model StaffMember {
-  id               String                      @id @default(cuid())
-  name             String
-  photo            String                      @default("")
-  role             String
-  branch           String                      @default("")
-  branches         String                      @default("[]")
-  schedule         String                      @default("")
-  scheduleBranches String                      @default("[]")
-  commissionType   String                      @default("")
-  commissionRate   Float                       @default(0)
-  services         String                      @default("")
-  status           String                      @default("Available")
-  attendance       String                      @default("Clocked out")
-  employmentDate   String                      @default("")
-  employmentStatus String                      @default("Regular")
-  birthDate        String                      @default("")
-  address          String                      @default("")
-  emergencyContact String                      @default("")
-  emergencyPhone   String                      @default("")
-  phone            String                      @default("")
-  account          Account?
-  attendanceEvents AttendanceEvent[]
-  faceTrackProfile FaceTrackProfile?
-  faceTrackRecords FaceTrackAttendanceRecord[]
-  createdAt        DateTime                    @default(now())
-  updatedAt        DateTime                    @updatedAt
+  id                String                      @id @default(cuid())
+  name              String
+  photo             String                      @default("")
+  role              String
+  branch            String                      @default("")
+  branches          String                      @default("[]")
+  schedule          String                      @default("")
+  scheduleBranches  String                      @default("[]")
+  commissionType    String                      @default("")
+  commissionRate    Float                       @default(0)
+  services          String                      @default("")
+  status            String                      @default("Available")
+  attendance        String                      @default("Clocked out")
+  employmentDate    String                      @default("")
+  employmentStatus  String                      @default("Regular")
+  birthDate         String                      @default("")
+  address           String                      @default("")
+  emergencyContact  String                      @default("")
+  emergencyPhone    String                      @default("")
+  phone             String                      @default("")
+  account           Account?
+  attendanceEvents  AttendanceEvent[]
+  faceTrackProfile  FaceTrackProfile?
+  faceTrackRecords  FaceTrackAttendanceRecord[]
+  payrollProfile    PayrollEmployeeProfile?
+  payrollSchedules  PayrollScheduleEntry[]
+  payrollLines      PayrollLine[]
+  payrollEarnings   PayrollCommissionEarning[]
+  payrollDeductions PayrollSalaryDeduction[]
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
 
   @@index([branch])
   @@index([role])
@@ -472,31 +479,33 @@ model FaceTrackKioskChallenge {
 }
 
 model Service {
-  id                      String        @id @default(cuid())
+  id                      String                     @id @default(cuid())
   name                    String
   category                String
-  serviceType             String        @default("Regular Service")
-  duration                Int           @default(60)
-  price                   Float         @default(0)
-  priceModel              String        @default("Fixed price")
-  priceUnit               String        @default("")
-  packageSessions         Int           @default(0)
-  packagePrice            Float         @default(0)
-  serviceValue            Float         @default(0)
-  recommendedIntervalDays Int           @default(0)
-  commission              String        @default("")
-  consumables             String        @default("[]")
-  branches                String        @default("[]")
-  staff                   String        @default("[]")
-  room                    String        @default("")
-  active                  Boolean       @default(true)
-  pos                     Boolean       @default(true)
-  description             String        @default("")
-  contraindications       String        @default("")
-  aftercare               String        @default("")
-  createdAt               DateTime      @default(now())
-  updatedAt               DateTime      @updatedAt
+  serviceType             String                     @default("Regular Service")
+  duration                Int                        @default(60)
+  price                   Float                      @default(0)
+  priceModel              String                     @default("Fixed price")
+  priceUnit               String                     @default("")
+  packageSessions         Int                        @default(0)
+  packagePrice            Float                      @default(0)
+  serviceValue            Float                      @default(0)
+  recommendedIntervalDays Int                        @default(0)
+  commission              String                     @default("")
+  consumables             String                     @default("[]")
+  branches                String                     @default("[]")
+  staff                   String                     @default("[]")
+  room                    String                     @default("")
+  active                  Boolean                    @default(true)
+  pos                     Boolean                    @default(true)
+  description             String                     @default("")
+  contraindications       String                     @default("")
+  aftercare               String                     @default("")
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
   appointments            Appointment[]
+  commissionRules         CommissionRule[]
+  payrollEarnings         PayrollCommissionEarning[]
 
   @@index([category])
   @@index([active])
@@ -690,28 +699,30 @@ model InventoryMovement {
 }
 
 model Sale {
-  id            String     @id @default(cuid())
-  invoice       String     @unique
-  date          String
-  time          String
-  clientId      String?
-  clientRecord  Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  client        String
-  branch        String
-  staff         String
-  subtotal      Float      @default(0)
-  discount      Float      @default(0)
-  total         Float      @default(0)
-  payments      String     @default("[]")
-  status        String     @default("Paid")
-  leadId        String     @default("")
-  appointmentId String?    @unique
-  notes         String     @default("")
-  testMode      Boolean    @default(false)
-  enteredAt     DateTime   @default(now())
-  items         SaleItem[]
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  id                String                     @id @default(cuid())
+  invoice           String                     @unique
+  date              String
+  time              String
+  clientId          String?
+  clientRecord      Client?                    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client            String
+  branch            String
+  staff             String
+  subtotal          Float                      @default(0)
+  discount          Float                      @default(0)
+  total             Float                      @default(0)
+  payments          String                     @default("[]")
+  status            String                     @default("Paid")
+  leadId            String                     @default("")
+  appointmentId     String?                    @unique
+  notes             String                     @default("")
+  testMode          Boolean                    @default(false)
+  enteredAt         DateTime                   @default(now())
+  items             SaleItem[]
+  payrollEarnings   PayrollCommissionEarning[]
+  payrollDeductions PayrollSalaryDeduction[]
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
 
   @@index([date])
   @@index([clientId])
@@ -721,19 +732,225 @@ model Sale {
 }
 
 model SaleItem {
-  id                      String @id @default(cuid())
+  id                      String                    @id @default(cuid())
   saleId                  String
-  sale                    Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale                    Sale                      @relation(fields: [saleId], references: [id], onDelete: Cascade)
   name                    String
   type                    String
-  qty                     Float  @default(1)
-  price                   Float  @default(0)
-  originalPrice           Float  @default(0)
-  discount                Float  @default(0)
-  provider                String @default("N/A")
-  serviceId               String @default("")
-  aftercare               String @default("")
-  recommendedIntervalDays Int    @default(0)
+  qty                     Float                     @default(1)
+  price                   Float                     @default(0)
+  originalPrice           Float                     @default(0)
+  discount                Float                     @default(0)
+  provider                String                    @default("N/A")
+  serviceId               String                    @default("")
+  aftercare               String                    @default("")
+  recommendedIntervalDays Int                       @default(0)
+  payrollEarning          PayrollCommissionEarning?
+}
+
+model PayrollEmployeeProfile {
+  id                    String      @id @default(cuid())
+  staffId               String      @unique
+  staff                 StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  payType               String      @default("Monthly")
+  monthlySalary         Float       @default(0)
+  dailyRate             Float       @default(0)
+  hourlyRate            Float       @default(0)
+  periodsPerMonth       Int         @default(2)
+  standardWorkDays      Int         @default(26)
+  standardMinutesPerDay Int         @default(480)
+  overtimeMultiplier    Float       @default(1.25)
+  workDays              String      @default("[1,2,3,4,5,6]")
+  paidLeaveCredits      Float       @default(0)
+  active                Boolean     @default(false)
+  updatedBy             String      @default("")
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@index([active])
+}
+
+model PayrollScheduleEntry {
+  id               String      @id @default(cuid())
+  staffId          String
+  staff            StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  workDate         String
+  branch           String      @default("")
+  type             String      @default("Work Day")
+  paid             Boolean     @default(false)
+  scheduledMinutes Int         @default(480)
+  status           String      @default("Approved")
+  notes            String      @default("")
+  createdById      String      @default("")
+  createdBy        String      @default("")
+  approvedById     String      @default("")
+  approvedBy       String      @default("")
+  approvedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([staffId, workDate])
+  @@index([workDate, status])
+  @@index([branch, workDate])
+}
+
+model PayrollRun {
+  id              String        @id @default(cuid())
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  cutoffStart     String
+  cutoffEnd       String
+  payDate         String
+  branch          String        @default("All branches")
+  status          String        @default("Draft")
+  notes           String        @default("")
+  totalGross      Float         @default(0)
+  totalDeductions Float         @default(0)
+  totalNet        Float         @default(0)
+  createdById     String
+  createdBy       String
+  approvedById    String        @default("")
+  approvedBy      String        @default("")
+  approvedAt      DateTime?
+  finalizedById   String        @default("")
+  finalizedBy     String        @default("")
+  finalizedAt     DateTime?
+  lines           PayrollLine[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([organizationId, cutoffStart, cutoffEnd, branch])
+  @@index([organizationId, status, cutoffEnd])
+  @@index([branch, cutoffStart, cutoffEnd])
+}
+
+model PayrollLine {
+  id                  String                     @id @default(cuid())
+  payrollRunId        String
+  payrollRun          PayrollRun                 @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  staffId             String
+  staff               StaffMember                @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  staffName           String
+  role                String
+  branch              String
+  scheduledDays       Float                      @default(0)
+  workedDays          Float                      @default(0)
+  regularMinutes      Int                        @default(0)
+  overtimeMinutes     Int                        @default(0)
+  undertimeMinutes    Int                        @default(0)
+  absenceDays         Float                      @default(0)
+  paidLeaveDays       Float                      @default(0)
+  dayOffDays          Float                      @default(0)
+  basePay             Float                      @default(0)
+  overtimePay         Float                      @default(0)
+  incentives          Float                      @default(0)
+  commissions         Float                      @default(0)
+  salaryDeductions    Float                      @default(0)
+  otherDeductions     Float                      @default(0)
+  grossPay            Float                      @default(0)
+  totalDeductions     Float                      @default(0)
+  netPay              Float                      @default(0)
+  calculationDetails  String                     @default("{}")
+  adjustments         PayrollAdjustment[]
+  commissionEarnings  PayrollCommissionEarning[]
+  salaryDeductionRows PayrollSalaryDeduction[]
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@unique([payrollRunId, staffId])
+  @@index([staffId, payrollRunId])
+}
+
+model PayrollAdjustment {
+  id            String      @id @default(cuid())
+  payrollLineId String
+  payrollLine   PayrollLine @relation(fields: [payrollLineId], references: [id], onDelete: Cascade)
+  type          String
+  amount        Float
+  reason        String
+  createdById   String
+  createdBy     String
+  createdAt     DateTime    @default(now())
+
+  @@index([payrollLineId, type])
+}
+
+model CommissionRule {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name               String
+  role               String
+  serviceId          String?
+  service            Service?     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  branch             String       @default("All branches")
+  ruleType           String       @default("Percentage")
+  value              Float        @default(0)
+  discountedRuleType String       @default("")
+  discountedValue    Float        @default(0)
+  packageBasis       String       @default("Session Value")
+  priority           Int          @default(0)
+  active             Boolean      @default(true)
+  effectiveFrom      String       @default("")
+  effectiveTo        String       @default("")
+  createdById        String       @default("")
+  createdBy          String       @default("")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@unique([organizationId, role, serviceId, branch])
+  @@index([organizationId, active, role])
+  @@index([serviceId])
+}
+
+model PayrollCommissionEarning {
+  id            String       @id @default(cuid())
+  sourceKey     String       @unique
+  payrollLineId String?
+  payrollLine   PayrollLine? @relation(fields: [payrollLineId], references: [id], onDelete: SetNull)
+  staffId       String
+  staff         StaffMember  @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  saleId        String
+  sale          Sale         @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  saleItemId    String       @unique
+  saleItem      SaleItem     @relation(fields: [saleItemId], references: [id], onDelete: Restrict)
+  serviceId     String?
+  service       Service?     @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  sourceDate    String
+  branch        String
+  serviceName   String
+  ruleName      String
+  baseAmount    Float        @default(0)
+  amount        Float        @default(0)
+  status        String       @default("Pending")
+  details       String       @default("{}")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([staffId, sourceDate, status])
+  @@index([payrollLineId])
+}
+
+model PayrollSalaryDeduction {
+  id            String       @id @default(cuid())
+  sourceKey     String       @unique
+  payrollLineId String?
+  payrollLine   PayrollLine? @relation(fields: [payrollLineId], references: [id], onDelete: SetNull)
+  staffId       String
+  staff         StaffMember  @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  saleId        String
+  sale          Sale         @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  saleInvoice   String
+  sourceDate    String
+  branch        String
+  amount        Float
+  status        String       @default("Pending")
+  details       String       @default("{}")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([staffId, sourceDate, status])
+  @@index([payrollLineId])
 }
 
 model ClinicPackage {

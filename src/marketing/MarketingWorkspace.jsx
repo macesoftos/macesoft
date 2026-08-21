@@ -1684,6 +1684,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   const warnings = campaignWarnings(draft);
   const advisories = campaignAdvisories(draft);
   const approvalRequired = !canApproveMarketing && settings.managerApproval !== false;
+  const saveContextRef = useRef({ approvalRequired, notify, onSaveCampaign, settings });
   const contentBlocks = flattenEmailBlocks(draft.blocks);
   const linkCount = contentBlocks.filter((block) => String(block.link || "").trim()).length;
   const mergeTagCount = (JSON.stringify(contentBlocks).match(/{{\s*[a-zA-Z0-9_]+(?:\s*\|\s*[^{}]+)?\s*}}/g) || []).length;
@@ -1699,6 +1700,9 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
   const draftSignature = useMemo(() => JSON.stringify({ ...draft, updatedAt: undefined }), [draft]);
 
   useEffect(() => { draftRef.current = draft; campaignIdRef.current = draft.id || campaignIdRef.current; }, [draft]);
+  useEffect(() => {
+    saveContextRef.current = { approvalRequired, notify, onSaveCampaign, settings };
+  }, [approvalRequired, notify, onSaveCampaign, settings]);
 
   function updateDraft(patch) {
     setDraft((current) => {
@@ -2020,8 +2024,9 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
     const signature = JSON.stringify({ ...snapshot, id: pendingCampaignId, updatedAt: undefined });
     setSaveState("Saving…");
     const run = async () => {
+      const saveContext = saveContextRef.current;
       const campaignSnapshot = { ...snapshot, id: pendingCampaignId };
-      const generatedHtml = snapshot.channel === "SMS" ? "" : buildVisualEmailHtml(campaignSnapshot, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin);
+      const generatedHtml = snapshot.channel === "SMS" ? "" : buildVisualEmailHtml(campaignSnapshot, saveContext.settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin);
       const emailResult = snapshot.channel === "SMS"
         ? { html: "", error: "", removed: 0 }
         : sanitizeImportedEmailHtml(snapshot.editorMode === "html" ? snapshot.html : generatedHtml);
@@ -2029,7 +2034,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
       if (emailResult.removed) throw new Error("Clean unsupported or unsafe HTML before saving this campaign.");
       const emailSummary = emailHtmlToPlainText(emailResult.html);
       const message = snapshot.channel === "Email" ? emailSummary : snapshot.message;
-      const savedCampaign = await onSaveCampaign?.({
+      const savedCampaign = await saveContext.onSaveCampaign?.({
         id: pendingCampaignId,
         branch: snapshot.branch,
         name: snapshot.name,
@@ -2048,7 +2053,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
           theme: snapshot.theme,
         },
         scheduledAt: snapshot.scheduledAt || null,
-        managerApproval: approvalRequired,
+        managerApproval: saveContext.approvalRequired,
         sent: Number(snapshot.sent || 0),
         booked: Number(snapshot.booked || 0),
         credits: Number(snapshot.credits || 0),
@@ -2063,17 +2068,17 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
         lastSavedSignatureRef.current = signature;
         setSaveState(`Saved to campaign · ${new Date().toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`);
       }
-      if (!silent) notify?.("Campaign saved.");
+      if (!silent) saveContext.notify?.("Campaign saved.");
       return savedCampaign;
     };
     const queued = saveChainRef.current.catch(() => undefined).then(run).catch((error) => {
       if (requestId === saveRequestRef.current) setSaveState("Save failed · local recovery kept");
-      if (!silent) notify?.(error.message || "Unable to save the campaign.", "error");
+      if (!silent) saveContextRef.current.notify?.(error.message || "Unable to save the campaign.", "error");
       throw error;
     });
     saveChainRef.current = queued;
     return queued;
-  }, [approvalRequired, notify, onSaveCampaign, setDraft, settings]);
+  }, [setDraft]);
 
   useEffect(() => {
     if (finalizingScheduleRef.current || !draft.name.trim() || !draft.segment || draftSignature === lastSavedSignatureRef.current) return undefined;

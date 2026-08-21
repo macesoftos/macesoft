@@ -245,8 +245,10 @@ try {
   const bgcClientId = `cl-smoke-bgc-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
   const serviceId = `svc-smoke-${suffix}`;
-  const appointmentDay = String((Number.parseInt(suffix.slice(-5), 36) % 27) + 1).padStart(2, "0");
-  const appointmentDate = `2099-11-${appointmentDay}`;
+  const appointmentSeed = Number.parseInt(suffix.slice(-6), 36);
+  const appointmentAt = new Date(Date.UTC(2080, 0, 1) + (appointmentSeed % 6_000) * 86_400_000);
+  if (appointmentAt.getUTCDay() === 0) appointmentAt.setUTCDate(appointmentAt.getUTCDate() + 1);
+  const appointmentDate = appointmentAt.toISOString().slice(0, 10);
 
   const createdBgcBranch = await jsonRequest("/api/branches", {
     name: "Mace BGC",
@@ -268,7 +270,7 @@ try {
     commission: "",
     consumables: [],
     branches: ["Mace Davao"],
-    staff: ["Doctor"],
+    staff: ["Doctor", "Nurse"],
     room: "Room 1",
     active: true,
     pos: true,
@@ -734,6 +736,150 @@ try {
 
   await request(`/api/resources/staff/${staffLinkId}`, { method: "DELETE", headers: ownerHeaders });
 
+  const payrollStaffId = `st-payroll-${suffix}`;
+  const payrollStaffName = `Payroll Nurse ${suffix}`;
+  const payrollStaff = await jsonRequest("/api/resources/staff", {
+    id: payrollStaffId,
+    name: payrollStaffName,
+    role: "Nurse",
+    branch: "Mace Davao",
+    branches: ["Mace Davao"],
+    commissionRate: 0,
+    status: "Available",
+  });
+  assert(payrollStaff.response.status === 201, "payroll employee fixture create failed");
+
+  const payrollOverview = await request("/api/payroll/overview", { headers: ownerHeaders });
+  assert(payrollOverview.response.ok, `payroll overview failed (${payrollOverview.response.status}: ${payrollOverview.payload?.error || "unknown error"})`);
+  assert(payrollOverview.payload.staff.some((person) => person.id === payrollStaffId), "payroll overview omitted the employee");
+  assert(payrollOverview.payload.rules.some((rule) => rule.role === "Nurse" && rule.ruleType === "Percentage" && rule.value === 10), "default Nurse commission rule was not installed");
+
+  const payrollProfile = await jsonRequest(`/api/payroll/profiles/${payrollStaffId}`, {
+    payType: "Monthly",
+    monthlySalary: 26_000,
+    dailyRate: 0,
+    hourlyRate: 0,
+    periodsPerMonth: 2,
+    standardWorkDays: 26,
+    standardMinutesPerDay: 480,
+    overtimeMultiplier: 1.25,
+    workDays: [0, 1, 2, 3, 4, 5, 6],
+    paidLeaveCredits: 2,
+    active: true,
+  }, { method: "PUT" });
+  assert(payrollProfile.response.ok && payrollProfile.payload.profile.monthlySalary === 26_000, "payroll profile update failed");
+
+  const payrollToday = new Date().toISOString().slice(0, 10);
+  const payrollYesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const paidLeave = await jsonRequest("/api/payroll/schedules", {
+    staffId: payrollStaffId,
+    workDate: payrollToday,
+    branch: "Mace Davao",
+    type: "Sick Leave",
+    paid: true,
+    scheduledMinutes: 480,
+    notes: "Release-test paid leave",
+  });
+  assert(paidLeave.response.status === 201 && paidLeave.payload.schedule.paid, "paid leave schedule entry failed");
+  const overdrawnLeave = await jsonRequest("/api/payroll/schedules", {
+    staffId: payrollStaffId,
+    workDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+    branch: "Mace Davao",
+    type: "Vacation Leave",
+    paid: true,
+    scheduledMinutes: 480,
+  });
+  assert(overdrawnLeave.response.status === 201, "second paid leave credit could not be used");
+  const thirdPaidLeave = await jsonRequest("/api/payroll/schedules", {
+    staffId: payrollStaffId,
+    workDate: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+    branch: "Mace Davao",
+    type: "Emergency Leave",
+    paid: true,
+    scheduledMinutes: 480,
+  });
+  assert(thirdPaidLeave.response.status === 409, "paid leave could exceed the configured credit balance");
+
+  await prisma.faceTrackAttendanceRecord.create({
+    data: {
+      staffId: payrollStaffId,
+      workDate: payrollYesterday,
+      branch: "Mace Davao",
+      scheduledStart: new Date(`${payrollYesterday}T01:00:00.000Z`),
+      scheduledEnd: new Date(`${payrollYesterday}T09:00:00.000Z`),
+      originalTimeIn: new Date(`${payrollYesterday}T01:00:00.000Z`),
+      originalTimeOut: new Date(`${payrollYesterday}T10:00:00.000Z`),
+      timeIn: new Date(`${payrollYesterday}T01:00:00.000Z`),
+      timeOut: new Date(`${payrollYesterday}T10:00:00.000Z`),
+      workedMinutes: 480,
+      calculatedOvertimeMinutes: 60,
+      approvedOvertimeMinutes: 60,
+      overtimeStatus: "APPROVED",
+      status: "CLOSED",
+    },
+  });
+
+  const payrollCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: {
+      clientId,
+      clientName: "Automated Smoke Client Updated",
+      branch: "Mace Davao",
+      staff: "Dr. Mace",
+      invoicePrefix: "MACE",
+      cart: [{
+        key: `service-${serviceId}`,
+        serviceId,
+        type: "Service",
+        name: "Automated Smoke Consultation",
+        qty: 1,
+        provider: payrollStaffName,
+      }],
+    },
+    payment: {
+      payments: [{ method: "Salary Deduction", amount: 1500, employeeId: payrollStaffId }],
+      notes: "Payroll salary-deduction smoke test",
+    },
+  });
+  assert(payrollCheckout.response.status === 201, `payroll POS checkout failed (${payrollCheckout.response.status}: ${payrollCheckout.payload?.error || "unknown error"})`);
+  const payrollSaleId = payrollCheckout.payload.sale.id;
+  assert(await prisma.payrollSalaryDeduction.count({ where: { saleId: payrollSaleId, staffId: payrollStaffId, status: "Pending" } }) === 1, "POS salary deduction was not recorded immediately");
+
+  const payrollRunCreate = await jsonRequest("/api/payroll/runs", {
+    cutoffStart: payrollYesterday,
+    cutoffEnd: payrollToday,
+    payDate: payrollToday,
+    branch: "Mace Davao",
+    notes: "Release-test payroll cutoff",
+  });
+  assert(payrollRunCreate.response.status === 201, `payroll run create failed (${payrollRunCreate.response.status}: ${payrollRunCreate.payload?.error || "unknown error"})`);
+  let payrollRun = payrollRunCreate.payload.run;
+  const payrollLine = payrollRun.lines.find((line) => line.staffId === payrollStaffId);
+  assert(payrollLine, "payroll run omitted the configured employee");
+  assert(payrollLine.paidLeaveDays === 1, "payroll did not include paid leave");
+  assert(payrollLine.overtimeMinutes === 60 && payrollLine.overtimePay === 156.25, "approved overtime was not calculated correctly");
+  assert(payrollLine.commissions === 150, "10% Nurse commission was not calculated from the service value");
+  assert(payrollLine.salaryDeductions === 1500, "POS salary deduction was not included in the cutoff");
+
+  const payrollAdjustment = await jsonRequest(`/api/payroll/runs/${payrollRun.id}/lines/${payrollLine.id}/adjustments`, {
+    type: "Incentive",
+    amount: 250,
+    reason: "Release-test approved incentive",
+  });
+  assert(payrollAdjustment.response.status === 201, "payroll incentive adjustment failed");
+  payrollRun = payrollAdjustment.payload.run;
+  assert(payrollRun.lines.find((line) => line.staffId === payrollStaffId)?.incentives === 250, "payroll incentive was not recalculated");
+
+  const payrollApproved = await jsonRequest(`/api/payroll/runs/${payrollRun.id}/status`, { status: "Approved" });
+  assert(payrollApproved.response.ok && payrollApproved.payload.run.status === "Approved", `payroll approval failed (${payrollApproved.response.status}: ${payrollApproved.payload?.error || "unknown error"})`);
+  const payrollFinalized = await jsonRequest(`/api/payroll/runs/${payrollRun.id}/status`, { status: "Finalized" });
+  assert(payrollFinalized.response.ok && payrollFinalized.payload.run.status === "Finalized", "payroll finalization failed");
+  assert(await prisma.payrollSalaryDeduction.count({ where: { saleId: payrollSaleId, status: "Included" } }) === 1, "finalized salary deduction was not locked as Included");
+  assert(await prisma.payrollCommissionEarning.count({ where: { saleId: payrollSaleId, status: "Included" } }) === 1, "finalized commission was not locked as Included");
+  const lockedPayrollVoid = await jsonRequest(`/api/transactions/${payrollSaleId}/void`, {});
+  assert(lockedPayrollVoid.response.status === 409, "a sale included in finalized payroll could still be voided");
+  const finalizedRecalculate = await jsonRequest(`/api/payroll/runs/${payrollRun.id}/recalculate`, {});
+  assert(finalizedRecalculate.response.status === 400, "finalized payroll could still be recalculated");
+
   const impossibleCheckout = await jsonRequest("/api/pos/checkout", {
     draft: {
       clientName: "Automated Smoke Client Updated",
@@ -865,6 +1011,14 @@ try {
     method: "DELETE",
     headers: ownerHeaders,
   });
+  await prisma.payrollCommissionEarning.deleteMany({ where: { saleId: payrollSaleId } });
+  await prisma.payrollSalaryDeduction.deleteMany({ where: { saleId: payrollSaleId } });
+  await prisma.payrollRun.deleteMany({ where: { id: payrollRun.id } });
+  await prisma.faceTrackAttendanceRecord.deleteMany({ where: { staffId: payrollStaffId } });
+  await prisma.payrollScheduleEntry.deleteMany({ where: { staffId: payrollStaffId } });
+  await prisma.payrollEmployeeProfile.deleteMany({ where: { staffId: payrollStaffId } });
+  await request(`/api/resources/transactions/${payrollSaleId}`, { method: "DELETE", headers: ownerHeaders });
+  await request(`/api/resources/staff/${payrollStaffId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/services/${serviceId}`, {
     method: "DELETE",
     headers: ownerHeaders,

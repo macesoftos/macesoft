@@ -258,6 +258,83 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  const payrollStaffId = `staff-payroll-e2e-${Date.now()}`;
+  const payrollStaffName = `Payroll E2E Nurse ${Date.now()}`;
+  const payrollFixture = await page.evaluate(async ({ id, name }) => {
+    const headers = { "Content-Type": "application/json", "X-Mace-Request": "app" };
+    const staffResponse = await fetch("/api/resources/staff", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({ id, name, role: "Nurse", branch: "Mace Davao", branches: ["Mace Davao"], status: "Available" }),
+    });
+    if (staffResponse.status !== 201) return { staffStatus: staffResponse.status, profileStatus: 0 };
+    const profileResponse = await fetch(`/api/payroll/profiles/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({
+        payType: "Monthly",
+        monthlySalary: 26_000,
+        dailyRate: 0,
+        hourlyRate: 0,
+        periodsPerMonth: 2,
+        standardWorkDays: 26,
+        standardMinutesPerDay: 480,
+        overtimeMultiplier: 1.25,
+        workDays: [1, 2, 3, 4, 5, 6],
+        paidLeaveCredits: 3,
+        active: true,
+      }),
+    });
+    return { staffStatus: staffResponse.status, profileStatus: profileResponse.status };
+  }, { id: payrollStaffId, name: payrollStaffName });
+  expect(payrollFixture).toEqual({ staffStatus: 201, profileStatus: 200 });
+
+  await gotoAuthenticatedWorkspace(page, "/payroll");
+  await expect(page).toHaveURL(/\/payroll$/);
+  await expect(page.locator(".payroll-workspace")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Payroll", exact: true })).toBeVisible();
+  await expect(page.getByText("Pending salary deductions", { exact: true })).toBeVisible();
+  for (const section of ["Payroll Runs", "Employee Pay", "Schedule & Leave", "Commission Rules"]) {
+    await expect(page.getByRole("button", { name: section })).toBeVisible();
+  }
+
+  await page.getByRole("button", { name: "Employee Pay" }).click();
+  await expect(page.getByText(payrollStaffName, { exact: true }).first()).toBeVisible();
+  await page.getByText(payrollStaffName, { exact: true }).first().click();
+  await page.getByLabel("Monthly salary").fill("27000");
+  const profileUpdate = page.waitForResponse((response) => response.url().includes(`/api/payroll/profiles/${payrollStaffId}`) && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "Save pay profile" }).click();
+  expect((await profileUpdate).status()).toBe(200);
+
+  await page.getByRole("button", { name: "Commission Rules" }).click();
+  await expect(page.getByText("Nurse standard 10%", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Schedule & Leave" }).click();
+  await expect(page.getByRole("heading", { name: "Schedule or leave" })).toBeVisible();
+  await page.getByRole("button", { name: "Payroll Runs" }).click();
+  if (!await page.getByLabel("Cutoff start").isVisible()) await page.getByText("Generate payroll", { exact: true }).click();
+  await page.getByLabel("Cutoff start").fill("2001-01-01");
+  await page.getByLabel("Cutoff end").fill("2001-01-01");
+  await page.getByLabel("Pay date").fill("2001-01-05");
+  await page.getByLabel("Branch scope").selectOption({ label: "Mace Davao" });
+  await page.getByLabel("Notes").fill("Browser release acceptance payroll");
+  const payrollCreation = page.waitForResponse((response) => response.url().endsWith("/api/payroll/runs") && response.request().method() === "POST");
+  await page.getByRole("button", { name: "Generate draft" }).click();
+  expect((await payrollCreation).status()).toBe(201);
+  await expect(page.locator(".payroll-run-detail .payroll-table").getByText(payrollStaffName, { exact: true })).toBeVisible();
+  await expect(page.getByText("Net payroll", { exact: true })).toBeVisible();
+
+  for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await gotoAuthenticatedWorkspace(page, "/payroll");
+    await expect(page.locator(".payroll-workspace")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Payroll Runs" })).toBeVisible();
+    await expect(page.getByText("Pending salary deductions", { exact: true })).toBeVisible();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   await gotoAuthenticatedWorkspace(page, "/#/support");
   await expect(page.getByRole("button", { name: "Create new" })).toHaveCount(0);
 

@@ -56,6 +56,14 @@ async function clearDatabase() {
   await prisma.leadActivity.deleteMany();
   await prisma.leadIntegration.deleteMany();
   await prisma.lead.deleteMany();
+  await prisma.payrollAdjustment.deleteMany();
+  await prisma.payrollCommissionEarning.deleteMany();
+  await prisma.payrollSalaryDeduction.deleteMany();
+  await prisma.payrollLine.deleteMany();
+  await prisma.payrollRun.deleteMany();
+  await prisma.payrollScheduleEntry.deleteMany();
+  await prisma.payrollEmployeeProfile.deleteMany();
+  await prisma.commissionRule.deleteMany();
   await prisma.giftCertificate.deleteMany();
   await prisma.clinicPackage.deleteMany();
   await prisma.saleItem.deleteMany();
@@ -92,7 +100,7 @@ async function seedBranches() {
         devices: asJsonText(branch.devices),
         image: branch.image,
         modules: {
-          create: ["overview", "appointments", "clients", "leads", "pos", "card-view", "room-view", "treatments", "services", "packages", "booking", "staff-view", "staff", "facetrack-attendance", "inventory", "expenses", "reports", "sms", "flipbooks", "support"].map((moduleId) => ({ moduleId, enabled: true })),
+          create: ["overview", "appointments", "clients", "leads", "pos", "card-view", "room-view", "treatments", "services", "packages", "booking", "staff-view", "staff", "facetrack-attendance", "inventory", "expenses", "payroll", "reports", "sms", "flipbooks", "support"].map((moduleId) => ({ moduleId, enabled: true })),
         },
         rooms: {
           create: branch.rooms.map((room) => ({

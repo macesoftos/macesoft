@@ -79,6 +79,7 @@ import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
+import PayrollWorkspace from "./payroll/PayrollWorkspace.jsx";
 import MarketingWorkspace from "./marketing/MarketingWorkspace.jsx";
 import FlipbooksWorkspace, { PublicFlipbookViewer } from "./flipbooks/FlipbooksWorkspace.jsx";
 import {
@@ -2790,6 +2791,7 @@ function App() {
         <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""} ${isFlipbooksView ? "flipbooks-content-area" : ""}`}>
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
           {activeModule === "facetrack-attendance" && <FaceTrackAttendance session={session} notify={notify} onExit={() => setActiveModule("overview")} />}
+          {activeModule === "payroll" && <PayrollWorkspace notify={notify} onAudit={applyAuditLog} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
             <Dashboard
               session={session}
@@ -4388,6 +4390,7 @@ const moduleDescriptions = {
   staff: "Staff records and attendance",
   branches: "Locations and capacity",
   expenses: "Approvals and receipts",
+  payroll: "Cutoffs, pay, and commissions",
   reports: "Sales and performance",
   booking: "Public request form",
   settings: "Company and security",

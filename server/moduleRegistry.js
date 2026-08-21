@@ -16,6 +16,7 @@ export const sidebarModules = [
   { id: "branches", label: "Branches", table: "Branch", phase: "admin", section: "Staff & Branches" },
   { id: "inventory", label: "Inventory", table: "InventoryItem", phase: "catalog", section: "Inventory & Finance" },
   { id: "expenses", label: "Expenses", table: "Expense", phase: "finance", section: "Inventory & Finance" },
+  { id: "payroll", label: "Payroll", table: "PayrollRun", phase: "finance", section: "Inventory & Finance" },
   { id: "reports", label: "Reports", table: null, phase: "insights", section: "Inventory & Finance" },
   { id: "sms", label: "Marketing", table: "MarketingCampaign", phase: "growth", section: "Marketing" },
   { id: "flipbooks", label: "Flipbooks", table: "Flipbook", phase: "growth", section: "Marketing" },
