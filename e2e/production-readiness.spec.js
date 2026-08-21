@@ -403,6 +403,14 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.keyboard.press("-");
   await expect(page.getByRole("group", { name: new RegExp(`${serviceName}, quantity 1`, "i") })).toBeFocused();
 
+  await page.getByLabel("Discount source").selectOption("__manual__");
+  await page.getByLabel("Manual discount scope").selectOption("Service");
+  await expect(page.getByLabel("Discounted service")).toContainText(serviceName);
+  await page.getByLabel("Manual discount type").selectOption("Percentage");
+  await page.getByLabel("Manual discount value").fill("10");
+  await expect(page.getByText(`10% of ${serviceName}`, { exact: true })).toBeVisible();
+  await page.getByRole("heading", { name: "Build checkout" }).click();
+
   await page.keyboard.press("F8");
   await page.keyboard.press("1");
   await expect(page.getByRole("dialog", { name: "Payment form" })).toBeVisible();
