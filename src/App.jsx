@@ -5288,6 +5288,8 @@ function POSModule({
   const [branch, setBranch] = useState(branchScope === "All branches" ? branchRecords.find((item) => item.status === "Active")?.name || "" : branchScope);
   const [staffName, setStaffName] = useState(staff[0]?.name ?? "");
   const [discountId, setDiscountId] = useState("");
+  const [manualDiscountType, setManualDiscountType] = useState("");
+  const [manualDiscountValue, setManualDiscountValue] = useState("");
   const [saleDate, setSaleDate] = useState(todayDate());
   const [testMode, setTestMode] = useState(false);
   const [activeCartId, setActiveCartId] = useState("");
@@ -5327,6 +5329,8 @@ function POSModule({
       setClientId(next.clientId || "");
       setStaffName(next.staff || "");
       setDiscountId(next.discountId || "");
+      setManualDiscountType(next.manualDiscountType || "");
+      setManualDiscountValue(next.manualDiscountType ? String(next.manualDiscountValue || "") : "");
       setSaleDate(next.saleDate || todayDate());
       setTestMode(Boolean(next.testMode));
       setCart(Array.isArray(next.items) ? next.items : []);
@@ -5334,6 +5338,8 @@ function POSModule({
       setActiveCartId("");
       setCart([]);
       setDiscountId("");
+      setManualDiscountType("");
+      setManualDiscountValue("");
       setSaleDate(todayDate());
       setTestMode(false);
     }
@@ -5349,17 +5355,19 @@ function POSModule({
       staff: staffName,
       items: cart,
       discountId,
+      manualDiscountType,
+      manualDiscountValue: Number(manualDiscountValue || 0),
       saleDate,
       testMode,
     };
-    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, saleDate: activeOpenCart.saleDate || todayDate(), testMode: Boolean(activeOpenCart.testMode) });
-    const pending = JSON.stringify({ clientId, staff: staffName, items: cart, discountId, saleDate, testMode });
+    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, manualDiscountType: activeOpenCart.manualDiscountType || "", manualDiscountValue: Number(activeOpenCart.manualDiscountValue || 0), saleDate: activeOpenCart.saleDate || todayDate(), testMode: Boolean(activeOpenCart.testMode) });
+    const pending = JSON.stringify({ clientId, staff: staffName, items: cart, discountId, manualDiscountType, manualDiscountValue: Number(manualDiscountValue || 0), saleDate, testMode });
     if (stored === pending) return undefined;
     const timer = window.setTimeout(() => {
       void saveOpenCart(nextDraft).catch((error) => notify(error.message || "Unable to save the open POS cart.", "error"));
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [activeOpenCart, branch, cart, clientId, clients, discountId, notify, saleDate, saveOpenCart, staffName, testMode]);
+  }, [activeOpenCart, branch, cart, clientId, clients, discountId, manualDiscountType, manualDiscountValue, notify, saleDate, saveOpenCart, staffName, testMode]);
 
   useEffect(() => {
     if (!canManagePosCatalog && posScreen !== "Checkout") {
@@ -5397,11 +5405,26 @@ function POSModule({
   const pagedProducts = catalogTab === "Products" ? visibleProducts.slice(catalogPageStart, catalogPageEnd) : [];
   const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.qty || 1), 0);
   const discount = discounts.find((item) => item.id === discountId);
-  const transactionDiscountAmount = discount
-    ? discount.type === "Percentage"
-      ? Math.round((subtotal * Number(discount.value)) / 100)
-      : Number(discount.value)
-    : 0;
+  const normalizedManualDiscountValue = Math.max(0, Number(manualDiscountValue || 0));
+  const manualDiscount = useMemo(
+    () => manualDiscountType ? { type: manualDiscountType, value: normalizedManualDiscountValue } : null,
+    [manualDiscountType, normalizedManualDiscountValue],
+  );
+  const manualDiscountValidationMessage = manualDiscount?.type === "Percentage" && manualDiscount.value > 100
+    ? "Manual percentage cannot exceed 100%."
+    : manualDiscount?.type === "Fixed amount" && manualDiscount.value > subtotal
+      ? "Manual discount cannot exceed the subtotal."
+      : "";
+  const manualDiscountInvalid = Boolean(manualDiscountValidationMessage);
+  const transactionDiscountAmount = manualDiscount
+    ? manualDiscount.type === "Percentage"
+      ? Math.round((subtotal * Math.min(100, manualDiscount.value)) / 100)
+      : Math.min(subtotal, manualDiscount.value)
+    : discount
+      ? discount.type === "Percentage"
+        ? Math.round((subtotal * Number(discount.value)) / 100)
+        : Number(discount.value)
+      : 0;
   const eligiblePromotions = promotions.filter((promotion) => {
     const applicableBranches = splitList(promotion.branches);
     return promotion.active && saleDate >= promotion.startDate && saleDate <= promotion.endDate
@@ -5451,6 +5474,8 @@ function POSModule({
       staff: staffName,
       items: cart,
       discountId,
+      manualDiscountType,
+      manualDiscountValue: normalizedManualDiscountValue,
       saleDate,
       testMode,
     });
@@ -5464,6 +5489,8 @@ function POSModule({
       setClientId(openCart.clientId || "");
       setStaffName(openCart.staff || "");
       setDiscountId(openCart.discountId || "");
+      setManualDiscountType(openCart.manualDiscountType || "");
+      setManualDiscountValue(openCart.manualDiscountType ? String(openCart.manualDiscountValue || "") : "");
       setSaleDate(openCart.saleDate || todayDate());
       setTestMode(Boolean(openCart.testMode));
       setCart(Array.isArray(openCart.items) ? openCart.items : []);
@@ -5489,12 +5516,16 @@ function POSModule({
         staff: staffName,
         items: [],
         discountId: "",
+        manualDiscountType: "",
+        manualDiscountValue: 0,
         saleDate: todayDate(),
         testMode: false,
       });
       setActiveCartId(created.id);
       setClientId(created.clientId || "");
       setDiscountId("");
+      setManualDiscountType("");
+      setManualDiscountValue("");
       setSaleDate(created.saleDate || todayDate());
       setTestMode(Boolean(created.testMode));
       setCart([]);
@@ -5527,6 +5558,8 @@ function POSModule({
           setClientId(next.clientId || "");
           setStaffName(next.staff || "");
           setDiscountId(next.discountId || "");
+          setManualDiscountType(next.manualDiscountType || "");
+          setManualDiscountValue(next.manualDiscountType ? String(next.manualDiscountValue || "") : "");
           setSaleDate(next.saleDate || todayDate());
           setTestMode(Boolean(next.testMode));
           setCart(Array.isArray(next.items) ? next.items : []);
@@ -5535,6 +5568,8 @@ function POSModule({
           setActiveCartId("");
           setCart([]);
           setDiscountId("");
+          setManualDiscountType("");
+          setManualDiscountValue("");
           setSaleDate(todayDate());
           setTestMode(false);
         }
@@ -5612,7 +5647,8 @@ function POSModule({
       }
       if (event.key === "F8" || (event.ctrlKey && event.key === "Enter")) {
         event.preventDefault();
-        if (cart.length) setCheckoutStep("payment");
+        if (manualDiscountInvalid) notify(manualDiscountValidationMessage, "error");
+        else if (cart.length) setCheckoutStep("payment");
         return;
       }
       if (checkoutStep === "payment" && /^[1-4]$/.test(event.key)) {
@@ -5626,6 +5662,7 @@ function POSModule({
           cart,
           subtotal,
           discount,
+          manualDiscount,
           discountAmount,
           total,
           notes: "",
@@ -5662,7 +5699,7 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [activeCartId, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, clientId, discount, discountAmount, openPayment, posPaymentOptions, posScreen, saleDate, setCart, staffName, subtotal, testMode, total]);
+  }, [activeCartId, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, saleDate, setCart, staffName, subtotal, testMode, total]);
 
   function createPaymentDraft(patch = {}) {
     return {
@@ -5673,6 +5710,7 @@ function POSModule({
       cart,
       subtotal,
       discount,
+      manualDiscount,
       discountAmount,
       total,
       notes: "",
@@ -5685,11 +5723,19 @@ function POSModule({
 
   function showPaymentStep() {
     if (!cart.length) return;
+    if (manualDiscountInvalid) {
+      notify(manualDiscountValidationMessage, "error");
+      return;
+    }
     setCheckoutStep("payment");
   }
 
   function choosePayment(option) {
     if (!cart.length) return;
+    if (manualDiscountInvalid) {
+      notify(manualDiscountValidationMessage, "error");
+      return;
+    }
     openPayment(createPaymentDraft({
       paymentMethod: option.method,
       paymentLabel: option.label,
@@ -5722,7 +5768,9 @@ function POSModule({
       total,
       payments: [],
       status: "Unpaid",
-      notes: discount ? `${discount.name} applied` : "",
+      notes: manualDiscount
+        ? `Manual ${manualDiscount.type === "Percentage" ? `${manualDiscount.value}%` : money.format(manualDiscount.value)} discount applied`
+        : discount ? `${discount.name} applied` : "",
     };
   }
 
@@ -6148,14 +6196,60 @@ function POSModule({
         </div>
         <div className="invoice-fields">
           <label className="stacked-field">
-            <span>Discount</span>
-            <select value={discountId} onChange={(event) => setDiscountId(event.target.value)}>
+            <span>Discount source</span>
+            <select
+              aria-label="Discount source"
+              value={manualDiscountType ? "__manual__" : discountId}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === "__manual__") {
+                  setDiscountId("");
+                  setManualDiscountType((current) => current || "Fixed amount");
+                  return;
+                }
+                setDiscountId(value);
+                setManualDiscountType("");
+                setManualDiscountValue("");
+              }}
+            >
               <option value="">No discount</option>
-              {discounts.filter((item) => item.active).map((item) => (
-                <option key={item.id} value={item.id}>{item.name} - {item.type}</option>
-              ))}
+              <option value="__manual__">Manual discount</option>
+              <optgroup label="Saved discount rules">
+                {discounts.filter((item) => item.active).map((item) => (
+                  <option key={item.id} value={item.id}>{item.name} - {item.type}</option>
+                ))}
+              </optgroup>
             </select>
           </label>
+          {manualDiscountType && (
+            <div className="manual-discount-fields">
+              <label className="stacked-field">
+                <span>Manual discount type</span>
+                <select aria-label="Manual discount type" value={manualDiscountType} onChange={(event) => setManualDiscountType(event.target.value)}>
+                  <option value="Fixed amount">Peso amount</option>
+                  <option value="Percentage">Percentage</option>
+                </select>
+              </label>
+              <label className="stacked-field">
+                <span>{manualDiscountType === "Percentage" ? "Percent" : "Amount"}</span>
+                <input
+                  aria-label="Manual discount value"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  max={manualDiscountType === "Percentage" ? "100" : subtotal}
+                  step="0.01"
+                  value={manualDiscountValue}
+                  onChange={(event) => setManualDiscountValue(event.target.value)}
+                  placeholder={manualDiscountType === "Percentage" ? "e.g. 10" : "e.g. 500"}
+                />
+              </label>
+              <small className={manualDiscountInvalid ? "field-error" : ""}>
+                {manualDiscountValidationMessage || (manualDiscountType === "Percentage" ? `${normalizedManualDiscountValue || 0}% of subtotal` : `${money.format(normalizedManualDiscountValue || 0)} off the subtotal`)}
+              </small>
+            </div>
+          )}
+          {promotionDiscountAmount > 0 && <small className="automatic-promotion-note">Eligible promotion applied automatically: {money.format(promotionDiscountAmount)}.</small>}
         </div>
         <div className="checkout-sticky-footer">
           <div className="checkout-summary-card">
@@ -6193,7 +6287,7 @@ function POSModule({
             </>
           ) : (
             <>
-              <button className="primary-button full" type="button" onClick={showPaymentStep} disabled={!cart.length}>
+              <button className="primary-button full" type="button" onClick={showPaymentStep} disabled={!cart.length || manualDiscountInvalid}>
                 <Check size={17} aria-hidden="true" />
                 Complete transaction
                 <kbd>F8</kbd>

@@ -3491,6 +3491,24 @@ async function buildSaleDraftItems(cart, branch) {
   return prepared;
 }
 
+function normalizeManualDiscount(value) {
+  const rawType = clean(value?.type);
+  const rawValue = value?.value;
+  if (!rawType && (rawValue === undefined || rawValue === null || rawValue === "" || Number(rawValue) === 0)) return null;
+  const normalizedType = rawType.toLowerCase();
+  const type = normalizedType === "percentage"
+    ? "Percentage"
+    : ["fixed amount", "fixed", "amount"].includes(normalizedType)
+      ? "Fixed amount"
+      : "";
+  if (!type) throw apiError("Manual discount type must be Percentage or Fixed amount.");
+  const discountValue = numberValue(rawValue, "Manual discount", { min: 0 });
+  if (type === "Percentage" && discountValue > 100) {
+    throw apiError("Manual percentage discount cannot exceed 100%.");
+  }
+  return { type, value: discountValue };
+}
+
 async function calculateCheckout(draft, { actor, branch }) {
   const items = await buildSaleDraftItems(draft.cart, branch);
   const subtotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
@@ -3525,12 +3543,23 @@ async function calculateCheckout(draft, { actor, branch }) {
   if (clientId && !client) throw apiError("The selected client was not found.", 404);
   const discountId = clean(draft.discount?.id || draft.discountId);
   const discount = discountId ? await prisma.discount.findUnique({ where: { id: discountId } }) : null;
+  const manualDiscount = normalizeManualDiscount(draft.manualDiscount);
+  if (discountId && manualDiscount) throw apiError("Choose either a saved discount rule or a manual discount, not both.");
   if (discountId) assertDiscountUsable(discount, { role: actor.role, client, items });
-  const discountAmount = discount
+  const savedDiscountAmount = discount
     ? discount.type === "Percentage"
       ? Math.round((subtotal * Number(discount.value || 0)) / 100)
       : Number(discount.value || 0)
     : 0;
+  const manualDiscountAmount = manualDiscount
+    ? manualDiscount.type === "Percentage"
+      ? Math.round((subtotal * manualDiscount.value) / 100)
+      : manualDiscount.value
+    : 0;
+  if (manualDiscountAmount > subtotal) {
+    throw apiError("Manual discount cannot exceed the cart subtotal.");
+  }
+  const transactionDiscountAmount = manualDiscount ? manualDiscountAmount : savedDiscountAmount;
   const requestedDepositCredit = numberValue(draft.depositCredit, "Deposit credit", { min: 0 });
   const appointmentId = clean(draft.appointmentId);
   let depositCredit = 0;
@@ -3549,12 +3578,14 @@ async function calculateCheckout(draft, { actor, branch }) {
   } else if (requestedDepositCredit > 0) {
     throw apiError("Select the appointment that owns this deposit credit.", 409);
   }
-  const totalDiscount = Math.min(discountAmount + depositCredit + promotionDiscount, subtotal);
+  const totalDiscount = Math.min(transactionDiscountAmount + depositCredit + promotionDiscount, subtotal);
 
   return {
     items,
     subtotal,
     discount,
+    manualDiscount,
+    transactionDiscountAmount,
     depositCredit,
     appointmentId: creditedAppointmentId,
     appointmentUpdatedAt: creditedAppointmentUpdatedAt,
@@ -6750,13 +6781,21 @@ function normalizePosCartPayload(payload, actor, existing = null) {
   if (saleDate !== today && !canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can prepare a historical transaction.", 403);
   const testMode = payload?.testMode === undefined ? Boolean(existing?.testMode) : payload.testMode === true;
   if (testMode && !isAdmin(actor.role)) throw apiError("Only Super Admin can use POS Test Mode.", 403);
+  const discountId = clean(payload?.discountId);
+  const manualDiscount = normalizeManualDiscount({
+    type: payload?.manualDiscountType ?? existing?.manualDiscountType,
+    value: payload?.manualDiscountValue ?? existing?.manualDiscountValue,
+  });
+  if (discountId && manualDiscount) throw apiError("Choose either a saved discount rule or a manual discount, not both.");
   return {
     clientId: clean(payload?.clientId),
     client: clean(payload?.client) || "Walk-in",
     branch,
     staff: clean(payload?.staff),
     items: JSON.stringify(items),
-    discountId: clean(payload?.discountId),
+    discountId,
+    manualDiscountType: manualDiscount?.type || "",
+    manualDiscountValue: manualDiscount?.value || 0,
     saleDate,
     testMode,
   };
@@ -7110,6 +7149,9 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       movements.push(movement);
     }
     const tenderNotes = [
+      ...(checkout.manualDiscount ? [
+        `Manual discount: ${checkout.manualDiscount.type === "Percentage" ? `${checkout.manualDiscount.value}%` : checkout.manualDiscount.value} (${checkout.transactionDiscountAmount} applied)`,
+      ] : checkout.discount ? [`Discount rule: ${checkout.discount.name} (${checkout.transactionDiscountAmount} applied)`] : []),
       ...(checkout.appliedPromotions.length ? [`Promotions: ${checkout.appliedPromotions.join(", ")}`] : []),
       ...settledCertificates.map((certificate) => `GC ${certificate.code} balance ${certificate.balance}`),
       ...settledPackages.map((pkg) => `${pkg.name} ${pkg.used}/${pkg.sessions} sessions`),
