@@ -2062,8 +2062,12 @@ async function listResource(resource, actor = null) {
   let where = {};
   if (actor) {
     if (config.unifiedClientAccess) {
-      const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
-      where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
+      if (!hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
+        where = { id: "__none__" };
+      } else {
+        const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
+        where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
+      }
     } else if (config.branchField) where = branchWhere(actor, config.branchField);
     if (config.branchField && config.allowLegacyOrganizationScope && actor.access?.scope === "branch") {
       where = { OR: [where, { [config.branchField]: "All branches" }] };

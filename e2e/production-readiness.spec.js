@@ -9,9 +9,11 @@ if (!ownerEmail || !ownerPassword) {
 }
 
 async function gotoAuthenticatedWorkspace(page, path) {
-  const bootstrap = page.waitForResponse((response) => response.url().endsWith("/api/bootstrap") && response.status() === 200);
   await page.goto(path);
-  await bootstrap;
+  await expect.poll(async () => page.evaluate(async () => {
+    const response = await fetch("/api/bootstrap", { credentials: "include" });
+    return response.status;
+  }), { timeout: 30_000 }).toBe(200);
 }
 
 test("anonymous users cannot read clinic data", async ({ request }) => {

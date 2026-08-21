@@ -521,10 +521,11 @@ try {
   const davaoPos = await request("/api/bootstrap", { headers: davaoReceptionist });
   const bgcPos = await request("/api/bootstrap", { headers: bgcReceptionist });
   assert(davaoPos.response.ok && davaoPos.payload.clients.some((client) => client.id === clientId), "Davao POS did not include its own customer selector data");
-  assert(!davaoPos.payload.clients.some((client) => client.id === bgcClientId), "Davao POS exposed a BGC customer");
+  assert(davaoPos.payload.clients.some((client) => client.id === bgcClientId), "Davao POS did not include the unified BGC customer selector data");
   assert(bgcPos.response.ok && bgcPos.payload.clients.some((client) => client.id === bgcClientId), "BGC POS did not include its own customer selector data");
-  assert(!bgcPos.payload.clients.some((client) => client.id === clientId), "BGC POS exposed a Davao customer");
+  assert(bgcPos.payload.clients.some((client) => client.id === clientId), "BGC POS did not include the unified Davao customer selector data");
   assert(!Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === clientId), "medicalNotes"), "POS bootstrap exposed clinical client fields");
+  assert(!Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === bgcClientId), "medicalNotes"), "Unified POS selector exposed cross-branch clinical client fields");
 
   const crossBranchUpdate = await jsonRequestAs(`/api/resources/clients/${bgcClientId}`, {
     ...createdBgcClient.payload.record,
