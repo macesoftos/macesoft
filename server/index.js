@@ -3555,6 +3555,9 @@ async function calculateCheckout(draft, { actor, branch }) {
   const discount = discountId ? await prisma.discount.findUnique({ where: { id: discountId } }) : null;
   const manualDiscount = normalizeManualDiscount(draft.manualDiscount);
   if (discountId && manualDiscount) throw apiError("Choose either a saved discount rule or a manual discount, not both.");
+  if ((discountId || manualDiscount) && !canManageOrganization(actor.role)) {
+    throw apiError("An Owner or Super Admin must approve and post POS discounts or price adjustments.", 403);
+  }
   if (discountId) assertDiscountUsable(discount, { role: actor.role, client, items });
   const savedDiscountAmount = discount
     ? discount.type === "Percentage"
@@ -6616,6 +6619,105 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
   response.json(result);
 }));
 
+app.post("/api/packages/:id/payments", asyncRoute(async (request, response) => {
+  const id = String(request.params.id);
+  const pkg = await prisma.clinicPackage.findUnique({ where: { id } });
+  if (!pkg) throw apiError("Package not found.", 404);
+
+  assertMutationAllowed(request, "packages", pkg.branch);
+  const actor = actorFromRequest(request);
+  const amount = numberValue(request.body?.amount, "Installment amount", { min: 0.01 });
+  const date = clean(request.body?.date) || posCalendarDate();
+  const method = requireText(request.body?.method, "Payment method");
+  const referenceNumber = normalizePaymentReference(request.body?.referenceNumber);
+  const nextPayment = clean(request.body?.nextPayment);
+  const notes = clean(request.body?.notes);
+  const today = posCalendarDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || date > today) {
+    throw apiError("Choose a valid payment date that is not in the future.");
+  }
+  if (nextPayment && (!/^\d{4}-\d{2}-\d{2}$/.test(nextPayment) || Number.isNaN(Date.parse(`${nextPayment}T00:00:00Z`)))) {
+    throw apiError("Choose a valid next payment date.");
+  }
+  const settings = await getPersistedSettings();
+  const allowedMethods = new Set(normalizePaymentMethods(settings.paymentMethods).filter((entry) => entry.active).map((entry) => entry.name));
+  if (!allowedMethods.has(method) || ["Package", "Gift Certificate", "Salary Deduction"].includes(method)) {
+    throw apiError(`${method} cannot be used to record a package installment.`, 409);
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const current = await tx.clinicPackage.findUnique({ where: { id } });
+    const outstanding = Math.max(0, Number(current.price || 0) - Number(current.amountPaid || 0));
+    if (outstanding <= 0) throw apiError(`${current.name} is already fully paid.`, 409);
+    if (amount > outstanding) throw apiError(`Installment cannot exceed the outstanding balance of ${outstanding}.`);
+
+    const paymentId = randomBytes(12).toString("hex");
+    const historyEntry = {
+      id: paymentId,
+      date,
+      amount,
+      method,
+      ...(referenceNumber ? { referenceNumber } : {}),
+      ...(notes ? { notes } : {}),
+      receivedBy: actor.name,
+    };
+    const fullyPaid = amount >= outstanding;
+    const updated = await tx.clinicPackage.updateMany({
+      where: { id, amountPaid: current.amountPaid },
+      data: {
+        amountPaid: { increment: amount },
+        nextPayment: fullyPaid ? "" : nextPayment,
+        paymentHistory: jsonText([...parseJsonList(current.paymentHistory), historyEntry], []),
+      },
+    });
+    if (updated.count !== 1) throw apiError(`${current.name} changed while the installment was being recorded. Try again.`, 409);
+
+    let sale = null;
+    if (current.sourceSaleId) {
+      const sourceSale = await tx.sale.findUnique({ where: { id: current.sourceSaleId } });
+      if (sourceSale && sourceSale.status !== "Void") {
+        const payments = parseJsonList(sourceSale.payments);
+        payments.push({ id: paymentId, method, amount, ...(referenceNumber ? { referenceNumber } : {}), packageInstallmentId: current.id });
+        const collected = payments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
+        sale = await tx.sale.update({
+          where: { id: sourceSale.id },
+          data: {
+            payments: jsonText(payments, []),
+            status: collected >= Number(sourceSale.total || 0) ? "Paid" : collected > 0 ? "Partially Paid" : "Unpaid",
+          },
+          include: { items: true },
+        });
+      }
+    }
+
+    let client = null;
+    if (current.clientId && sale) {
+      const existingClient = await tx.client.findUnique({ where: { id: current.clientId } });
+      if (existingClient) {
+        client = await tx.client.update({
+          where: { id: existingClient.id },
+          data: { balance: Math.max(0, Number(existingClient.balance || 0) - amount) },
+        });
+      }
+    }
+
+    const record = await tx.clinicPackage.findUnique({ where: { id } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Packages",
+      action: "Package installment recorded",
+      details: `${amount} received for ${record.name} from ${record.client} via ${method}.${fullyPaid ? " Package is fully paid." : ` Remaining balance ${Math.max(0, Number(record.price || 0) - Number(record.amountPaid || 0))}.`}`,
+    });
+    return {
+      record: serializePackage(record),
+      sale: sale ? serializeSale(sale) : null,
+      client: client ? serializeClient(client) : null,
+      auditLog,
+    };
+  });
+
+  response.status(201).json(result);
+}));
+
 app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
   const sale = await prisma.sale.findUnique({ where: { id }, include: { items: true } });
@@ -6768,7 +6870,7 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
         orderBy: [{ item: "asc" }],
       }) : null,
       giftCertificates: restoredCertificates,
-      packages: [...restoredPackages, ...cancelledIssuedPackages],
+      packages: [...restoredPackages, ...cancelledIssuedPackages].map(serializePackage),
       client: updatedClient ? serializeClient(updatedClient) : null,
       auditLog,
     };
@@ -6961,6 +7063,37 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   if (outstandingAmount > 0 && !checkout.client && !testMode) {
     throw apiError("Select a registered client before posting an unpaid or partially paid transaction.");
   }
+  const packageLineAmounts = new Map(packagePurchaseItems.map((item) => {
+    const grossLineTotal = Number(item.price || 0) * Number(item.qty || 1);
+    const netPackagePrice = checkout.subtotal > 0
+      ? Math.round((((grossLineTotal / checkout.subtotal) * checkout.total) + Number.EPSILON) * 100) / 100
+      : 0;
+    return [item.lineKey, netPackagePrice];
+  }));
+  const packageNetTotal = [...packageLineAmounts.values()].reduce((sum, amount) => sum + amount, 0);
+  const nonPackageNetTotal = Math.max(0, checkout.total - packageNetTotal);
+  const requiredPackageAllocation = Math.max(0, Math.min(packageNetTotal, Math.min(paidAmount, checkout.total) - nonPackageNetTotal));
+  const requestedPackageInstallments = Array.isArray(paymentData.packageInstallments) ? paymentData.packageInstallments : null;
+  const packageInstallmentsByLine = new Map();
+  if (requestedPackageInstallments) {
+    for (const installment of requestedPackageInstallments) {
+      const lineKey = requireText(installment?.lineKey, "Package line");
+      if (packageInstallmentsByLine.has(lineKey)) throw apiError("Each package can only have one installment allocation.");
+      const packagePrice = packageLineAmounts.get(lineKey);
+      if (packagePrice === undefined) throw apiError("A package installment was assigned to an invalid cart line.");
+      const amountPaid = numberValue(installment?.amountPaid, "Package amount paid", { min: 0 });
+      if (amountPaid > packagePrice) throw apiError("Package amount paid cannot exceed the package total.");
+      const nextPayment = clean(installment?.nextPayment);
+      if (nextPayment && (!/^\d{4}-\d{2}-\d{2}$/.test(nextPayment) || Number.isNaN(Date.parse(`${nextPayment}T00:00:00Z`)))) {
+        throw apiError("Choose a valid next package payment date.");
+      }
+      packageInstallmentsByLine.set(lineKey, { amountPaid, nextPayment });
+    }
+    const allocated = [...packageInstallmentsByLine.values()].reduce((sum, installment) => sum + installment.amountPaid, 0);
+    if (Math.abs(allocated - requiredPackageAllocation) > 0.009) {
+      throw apiError(`Apply ${requiredPackageAllocation} of this payment to the package installment balance.`);
+    }
+  }
   const deductions = testMode ? [] : await inventoryDeductionsForSale(checkout.items, branch);
   const operationalPayments = testMode ? [] : normalizedPayments;
 
@@ -7097,7 +7230,6 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 
     const issuedPackages = [];
     if (!testMode && checkout.client) {
-      const paidRatio = checkout.total > 0 ? Math.min(1, paidAmount / checkout.total) : 1;
       const paymentMethod = [...new Set(normalizedPayments.map((payment) => payment.method))].join(" + ");
       for (const item of packagePurchaseItems) {
         const sessions = Number(item.source.packageSessions || 0) * Number(item.qty || 1);
@@ -7106,7 +7238,10 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         const netPackagePrice = checkout.subtotal > 0
           ? Math.round(((grossLineTotal / checkout.subtotal) * checkout.total) * 100) / 100
           : 0;
-        const packageAmountPaid = Math.round((netPackagePrice * paidRatio) * 100) / 100;
+        const installment = packageInstallmentsByLine.get(item.lineKey);
+        const packageAmountPaid = requestedPackageInstallments
+          ? Number(installment?.amountPaid || 0)
+          : Math.round((netPackagePrice * (checkout.total > 0 ? Math.min(1, paidAmount / checkout.total) : 1)) * 100) / 100;
         issuedPackages.push(await tx.clinicPackage.create({
           data: {
             name: item.name,
@@ -7120,7 +7255,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
             status: "Active",
             price: netPackagePrice,
             amountPaid: packageAmountPaid,
-            nextPayment: "",
+            nextPayment: packageAmountPaid < netPackagePrice ? clean(installment?.nextPayment) : "",
             purchaseDate: saleDate,
             serviceValue: Number(item.source.serviceValue || (sessions ? netPackagePrice / sessions : 0)),
             paymentHistory: jsonText(packageAmountPaid > 0 ? [{
@@ -7224,7 +7359,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       }),
       movements,
       giftCertificates: settledCertificates,
-      packages: [...settledPackages, ...issuedPackages],
+      packages: [...settledPackages, ...issuedPackages].map(serializePackage),
       client: updatedClient ? serializeClient(updatedClient) : null,
       posCartId,
       auditLog,

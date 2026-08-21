@@ -696,6 +696,13 @@ export function redeemPackageRecord(id) {
   });
 }
 
+export function recordPackageInstallment(id, payment) {
+  return requestJson(`/api/packages/${encodeURIComponent(id)}/payments`, {
+    method: "POST",
+    body: JSON.stringify(payment),
+  });
+}
+
 export function voidTransactionRecord(id) {
   return requestJson(`/api/transactions/${encodeURIComponent(id)}/void`, {
     method: "POST",
