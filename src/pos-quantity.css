@@ -574,9 +574,105 @@
 }
 
 .invoice-fields {
+  padding: 0 18px 14px;
+}
+
+.discount-panel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbf8f7;
+}
+
+.discount-panel.has-error {
+  border-color: var(--danger, #b42318);
+}
+
+.discount-panel-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  padding: 11px 14px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.discount-panel-toggle:hover {
+  background: var(--rose-soft);
+}
+
+.discount-panel-heading {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.discount-panel-heading strong {
+  font-size: 0.88rem;
+}
+
+.discount-panel-heading small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discount-panel-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--wine);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.discount-panel-action svg {
+  transition: transform 160ms ease;
+}
+
+.discount-panel-action svg.is-expanded {
+  transform: rotate(180deg);
+}
+
+.discount-panel-content {
   display: grid;
   gap: 12px;
-  padding: 0 18px 14px;
+  border-top: 1px solid var(--line);
+  padding: 14px;
+}
+
+.discount-panel-content .stacked-field {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.discount-panel-content .stacked-field > select,
+.discount-panel-content .stacked-field > input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 10px;
+}
+
+.discount-panel-content .stacked-field > select:focus-visible,
+.discount-panel-content .stacked-field > input:focus-visible {
+  border-color: var(--wine);
+  outline: 3px solid rgba(130, 24, 65, 0.12);
 }
 
 .manual-discount-fields {
