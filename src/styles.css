@@ -1392,12 +1392,12 @@ img { max-width: 100%; }
   border-bottom: 1px solid var(--line);
 }
 
-.account-detail-list {
+.account-action-list {
   display: grid;
   gap: 7px;
 }
 
-.account-detail-list span,
+.account-action-list button,
 .account-dropdown button {
   min-height: 34px;
   display: flex;
@@ -1409,16 +1409,53 @@ img { max-width: 100%; }
   font-weight: 800;
 }
 
-.account-detail-list span {
+.account-action-list button {
+  width: 100%;
+  min-height: 48px;
+  justify-content: flex-start;
+  border: 1px solid transparent;
   background: var(--paper);
-  padding: 0 10px;
+  padding: 7px 10px;
+  text-align: left;
 }
 
-.account-detail-list svg {
+.account-action-list button > span {
+  min-width: 0;
+  display: grid;
+  flex: 1;
+  gap: 1px;
+}
+
+.account-action-list button strong,
+.account-action-list button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-action-list button strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.account-action-list button small {
+  color: var(--muted);
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.account-action-list svg {
   color: var(--wine);
+  flex: 0 0 auto;
 }
 
-.account-dropdown button {
+.account-action-list button:hover,
+.account-action-list button:focus-visible {
+  border-color: rgba(119, 51, 66, 0.28);
+  background: var(--rose-soft);
+}
+
+.account-dropdown .account-sign-out {
   justify-content: center;
   width: 100%;
   border: 1px solid var(--line);
@@ -1426,9 +1463,78 @@ img { max-width: 100%; }
   color: var(--wine);
 }
 
-.account-dropdown button:hover {
+.account-dropdown .account-sign-out:hover {
   border-color: rgba(119, 51, 66, 0.28);
   background: var(--rose-soft);
+}
+
+.account-security-modal {
+  width: min(620px, 100%);
+}
+
+.account-security-summary {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 18px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+.account-security-summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.account-security-summary > div span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-security-summary dl {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 2px 0 0;
+}
+
+.account-security-summary dl div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.account-security-summary dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.account-security-summary dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-password-helper {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .content-area,
@@ -7846,7 +7952,7 @@ td,
 .pagination,
 .account-summary strong,
 .account-profile strong,
-.account-detail-list span,
+.account-action-list button,
 .account-dropdown button {
   font-size: var(--font-size-base);
   line-height: var(--line-height-normal);

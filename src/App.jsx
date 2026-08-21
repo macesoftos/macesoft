@@ -2576,7 +2576,13 @@ function App() {
               ) : (
                 <div className="active-branch-label" title="Your assigned branch"><Store size={17} aria-hidden="true" /><span>{branchScope}</span></div>
               )}
-              <AccountMenu session={session} onLogout={handleLogout} />
+              <AccountMenu
+                session={session}
+                sessionModules={sessionModules}
+                onLogout={handleLogout}
+                onNavigate={setActiveModule}
+                onOpenAccount={() => openModal("account")}
+              />
             </div>
             </header>
           </div>
@@ -2927,6 +2933,7 @@ function App() {
         saveCampaign={saveCampaign}
         saveSettings={saveSettings}
         saveRoom={saveRoom}
+        changePassword={handlePasswordChange}
         clients={clients}
         services={services}
         branches={branchRecords}
@@ -3475,11 +3482,19 @@ function NotificationCenter({ loading, notifications, onMarkAllRead, onNavigate,
   );
 }
 
-function AccountMenu({ session, onLogout }) {
+function AccountMenu({ session, sessionModules = [], onLogout, onNavigate, onOpenAccount }) {
   const initials = initialsFor(session.name);
+  const detailsRef = useRef(null);
+  const canManageUsers = sessionModules.includes("staff");
+  const canManageBranches = sessionModules.includes("branches");
+
+  function runAction(action) {
+    if (detailsRef.current) detailsRef.current.open = false;
+    action();
+  }
 
   return (
-    <details className="account-menu">
+    <details className="account-menu" ref={detailsRef}>
       <summary aria-label={`Open account menu for ${session.name}`}>
         <span className="account-avatar" aria-hidden="true">{initials}</span>
         <span className="account-summary">
@@ -3496,12 +3511,24 @@ function AccountMenu({ session, onLogout }) {
             <small>{session.email}</small>
           </div>
         </div>
-        <div className="account-detail-list">
-          <span><ShieldCheck size={15} aria-hidden="true" /> {session.role}</span>
-          <span><Store size={15} aria-hidden="true" /> {session.branch}</span>
-          <span><Mail size={15} aria-hidden="true" /> Signed in</span>
+        <div className="account-action-list">
+          <button type="button" role="menuitem" onClick={() => runAction(canManageUsers ? () => onNavigate("staff") : onOpenAccount)}>
+            <ShieldCheck size={16} aria-hidden="true" />
+            <span><strong>{session.role}</strong><small>{canManageUsers ? "Manage users and access" : "View your access"}</small></span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+          <button type="button" role="menuitem" onClick={() => runAction(canManageBranches ? () => onNavigate("branches") : onOpenAccount)}>
+            <Store size={16} aria-hidden="true" />
+            <span><strong>{session.branch}</strong><small>{canManageBranches ? "Manage clinic branches" : "View branch access"}</small></span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+          <button type="button" role="menuitem" onClick={() => runAction(onOpenAccount)}>
+            <LockKeyhole size={16} aria-hidden="true" />
+            <span><strong>Account security</strong><small>Change your password</small></span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
         </div>
-        <button type="button" onClick={onLogout} role="menuitem">
+        <button className="account-sign-out" type="button" onClick={onLogout} role="menuitem">
           <LogOut size={16} aria-hidden="true" />
           Sign out
         </button>
@@ -11617,6 +11644,7 @@ function ModalHost({
   saveCampaign,
   saveSettings,
   saveRoom,
+  changePassword,
   clients,
   services,
   branches,
@@ -11650,6 +11678,10 @@ function ModalHost({
   const templateOptions = [{ value: "", label: "Custom message" }, ...(templates ?? []).map((template) => ({ value: template.id, label: template.name }))];
   const defaultMarketingTemplate = (templates ?? []).find((template) => template.category === "Marketing") ?? templates?.[0];
   const canManageProductPhotos = canManageOrganization(session?.role);
+
+  if (modal.type === "account") {
+    return <AccountSecurityModal account={session} onClose={closeModal} onChangePassword={changePassword} />;
+  }
 
   if (modal.type === "payment") {
     return (
@@ -12098,6 +12130,58 @@ function ModalHost({
   const config = configs[modal.type];
   if (!config) return null;
   return <EntityModal config={config} onClose={closeModal} />;
+}
+
+function AccountSecurityModal({ account, onClose, onChangePassword }) {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    if (form.newPassword !== form.confirmPassword) {
+      setError("New passwords do not match.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onChangePassword(form.currentPassword, form.newPassword);
+      onClose();
+    } catch (passwordError) {
+      setError(passwordError.message || "Unable to update the password.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Account security">
+      <form className="modal-card account-security-modal" onSubmit={submit}>
+        <button className="modal-close" type="button" onClick={onClose} aria-label="Close account security"><X size={18} /></button>
+        <ModalHeader icon={LockKeyhole} title="Account security" action="Profile and password" />
+        <div className="account-security-summary">
+          <span className="account-avatar large" aria-hidden="true">{initialsFor(account.name)}</span>
+          <div><strong>{account.name}</strong><span>{account.email}</span></div>
+          <dl>
+            <div><dt>Role</dt><dd>{account.role}</dd></div>
+            <div><dt>Active branch</dt><dd>{account.branch}</dd></div>
+          </dl>
+        </div>
+        <div className="form-grid account-password-fields">
+          <label className="full-span"><span>Current password</span><input required autoComplete="current-password" type="password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} /></label>
+          <label><span>New password</span><input required autoComplete="new-password" type="password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} /></label>
+          <label><span>Confirm new password</span><input required autoComplete="new-password" type="password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} /></label>
+        </div>
+        <p className="account-password-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p>
+        {error && <div className="inline-state danger" role="alert"><AlertCircle size={17} /> {error}</div>}
+        <div className="modal-actions">
+          <button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="primary-button" type="submit" disabled={saving || !form.currentPassword || !form.newPassword || !form.confirmPassword}><LockKeyhole size={17} /> {saving ? "Updating..." : "Update password"}</button>
+        </div>
+      </form>
+    </div>
+  );
 }
 
 function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, onSubmit }) {

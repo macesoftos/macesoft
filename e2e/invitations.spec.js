@@ -68,13 +68,17 @@ function managerSession() {
   };
 }
 
-async function mockWorkspace(page, session, capabilities) {
+async function mockWorkspace(page, session, capabilities, { onPasswordChange } = {}) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
     let payload = {};
     let status = 200;
     if (pathname === "/api/auth/session") payload = { account: session };
+    else if (pathname === "/api/auth/change-password") {
+      onPasswordChange?.(request.postDataJSON());
+      payload = { account: { ...session, mustChangePassword: false } };
+    }
     else if (pathname === "/api/health") payload = { ok: true };
     else if (pathname === "/api/notifications") payload = { notifications: [], readAt: null, unreadCount: 0 };
     else if (pathname === "/api/accounts") payload = { accounts: [session] };
@@ -88,6 +92,41 @@ async function mockWorkspace(page, session, capabilities) {
     await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
   });
 }
+
+test("account menu rows provide role, branch, and security actions", async ({ page }) => {
+  let passwordPayload = null;
+  const session = {
+    ...ownerSession(),
+    name: "MACE Admin",
+    email: "admin@mace.test",
+    role: "Super Admin",
+    access: { ...ownerSession().access, modules: roleAccess["Super Admin"] },
+  };
+  await mockWorkspace(page, session, { roles: [], permissions: [], branches: [] }, {
+    onPasswordChange: (payload) => { passwordPayload = payload; },
+  });
+  await page.goto("/appointments");
+
+  const accountTrigger = page.getByLabel("Open account menu for MACE Admin");
+  await accountTrigger.click();
+  await page.getByRole("menuitem", { name: /Super Admin Manage users and access/i }).click();
+  await expect(page).toHaveURL(/\/staff$/);
+
+  await accountTrigger.click();
+  await page.getByRole("menuitem", { name: /All branches Manage clinic branches/i }).click();
+  await expect(page).toHaveURL(/\/branches$/);
+
+  await accountTrigger.click();
+  await page.getByRole("menuitem", { name: /Account security Change your password/i }).click();
+  const securityDialog = page.getByRole("dialog", { name: "Account security" });
+  await expect(securityDialog).toBeVisible();
+  await securityDialog.getByLabel("Current password").fill("CurrentPassword2026!");
+  await securityDialog.getByLabel("New password", { exact: true }).fill("NewPassword2026!");
+  await securityDialog.getByLabel("Confirm new password").fill("NewPassword2026!");
+  await securityDialog.getByRole("button", { name: "Update password" }).click();
+  await expect(securityDialog).toBeHidden();
+  expect(passwordPayload).toEqual({ currentPassword: "CurrentPassword2026!", newPassword: "NewPassword2026!" });
+});
 
 test("owner invitation form exposes authorized roles, concrete branches, and responsive controls", async ({ page }) => {
   const capabilities = {
