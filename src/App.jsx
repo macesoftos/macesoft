@@ -13809,6 +13809,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   const firstMethod = paymentMethods[0] || "Cash";
   const splitSecondMethod = paymentMethods.find((method) => method !== firstMethod && method !== "Package") || firstMethod;
   const packagePurchaseLines = (draft.cart || []).filter((item) => item.type === "Service" && item.serviceType === "Package");
+  const packageServiceLines = (draft.cart || []).filter((item) => item.type === "Service");
   const packageLineAmount = (item) => {
     const gross = Number(item?.price || 0) * Number(item?.qty || 1);
     return Number(draft.subtotal || 0) > 0
@@ -13864,7 +13865,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   });
   const tenderIncomplete = payments.some((payment) =>
     (payment.method === "Gift Certificate" && !payment.giftCertificateId)
-    || (payment.method === "Package" && !payment.packageId)
+    || (payment.method === "Package" && (!payment.packageId || !payment.packageLineKey))
     || (payment.method === "Salary Deduction" && !payment.employeeId));
   const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete && !packageAllocationInvalid;
 
@@ -13878,7 +13879,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   }
 
   function changeMethod(index, method) {
-    updatePayment(index, { method, giftCertificateId: undefined, packageId: undefined, employeeId: undefined });
+    updatePayment(index, { method, giftCertificateId: undefined, packageId: undefined, packageLineKey: undefined, employeeId: undefined });
   }
 
   function chooseCertificate(index, certificateId) {
@@ -13890,8 +13891,11 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   }
 
   function choosePackage(index, packageId) {
+    const assignedLineKeys = new Set(payments.map((payment, itemIndex) => itemIndex === index ? "" : payment.packageLineKey).filter(Boolean));
+    const nextLine = packageServiceLines.find((item) => !assignedLineKeys.has(item.key)) || packageServiceLines[0];
     updatePayment(index, {
       packageId: packageId || undefined,
+      packageLineKey: packageId ? (payments[index]?.packageLineKey || nextLine?.key) : undefined,
       ...(packageId ? { amount: remainingBesides(index) } : {}),
     });
   }
@@ -14007,19 +14011,33 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                 </select>
               )}
               {payment.method === "Package" && (
-                <select
-                  className="payment-tender-select"
-                  aria-label={`Payment ${index + 1} package`}
-                  value={payment.packageId || ""}
-                  onChange={(event) => choosePackage(index, event.target.value)}
-                >
-                  <option value="">Select client package (1 session)...</option>
-                  {usablePackages.map((pkg) => (
-                    <option key={pkg.id} value={pkg.id}>
-                      {pkg.name} - {Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left
-                    </option>
-                  ))}
-                </select>
+                <div className="payment-package-allocation">
+                  <select
+                    className="payment-tender-select"
+                    aria-label={`Payment ${index + 1} package`}
+                    value={payment.packageId || ""}
+                    onChange={(event) => choosePackage(index, event.target.value)}
+                  >
+                    <option value="">Select client package (1 session)...</option>
+                    {usablePackages.map((pkg) => (
+                      <option key={pkg.id} value={pkg.id}>
+                        {pkg.name} - {Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="payment-tender-select"
+                    aria-label={`Payment ${index + 1} package service`}
+                    value={payment.packageLineKey || ""}
+                    onChange={(event) => updatePayment(index, { packageLineKey: event.target.value || undefined })}
+                  >
+                    <option value="">Select service session covered...</option>
+                    {packageServiceLines.map((line) => {
+                      const assignedElsewhere = payments.some((entry, itemIndex) => itemIndex !== index && entry.method === "Package" && entry.packageLineKey === line.key);
+                      return <option key={line.key} value={line.key} disabled={assignedElsewhere}>{line.name}{line.provider && line.provider !== "N/A" ? ` · ${line.provider}` : ""}</option>;
+                    })}
+                  </select>
+                </div>
               )}
               {payment.method === "Salary Deduction" && (
                 <select className="payment-tender-select" aria-label={`Payment ${index + 1} employee`} value={payment.employeeId || ""} onChange={(event) => updatePayment(index, { employeeId: event.target.value || undefined })}>
@@ -14032,6 +14050,9 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
               )}
               {payment.method === "Package" && !usablePackages.length && (
                 <span className="payment-tender-hint">No active packages for this client at this branch.</span>
+              )}
+              {payment.method === "Package" && !packageServiceLines.length && (
+                <span className="payment-tender-hint">Add the service covered by this package before checkout.</span>
               )}
             </div>
           ))}

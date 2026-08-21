@@ -1561,6 +1561,16 @@ img { max-width: 100%; }
   width: 100%;
 }
 
+.payment-package-allocation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 680px) {
+  .payment-package-allocation { grid-template-columns: 1fr; }
+}
+
 .payment-tender-hint {
   font-size: 12px;
   color: var(--muted, #8a8f98);

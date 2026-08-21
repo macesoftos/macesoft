@@ -7026,6 +7026,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       referenceNumber,
       ...(clean(payment.giftCertificateId) ? { giftCertificateId: clean(payment.giftCertificateId) } : {}),
       ...(clean(payment.packageId) ? { packageId: clean(payment.packageId) } : {}),
+      ...(clean(payment.packageLineKey) ? { packageLineKey: clean(payment.packageLineKey) } : {}),
       ...(clean(payment.employeeId) ? { employeeId: clean(payment.employeeId) } : {}),
     };
   }).filter((payment) => payment.amount > 0);
@@ -7044,6 +7045,9 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     }
     if (payment.packageId && payment.method !== "Package") {
       throw apiError("Package identifiers can only be used with Package payments.");
+    }
+    if (payment.packageLineKey && payment.method !== "Package") {
+      throw apiError("Package service links can only be used with Package payments.");
     }
     if (payment.method === "Salary Deduction" && !payment.employeeId) {
       throw apiError("Select the employee linked to the salary deduction.");
@@ -7066,6 +7070,24 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   if (disabledPayment) throw apiError(`${disabledPayment.method} is not an enabled payment method. Refresh POS settings and try again.`, 409);
 
   const checkout = await calculateCheckout(draft, { actor, branch });
+  const checkoutServiceLines = new Map(checkout.items.filter((item) => item.type === "Service").map((item) => [item.lineKey, item]));
+  const packageLineUsage = new Map();
+  for (const payment of normalizedPayments) {
+    if (payment.method !== "Package") continue;
+    const packageLineKey = clean(payment.packageLineKey) || (checkoutServiceLines.size === 1 ? checkoutServiceLines.keys().next().value : "");
+    if (!packageLineKey) throw apiError("Select the service covered by this package payment.");
+    const coveredLine = checkoutServiceLines.get(packageLineKey);
+    if (!coveredLine) throw apiError("The selected package must cover a service in this transaction.", 409);
+    const usedSessions = (packageLineUsage.get(packageLineKey) || 0) + 1;
+    if (usedSessions > Math.max(1, Number(coveredLine.qty || 1))) {
+      throw apiError(`${coveredLine.name} does not have another session line available for this package payment.`, 409);
+    }
+    packageLineUsage.set(packageLineKey, usedSessions);
+    payment.packageLineKey = packageLineKey;
+    payment.packageServiceId = clean(coveredLine.sourceId);
+    payment.packageServiceName = clean(coveredLine.name);
+    payment.packageProvider = clean(coveredLine.provider);
+  }
   const packagePurchaseItems = checkout.items.filter((item) => item.type === "Service" && item.source.serviceType === "Package");
   if (packagePurchaseItems.length && !checkout.client && !testMode) {
     throw apiError("Select a registered client before selling a package so its sessions can be issued.");
@@ -7173,9 +7195,10 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     const packageRedemptions = new Map();
     for (const payment of operationalPayments) {
       if (!payment.packageId) continue;
-      packageRedemptions.set(payment.packageId, (packageRedemptions.get(payment.packageId) || 0) + 1);
+      packageRedemptions.set(payment.packageId, [...(packageRedemptions.get(payment.packageId) || []), payment]);
     }
-    for (const [packageId, sessions] of packageRedemptions) {
+    for (const [packageId, redemptionPayments] of packageRedemptions) {
+      const sessions = redemptionPayments.length;
       const pkg = await tx.clinicPackage.findUnique({ where: { id: packageId } });
       assertPackageRedeemable(pkg, { branch });
       assertPackageOwnedByClient(pkg, draft.clientId);
@@ -7188,7 +7211,13 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
           used: { increment: sessions },
           sessionHistory: jsonText([
             ...parseJsonList(pkg.sessionHistory),
-            { date: saleDate, branch, sessions, service: checkout.items.filter((item) => item.type === "Service").map((item) => item.name).join(", "), provider: checkout.items.filter((item) => item.type === "Service").map((item) => item.provider).filter((value) => value && value !== "N/A").join(", ") },
+            {
+              date: saleDate,
+              branch,
+              sessions,
+              service: redemptionPayments.map((payment) => payment.packageServiceName).filter(Boolean).join(", "),
+              provider: redemptionPayments.map((payment) => payment.packageProvider).filter((value) => value && value !== "N/A").join(", "),
+            },
           ], []),
         },
       });

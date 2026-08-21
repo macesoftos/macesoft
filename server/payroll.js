@@ -325,13 +325,27 @@ async function syncCommissionEarnings(database, { sales, staff, rules }) {
   const packageById = new Map(packages.map((pkg) => [pkg.id, pkg]));
 
   for (const sale of sales) {
-    const packageTender = parseList(sale.payments).find((payment) => payment.method === "Package" && payment.packageId);
+    const packageTenders = parseList(sale.payments).filter((payment) => payment.method === "Package" && payment.packageId);
+    const serviceItems = sale.items.filter((item) => item.type === "Service" && item.serviceId);
+    const packageTenderByItemId = new Map();
+    const assignedCounts = new Map();
+    for (const tender of packageTenders) {
+      const matchedItem = serviceItems.find((item) => (
+        (!tender.packageServiceId || item.serviceId === tender.packageServiceId)
+        && (!tender.packageProvider || clean(item.provider) === clean(tender.packageProvider))
+        && (assignedCounts.get(item.id) || 0) < Math.max(1, Number(item.qty || 1))
+      )) || (!tender.packageServiceId && serviceItems.length === 1 ? serviceItems[0] : null);
+      if (!matchedItem) continue;
+      assignedCounts.set(matchedItem.id, (assignedCounts.get(matchedItem.id) || 0) + 1);
+      if (!packageTenderByItemId.has(matchedItem.id)) packageTenderByItemId.set(matchedItem.id, tender);
+    }
     for (const item of sale.items) {
       if (item.type !== "Service" || !item.serviceId || !clean(item.provider) || item.provider === "N/A") continue;
       const person = staffByName.get(clean(item.provider).toLocaleLowerCase());
       if (!person) continue;
       const service = serviceById.get(item.serviceId);
       if (!service) continue;
+      const packageTender = packageTenderByItemId.get(item.id);
       if (service.serviceType === "Package" && !packageTender) continue;
       let baseAmount = proportionalLineBase(sale, item);
       if (packageTender) {
@@ -360,7 +374,7 @@ async function syncCommissionEarnings(database, { sales, staff, rules }) {
           ruleName: rule.name,
           baseAmount,
           amount,
-          details: json({ discounted, ruleType: discounted && rule.discountedRuleType ? rule.discountedRuleType : rule.ruleType, value: discounted && rule.discountedRuleType ? rule.discountedValue : rule.value, packageSession: Boolean(packageTender) }),
+          details: json({ discounted, ruleType: discounted && rule.discountedRuleType ? rule.discountedRuleType : rule.ruleType, value: discounted && rule.discountedRuleType ? rule.discountedValue : rule.value, packageSession: Boolean(packageTender), packageId: packageTender?.packageId || "" }),
         },
         update: {
           staffId: person.id,
@@ -368,7 +382,7 @@ async function syncCommissionEarnings(database, { sales, staff, rules }) {
           amount,
           ruleName: rule.name,
           status: sale.status === "Void" ? "Reversed" : "Pending",
-          details: json({ discounted, ruleType: discounted && rule.discountedRuleType ? rule.discountedRuleType : rule.ruleType, value: discounted && rule.discountedRuleType ? rule.discountedValue : rule.value, packageSession: Boolean(packageTender) }),
+          details: json({ discounted, ruleType: discounted && rule.discountedRuleType ? rule.discountedRuleType : rule.ruleType, value: discounted && rule.discountedRuleType ? rule.discountedValue : rule.value, packageSession: Boolean(packageTender), packageId: packageTender?.packageId || "" }),
         },
       });
     }
@@ -385,8 +399,8 @@ async function recalculateRun(database, runId, actor) {
   const staffIds = staff.map((person) => person.id);
   const [profiles, attendance, schedules, rules, sales] = await Promise.all([
     database.payrollEmployeeProfile.findMany({ where: { staffId: { in: staffIds }, active: true } }),
-    database.faceTrackAttendanceRecord.findMany({ where: { staffId: { in: staffIds }, workDate: { gte: run.cutoffStart, lte: run.cutoffEnd } } }),
-    database.payrollScheduleEntry.findMany({ where: { staffId: { in: staffIds }, workDate: { gte: run.cutoffStart, lte: run.cutoffEnd }, status: "Approved" } }),
+    database.faceTrackAttendanceRecord.findMany({ where: { staffId: { in: staffIds }, workDate: { gte: run.cutoffStart, lte: run.cutoffEnd }, ...(run.branch === "All branches" ? {} : { branch: run.branch }) } }),
+    database.payrollScheduleEntry.findMany({ where: { staffId: { in: staffIds }, workDate: { gte: run.cutoffStart, lte: run.cutoffEnd }, status: "Approved", ...(run.branch === "All branches" ? {} : { branch: run.branch }) } }),
     database.commissionRule.findMany({ where: { organizationId: actor.organizationId, active: true } }),
     database.sale.findMany({
       where: {
