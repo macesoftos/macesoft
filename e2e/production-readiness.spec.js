@@ -426,6 +426,9 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.keyboard.press("F8");
   await page.keyboard.press("1");
   await expect(page.getByRole("dialog", { name: "Payment form" })).toBeVisible();
+  const paymentReference = page.getByLabel("Payment 1 reference number");
+  await expect(paymentReference).toHaveAttribute("readonly", "");
+  await expect(paymentReference).toHaveValue(/^PAY-\d{8}-[A-F0-9]{8}$/);
   const checkoutResponse = page.waitForResponse((response) => response.url().endsWith("/api/pos/checkout") && response.request().method() === "POST");
   await page.keyboard.press("Control+Enter");
   expect((await checkoutResponse).status()).toBe(201);

@@ -282,6 +282,13 @@ function todayDate() {
   return isoDate(new Date());
 }
 
+function createSystemPaymentReference(prefix = "PAY", date = todayDate()) {
+  const token = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, 8).toUpperCase();
+  return `${prefix}-${String(date || todayDate()).replace(/-/g, "")}-${token}`;
+}
+
 function normalize(value) {
   return String(value ?? "").toLowerCase();
 }
@@ -2311,7 +2318,6 @@ function App() {
       amount: Number(values.amount || 0),
       date: values.date || todayDate(),
       method: values.method || "Cash",
-      referenceNumber: values.referenceNumber || "",
       nextPayment: values.nextPayment || "",
       notes: values.notes || "",
     });
@@ -13378,7 +13384,6 @@ function ModalHost({
         amount: modal.payload?.outstandingBalance ?? Math.max(0, Number(modal.payload?.price || 0) - Number(modal.payload?.amountPaid || 0)),
         date: todayDate(),
         method: installmentPaymentMethods[0] || "Cash",
-        referenceNumber: "",
         nextPayment: modal.payload?.nextPayment || "",
         notes: "",
       },
@@ -13388,7 +13393,6 @@ function ModalHost({
         field("amount", "Amount received", "number"),
         field("date", "Payment date", "date"),
         field("method", "Payment method", "select", installmentPaymentMethods.length ? installmentPaymentMethods : ["Cash"]),
-        field("referenceNumber", "Reference number (optional)", "text", null, "", false),
         field("nextPayment", "Next expected payment (optional)", "date", null, "", false),
         field("notes", "Notes (optional)", "textarea", null, "span-2", false),
       ],
@@ -13636,11 +13640,11 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     if (draft.splitPayment) {
       const firstAmount = Math.floor(Number(draft.total || 0) / 2);
       return [
-        { method: draft.paymentMethod || firstMethod, amount: firstAmount, referenceNumber: "" },
-        { method: splitSecondMethod, amount: Number(draft.total || 0) - firstAmount, referenceNumber: "" },
+        { method: draft.paymentMethod || firstMethod, amount: firstAmount, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) },
+        { method: splitSecondMethod, amount: Number(draft.total || 0) - firstAmount, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) },
       ];
     }
-    return [{ method: draft.paymentMethod || firstMethod, amount: draft.total, referenceNumber: "" }];
+    return [{ method: draft.paymentMethod || firstMethod, amount: draft.total, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) }];
   });
   const [notes, setNotes] = useState(draft.notes ?? "");
   const [packageInstallments, setPackageInstallments] = useState(() => packagePurchaseLines.map((item) => ({
@@ -13695,7 +13699,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   }
 
   function changeMethod(index, method) {
-    updatePayment(index, { method, referenceNumber: "", giftCertificateId: undefined, packageId: undefined, employeeId: undefined });
+    updatePayment(index, { method, giftCertificateId: undefined, packageId: undefined, employeeId: undefined });
   }
 
   function chooseCertificate(index, certificateId) {
@@ -13799,14 +13803,13 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                 )}
               </div>
               <label className="payment-reference-field">
-                <span>Reference number <small>Optional</small></span>
+                <span>Reference number <small>System generated</small></span>
                 <input
                   aria-label={`Payment ${index + 1} reference number`}
                   autoComplete="off"
                   maxLength={120}
-                  placeholder={payment.method === "Cash" ? "Receipt or acknowledgement number" : `${payment.method} transaction reference`}
+                  readOnly
                   value={payment.referenceNumber || ""}
-                  onChange={(event) => updatePayment(index, { referenceNumber: event.target.value })}
                 />
               </label>
               {payment.method === "Gift Certificate" && (
@@ -13854,7 +13857,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
             </div>
           ))}
         </div>
-        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: paymentMethods.find((method) => method !== "Package") || firstMethod, amount: 0, referenceNumber: "" }])}>
+        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: paymentMethods.find((method) => method !== "Package") || firstMethod, amount: 0, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) }])}>
           <Plus size={16} /> Add split payment
         </button>
         {packageInstallments.length > 0 && (
