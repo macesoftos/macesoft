@@ -116,6 +116,7 @@ import {
   loadLeadWebhookEvents,
   loadMyWorkspace,
   loadNotifications,
+  loadPayrollOverview,
   loadMarketingMedia,
   loadPublicLeadConfig,
   loadInvitations,
@@ -138,6 +139,8 @@ import {
   inspectInvitation,
   scheduleLeadFollowUp,
   saveResourceRecord,
+  savePayrollDayOffSwap,
+  savePayrollSchedule,
   saveSettingsRecord,
   sendMarketingCampaign,
   scheduleMarketingCampaign,
@@ -2913,8 +2916,11 @@ function App() {
             <StaffAvailabilityModule
               appointments={scopedAppointments}
               services={services}
-              staff={staff}
+              staff={scopedStaff}
               globalSearch={globalSearch}
+              branchScope={branchScope}
+              notify={notify}
+              onAudit={applyAuditLog}
             />
           )}
           {activeModule === "room-view" && (
@@ -7062,15 +7068,140 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
   );
 }
 
-function StaffAvailabilityModule({ appointments, services, staff, globalSearch }) {
+const staffScheduleTypes = ["Work Day", "Day Off", "Vacation Leave", "Emergency Leave", "Sick Leave", "Absent"];
+const staffLeaveTypes = new Set(["Vacation Leave", "Emergency Leave", "Sick Leave"]);
+const staffCalendarWeekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function staffScheduleBranch(person, requestedBranch = "") {
+  if (requestedBranch && requestedBranch !== "All branches") return requestedBranch;
+  if (person?.branch && person.branch !== "All branches") return person.branch;
+  return splitList(person?.branches)[0] || "";
+}
+
+function staffCanScheduleAtBranch(person, branch) {
+  return Boolean(person && branch && (person.branch === branch || person.branch === "All branches" || splitList(person.branches).includes(branch)));
+}
+
+function calendarCells(month) {
+  const [year, monthNumber] = String(month || todayDate().slice(0, 7)).split("-").map(Number);
+  const firstDay = new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay();
+  const days = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return [
+    ...Array.from({ length: firstDay }, (_, index) => ({ key: `blank-${index}`, date: "", day: "" })),
+    ...Array.from({ length: days }, (_, index) => ({
+      key: `${month}-${String(index + 1).padStart(2, "0")}`,
+      date: `${month}-${String(index + 1).padStart(2, "0")}`,
+      day: index + 1,
+    })),
+  ];
+}
+
+function StaffAvailabilityModule({ appointments, services, staff, globalSearch, branchScope = "All branches", notify, onAudit }) {
   const [date, setDate] = useState(todayDate());
+  const [calendarMonth, setCalendarMonth] = useState(todayDate().slice(0, 7));
+  const [scheduleOverview, setScheduleOverview] = useState(null);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
+  const [scheduleBusy, setScheduleBusy] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
+  const defaultStaff = staff[0];
+  const [scheduleForm, setScheduleForm] = useState(() => ({ staffId: "", workDate: todayDate(), branch: "", type: "Work Day", paid: false, scheduledMinutes: 480, notes: "" }));
+  const [swapForm, setSwapForm] = useState(() => ({ staffId: "", originalDayOff: todayDate(), swapWithStaffId: "", coworkerDayOff: todayDate(), branch: "", notes: "" }));
   const rows = staff.map((person) => person.name);
   const filtered = appointments
     .filter((appointment) => appointment.date === date)
     .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.staff}`).includes(normalize(globalSearch)));
+  const staffById = useMemo(() => new Map((scheduleOverview?.staff || staff).map((person) => [person.id, person])), [scheduleOverview?.staff, staff]);
+  const profilesByStaff = useMemo(() => new Map((scheduleOverview?.profiles || []).map((profile) => [profile.staffId, profile])), [scheduleOverview?.profiles]);
+  const visibleStaffIds = useMemo(() => new Set(staff.map((person) => person.id)), [staff]);
+  const visibleSchedules = useMemo(() => (scheduleOverview?.schedules || []).filter((entry) => {
+    if (!visibleStaffIds.has(entry.staffId)) return false;
+    const employee = staffById.get(entry.staffId);
+    const entryBranch = staffScheduleBranch(employee, entry.branch);
+    return branchScope === "All branches" || entryBranch === branchScope;
+  }), [branchScope, scheduleOverview?.schedules, staffById, visibleStaffIds]);
+  const leaveEntries = useMemo(() => visibleSchedules.filter((entry) => entry.status === "Approved" && staffLeaveTypes.has(entry.type)), [visibleSchedules]);
+  const selectedEmployee = staffById.get(scheduleForm.staffId);
+  const selectedBranch = staffScheduleBranch(selectedEmployee, scheduleForm.branch || branchScope);
+  const selectedProfile = profilesByStaff.get(scheduleForm.staffId);
+  const scheduleBranchOptions = (scheduleOverview?.branches || []).filter((branch) => branch.status === "Active" && staffCanScheduleAtBranch(selectedEmployee, branch.name));
+  const swapEmployee = staffById.get(swapForm.staffId);
+  const swapBranch = staffScheduleBranch(swapEmployee, swapForm.branch || branchScope);
+  const swapCoworkers = staff.filter((person) => person.id !== swapForm.staffId && staffCanScheduleAtBranch(person, swapBranch));
+  const usedLeaveCredits = (scheduleOverview?.schedules || []).filter((entry) => entry.staffId === scheduleForm.staffId && entry.status === "Approved" && entry.paid).length;
+  const remainingLeaveCredits = Math.max(0, Number(selectedProfile?.paidLeaveCredits || 0) - usedLeaveCredits);
+  const leaveConflict = staffLeaveTypes.has(scheduleForm.type)
+    ? leaveEntries.find((entry) => entry.workDate === scheduleForm.workDate && staffScheduleBranch(staffById.get(entry.staffId), entry.branch) === selectedBranch && entry.staffId !== scheduleForm.staffId)
+    : null;
+  const monthLeaves = leaveEntries.filter((entry) => entry.workDate.startsWith(calendarMonth));
+
+  const refreshSchedules = useCallback(async () => {
+    setScheduleLoading(true);
+    try {
+      const data = await loadPayrollOverview();
+      setScheduleOverview(data);
+      setScheduleError("");
+      return data;
+    } catch (error) {
+      setScheduleError(error.message || "Unable to load staff leave records.");
+      return null;
+    } finally {
+      setScheduleLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSchedules();
+  }, [refreshSchedules]);
+
+  useEffect(() => {
+    if (!defaultStaff || scheduleForm.staffId) return;
+    const branch = staffScheduleBranch(defaultStaff, branchScope);
+    setScheduleForm((current) => ({ ...current, staffId: defaultStaff.id, branch }));
+    const coworker = staff.find((person) => person.id !== defaultStaff.id && staffCanScheduleAtBranch(person, branch));
+    setSwapForm((current) => ({ ...current, staffId: defaultStaff.id, swapWithStaffId: coworker?.id || "", branch }));
+  }, [branchScope, defaultStaff, scheduleForm.staffId, staff]);
+
+  async function submitScheduleEntry(event) {
+    event.preventDefault();
+    if (leaveConflict) return;
+    setScheduleBusy("entry");
+    setScheduleError("");
+    try {
+      const result = await savePayrollSchedule({ ...scheduleForm, branch: selectedBranch });
+      onAudit?.(result.auditLog);
+      notify?.("Staff schedule entry saved.", "success");
+      await refreshSchedules();
+      setScheduleForm((current) => ({ ...current, type: "Work Day", paid: false, scheduledMinutes: 480, notes: "" }));
+    } catch (error) {
+      const message = error.message || "Unable to save the schedule entry.";
+      setScheduleError(message);
+      notify?.(message, "error");
+    } finally {
+      setScheduleBusy("");
+    }
+  }
+
+  async function submitDayOffSwap(event) {
+    event.preventDefault();
+    setScheduleBusy("swap");
+    setScheduleError("");
+    try {
+      const result = await savePayrollDayOffSwap({ ...swapForm, branch: swapBranch });
+      onAudit?.(result.auditLog);
+      notify?.("Day-off swap recorded for both employees.", "success");
+      await refreshSchedules();
+      setSwapForm((current) => ({ ...current, notes: "" }));
+    } catch (error) {
+      const message = error.message || "Unable to save the day-off swap.";
+      setScheduleError(message);
+      notify?.(message, "error");
+    } finally {
+      setScheduleBusy("");
+    }
+  }
 
   return (
-    <section className="module-grid two">
+    <section className="module-grid two staff-schedule-workspace">
       <div className="surface-panel wide">
         <SectionHeader icon={UserCheck} title="Staff Schedule" action={date} />
         <div className="report-filters single-line">
@@ -7087,13 +7218,61 @@ function StaffAvailabilityModule({ appointments, services, staff, globalSearch }
       <div className="surface-panel">
         <SectionHeader icon={Clock} title="Staff Load" action={`${filtered.length} bookings`} />
         <div className="message-list">
-          {staff.map((person) => (
-            <MessageItem
-              key={person.id}
-              title={person.name}
-              copy={`${filtered.filter((appointment) => appointment.staff === person.name).length} booking(s) / ${person.schedule}`}
-            />
-          ))}
+          {staff.map((person) => {
+            const override = visibleSchedules.find((entry) => entry.staffId === person.id && entry.workDate === date);
+            return <MessageItem key={person.id} title={person.name} copy={`${override ? `${override.type} · ` : ""}${filtered.filter((appointment) => appointment.staff === person.name).length} booking(s) / ${person.schedule}`} />;
+          })}
+        </div>
+      </div>
+      <div className="surface-panel full-span staff-leave-panel">
+        <div className="staff-leave-heading">
+          <div><p className="eyebrow">Approved staffing input</p><h2>Schedule, leave, and day-off swaps</h2><span>Paid leave uses the employee&apos;s configured credits. Leave capacity is limited to one employee per branch per day.</span></div>
+          <button className="secondary-button small" type="button" disabled={scheduleLoading} onClick={() => void refreshSchedules()}><RefreshCw className={scheduleLoading ? "spin" : ""} size={16} /> Refresh</button>
+        </div>
+        {scheduleError && <div className="inline-state danger" role="alert"><AlertCircle size={17} /> {scheduleError}</div>}
+        <div className="staff-leave-layout">
+          <div className="staff-schedule-forms">
+            <form className="staff-schedule-entry-form" onSubmit={submitScheduleEntry}>
+              <h3>Add schedule or leave</h3>
+              <div className="form-grid">
+                <label><span>Employee</span><select aria-label="Schedule employee" required value={scheduleForm.staffId} onChange={(event) => { const staffId = event.target.value; setScheduleForm((current) => ({ ...current, staffId, branch: staffScheduleBranch(staffById.get(staffId), branchScope) })); }}>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+                <label><span>Date</span><input aria-label="Schedule date" required type="date" value={scheduleForm.workDate} onChange={(event) => setScheduleForm((current) => ({ ...current, workDate: event.target.value }))} /></label>
+                <label><span>Type</span><select aria-label="Schedule type" value={scheduleForm.type} onChange={(event) => { const type = event.target.value; setScheduleForm((current) => ({ ...current, type, paid: staffLeaveTypes.has(type) ? current.paid : false, scheduledMinutes: type === "Day Off" ? 0 : current.scheduledMinutes || 480 })); }}>{staffScheduleTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+                <label><span>Branch</span><select aria-label="Schedule branch" required value={selectedBranch} onChange={(event) => setScheduleForm((current) => ({ ...current, branch: event.target.value }))}>{scheduleBranchOptions.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
+                {scheduleForm.type !== "Day Off" && <label><span>Scheduled minutes</span><input aria-label="Scheduled minutes" min="60" max="1440" required type="number" value={scheduleForm.scheduledMinutes} onChange={(event) => setScheduleForm((current) => ({ ...current, scheduledMinutes: event.target.value }))} /></label>}
+                {staffLeaveTypes.has(scheduleForm.type) && <label className="checkbox-field"><input type="checkbox" checked={scheduleForm.paid} disabled={remainingLeaveCredits <= 0} onChange={(event) => setScheduleForm((current) => ({ ...current, paid: event.target.checked }))} /><span>Paid leave — use one credit</span></label>}
+                <label className="span-2"><span>Notes</span><textarea rows="2" value={scheduleForm.notes} onChange={(event) => setScheduleForm((current) => ({ ...current, notes: event.target.value }))} /></label>
+              </div>
+              <div className="staff-leave-balance"><Clock size={16} /><span><strong>{remainingLeaveCredits} paid leave credit(s) remaining</strong><small>{usedLeaveCredits} used of {Number(selectedProfile?.paidLeaveCredits || 0)}</small></span></div>
+              {leaveConflict && <div className="inline-state warning"><AlertCircle size={16} /> {staffById.get(leaveConflict.staffId)?.name || "Another employee"} already has leave on this date at {selectedBranch}.</div>}
+              <button className="primary-button full" disabled={scheduleBusy === "entry" || scheduleLoading || Boolean(leaveConflict)}><Check size={16} /> {scheduleBusy === "entry" ? "Saving…" : "Save approved entry"}</button>
+            </form>
+
+            <form className="staff-day-off-swap-form" onSubmit={submitDayOffSwap}>
+              <h3>Switch day off with a coworker</h3>
+              <div className="form-grid">
+                <label><span>Employee</span><select aria-label="Swap employee" required value={swapForm.staffId} onChange={(event) => { const staffId = event.target.value; const branch = staffScheduleBranch(staffById.get(staffId), branchScope); setSwapForm((current) => ({ ...current, staffId, branch, swapWithStaffId: staffCanScheduleAtBranch(staffById.get(current.swapWithStaffId), branch) && current.swapWithStaffId !== staffId ? current.swapWithStaffId : "" })); }}>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+                <label><span>Employee&apos;s original day off</span><input aria-label="Employee original day off" required type="date" value={swapForm.originalDayOff} onChange={(event) => setSwapForm((current) => ({ ...current, originalDayOff: event.target.value }))} /></label>
+                <label><span>Swap with</span><select aria-label="Swap coworker" required value={swapForm.swapWithStaffId} onChange={(event) => setSwapForm((current) => ({ ...current, swapWithStaffId: event.target.value }))}><option value="">Select coworker</option>{swapCoworkers.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+                <label><span>Coworker&apos;s original day off</span><input aria-label="Coworker original day off" required type="date" value={swapForm.coworkerDayOff} onChange={(event) => setSwapForm((current) => ({ ...current, coworkerDayOff: event.target.value }))} /></label>
+                <label className="span-2"><span>Reason / approval notes</span><textarea rows="2" value={swapForm.notes} onChange={(event) => setSwapForm((current) => ({ ...current, notes: event.target.value }))} /></label>
+              </div>
+              <p>The system records both employees as working on their original day off and off on their coworker&apos;s date.</p>
+              <button className="secondary-button full" disabled={scheduleBusy === "swap" || scheduleLoading || !swapForm.swapWithStaffId || swapForm.originalDayOff === swapForm.coworkerDayOff}><RefreshCw size={16} /> {scheduleBusy === "swap" ? "Saving swap…" : "Record day-off swap"}</button>
+            </form>
+          </div>
+
+          <section className="staff-leave-calendar" aria-label="Approved leave calendar">
+            <div className="staff-leave-calendar-heading"><div><p className="eyebrow">Leave coverage</p><h3>Approved leave calendar</h3></div><label><span>Month</span><input aria-label="Leave calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value || todayDate().slice(0, 7))} /></label></div>
+            <div className="staff-leave-calendar-grid">
+              {staffCalendarWeekdays.map((weekday) => <strong className="staff-leave-weekday" key={weekday}>{weekday}</strong>)}
+              {calendarCells(calendarMonth).map((cell) => {
+                const entries = cell.date ? monthLeaves.filter((entry) => entry.workDate === cell.date) : [];
+                return <article className={`staff-leave-day ${cell.date ? "" : "is-empty"}`} key={cell.key}><span>{cell.day}</span>{entries.map((entry) => <small key={entry.id}><b>{staffById.get(entry.staffId)?.name || "Employee"}</b>{entry.type}<i>{staffScheduleBranch(staffById.get(entry.staffId), entry.branch)}</i></small>)}</article>;
+              })}
+            </div>
+            {!monthLeaves.length && !scheduleLoading && <div className="empty-state compact"><CalendarDays size={24} /><strong>No approved leave this month</strong><span>Vacation, emergency, and sick leave will appear here.</span></div>}
+          </section>
         </div>
       </div>
     </section>

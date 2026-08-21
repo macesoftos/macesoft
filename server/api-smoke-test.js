@@ -787,6 +787,18 @@ try {
     status: "Available",
   });
   assert(payrollStaff.response.status === 201, "payroll employee fixture create failed");
+  const payrollSwapStaffId = `st-payroll-swap-${suffix}`;
+  const payrollSwapStaffName = `Payroll Swap Nurse ${suffix}`;
+  const payrollSwapStaff = await jsonRequest("/api/resources/staff", {
+    id: payrollSwapStaffId,
+    name: payrollSwapStaffName,
+    role: "Nurse",
+    branch: "Mace Davao",
+    branches: ["Mace Davao"],
+    commissionRate: 0,
+    status: "Available",
+  });
+  assert(payrollSwapStaff.response.status === 201, "payroll swap employee fixture create failed");
 
   const payrollOverview = await request("/api/payroll/overview", { headers: ownerHeaders });
   assert(payrollOverview.response.ok, `payroll overview failed (${payrollOverview.response.status}: ${payrollOverview.payload?.error || "unknown error"})`);
@@ -821,6 +833,15 @@ try {
     notes: "Release-test paid leave",
   });
   assert(paidLeave.response.status === 201 && paidLeave.payload.schedule.paid, "paid leave schedule entry failed");
+  const conflictingLeave = await jsonRequest("/api/payroll/schedules", {
+    staffId: payrollSwapStaffId,
+    workDate: payrollToday,
+    branch: "Mace Davao",
+    type: "Vacation Leave",
+    paid: false,
+    scheduledMinutes: 480,
+  });
+  assert(conflictingLeave.response.status === 409, "a second employee could be placed on leave at the same branch and date");
   const overdrawnLeave = await jsonRequest("/api/payroll/schedules", {
     staffId: payrollStaffId,
     workDate: new Date(payrollTodayUtc + 86_400_000).toISOString().slice(0, 10),
@@ -839,6 +860,20 @@ try {
     scheduledMinutes: 480,
   });
   assert(thirdPaidLeave.response.status === 409, "paid leave could exceed the configured credit balance");
+
+  const originalDayOff = new Date(payrollTodayUtc + 3 * 86_400_000).toISOString().slice(0, 10);
+  const coworkerDayOff = new Date(payrollTodayUtc + 4 * 86_400_000).toISOString().slice(0, 10);
+  const dayOffSwap = await jsonRequest("/api/payroll/schedule-swaps", {
+    staffId: payrollStaffId,
+    originalDayOff,
+    swapWithStaffId: payrollSwapStaffId,
+    coworkerDayOff,
+    branch: "Mace Davao",
+    notes: "Release-test approved swap",
+  });
+  assert(dayOffSwap.response.status === 201 && dayOffSwap.payload.schedules.length === 4, "day-off swap was not recorded atomically");
+  assert(dayOffSwap.payload.schedules.filter((entry) => entry.type === "Day Off").length === 2, "day-off swap did not create both replacement days off");
+  assert(dayOffSwap.payload.schedules.filter((entry) => entry.type === "Work Day").length === 2, "day-off swap did not create both replacement work days");
 
   await prisma.faceTrackAttendanceRecord.create({
     data: {
@@ -1260,10 +1295,11 @@ try {
   await prisma.payrollSalaryDeduction.deleteMany({ where: { saleId: payrollSaleId } });
   await prisma.payrollRun.deleteMany({ where: { id: payrollRun.id } });
   await prisma.faceTrackAttendanceRecord.deleteMany({ where: { staffId: payrollStaffId } });
-  await prisma.payrollScheduleEntry.deleteMany({ where: { staffId: payrollStaffId } });
+  await prisma.payrollScheduleEntry.deleteMany({ where: { staffId: { in: [payrollStaffId, payrollSwapStaffId] } } });
   await prisma.payrollEmployeeProfile.deleteMany({ where: { staffId: payrollStaffId } });
   await request(`/api/resources/transactions/${payrollSaleId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/staff/${payrollStaffId}`, { method: "DELETE", headers: ownerHeaders });
+  await request(`/api/resources/staff/${payrollSwapStaffId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/services/${serviceId}`, {
     method: "DELETE",
     headers: ownerHeaders,

@@ -6459,6 +6459,152 @@ body:has(.public-lead-page-embedded) #root {
 .consent-document p { margin: 14px 0 0; white-space: pre-wrap; line-height: 1.65; }
 .consent-acceptance { margin-top: 4px; }
 
+.staff-leave-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.staff-leave-heading,
+.staff-leave-calendar-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.staff-leave-heading h2,
+.staff-leave-calendar-heading h3,
+.staff-schedule-forms h3 {
+  margin: 3px 0 5px;
+}
+
+.staff-leave-heading span,
+.staff-day-off-swap-form > p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.staff-leave-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(520px, 1.2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.staff-schedule-forms {
+  display: grid;
+  gap: 14px;
+}
+
+.staff-schedule-entry-form,
+.staff-day-off-swap-form,
+.staff-leave-calendar {
+  display: grid;
+  gap: 14px;
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-soft, #fbf8f6);
+}
+
+.staff-leave-balance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f2e7eb;
+  color: var(--wine);
+}
+
+.staff-leave-balance span {
+  display: grid;
+  gap: 2px;
+}
+
+.staff-leave-balance small { color: var(--muted); }
+
+.staff-leave-calendar-heading label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.staff-leave-calendar-heading input { min-height: 38px; }
+
+.staff-leave-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.staff-leave-weekday {
+  padding: 4px;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.staff-leave-day {
+  min-height: 94px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.staff-leave-day > span {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+}
+
+.staff-leave-day small {
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+  border-radius: 8px;
+  background: #f2e7eb;
+  color: var(--wine);
+  line-height: 1.25;
+}
+
+.staff-leave-day small b,
+.staff-leave-day small i {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-leave-day small i {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.staff-leave-day.is-empty {
+  border-color: transparent;
+  background: transparent;
+}
+
+@media (max-width: 1050px) {
+  .staff-leave-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
+  .staff-leave-heading,
+  .staff-leave-calendar-heading { align-items: stretch; flex-direction: column; }
+  .staff-leave-calendar { padding: 11px; overflow-x: auto; }
+  .staff-leave-calendar-grid { min-width: 680px; }
+}
+
 .payment-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 140px 34px;
