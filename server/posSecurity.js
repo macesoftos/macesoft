@@ -9,6 +9,7 @@ function clean(value) {
 function normalizedRole(value) {
   const role = clean(value).toLowerCase();
   if (["business owner", "business-owner", "owner"].includes(role)) return "owner";
+  if (["super admin", "super-admin", "admin"].includes(role)) return "admin";
   return role;
 }
 

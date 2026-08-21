@@ -103,9 +103,12 @@ import {
   addLeadActivity,
   bookLeadAppointment,
   completePosCheckout,
+  createPosCart,
   convertLeadToClient,
   deleteMarketingCampaignForever,
   deleteResourceRecord,
+  deletePosCart,
+  deleteTestTransactionRecord,
   listResourceRecords,
   loadBootstrap,
   loadLeadIntegrations,
@@ -140,8 +143,10 @@ import {
   selectActiveBranch,
   setApiSessionContext,
   submitPublicBooking,
+  submitPublicRegistration,
   submitPublicLead,
   updateLeadStage,
+  updatePosCart,
   updateAccountAccess,
   uploadTreatmentPhoto,
   moveMarketingCampaignToDeleted,
@@ -165,6 +170,19 @@ const money = new Intl.NumberFormat("en-PH", {
   currency: "PHP",
   maximumFractionDigits: 0,
 });
+
+function servicePriceLabel(service) {
+  const price = Number(service?.serviceType === "Package" && Number(service?.packagePrice) > 0 ? service.packagePrice : service?.price || 0);
+  const formatted = money.format(price);
+  const model = String(service?.priceModel || "Fixed price");
+  if (model === "Price after consultation/assessment") return "Price after consultation";
+  if (model === "Starts at") return `Starts at ${formatted}`;
+  if (model === "Per unit") {
+    const unit = String(service?.priceUnit || "unit").replace(/^Per\s+/i, "").toLowerCase();
+    return `${formatted} per ${unit}`;
+  }
+  return formatted;
+}
 
 const appointmentStatuses = [
   "Draft",
@@ -241,14 +259,6 @@ const leadLossReasons = [
   "Not medically eligible",
   "Other",
 ];
-const paymentMethods = ["Cash", "Credit Card", "Debit Card", "GCash", "Maya", "Bank Transfer", "Check", "Gift Certificate", "Account Balance"];
-const posPaymentMethods = ["Cash", "Credit Card", "Debit Card", "GCash", "Maya", "Bank Transfer", "Check", "Gift Certificate", "Package"];
-const posPaymentOptions = [
-  { label: "Cash", method: "Cash", icon: CircleDollarSign },
-  { label: "Card", method: "Credit Card", icon: CreditCard },
-  { label: "Split", method: "Cash", icon: HandCoins, split: true },
-  { label: "Package", method: "Package", icon: Gift },
-];
 const posCatalogPageSize = 14;
 
 function createId(prefix) {
@@ -269,6 +279,44 @@ function splitList(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function configuredPaymentMethods(settings) {
+  const source = Array.isArray(settings?.paymentMethods) && settings.paymentMethods.length
+    ? settings.paymentMethods
+    : initialSettings.paymentMethods;
+  return source
+    .map((method, index) => {
+      if (typeof method === "string") {
+        return { id: `payment-${index}-${normalize(method).replace(/[^a-z0-9]+/g, "-")}`, name: method.trim(), active: true, order: index };
+      }
+      return {
+        id: String(method?.id || `payment-${index}`),
+        name: String(method?.name || "").trim(),
+        active: method?.active !== false,
+        order: Number.isFinite(Number(method?.order)) ? Number(method.order) : index,
+      };
+    })
+    .filter((method) => method.name)
+    .sort((left, right) => left.order - right.order);
+}
+
+function activePaymentMethodNames(settings, { includePackage = false } = {}) {
+  const names = configuredPaymentMethods(settings).filter((method) => method.active).map((method) => method.name);
+  return includePackage && !names.includes("Package") ? [...names, "Package"] : names;
+}
+
+function posQuickPaymentOptions(settings) {
+  const methods = activePaymentMethodNames(settings);
+  const first = methods[0] || "Cash";
+  const cash = methods.find((method) => method === "Cash");
+  const card = methods.find((method) => /card/i.test(method));
+  const quick = [];
+  if (cash) quick.push({ label: cash, method: cash, icon: CircleDollarSign });
+  if (card && card !== cash) quick.push({ label: "Card", method: card, icon: CreditCard });
+  quick.push({ label: "Split", method: first, icon: HandCoins, split: true });
+  quick.push({ label: "Package", method: "Package", icon: Gift });
+  return quick.slice(0, 4);
 }
 
 function canonicalAppointmentStatus(status) {
@@ -297,6 +345,16 @@ const scheduleHours = Array.from(
   { length: (scheduleEndMinutes - scheduleStartMinutes) / 60 + 1 },
   (_, index) => scheduleStartMinutes + index * 60,
 );
+const defaultBranchOperatingHours = Object.freeze({
+  monday: { open: "10:00", close: "19:00", closed: false },
+  tuesday: { open: "10:00", close: "19:00", closed: false },
+  wednesday: { open: "10:00", close: "19:00", closed: false },
+  thursday: { open: "10:00", close: "19:00", closed: false },
+  friday: { open: "10:00", close: "19:00", closed: false },
+  saturday: { open: "10:00", close: "19:00", closed: false },
+  sunday: { open: "13:00", close: "17:00", closed: false },
+});
+const operatingDayKeys = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 function parseTimeToMinutes(value) {
   const raw = String(value ?? "").trim();
@@ -321,6 +379,14 @@ function formatScheduleTime(minutes) {
 function formatTimeInput(minutes) {
   const bounded = Math.max(0, Math.min(23 * 60 + 59, Math.round(Number(minutes) || 0)));
   return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
+}
+
+function treatmentVisitDuration(record) {
+  const start = parseTimeToMinutes(record?.arrivalTime);
+  const end = parseTimeToMinutes(record?.checkoutTime || record?.completedTime);
+  if (!record?.arrivalTime || (!record?.checkoutTime && !record?.completedTime) || end < start) return "In progress / not recorded";
+  const minutes = end - start;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 function serviceForAppointment(appointment, services) {
@@ -771,6 +837,9 @@ function App() {
   const [staff, setStaff] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [discounts, setDiscounts] = useState([]);
+  const [promotions, setPromotions] = useState([]);
+  const [consentTemplates, setConsentTemplates] = useState([]);
+  const [consentSubmissions, setConsentSubmissions] = useState([]);
   const [smsTemplates, setSmsTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [branchRecords, setBranchRecords] = useState([]);
@@ -784,6 +853,7 @@ function App() {
   const [organizationAccounts, setOrganizationAccounts] = useState([]);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [cart, setCart] = useState([]);
+  const [posCarts, setPosCarts] = useState([]);
   const [sendingCampaignId, setSendingCampaignId] = useState("");
   const [isPosChromeRevealed, setIsPosChromeRevealed] = useState(false);
   const isPosView = activeModule === "pos";
@@ -798,8 +868,9 @@ function App() {
     || window.location.hash.toLowerCase() === "#/book"
     || new URLSearchParams(window.location.search).get("form") === "appointment"
   ) ? "appointment" : "inquiry";
+  const isClientRegistrationView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/register";
   const isPublicFormView = typeof window !== "undefined" && (
-    ["/inquire", "/book"].includes(normalizedPathname(window.location.pathname))
+    ["/inquire", "/book", "/register"].includes(normalizedPathname(window.location.pathname))
     || ["#/inquire", "#/book"].includes(window.location.hash.toLowerCase())
   );
   const posTouchStartRef = useRef(null);
@@ -822,6 +893,7 @@ function App() {
     setServices([]);
     setInventory([]);
     setTransactions([]);
+    setPosCarts([]);
     setTreatments([]);
     setPackages([]);
     setGiftCertificates([]);
@@ -829,6 +901,9 @@ function App() {
     setStaff([]);
     setExpenses([]);
     setDiscounts([]);
+    setPromotions([]);
+    setConsentTemplates([]);
+    setConsentSubmissions([]);
     setSmsTemplates([]);
     setCampaigns([]);
     setBranchRecords([]);
@@ -1201,6 +1276,7 @@ function App() {
         setServices(Array.isArray(bootstrap.services) ? bootstrap.services : []);
         setInventory(Array.isArray(bootstrap.inventory) ? bootstrap.inventory : []);
         setTransactions(Array.isArray(bootstrap.transactions) ? bootstrap.transactions : []);
+        setPosCarts(Array.isArray(bootstrap.posCarts) ? bootstrap.posCarts : []);
         setTreatments(Array.isArray(bootstrap.treatments) ? bootstrap.treatments : []);
         setPackages(Array.isArray(bootstrap.packages) ? bootstrap.packages : []);
         setGiftCertificates(Array.isArray(bootstrap.giftCertificates) ? bootstrap.giftCertificates : []);
@@ -1208,6 +1284,9 @@ function App() {
         setStaff(Array.isArray(bootstrap.staff) ? bootstrap.staff : []);
         setExpenses(Array.isArray(bootstrap.expenses) ? bootstrap.expenses : []);
         setDiscounts(Array.isArray(bootstrap.discounts) ? bootstrap.discounts : []);
+        setPromotions(Array.isArray(bootstrap.promotions) ? bootstrap.promotions : []);
+        setConsentTemplates(Array.isArray(bootstrap.consentTemplates) ? bootstrap.consentTemplates : []);
+        setConsentSubmissions(Array.isArray(bootstrap.consentSubmissions) ? bootstrap.consentSubmissions : []);
         setSmsTemplates(Array.isArray(bootstrap.smsTemplates) ? bootstrap.smsTemplates : []);
         setCampaigns(Array.isArray(bootstrap.campaigns) ? bootstrap.campaigns : []);
         setAuditLogs(Array.isArray(bootstrap.auditLogs) ? bootstrap.auditLogs : []);
@@ -1410,9 +1489,9 @@ function App() {
 
   const stats = useMemo(() => {
     const today = todayDate();
-    const todaysTransactions = scopedTransactions.filter((transaction) => transaction.date === today);
+    const todaysTransactions = scopedTransactions.filter((transaction) => transaction.date === today && transaction.status !== "Void" && !transaction.testMode);
     const monthPrefix = today.slice(0, 7);
-    const monthTransactions = scopedTransactions.filter((transaction) => transaction.date?.startsWith(monthPrefix));
+    const monthTransactions = scopedTransactions.filter((transaction) => transaction.date?.startsWith(monthPrefix) && transaction.status !== "Void" && !transaction.testMode);
     const revenueToday = todaysTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
     const revenueMonth = monthTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
     const expensesMonth = scopedExpenses
@@ -1667,6 +1746,19 @@ function App() {
     setCart((current) => current.filter((item) => item.key !== key));
   }
 
+  async function saveOpenPosCart(values) {
+    const result = values.id
+      ? await updatePosCart(values.id, values)
+      : await createPosCart(values);
+    upsertById(setPosCarts, result.cart);
+    return result.cart;
+  }
+
+  async function discardOpenPosCart(id) {
+    await deletePosCart(id);
+    removeById(setPosCarts, id);
+  }
+
   async function completeTransaction(draft, paymentData) {
     const result = await completePosCheckout(
       {
@@ -1689,6 +1781,8 @@ function App() {
     for (const pkg of result.packages ?? []) {
       upsertById(setPackages, pkg);
     }
+    if (result.client) upsertById(setClients, result.client);
+    if (result.posCartId) removeById(setPosCarts, result.posCartId);
     applyAuditLog(result.auditLog);
     setCart([]);
     closeModal();
@@ -1754,8 +1848,14 @@ function App() {
 
   async function saveClient(values) {
     const isExisting = Boolean(values.id);
+    const fullName = [values.firstName, values.middleName, values.lastName].filter(Boolean).join(" ").trim() || values.fullName;
+    const address = [values.street, values.barangay, values.city, values.province].filter(Boolean).join(", ") || values.address;
+    const emergency = [values.emergencyName, values.emergencyPhone].filter(Boolean).join(" - ") || values.emergency;
     const record = {
       ...values,
+      fullName,
+      address,
+      emergency,
       id: values.id || createId("cl"),
       balance: Number(values.balance || 0),
       giftBalance: Number(values.giftBalance || 0),
@@ -1823,16 +1923,22 @@ function App() {
   }
 
   async function saveService(values) {
+    const packageSessions = Number(values.packageSessions || 0);
+    const packagePrice = Number(values.packagePrice || 0);
     const record = {
       ...values,
       id: values.id || createId("svc"),
       duration: Number(values.duration || 0),
       price: Number(values.price || 0),
+      packageSessions,
+      packagePrice,
+      serviceValue: Number(values.serviceValue || (packageSessions ? packagePrice / packageSessions : values.price) || 0),
+      recommendedIntervalDays: Number(values.recommendedIntervalDays || 0),
       active: values.active !== false,
       pos: values.pos !== false,
       branches: splitList(values.branches),
       staff: splitList(values.staff),
-      consumables: splitList(values.consumables),
+      consumables: [],
     };
     const result = await saveResourceRecord("services", record, { existing: Boolean(values.id) });
     upsertById(setServices, result.record);
@@ -1871,12 +1977,22 @@ function App() {
     notify(values.id ? "Inventory updated." : "Inventory item added.");
   }
 
-  async function receiveStock(id, qty = 5, reason = "Stock received") {
+  async function receiveStock(id, values = {}) {
     try {
-      const result = await postInventoryMovement(id, { qty, reason, date: todayDate() });
+      const result = await postInventoryMovement(id, {
+        qty: Number(values.qty || 0),
+        reason: values.reason || "Stock received",
+        date: values.date || todayDate(),
+        supplier: values.supplier || "",
+        receivedBy: values.receivedBy || "",
+        checkNumber: values.checkNumber || "",
+        unit: values.unit || "",
+        notes: values.notes || "",
+      });
       upsertById(setInventory, result.inventoryItem);
       upsertById(setInventoryMovements, result.movement);
       applyAuditLog(result.auditLog);
+      closeModal();
       notify("Stock movement saved.");
     } catch (error) {
       notify(error.message || "Unable to save stock movement.", "error");
@@ -2046,10 +2162,16 @@ function App() {
 
   async function saveTreatment(values) {
     const client = clients.find((item) => item.id === values.clientId);
+    const service = services.find((item) => item.name === values.service || item.id === values.serviceId);
+    const followUp = values.followUp || (Number(service?.recommendedIntervalDays) > 0
+      ? isoDate(addDays(new Date(`${values.date || todayDate()}T12:00:00`), Number(service.recommendedIntervalDays)))
+      : "");
     const record = {
       ...values,
       id: values.id || createId("tr"),
       client: client?.fullName ?? values.client,
+      aftercare: values.aftercare || service?.aftercare || "",
+      followUp,
     };
     const result = await saveResourceRecord("treatments", record, { existing: Boolean(values.id) });
     upsertById(setTreatments, result.record);
@@ -2092,9 +2214,9 @@ function App() {
     if (existingStaff && existingStaff.branch !== values.branch) {
       const approved = await new Promise((resolve) => {
         askConfirm({
-          title: `Transfer ${existingStaff.name}?`,
-          copy: `Access will move from ${existingStaff.branch} to ${values.branch}. Future schedules must be created in the new branch; historical appointments, treatments, attendance, and audit records keep their original branch.`,
-          actionLabel: "Transfer employee",
+          title: `Change ${existingStaff.name}'s primary branch?`,
+          copy: `${values.branch} will become the employee's primary branch. Other assigned branches remain available, and historical records keep their original branch.`,
+          actionLabel: "Change primary branch",
           onConfirm: () => resolve(true),
           onCancel: () => resolve(false),
         });
@@ -2105,6 +2227,7 @@ function App() {
       ...values,
       id: values.id || createId("st"),
       commissionRate: Number(values.commissionRate || 0),
+      branches: splitList(values.branches).length ? splitList(values.branches) : [values.branch],
     };
     const result = await saveResourceRecord("staff", record, { existing: Boolean(values.id) });
     upsertById(setStaff, result.record);
@@ -2135,6 +2258,11 @@ function App() {
       sessions: Number(values.sessions || 0),
       used: Number(values.used || 0),
       price: Number(values.price || 0),
+      amountPaid: Number(values.amountPaid || 0),
+      serviceValue: Number(values.serviceValue || (Number(values.sessions) ? Number(values.price) / Number(values.sessions) : 0)),
+      purchaseDate: values.purchaseDate || todayDate(),
+      paymentHistory: Array.isArray(values.paymentHistory) ? values.paymentHistory : [],
+      sessionHistory: Array.isArray(values.sessionHistory) ? values.sessionHistory : [],
       transferable: Boolean(values.transferable),
     };
     const result = await saveResourceRecord("packages", record, { existing: Boolean(values.id) });
@@ -2142,6 +2270,22 @@ function App() {
     applyAuditLog(result.auditLog);
     closeModal();
     notify("Package saved.");
+  }
+
+  async function saveGiftCertificate(values) {
+    const service = services.find((item) => item.id === values.serviceId);
+    const record = {
+      ...values,
+      id: values.id || createId("gc"),
+      service: service?.name || values.service || "",
+      balance: Number(values.balance || (values.type === "Specific Service" ? service?.price : 0) || 0),
+      issueDate: values.issueDate || todayDate(),
+    };
+    const result = await saveResourceRecord("giftCertificates", record, { existing: Boolean(values.id) });
+    upsertById(setGiftCertificates, result.record);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify(values.id ? "Gift certificate updated." : "Gift certificate issued.");
   }
 
   async function redeemPackage(id) {
@@ -2284,6 +2428,41 @@ function App() {
     return result.settings;
   }
 
+  async function savePromotion(values) {
+    const record = { ...values, id: values.id || createId("promo"), value: Number(values.value || 0) };
+    const result = await saveResourceRecord("promotions", record, { existing: Boolean(values.id) });
+    upsertById(setPromotions, result.record);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify(values.id ? "Promotion updated." : "Promotion created.");
+  }
+
+  async function saveDiscount(values) {
+    const record = { ...values, id: values.id || createId("discount"), value: Number(values.value || 0), usage: Number(values.usage || 0) };
+    const result = await saveResourceRecord("discounts", record, { existing: Boolean(values.id) });
+    upsertById(setDiscounts, result.record);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify(values.id ? "Discount updated." : "Discount created.");
+  }
+
+  async function saveConsentTemplate(values) {
+    const record = { ...values, id: values.id || createId("consent-form") };
+    const result = await saveResourceRecord("consentTemplates", record, { existing: Boolean(values.id) });
+    upsertById(setConsentTemplates, result.record);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify("Consent form template saved.");
+  }
+
+  async function saveConsentSubmission(values) {
+    const result = await saveResourceRecord("consentSubmissions", values);
+    upsertById(setConsentSubmissions, result.record);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify("Signed consent attached permanently to the client profile.");
+  }
+
   async function publicBooking(values) {
     const result = await submitPublicBooking(values);
     if (result.client) upsertById(setClients, result.client);
@@ -2315,6 +2494,7 @@ function App() {
             for (const pkg of result.packages ?? []) {
               upsertById(setPackages, pkg);
             }
+            if (result.client) upsertById(setClients, result.client);
             applyAuditLog(result.auditLog);
             notify("Transaction voided. Stock and prepaid tenders restored.", "warning");
           } catch (error) {
@@ -2325,8 +2505,28 @@ function App() {
     });
   }
 
+  function resetTestTransaction(transaction) {
+    askConfirm({
+      title: "Reset test transaction?",
+      copy: `${transaction.invoice} is isolated test data and will be permanently removed. Live sales, stock, balances, commissions, and payroll are not affected.`,
+      actionLabel: "Reset test transaction",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            const result = await deleteTestTransactionRecord(transaction.id);
+            removeById(setTransactions, result.id);
+            applyAuditLog(result.auditLog);
+            notify("Test transaction reset.", "warning");
+          } catch (error) {
+            notify(error.message || "Unable to reset the test transaction.", "error");
+          }
+        })();
+      },
+    });
+  }
+
   if (isPublicFormView) {
-    return <PublicLeadCapturePage initialMode={publicFormMode} />;
+    return isClientRegistrationView ? <PublicClientRegistrationPage /> : <PublicLeadCapturePage initialMode={publicFormMode} />;
   }
 
   if (publicFlipbookToken) {
@@ -2629,6 +2829,7 @@ function App() {
               branchScope={branchScope}
               cart={cart}
               discounts={discounts}
+              promotions={promotions}
               addCartItem={addCartItem}
               updateCartQty={updateCartQty}
               removeCartItem={removeCartItem}
@@ -2638,10 +2839,16 @@ function App() {
               openPayment={(draft) => openModal("payment", draft)}
               transactions={transactions}
               voidTransaction={voidTransaction}
+              resetTestTransaction={resetTestTransaction}
               onPrintReceipt={printReceipt}
               globalSearch={globalSearch}
               sessionRole={session.role}
               branchRecords={branchRecords}
+              posCarts={posCarts}
+              saveOpenCart={saveOpenPosCart}
+              discardOpenCart={discardOpenPosCart}
+              notify={notify}
+              settings={settings}
             />
           )}
           {activeModule === "card-view" && (
@@ -2691,6 +2898,8 @@ function App() {
               auditLogs={auditLogs}
               treatments={treatments}
               packages={packages}
+              consentTemplates={consentTemplates}
+              consentSubmissions={consentSubmissions}
               openModal={openModal}
               updateStatus={updateAppointmentStatus}
               onUpdateAppointment={saveAppointment}
@@ -2751,7 +2960,6 @@ function App() {
             <InventoryModule
               inventory={scopedInventory}
               movements={inventoryMovements}
-              receiveStock={receiveStock}
               openModal={openModal}
               globalSearch={globalSearch}
             />
@@ -2883,8 +3091,12 @@ function App() {
               users={organizationAccounts}
               auditLogs={auditLogs}
               discounts={discounts}
+              promotions={promotions}
               openModal={openModal}
               globalSearch={globalSearch}
+              saveSettings={saveSettings}
+              canConfigurePayments={isAdmin(session.role)}
+              consentTemplates={consentTemplates}
             />
           )}
           {activeModule === "support" && <SupportModule />}
@@ -2925,13 +3137,19 @@ function App() {
         saveClient={saveClient}
         saveService={saveService}
         saveInventory={saveInventory}
+        receiveStock={receiveStock}
         saveLead={saveLead}
         saveTreatment={saveTreatment}
         saveExpense={saveExpense}
         saveStaff={saveStaff}
         savePackage={savePackage}
+        saveGiftCertificate={saveGiftCertificate}
         saveCampaign={saveCampaign}
         saveSettings={saveSettings}
+        saveDiscount={saveDiscount}
+        savePromotion={savePromotion}
+        saveConsentTemplate={saveConsentTemplate}
+        saveConsentSubmission={saveConsentSubmission}
         saveRoom={saveRoom}
         changePassword={handlePasswordChange}
         clients={clients}
@@ -2944,6 +3162,7 @@ function App() {
         packages={packages}
         giftCertificates={giftCertificates}
         appointments={appointments}
+        consentTemplates={consentTemplates}
       />
 
       {confirm && <ConfirmDialog confirm={confirm} onCancel={() => { confirm.onCancel?.(); setConfirm(null); }} onConfirmComplete={() => setConfirm(null)} />}
@@ -2998,7 +3217,7 @@ function PrintableReceipt({ receipt, settings }) {
                   <tr key={`${item.name}-${index}`}>
                     <td>
                       <strong>{item.name}</strong>
-                      <span>{item.type} / {money.format(price)}</span>
+                      <span>{item.type} / {money.format(price)}{item.provider && item.provider !== "N/A" ? ` / Provider: ${item.provider}` : ""}</span>
                     </td>
                     <td>{qty}</td>
                     <td>{money.format(price * qty)}</td>
@@ -3007,6 +3226,18 @@ function PrintableReceipt({ receipt, settings }) {
               })}
             </tbody>
           </table>
+
+          {items.some((item) => item.type === "Service" && (item.aftercare || Number(item.recommendedIntervalDays) > 0)) && (
+            <section className="print-receipt-aftercare">
+              <strong>Aftercare & recommended next session</strong>
+              {items.filter((item) => item.type === "Service").map((item, index) => {
+                const nextDate = Number(item.recommendedIntervalDays) > 0 && receipt.date
+                  ? isoDate(addDays(new Date(`${receipt.date}T12:00:00`), Number(item.recommendedIntervalDays)))
+                  : "";
+                return <div key={`${item.name}-aftercare-${index}`}><b>{item.name}</b>{item.aftercare && <span>{item.aftercare}</span>}{nextDate && <span>Recommended next session: {formatDate(nextDate)} ({item.recommendedIntervalDays} days)</span>}</div>;
+              })}
+            </section>
+          )}
 
           <div className="print-receipt-totals">
             <div><span>Subtotal</span><strong>{money.format(subtotal)}</strong></div>
@@ -3552,6 +3783,68 @@ function publicLeadAttribution() {
   };
 }
 
+function PublicClientRegistrationPage() {
+  const branch = new URLSearchParams(window.location.search).get("branch") || "";
+  const [form, setForm] = useState({ firstName: "", middleName: "", lastName: "", birthday: "", gender: "", civilStatus: "", mobile: "", email: "", street: "", barangay: "", city: "", province: "", occupation: "", emergencyName: "", emergencyPhone: "", marketingOptIn: false, privacyConsent: false, clinicWebsite: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const update = (name, value) => setForm((current) => ({ ...current, [name]: value }));
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await submitPublicRegistration({ ...form, branch });
+      setSubmitted(true);
+    } catch (submitError) {
+      setError(submitError.message || "Registration could not be submitted.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <main className="public-registration-page">
+      <section className="public-registration-card">
+        <img src={assets.logo} alt="MACE Medical Aesthetics Clinic & Essentials" />
+        {submitted ? (
+          <div className="confirmation-panel"><Check size={30} /><h2>Registration received</h2><p>Thank you. The {branch || "MACE"} team can now review your unified client profile.</p></div>
+        ) : (
+          <form onSubmit={submit}>
+            <p className="eyebrow">Secure client registration · {branch || "Select clinic"}</p>
+            <h1>Tell us about you</h1>
+            <p>Your information creates one MACE profile that can be used across clinic branches.</p>
+            {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
+            <div className="form-grid">
+              <label><span>First name *</span><input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
+              <label><span>Middle name</span><input value={form.middleName} onChange={(event) => update("middleName", event.target.value)} /></label>
+              <label><span>Last name *</span><input required value={form.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
+              <label><span>Date of birth</span><input type="date" max={todayDate()} value={form.birthday} onChange={(event) => update("birthday", event.target.value)} /></label>
+              <label><span>Gender</span><select value={form.gender} onChange={(event) => update("gender", event.target.value)}><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option></select></label>
+              <label><span>Civil status</span><select value={form.civilStatus} onChange={(event) => update("civilStatus", event.target.value)}><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Separated</option></select></label>
+              <label><span>Mobile number</span><input value={form.mobile} onChange={(event) => update("mobile", event.target.value)} /></label>
+              <label><span>Email</span><input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} /></label>
+              <label><span>Street</span><input value={form.street} onChange={(event) => update("street", event.target.value)} /></label>
+              <label><span>Barangay</span><input value={form.barangay} onChange={(event) => update("barangay", event.target.value)} /></label>
+              <label><span>City</span><input value={form.city} onChange={(event) => update("city", event.target.value)} /></label>
+              <label><span>Province</span><input value={form.province} onChange={(event) => update("province", event.target.value)} /></label>
+              <label><span>Occupation</span><input value={form.occupation} onChange={(event) => update("occupation", event.target.value)} /></label>
+              <label><span>Emergency contact name</span><input value={form.emergencyName} onChange={(event) => update("emergencyName", event.target.value)} /></label>
+              <label><span>Emergency contact number</span><input value={form.emergencyPhone} onChange={(event) => update("emergencyPhone", event.target.value)} /></label>
+              <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => update("marketingOptIn", event.target.checked)} /><span>I would like to receive MACE care reminders and offers.</span></label>
+              <label className="checkbox-field span-2"><input required type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} /><span>I consent to MACE securely collecting this information for my clinic profile. *</span></label>
+              <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} value={form.clinicWebsite} onChange={(event) => update("clinicWebsite", event.target.value)} /></label>
+            </div>
+            <button className="primary-button full" disabled={saving || !branch || !form.firstName || !form.lastName || (!form.mobile && !form.email) || !form.privacyConsent} type="submit"><Check size={17} /> {saving ? "Submitting..." : "Submit registration"}</button>
+          </form>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function PublicLeadCapturePage({ initialMode = "inquiry" }) {
   const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
   const [formMode, setFormMode] = useState(initialMode);
@@ -3791,15 +4084,17 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
   }), [config.services, form.branch]);
 
   const selectedService = availableServices.find((service) => service.id === form.serviceId);
+  const selectedBranch = config.branches.find((branch) => branch.name === form.branch);
   const timeOptions = useMemo(() => {
     const duration = Math.max(15, Number(selectedService?.duration || 60));
+    const window = branchOperatingWindow(selectedBranch, form.date);
+    if (window.closed) return [];
     const options = [];
-    for (let minutes = scheduleStartMinutes; minutes + duration <= scheduleEndMinutes; minutes += 30) {
-      if (minutes < 13 * 60 && minutes + duration > 12 * 60) continue;
+    for (let minutes = window.open; minutes + duration <= window.close; minutes += 30) {
       options.push({ value: formatTimeInput(minutes), label: formatScheduleTime(minutes) });
     }
     return options;
-  }, [selectedService?.duration]);
+  }, [form.date, selectedBranch, selectedService?.duration]);
 
   useEffect(() => {
     const defaultBranch = form.branch || config.branches[0]?.name || "";
@@ -3902,10 +4197,10 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
         <label><span>Email</span><input autoComplete="email" maxLength={160} type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} /></label>
 
         <label><span>Clinic branch *</span><select disabled={loadingConfig || !config.branches.length} value={form.branch} onChange={(event) => chooseBranch(event.target.value)} required>{config.branches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label>
-        <label><span>Service *</span><select disabled={loadingConfig || !availableServices.length} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)} required>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+        <label><span>Service *</span><select disabled={loadingConfig || !availableServices.length} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)} required>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name} - {servicePriceLabel(service)}</option>)}</select></label>
         <label><span>Preferred date *</span><input type="date" min={todayDate()} value={form.date} onChange={(event) => updateField("date", event.target.value)} required /></label>
         <label><span>Preferred time *</span><select disabled={!timeOptions.length} value={form.time} onChange={(event) => updateField("time", event.target.value)} required>{timeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-        <small className="span-2 public-lead-contact-help">Available request times are within clinic hours and exclude the 12:00–1:00 PM lunch break.</small>
+        <small className="span-2 public-lead-contact-help">Available request times follow the selected branch&apos;s operating hours. 12:00 noon remains bookable.</small>
 
         <label className="span-2"><span>Concern or notes</span><textarea rows={4} maxLength={1000} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder="Tell us what you would like to address during your visit." /></label>
         <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
@@ -4172,6 +4467,8 @@ function Dashboard({
   expenses,
   treatments,
   packages,
+  consentTemplates = [],
+  consentSubmissions = [],
   branchRecords,
   settings,
   users,
@@ -4187,7 +4484,7 @@ function Dashboard({
   const branchCards = branchRecords
     .filter((branch) => branchScope === "All branches" || branch.name === branchScope)
     .map((branch) => {
-      const branchTransactions = transactions.filter((transaction) => transaction.branch === branch.name);
+      const branchTransactions = transactions.filter((transaction) => transaction.branch === branch.name && transaction.status !== "Void" && !transaction.testMode);
       const revenue = branchTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
       return { ...branch, revenue };
     });
@@ -4367,7 +4664,7 @@ function dashboardRecordInRange(record, range) {
 }
 
 function collectedTransactionAmount(transaction) {
-  if (transaction.status === "Void") return 0;
+  if (transaction.status === "Void" || transaction.testMode) return 0;
   const payments = Array.isArray(transaction.payments) ? transaction.payments : [];
   const collected = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   return collected > 0 ? collected : Number(transaction.total || 0);
@@ -4398,7 +4695,7 @@ function OverallBusinessDashboard({
   const [period, setPeriod] = useState("all");
   const range = useMemo(() => dashboardPeriodRange(period), [period]);
   const activeTransactions = useMemo(
-    () => transactions.filter((transaction) => transaction.status !== "Void"),
+    () => transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode),
     [transactions],
   );
   const periodTransactions = useMemo(
@@ -4642,7 +4939,7 @@ function buildRoleWorkspace({
   const openLeads = leads.filter((item) => !closedLeadStatuses.includes(canonicalLeadStatus(item.status)));
   const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy");
   const pendingExpenses = expenses.filter((item) => item.status === "For approval");
-  const partialTransactions = transactions.filter((item) => item.status === "Partial");
+  const partialTransactions = transactions.filter((item) => ["Partial", "Partially Paid", "Unpaid"].includes(item.status));
   const activePackages = packages.filter((item) => item.status === "Active");
   const treatmentRows = treatments.slice(0, 5).map((item) => ({
     title: item.client,
@@ -4947,6 +5244,7 @@ function POSModule({
   branchScope,
   cart,
   discounts,
+  promotions = [],
   addCartItem,
   updateCartQty,
   removeCartItem,
@@ -4956,15 +5254,24 @@ function POSModule({
   openPayment,
   transactions,
   voidTransaction,
+  resetTestTransaction,
   onPrintReceipt,
   globalSearch,
   sessionRole,
   branchRecords = [],
+  posCarts = [],
+  saveOpenCart,
+  discardOpenCart,
+  notify,
+  settings,
 }) {
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
-  const [branch, setBranch] = useState(branchScope === "All branches" ? branches[0].name : branchScope);
+  const [branch, setBranch] = useState(branchScope === "All branches" ? branchRecords.find((item) => item.status === "Active")?.name || "" : branchScope);
   const [staffName, setStaffName] = useState(staff[0]?.name ?? "");
   const [discountId, setDiscountId] = useState("");
+  const [saleDate, setSaleDate] = useState(todayDate());
+  const [testMode, setTestMode] = useState(false);
+  const [activeCartId, setActiveCartId] = useState("");
   const [catalogTab, setCatalogTab] = useState("Services");
   const [posScreen, setPosScreen] = useState("Checkout");
   const [catalogQuery, setCatalogQuery] = useState("");
@@ -4979,11 +5286,61 @@ function POSModule({
   const cartRowRefs = useRef([]);
   const saleClientRef = useRef(null);
   const canManagePosCatalog = canManageOrganization(sessionRole);
+  const canPostHistoricalSale = canManageOrganization(sessionRole);
+  const canUseTestMode = isAdmin(sessionRole);
+  const posPaymentOptions = useMemo(() => posQuickPaymentOptions(settings), [settings]);
   const posScreens = canManagePosCatalog ? ["Checkout", "Service Prices"] : ["Checkout"];
+  const openCartsForBranch = useMemo(
+    () => posCarts.filter((openCart) => openCart.branch === branch),
+    [branch, posCarts],
+  );
+  const activeOpenCart = posCarts.find((openCart) => openCart.id === activeCartId);
 
   useEffect(() => {
     if (branchScope !== "All branches") setBranch(branchScope);
   }, [branchScope]);
+
+  useEffect(() => {
+    if (activeOpenCart?.branch === branch) return;
+    const next = openCartsForBranch[0];
+    if (next) {
+      setActiveCartId(next.id);
+      setClientId(next.clientId || "");
+      setStaffName(next.staff || "");
+      setDiscountId(next.discountId || "");
+      setSaleDate(next.saleDate || todayDate());
+      setTestMode(Boolean(next.testMode));
+      setCart(Array.isArray(next.items) ? next.items : []);
+    } else {
+      setActiveCartId("");
+      setCart([]);
+      setDiscountId("");
+      setSaleDate(todayDate());
+      setTestMode(false);
+    }
+  }, [activeOpenCart?.branch, branch, openCartsForBranch, setCart]);
+
+  useEffect(() => {
+    if (!activeOpenCart || activeOpenCart.branch !== branch) return undefined;
+    const nextDraft = {
+      ...activeOpenCart,
+      clientId,
+      client: clients.find((item) => item.id === clientId)?.fullName || "Walk-in",
+      branch,
+      staff: staffName,
+      items: cart,
+      discountId,
+      saleDate,
+      testMode,
+    };
+    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, saleDate: activeOpenCart.saleDate || todayDate(), testMode: Boolean(activeOpenCart.testMode) });
+    const pending = JSON.stringify({ clientId, staff: staffName, items: cart, discountId, saleDate, testMode });
+    if (stored === pending) return undefined;
+    const timer = window.setTimeout(() => {
+      void saveOpenCart(nextDraft).catch((error) => notify(error.message || "Unable to save the open POS cart.", "error"));
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [activeOpenCart, branch, cart, clientId, clients, discountId, notify, saleDate, saveOpenCart, staffName, testMode]);
 
   useEffect(() => {
     if (!canManagePosCatalog && posScreen !== "Checkout") {
@@ -5021,16 +5378,153 @@ function POSModule({
   const pagedProducts = catalogTab === "Products" ? visibleProducts.slice(catalogPageStart, catalogPageEnd) : [];
   const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.qty || 1), 0);
   const discount = discounts.find((item) => item.id === discountId);
-  const discountAmount = discount
+  const transactionDiscountAmount = discount
     ? discount.type === "Percentage"
       ? Math.round((subtotal * Number(discount.value)) / 100)
       : Number(discount.value)
     : 0;
+  const eligiblePromotions = promotions.filter((promotion) => {
+    const applicableBranches = splitList(promotion.branches);
+    return promotion.active && saleDate >= promotion.startDate && saleDate <= promotion.endDate
+      && (!applicableBranches.length || applicableBranches.includes("All branches") || applicableBranches.includes(branch));
+  });
+  const promotionDiscountAmount = cart.reduce((sum, item) => {
+    if (item.type !== "Service") return sum;
+    const lineTotal = Number(item.price || 0) * Number(item.qty || 1);
+    const best = eligiblePromotions.reduce((amount, promotion) => {
+      const serviceIds = splitList(promotion.serviceIds);
+      const packageNames = splitList(promotion.packageNames);
+      const targetMatches = (!serviceIds.length && !packageNames.length)
+        || serviceIds.includes(item.serviceId)
+        || (item.serviceType === "Package" && packageNames.includes(item.name));
+      if (!targetMatches) return amount;
+      const candidate = promotion.discountType === "Percentage" ? (lineTotal * Number(promotion.value || 0)) / 100 : Math.min(lineTotal, Number(promotion.value || 0) * Number(item.qty || 1));
+      return Math.max(amount, candidate);
+    }, 0);
+    return sum + Math.round(best);
+  }, 0);
+  const discountAmount = Math.min(subtotal, transactionDiscountAmount + promotionDiscountAmount);
   const total = Math.max(0, subtotal - discountAmount);
   const client = clients.find((item) => item.id === clientId);
   const todaysTransactions = transactions.filter((transaction) => transaction.date === todayDate());
   const transactionSummaryRows = todaysTransactions.length ? todaysTransactions : transactions;
-  const todaysTransactionTotal = todaysTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
+  const todaysTransactionTotal = todaysTransactions.reduce((sum, transaction) => transaction.status === "Void" || transaction.testMode ? sum : sum + Number(transaction.total || 0), 0);
+  const staffAtBranch = staff.filter((person) => {
+    const assignedBranches = splitList(person.branches);
+    return person.branch === branch || assignedBranches.includes(branch) || person.branch === "All branches";
+  });
+
+  function providersForCartItem(item) {
+    if (item.type !== "Service") return ["N/A"];
+    const service = services.find((entry) => entry.id === item.serviceId);
+    const allowedRoles = splitList(service?.staff);
+    const providers = staffAtBranch.filter((person) => !allowedRoles.length || allowedRoles.includes(person.role) || allowedRoles.includes("All staff"));
+    return ["N/A", ...providers.map((person) => person.name)];
+  }
+
+  async function persistActiveCart() {
+    if (!activeOpenCart) return null;
+    return saveOpenCart({
+      ...activeOpenCart,
+      clientId,
+      client: client?.fullName || "Walk-in",
+      branch,
+      staff: staffName,
+      items: cart,
+      discountId,
+      saleDate,
+      testMode,
+    });
+  }
+
+  async function activateOpenCart(openCart) {
+    if (!openCart || openCart.id === activeCartId) return;
+    try {
+      await persistActiveCart();
+      setActiveCartId(openCart.id);
+      setClientId(openCart.clientId || "");
+      setStaffName(openCart.staff || "");
+      setDiscountId(openCart.discountId || "");
+      setSaleDate(openCart.saleDate || todayDate());
+      setTestMode(Boolean(openCart.testMode));
+      setCart(Array.isArray(openCart.items) ? openCart.items : []);
+      setCheckoutStep("review");
+    } catch (error) {
+      notify(error.message || "Unable to switch POS carts.", "error");
+    }
+  }
+
+  async function openCartForClient(nextClientId) {
+    const existing = posCarts.find((openCart) => openCart.clientId === nextClientId && openCart.branch === branch);
+    if (existing) {
+      await activateOpenCart(existing);
+      return existing;
+    }
+    const selectedClient = clients.find((item) => item.id === nextClientId);
+    try {
+      await persistActiveCart();
+      const created = await saveOpenCart({
+        clientId: nextClientId,
+        client: selectedClient?.fullName || "Walk-in",
+        branch,
+        staff: staffName,
+        items: [],
+        discountId: "",
+        saleDate: todayDate(),
+        testMode: false,
+      });
+      setActiveCartId(created.id);
+      setClientId(created.clientId || "");
+      setDiscountId("");
+      setSaleDate(created.saleDate || todayDate());
+      setTestMode(Boolean(created.testMode));
+      setCart([]);
+      setCheckoutStep("review");
+      return created;
+    } catch (error) {
+      const conflictCart = error?.payload?.cart;
+      if (conflictCart) await activateOpenCart(await saveOpenCart(conflictCart));
+      else notify(error.message || "Unable to start a POS cart.", "error");
+      return null;
+    }
+  }
+
+  async function addPosCartItem(item) {
+    let openCart = activeOpenCart;
+    if (!openCart) openCart = await openCartForClient(clientId);
+    if (!openCart) return;
+    addCartItem(item);
+  }
+
+  async function closeOpenCart(openCart) {
+    try {
+      const next = openCart.id === activeCartId
+        ? openCartsForBranch.find((item) => item.id !== openCart.id)
+        : null;
+      await discardOpenCart(openCart.id);
+      if (openCart.id === activeCartId) {
+        if (next) {
+          setActiveCartId(next.id);
+          setClientId(next.clientId || "");
+          setStaffName(next.staff || "");
+          setDiscountId(next.discountId || "");
+          setSaleDate(next.saleDate || todayDate());
+          setTestMode(Boolean(next.testMode));
+          setCart(Array.isArray(next.items) ? next.items : []);
+          setCheckoutStep("review");
+        } else {
+          setActiveCartId("");
+          setCart([]);
+          setDiscountId("");
+          setSaleDate(todayDate());
+          setTestMode(false);
+        }
+      }
+      notify("Open POS cart discarded.");
+    } catch (error) {
+      notify(error.message || "Unable to discard this POS cart.", "error");
+    }
+  }
 
   useEffect(() => {
     setCatalogPage(1);
@@ -5119,6 +5613,9 @@ function POSModule({
           paymentMethod: option.method,
           paymentLabel: option.label,
           splitPayment: option.split,
+          posCartId: activeCartId,
+          saleDate,
+          testMode,
         });
         return;
       }
@@ -5146,7 +5643,7 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, clientId, discount, discountAmount, openPayment, posScreen, setCart, staffName, subtotal, total]);
+  }, [activeCartId, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, clientId, discount, discountAmount, openPayment, posPaymentOptions, posScreen, saleDate, setCart, staffName, subtotal, testMode, total]);
 
   function createPaymentDraft(patch = {}) {
     return {
@@ -5160,6 +5657,9 @@ function POSModule({
       discountAmount,
       total,
       notes: "",
+      posCartId: activeCartId,
+      saleDate,
+      testMode,
       ...patch,
     };
   }
@@ -5182,7 +5682,7 @@ function POSModule({
     return {
       id: "current-checkout",
       invoice: "Current checkout",
-      date: todayDate(),
+      date: saleDate,
       time: new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
       client: client?.fullName ?? "Walk-in",
       branch,
@@ -5192,6 +5692,9 @@ function POSModule({
         type: item.type,
         qty: Number(item.qty || 1),
         price: Number(item.price || 0),
+        provider: item.provider || "N/A",
+        aftercare: item.aftercare || "",
+        recommendedIntervalDays: Number(item.recommendedIntervalDays || 0),
       })),
       subtotal,
       discount: discountAmount,
@@ -5290,6 +5793,21 @@ function POSModule({
 
   return (
     <section className="module-grid pos-layout">
+      <div className="surface-panel full-span pos-open-carts-bar">
+        <div><strong>Open client carts</strong><span>{openCartsForBranch.length} active at {branch}</span></div>
+        <div className="pos-open-cart-tabs" role="tablist" aria-label="Open POS carts">
+          {openCartsForBranch.map((openCart) => (
+            <div className={`pos-open-cart-tab ${openCart.id === activeCartId ? "active" : ""}`} key={openCart.id}>
+              <button type="button" role="tab" aria-selected={openCart.id === activeCartId} onClick={() => void activateOpenCart(openCart)}>
+                <span>{openCart.testMode ? "TEST · " : ""}{openCart.client || "Walk-in"}</span>
+                <small>{Array.isArray(openCart.items) ? openCart.items.length : 0} line(s)</small>
+              </button>
+              <button type="button" aria-label={`Discard ${openCart.client || "Walk-in"} cart`} title="Discard open cart" onClick={() => void closeOpenCart(openCart)}><X size={13} /></button>
+            </div>
+          ))}
+          <button className="pos-new-cart-button" type="button" onClick={() => setIsSaleContextOpen(true)}><Plus size={15} /> New / switch client</button>
+        </div>
+      </div>
       <div className="surface-panel wide pos-catalog-panel">
         <div className="pos-header">
           <div>
@@ -5320,6 +5838,14 @@ function POSModule({
             </button>
           </div>
         </div>
+
+        {posScreen === "Checkout" && (testMode || saleDate !== todayDate()) && (
+          <div className={`pos-ledger-mode-banner ${testMode ? "test" : "historical"}`} role="status">
+            <AlertCircle size={17} />
+            <span>{testMode ? "TEST MODE — this transaction is isolated from all live financial and stock figures." : `Historical transaction date: ${formatDate(saleDate)}. The actual entry time is preserved in the audit log.`}</span>
+            <button type="button" onClick={() => setIsSaleContextOpen(true)}>Review</button>
+          </div>
+        )}
 
         {posScreen === "Checkout" ? (
           <>
@@ -5385,22 +5911,22 @@ function POSModule({
               <div className="service-grid pos-service-grid">
                 {pagedServices.map((service, index) => (
                   <button
-                    className={`service-card pos-service-card ${cart.some((item) => item.key === `service-${service.id}`) ? "in-cart" : ""}`}
+                    className={`service-card pos-service-card ${cart.some((item) => item.serviceId === service.id) ? "in-cart" : ""}`}
                     key={service.id}
                     ref={(node) => { catalogItemRefs.current[index] = node; }}
                     tabIndex={catalogFocusIndex === index ? 0 : -1}
                     onFocus={() => setCatalogFocusIndex(index)}
                     onKeyDown={(event) => handleCatalogItemKeyDown(event, index)}
-                    onClick={() => addCartItem({ key: `service-${service.id}`, serviceId: service.id, type: "Service", name: service.name, category: service.category, price: service.price })}
+                    onClick={() => void addPosCartItem({ key: `service-${service.id}-${createId("line")}`, serviceId: service.id, serviceType: service.serviceType, type: "Service", name: service.name, category: service.category, price: service.price, provider: "N/A", aftercare: service.aftercare || "", recommendedIntervalDays: Number(service.recommendedIntervalDays || 0) })}
                     type="button"
                   >
                     <strong>{service.name}</strong>
                     <span className="service-card-meta">
                       <small>{service.duration} min</small>
-                      <b>{money.format(service.price)}</b>
+                      <b>{servicePriceLabel(service)}</b>
                     </span>
-                    {cart.find((item) => item.key === `service-${service.id}`)?.qty && (
-                      <span className="cart-count">{cart.find((item) => item.key === `service-${service.id}`)?.qty}</span>
+                    {cart.some((item) => item.serviceId === service.id) && (
+                      <span className="cart-count">{cart.filter((item) => item.serviceId === service.id).reduce((sum, item) => sum + Number(item.qty || 1), 0)}</span>
                     )}
                   </button>
                 ))}
@@ -5416,7 +5942,7 @@ function POSModule({
                     tabIndex={catalogFocusIndex === index ? 0 : -1}
                     onFocus={() => setCatalogFocusIndex(index)}
                     onKeyDown={(event) => handleCatalogItemKeyDown(event, index)}
-                    onClick={() => addCartItem({ key: `product-${item.id}`, inventoryId: item.id, type: "Product", name: item.item, category: item.category, price: item.price })}
+                    onClick={() => void addPosCartItem({ key: `product-${item.id}`, inventoryId: item.id, type: "Product", name: item.item, category: item.category, price: item.price })}
                     type="button"
                     disabled={item.stock <= 0}
                   >
@@ -5461,7 +5987,6 @@ function POSModule({
         ) : (
           <POSServicePriceScreen
             branch={branch}
-            inventory={inventory}
             saveService={saveService}
             services={services}
             staff={staff}
@@ -5509,6 +6034,14 @@ function POSModule({
               <div>
                 <strong>{item.name}</strong>
                 <span>{item.type} / {item.category}</span>
+                {item.type === "Service" && (
+                  <label className="cart-provider-select">
+                    <span>Provider</span>
+                    <select value={item.provider || "N/A"} onChange={(event) => setCart((current) => current.map((entry) => entry.key === item.key ? { ...entry, provider: event.target.value } : entry))}>
+                      {providersForCartItem(item).map((provider) => <option key={provider}>{provider}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
               <div className="quantity-stepper" aria-label={`Quantity for ${item.name}`}>
                 <button
@@ -5559,6 +6092,7 @@ function POSModule({
               <span>Discount</span>
               <strong>-{money.format(discountAmount)}</strong>
             </div>
+            {promotionDiscountAmount > 0 && <div><span>Automatic promotion</span><strong>-{money.format(promotionDiscountAmount)}</strong></div>}
             <div className="due-row">
               <span>Total</span>
               <strong>{money.format(total)}</strong>
@@ -5620,7 +6154,9 @@ function POSModule({
               render: (row) => (
                 <div className="inline-actions">
                   <button type="button" onClick={() => onPrintReceipt(row)}><Printer size={15} /> Receipt</button>
-                  {row.status !== "Void" && <button type="button" onClick={() => voidTransaction(row)}><Trash2 size={15} /> Void</button>}
+                  {row.testMode
+                    ? <button type="button" onClick={() => resetTestTransaction(row)}><RefreshCw size={15} /> Reset test</button>
+                    : row.status !== "Void" && <button type="button" onClick={() => voidTransaction(row)}><Trash2 size={15} /> Void</button>}
                 </div>
               ),
               exportValue: () => "",
@@ -5650,7 +6186,7 @@ function POSModule({
             <div className="pos-context-fields">
               <label className="stacked-field">
                 <span>Select client</span>
-                <select ref={saleClientRef} value={clientId} onChange={(event) => setClientId(event.target.value)}>
+                <select ref={saleClientRef} value={clientId} onChange={(event) => void openCartForClient(event.target.value)}>
                   <option value="">Walk-in / Anonymous</option>
                   {clients.map((item) => (
                     <option key={item.id} value={item.id}>{item.fullName}</option>
@@ -5665,9 +6201,20 @@ function POSModule({
               <label className="stacked-field">
                 <span>Select Staff</span>
                 <select value={staffName} onChange={(event) => setStaffName(event.target.value)}>
-                  {staff.map((person) => <option key={person.id}>{person.name}</option>)}
+                  {staffAtBranch.map((person) => <option key={person.id}>{person.name}</option>)}
                 </select>
               </label>
+              <label className="stacked-field">
+                <span>Transaction date</span>
+                <input type="date" max={todayDate()} value={saleDate} disabled={!canPostHistoricalSale} onChange={(event) => setSaleDate(event.target.value || todayDate())} />
+                <small>{canPostHistoricalSale ? "Backdated entries are audit-logged; future dates are blocked." : "Only an Owner or Super Admin can backdate a transaction."}</small>
+              </label>
+              {canUseTestMode && (
+                <label className="checkbox-field pos-test-mode-field">
+                  <input type="checkbox" checked={testMode} onChange={(event) => setTestMode(event.target.checked)} />
+                  <span><strong>POS Test Mode</strong><small>Excluded from revenue, inventory, balances, commission, and payroll. Test entries can be reset.</small></span>
+                </label>
+              )}
             </div>
             <div className="modal-actions">
               <span className="modal-keyboard-hint"><kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> done</span>
@@ -5733,7 +6280,7 @@ function POSCatalogPagination({ page, pageCount, start, end, total, onPageChange
   );
 }
 
-function POSServicePriceScreen({ branch, inventory, saveService, services, staff }) {
+function POSServicePriceScreen({ branch, saveService, services, staff }) {
   const staffRoleList = useMemo(
     () => [...new Set(staff.map((person) => person.role).filter(Boolean))].join(", "),
     [staff],
@@ -5747,12 +6294,17 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
     return {
       name: "",
       category: serviceCategories[0],
+      serviceType: "Regular Service",
       duration: 60,
       price: "",
-      commission: "",
-      consumables: "",
+      priceModel: "Fixed price",
+      priceUnit: "",
+      packageSessions: 0,
+      packagePrice: 0,
+      serviceValue: 0,
+      recommendedIntervalDays: 0,
       branches: branch,
-      staff: staffRoleList || "Doctor, Nurse / Aesthetician",
+      staff: staffRoleList || "Doctor, Nurse, Aesthetician",
       room: "Treatment Room",
       active: true,
       pos: true,
@@ -5784,10 +6336,15 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
     setForm({
       name: service.name ?? "",
       category: service.category ?? serviceCategories[0],
+      serviceType: service.serviceType ?? "Regular Service",
       duration: service.duration ?? 60,
       price: service.price ?? "",
-      commission: service.commission ?? "",
-      consumables: Array.isArray(service.consumables) ? service.consumables.join(", ") : service.consumables ?? "",
+      priceModel: service.priceModel ?? "Fixed price",
+      priceUnit: service.priceUnit ?? "",
+      packageSessions: service.packageSessions ?? 0,
+      packagePrice: service.packagePrice ?? 0,
+      serviceValue: service.serviceValue ?? 0,
+      recommendedIntervalDays: service.recommendedIntervalDays ?? 0,
       branches: Array.isArray(service.branches) ? service.branches.join(", ") : service.branches ?? branch,
       staff: Array.isArray(service.staff) ? service.staff.join(", ") : service.staff ?? staffRoleList,
       room: service.room ?? "Treatment Room",
@@ -5822,8 +6379,10 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
         name,
         duration: Number(form.duration || 0),
         price,
-        commission: form.commission || "Standard POS service",
-        consumables: form.consumables || "",
+        packageSessions: Number(form.packageSessions || 0),
+        packagePrice: Number(form.packagePrice || 0),
+        serviceValue: Number(form.serviceValue || 0),
+        recommendedIntervalDays: Number(form.recommendedIntervalDays || 0),
         branches: form.branches || branch,
         staff: form.staff || staffRoleList,
         room: form.room || "Treatment Room",
@@ -5875,8 +6434,42 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
             </select>
           </label>
           <label>
-            <span>Price</span>
+            <span>Service type</span>
+            <select value={form.serviceType} onChange={(event) => updateForm("serviceType", event.target.value)}>
+              {["Regular Service", "Package", "Add-on"].map((type) => <option key={type}>{type}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Pricing model</span>
+            <select value={form.priceModel} onChange={(event) => updateForm("priceModel", event.target.value)}>
+              {["Fixed price", "Starts at", "Price after consultation/assessment", "Per unit"].map((model) => <option key={model}>{model}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Base price</span>
             <input type="number" min="0" value={form.price} onChange={(event) => updateForm("price", event.target.value)} placeholder="0" />
+          </label>
+          <label>
+            <span>Pricing unit</span>
+            <select value={form.priceUnit} onChange={(event) => updateForm("priceUnit", event.target.value)}>
+              {["", "Per syringe", "Per ml", "Per vial", "Per ampule"].map((unit) => <option key={unit} value={unit}>{unit || "Not applicable"}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Package sessions</span>
+            <input type="number" min="0" value={form.packageSessions} onChange={(event) => updateForm("packageSessions", event.target.value)} />
+          </label>
+          <label>
+            <span>Package price</span>
+            <input type="number" min="0" value={form.packagePrice} onChange={(event) => updateForm("packagePrice", event.target.value)} />
+          </label>
+          <label>
+            <span>Service value / session</span>
+            <input type="number" min="0" value={form.serviceValue} onChange={(event) => updateForm("serviceValue", event.target.value)} />
+          </label>
+          <label>
+            <span>Recommended interval (days)</span>
+            <input type="number" min="0" value={form.recommendedIntervalDays} onChange={(event) => updateForm("recommendedIntervalDays", event.target.value)} />
           </label>
           <label>
             <span>Duration minutes</span>
@@ -5893,13 +6486,6 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
           <label>
             <span>Room / device</span>
             <input value={form.room} onChange={(event) => updateForm("room", event.target.value)} />
-          </label>
-          <label>
-            <span>Consumable</span>
-            <select value={form.consumables} onChange={(event) => updateForm("consumables", event.target.value)}>
-              <option value="">None</option>
-              {inventory.filter((item) => item.type === "Consumable").map((item) => <option key={item.id}>{item.item}</option>)}
-            </select>
           </label>
           <label className="span-2">
             <span>Description</span>
@@ -5945,7 +6531,7 @@ function POSServicePriceScreen({ branch, inventory, saveService, services, staff
                 <strong>{service.name}</strong>
                 <span>{service.category} / {service.duration} min</span>
               </div>
-              <b>{money.format(service.price)}</b>
+              <b>{servicePriceLabel(service)}</b>
               <StatusBadge status={service.active ? "Active" : "Inactive"} />
               <button className="secondary-button small" type="button" onClick={() => startEdit(service)}>
                 <Edit3 size={15} aria-hidden="true" />
@@ -6584,7 +7170,7 @@ function LegacyAppointmentsModule({
   const cancelledToday = todaysAppointments.filter((item) => canonicalAppointmentStatus(item.status) === "Cancelled");
   const noShowsToday = todaysAppointments.filter((item) => canonicalAppointmentStatus(item.status) === "No Show");
   const revenueToday = transactions
-    .filter((transaction) => transaction.date === today && transaction.status !== "Void")
+    .filter((transaction) => transaction.date === today && transaction.status !== "Void" && !transaction.testMode)
     .reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
   const roomsOccupied = roomOptions.filter((room) => activeRows.some((item) => item.room === room)).length;
   const pendingDeposits = activeRows.filter((item) => appointmentPaymentSummary(item, services, transactions).status === "Unpaid");
@@ -8203,10 +8789,11 @@ function ClientsModule({
   const profileAppointments = appointments.filter((item) => item.clientId === profileClient?.id);
   const profileTransactions = transactions.filter((item) => item.client === profileClient?.fullName);
   const profilePackages = packages.filter((item) => item.clientId === profileClient?.id);
+  const profileConsents = consentSubmissions.filter((item) => item.clientId === profileClient?.id);
   const safeDirectoryView = directoryView === "cards" ? "cards" : "list";
   const activeDirectoryQuery = `${directoryQuery} ${globalSearch}`.trim();
   const directoryBranches = useMemo(
-    () => ["All branches", ...new Set(clients.map((client) => client.branch).filter(Boolean))],
+    () => ["All branches", ...new Set(clients.flatMap((client) => [client.branch, ...splitList(client.branchesVisited)]).filter(Boolean))],
     [clients],
   );
   const filteredClients = useMemo(() => {
@@ -8232,7 +8819,7 @@ function ClientsModule({
 
     const query = normalize(activeDirectoryQuery);
     const matches = clients.filter((client) => {
-      const branchMatches = directoryBranch === "All branches" || client.branch === directoryBranch;
+      const branchMatches = directoryBranch === "All branches" || client.branch === directoryBranch || splitList(client.branchesVisited).includes(directoryBranch);
       if (!branchMatches) return false;
       if (!query) return true;
 
@@ -8242,6 +8829,7 @@ function ClientsModule({
         client.mobile,
         client.email,
         client.branch,
+        splitList(client.branchesVisited).join(" "),
         client.tag,
         client.retention,
         client.source,
@@ -8390,10 +8978,12 @@ function ClientsModule({
           appointments={profileAppointments}
           transactions={profileTransactions}
           packages={profilePackages}
+          consents={profileConsents}
           sensitiveAllowed={sensitiveAllowed}
           onClose={onCloseDetail}
           onEdit={() => openModal("client", profileClient)}
           onAddTreatment={() => openModal("treatment", { clientId: profileClient.id })}
+          onAddConsent={() => openModal("consent", { clientId: profileClient.id, branch: profileClient.branch, templateId: consentTemplates.find((item) => item.active)?.id || "" })}
           onDelete={() => deleteClient(profileClient)}
         />
       </RecordDetailPageHeader>
@@ -8585,6 +9175,7 @@ function ClientsModule({
           appointments={profileAppointments}
           transactions={profileTransactions}
           packages={profilePackages}
+          consents={profileConsents}
           sensitiveAllowed={sensitiveAllowed}
           onClose={() => setProfileClientId(null)}
           onEdit={() => {
@@ -8595,6 +9186,7 @@ function ClientsModule({
             setProfileClientId(null);
             openModal("treatment", { clientId: profileClient.id });
           }}
+          onAddConsent={() => openModal("consent", { clientId: profileClient.id, branch: profileClient.branch, templateId: consentTemplates.find((item) => item.active)?.id || "" })}
           onDelete={() => {
             setProfileClientId(null);
             deleteClient(profileClient);
@@ -8613,16 +9205,28 @@ function ClientProfileDialog({
   appointments,
   transactions,
   packages,
+  consents = [],
   sensitiveAllowed,
   onClose,
   onEdit,
   onAddTreatment,
+  onAddConsent,
   onDelete,
 }) {
   const profileLabels = [client.tag, client.retention]
     .filter(Boolean)
     .filter((label, index, labels) => labels.findIndex((item) => normalize(item) === normalize(label)) === index)
     .join(" / ");
+  const validTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode);
+  const totalSpent = validTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
+  const branchesVisited = [...new Set([
+    ...splitList(client.branchesVisited),
+    client.branch,
+    ...appointments.map((item) => item.branch),
+    ...treatments.map((item) => item.branch),
+    ...validTransactions.map((item) => item.branch),
+  ].filter(Boolean))];
+  const age = ageFromBirthday(client.birthday);
 
   const profileContent = (
       <div className={`modal-card client-profile-panel client-profile-modal ${standalone ? "is-standalone" : ""}`}>
@@ -8648,6 +9252,9 @@ function ClientProfileDialog({
                 <button className="secondary-button small" type="button" onClick={onAddTreatment}>
                   <HeartPulse size={16} /> Add treatment
                 </button>
+                <button className="secondary-button small" type="button" onClick={onAddConsent}>
+                  <FileText size={16} /> Sign consent
+                </button>
                 <button className="ghost-button small" type="button" onClick={onDelete}>
                   <Trash2 size={16} /> Delete
                 </button>
@@ -8656,7 +9263,13 @@ function ClientProfileDialog({
             <div className="record-grid client-profile-list">
               <RecordItem label="Mobile" value={sensitiveAllowed ? client.mobile : maskMobile(client.mobile)} />
               <RecordItem label="Email" value={sensitiveAllowed ? client.email : "Restricted"} />
-              <RecordItem label="Branch visited" value={client.branch} />
+              <RecordItem label="Branches visited" value={branchesVisited.join(", ")} />
+              <RecordItem label="Total spent since first visit" value={money.format(totalSpent)} />
+              <RecordItem label="Date of birth / age" value={client.birthday ? `${formatDate(client.birthday)}${age === null ? "" : ` · ${age} years old`}` : "Not recorded"} />
+              <RecordItem label="Civil status" value={client.civilStatus} />
+              <RecordItem label="Address" value={[client.street, client.barangay, client.city, client.province].filter(Boolean).join(", ") || client.address} />
+              <RecordItem label="Occupation" value={client.occupation} />
+              <RecordItem label="Emergency contact" value={[client.emergencyName, client.emergencyPhone].filter(Boolean).join(" · ") || client.emergency} />
               <RecordItem label="Source / referral" value={`${client.source} / ${client.referral}`} />
               <RecordItem label="Allergies" value={sensitiveAllowed ? client.allergies : "Restricted"} />
               <RecordItem label="Contraindications" value={sensitiveAllowed ? client.contraindications : "Restricted"} />
@@ -8664,10 +9277,11 @@ function ClientProfileDialog({
               <RecordItem label="Package balance" value={client.packageBalance} />
             </div>
             <div className="dashboard-grid compact client-profile-panels">
-              <MiniPanel icon={HeartPulse} title="Treatment history" rows={treatments.map((item) => `${item.date} - ${item.service}`)} empty="No treatments yet." />
-              <MiniPanel icon={CalendarDays} title="Appointments" rows={appointments.map((item) => `${item.date} ${item.time} - ${item.status}`)} empty="No appointments yet." />
-              <MiniPanel icon={WalletCards} title="Payments" rows={transactions.map((item) => `${item.invoice} - ${money.format(item.total)}`)} empty="No payments yet." />
+              <MiniPanel icon={HeartPulse} title="Treatment history" rows={treatments.map((item) => `${item.date} · ${item.branch || "Branch not recorded"} · ${item.service} · ${item.provider || "Provider N/A"}`)} empty="No treatments yet." />
+              <MiniPanel icon={CalendarDays} title="Appointments" rows={appointments.map((item) => `${item.date} ${item.time} · ${item.branch} · ${item.service} · ${item.staff || "Provider N/A"} · ${item.status}`)} empty="No appointments yet." />
+              <MiniPanel icon={WalletCards} title="Payments" rows={validTransactions.map((item) => `${item.date} · ${item.branch} · ${item.invoice} · ${money.format(item.total)} · ${item.status}`)} empty="No payments yet." />
               <MiniPanel icon={Gift} title="Packages" rows={packages.map((item) => `${item.name}: ${item.used}/${item.sessions}`)} empty="No active packages." />
+              <MiniPanel icon={ShieldCheck} title="Signed consent forms" rows={consents.map((item) => `${formatDateTime(item.signedAt)} · ${item.formName} ${item.formVersion} · ${item.branch} · ${item.witness || "No witness"}`)} empty="No signed consent forms." />
             </div>
           </div>
         </div>
@@ -8971,6 +9585,7 @@ function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openMod
                   <article><span>Treatment room</span><strong>{selectedRecord.room || "Not recorded"}</strong></article>
                   <article><span>Follow-up</span><strong className={followUpDue(selectedRecord) ? "due" : ""}>{selectedRecord.followUp ? formatDate(selectedRecord.followUp) : "Not scheduled"}</strong></article>
                   <article><span>Client feedback</span><strong>{selectedRecord.satisfaction || "Not recorded"}</strong></article>
+                  <article><span>Total visit duration</span><strong>{treatmentVisitDuration(selectedRecord)}</strong></article>
                 </div>
 
                 <div className="treatment-note-grid">
@@ -9039,11 +9654,13 @@ function TreatmentRecordPage({ record, client, followUpDue, onEdit, onUploadPhot
         <article><span>Treatment room</span><strong>{record.room || "Not recorded"}</strong></article>
         <article><span>Follow-up</span><strong className={followUpDue ? "due" : ""}>{record.followUp ? formatDate(record.followUp) : "Not scheduled"}</strong></article>
         <article><span>Client feedback</span><strong>{record.satisfaction || "Not recorded"}</strong></article>
+        <article><span>Total visit duration</span><strong>{treatmentVisitDuration(record)}</strong></article>
       </div>
 
       <div className="treatment-note-grid">
         <section><div><ClipboardCheck size={17} /><strong>Pre-treatment assessment</strong></div><p>{record.preNotes || "No pre-treatment assessment was recorded."}</p></section>
         <section><div><Activity size={17} /><strong>Outcome & clinical notes</strong></div><p>{record.outcome || record.postNotes || "No outcome notes were recorded."}</p></section>
+        <section><div><HeartPulse size={17} /><strong>Aftercare instructions</strong></div><p>{record.aftercare || "No service aftercare instructions were recorded."}</p></section>
       </div>
 
       <div className="treatment-documentation-grid">
@@ -9129,7 +9746,7 @@ function ServicesModule({ services, openModal, toggleService }) {
               <span>{service.category}</span>
               <strong>{service.name}</strong>
               <small>{service.duration} min / {service.room}</small>
-              <b>{money.format(service.price)}</b>
+              <b>{servicePriceLabel(service)}</b>
               <p>{service.description}</p>
               <div className="inline-actions">
                 <button type="button" onClick={() => openModal("service", service)}><Edit3 size={15} /> Edit</button>
@@ -9143,7 +9760,7 @@ function ServicesModule({ services, openModal, toggleService }) {
   );
 }
 
-function InventoryModule({ inventory, movements, receiveStock, openModal, globalSearch }) {
+function InventoryModule({ inventory, movements, openModal, globalSearch }) {
   const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy");
 
   return (
@@ -9155,26 +9772,27 @@ function InventoryModule({ inventory, movements, receiveStock, openModal, global
           globalSearch={globalSearch}
           toolbarActions={(
             <>
-              <button className="secondary-button small" type="button" onClick={() => openModal("inventory")}>
+              <button className="secondary-button small" type="button" onClick={() => openModal("inventory-receive")}>
                 <PackagePlus size={16} /> Receive stock
+              </button>
+              <button className="secondary-button small" type="button" onClick={() => openModal("inventory")}>
+                <Plus size={16} /> Add item
               </button>
             </>
           )}
           columns={[
             { key: "photo", label: "Photo", sortable: false, render: (row) => <ProductThumbnail item={row} />, exportValue: () => "" },
             { key: "item", label: "Item", render: (row) => <strong className="inventory-product-name">{row.item}</strong> },
-            { key: "sku", label: "SKU" },
             { key: "category", label: "Category" },
             { key: "branch", label: "Branch" },
             { key: "stock", label: "Stock", render: (row) => `${row.stock} ${row.unit}` },
-            { key: "expiry", label: "Expiry" },
             { key: "status", label: "Status", render: (row) => <StatusBadge status={stockStatus(row)} /> },
             {
               key: "actions",
               label: "Actions",
               render: (row) => (
                 <div className="inline-actions">
-                  <button type="button" onClick={() => receiveStock(row.id, 5, "Quick receive")}><Plus size={15} /> +5</button>
+                  <button type="button" onClick={() => openModal("inventory-receive", { inventoryId: row.id, unit: row.unit, supplier: row.supplier })}><PackagePlus size={15} /> Receive</button>
                   <button type="button" onClick={() => openModal("inventory", row)}><Edit3 size={15} /> Edit</button>
                 </div>
               ),
@@ -9194,6 +9812,10 @@ function InventoryModule({ inventory, movements, receiveStock, openModal, global
             { key: "item", label: "Item" },
             { key: "branch", label: "Branch" },
             { key: "qty", label: "Qty" },
+            { key: "unit", label: "Unit" },
+            { key: "supplier", label: "Supplier" },
+            { key: "receivedBy", label: "Received by" },
+            { key: "checkNumber", label: "Check no." },
             { key: "reason", label: "Reason" },
             { key: "user", label: "User" },
           ]}
@@ -9216,7 +9838,16 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
               <div className="session-meter">
                 <span style={{ width: `${Math.max(8, (Number(pkg.used) / Number(pkg.sessions)) * 100)}%` }} />
               </div>
-              <small>{pkg.used} used / {pkg.sessions} sessions / expires {pkg.expires}</small>
+              <small>{pkg.used} used / {pkg.sessions} sessions / {pkg.expires ? `expires ${formatDate(pkg.expires)}` : "no expiration"}</small>
+              <small>{money.format(pkg.amountPaid || 0)} paid · {money.format(pkg.outstandingBalance ?? Math.max(0, Number(pkg.price || 0) - Number(pkg.amountPaid || 0)))} outstanding · {money.format(pkg.serviceValue || 0)} / session</small>
+              <details className="package-history-details">
+                <summary>Payment & session history</summary>
+                <div>
+                  {(pkg.paymentHistory || []).slice(-3).map((entry, index) => <span key={`payment-${index}`}>{formatDate(entry.date)} · {money.format(entry.amount)} · {entry.method || "Payment"}</span>)}
+                  {(pkg.sessionHistory || []).slice(-3).map((entry, index) => <span key={`session-${index}`}>{formatDate(entry.date)} · {entry.sessions > 0 ? "+" : ""}{entry.sessions} session · {entry.branch || pkg.branch}</span>)}
+                  {!pkg.paymentHistory?.length && !pkg.sessionHistory?.length && <span>No package activity recorded yet.</span>}
+                </div>
+              </details>
               <div className="inline-actions">
                 <button type="button" onClick={() => redeemPackage(pkg.id)}>Redeem session</button>
                 <button type="button" onClick={() => openModal("package", pkg)}><Edit3 size={15} /> Edit</button>
@@ -9227,14 +9858,16 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
       </div>
       <div className="surface-panel">
         <SectionHeader icon={CreditCard} title="Gift Certificates" action="Cross-branch" />
+        <button className="primary-button small" type="button" onClick={() => openModal("gift-certificate")}><Plus size={16} /> Issue certificate</button>
         <div className="stock-list">
           {giftCertificates.map((gc) => (
             <article className="stock-row" key={gc.id}>
               <div>
                 <strong>{gc.code}</strong>
-                <span>{gc.client} / expires {gc.expires}</span>
+                <span>{gc.client} · issued {formatDate(gc.issueDate)} · {gc.expires ? `expires ${formatDate(gc.expires)}` : "no expiration"}</span>
+                {gc.redeemedDate && <small>Redeemed {formatDate(gc.redeemedDate)} at {gc.redeemedBranch} · transaction {gc.transactionId}</small>}
               </div>
-              <b>{money.format(gc.balance)}</b>
+              <div className="gift-certificate-row-actions"><b>{gc.type === "Specific Service" ? gc.service : money.format(gc.balance)}</b><button type="button" onClick={() => openModal("gift-certificate", gc)}><Edit3 size={14} /> Edit</button></div>
             </article>
           ))}
         </div>
@@ -9251,9 +9884,11 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
             { key: "name", label: "Package" },
             { key: "client", label: "Client" },
             { key: "sessions", label: "Sessions", render: (row) => `${row.used}/${row.sessions}` },
-            { key: "expires", label: "Expiration" },
+            { key: "expires", label: "Expiration", render: (row) => row.expires ? formatDate(row.expires) : "No expiration" },
             { key: "branch", label: "Branch" },
             { key: "price", label: "Price", render: (row) => money.format(row.price) },
+            { key: "amountPaid", label: "Paid", render: (row) => money.format(row.amountPaid || 0) },
+            { key: "outstandingBalance", label: "Balance", render: (row) => money.format(row.outstandingBalance ?? Math.max(0, Number(row.price || 0) - Number(row.amountPaid || 0))) },
             { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
           ]}
         />
@@ -10825,7 +11460,7 @@ function StaffRecordPage({ person, account, onClock, onEdit }) {
         <div>
           <p className="eyebrow">{person.role || "Clinic team"}</p>
           <h2>{person.name}</h2>
-          <span>{person.branch || "Branch not assigned"}</span>
+          <span>{splitList(person.branches).join(", ") || person.branch || "Branch not assigned"}</span>
         </div>
         <div className="staff-record-actions">
           <button className="secondary-button" type="button" onClick={onClock}><Clock size={16} /> Update attendance</button>
@@ -10837,7 +11472,12 @@ function StaffRecordPage({ person, account, onClock, onEdit }) {
         <RecordItem label="Status" value={person.status} />
         <RecordItem label="Attendance" value={person.attendance} />
         <RecordItem label="Schedule" value={person.schedule} />
+        <RecordItem label="Assigned branches" value={splitList(person.branches).join(", ") || person.branch} />
+        <RecordItem label="Employment status" value={person.employmentStatus} />
         <RecordItem label="Employment date" value={formatDate(person.employmentDate)} />
+        <RecordItem label="Date of birth" value={formatDate(person.birthDate)} />
+        <RecordItem label="Address" value={person.address} />
+        <RecordItem label="Emergency contact" value={[person.emergencyContact, person.emergencyPhone].filter(Boolean).join(" · ")} />
         <RecordItem label="Phone" value={person.phone} />
         <RecordItem label="Commission" value={`${Number(person.commissionRate || 0)}%${person.commissionType ? ` · ${person.commissionType}` : ""}`} />
         <RecordItem label="Login" value={account?.email || "Not connected"} />
@@ -10900,12 +11540,12 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   const branchModuleOptions = useMemo(() => navItems.filter((item) => !["my-workspace", "applications", "branches", "settings"].includes(item.id)), []);
   const emptyForm = useCallback(() => ({
     name: "", code: "", city: "", address: "", phone: "", email: "", timezone: "Asia/Manila",
-    hours: "", roomCount: 0, devices: "", image: "", status: "Active", managerIds: [],
+    hours: operatingHoursSummary(defaultBranchOperatingHours), operatingHours: freshOperatingHours(), roomCount: 0, couches: 0, devices: "", image: "", status: "Active", managerIds: [],
     enabledModules: branchModuleOptions.map((module) => module.id),
   }), [branchModuleOptions]);
   const [form, setForm] = useState(() => ({
     name: "", code: "", city: "", address: "", phone: "", email: "", timezone: "Asia/Manila",
-    hours: "", roomCount: 0, devices: "", image: "", status: "Active", managerIds: [], enabledModules: [],
+    hours: operatingHoursSummary(defaultBranchOperatingHours), operatingHours: freshOperatingHours(), roomCount: 0, couches: 0, devices: "", image: "", status: "Active", managerIds: [], enabledModules: [],
   }));
   const [photoError, setPhotoError] = useState("");
   const today = new Date().toISOString().slice(0, 10);
@@ -10948,8 +11588,10 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
       phone: branch.phone || "",
       email: branch.email || "",
       timezone: branch.timezone || "Asia/Manila",
-      hours: branch.hours || "",
+      hours: branch.hours || operatingHoursSummary(branch.operatingHours),
+      operatingHours: freshOperatingHours(branch.operatingHours),
       roomCount: branch.rooms?.length ?? 0,
+      couches: Number(branch.couches || 0),
       devices: Array.isArray(branch.devices) ? branch.devices.join(", ") : "",
       image: branch.image || "",
       status: branch.status || "Active",
@@ -10975,7 +11617,9 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
       const values = {
         ...form,
         image,
+        hours: operatingHoursSummary(form.operatingHours),
         roomCount: Number(form.roomCount) || 0,
+        couches: Number(form.couches) || 0,
         devices: form.devices.split(",").map((item) => item.trim()).filter(Boolean),
       };
       if (branchToEdit) await onUpdateBranch(branchToEdit, values);
@@ -11066,7 +11710,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
           {!filteredBranches.length ? <EmptyState title="No matching branches" copy="Try another search or status filter." /> : <table className="branch-management-table">
             <thead><tr><th>Branch</th><th>Contact</th><th>Manager</th><th>Employees</th><th>Modules</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>{filteredBranches.map((item) => {
-            const assignedStaff = staff.filter((person) => person.branch === item.name).length;
+            const assignedStaff = staff.filter((person) => person.branch === item.name || splitList(person.branches).includes(item.name)).length;
             return (
               <tr key={item.id}>
                 <td><div className="branch-table-name"><strong>{item.name}</strong><span>{item.code || "No code"} · {item.address || item.city || "Address pending"}</span></div></td>
@@ -11104,6 +11748,12 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
               </div>
               {photoError && <div className="inline-state danger"><AlertCircle size={16} /><span>{photoError}</span></div>}
             </div>
+            {branchToEdit && (
+              <div className="branch-registration-qr">
+                <img src={`/api/public-registration/qr?branch=${encodeURIComponent(branchToEdit.name)}`} alt={`Client registration QR for ${branchToEdit.name}`} />
+                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified MACE profile.</span><a href={`/register?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
+              </div>
+            )}
             <div className="form-grid">
               <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE Makati" /></label>
               <label><span>Unique branch code</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} placeholder="e.g. MACE-MKT" /></label>
@@ -11112,8 +11762,12 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
               <label><span>Phone</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Branch contact number" /></label>
               <label><span>Email address</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="branch@macebydrmace.com" /></label>
               <label><span>Time zone</span><select value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })}><option>Asia/Manila</option><option>Asia/Singapore</option><option>Asia/Tokyo</option><option>UTC</option></select></label>
-              <label><span>Operating hours</span><input value={form.hours} onChange={(event) => setForm({ ...form, hours: event.target.value })} placeholder="9:00 AM - 7:00 PM" /></label>
               <label><span>Number of rooms</span><input min="0" max="50" type="number" value={form.roomCount} onChange={(event) => setForm({ ...form, roomCount: event.target.value })} /></label>
+              <label><span>Number of couches</span><input min="0" max="50" type="number" value={form.couches} onChange={(event) => setForm({ ...form, couches: event.target.value })} /></label>
+              <fieldset className="full-span branch-hours-fieldset"><legend>Operating hours by day</legend><div className="branch-hours-grid">{operatingDayKeys.slice(1).concat("sunday").map((dayKey) => {
+                const day = form.operatingHours?.[dayKey] || defaultBranchOperatingHours[dayKey];
+                return <div className={`branch-hours-row ${day.closed ? "is-closed" : ""}`} key={dayKey}><strong>{dayKey[0].toUpperCase() + dayKey.slice(1)}</strong><label><span className="sr-only">{dayKey} opens</span><input type="time" value={day.open} disabled={day.closed} onChange={(event) => setForm((current) => ({ ...current, operatingHours: { ...current.operatingHours, [dayKey]: { ...current.operatingHours[dayKey], open: event.target.value } } }))} /></label><span>to</span><label><span className="sr-only">{dayKey} closes</span><input type="time" value={day.close} disabled={day.closed} onChange={(event) => setForm((current) => ({ ...current, operatingHours: { ...current.operatingHours, [dayKey]: { ...current.operatingHours[dayKey], close: event.target.value } } }))} /></label><label className="branch-hours-closed"><input type="checkbox" checked={Boolean(day.closed)} onChange={(event) => setForm((current) => ({ ...current, operatingHours: { ...current.operatingHours, [dayKey]: { ...current.operatingHours[dayKey], closed: event.target.checked } } }))} /><span>Closed</span></label></div>;
+              })}</div><small>Default: Monday-Saturday 10:00 AM-7:00 PM; Sunday 1:00 PM-5:00 PM. Noon remains available.</small></fieldset>
               <label><span>Devices</span><input value={form.devices} onChange={(event) => setForm({ ...form, devices: event.target.value })} placeholder="Comma-separated" /></label>
               <label><span>Status</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option>Active</option><option>Inactive</option><option>Archived</option></select></label>
               <label className="full-span"><span>Assigned manager(s)</span><select multiple value={form.managerIds} onChange={(event) => setForm({ ...form, managerIds: Array.from(event.target.selectedOptions, (option) => option.value) })}>{(accounts || []).filter((account) => account.status === "Active" && !canManageOrganization(account.role)).map((account) => <option key={account.id} value={account.id}>{account.name} · {account.email}</option>)}</select><small>Use Ctrl/Cmd to select more than one manager.</small></label>
@@ -11176,7 +11830,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   const reportTabs = ["Daily Sales", "Annual Sales", "Expenses", "Monthly Net Profit", "Staff Commission", "Product Inventory"];
   const [reportView, setReportView] = useState("Daily Sales");
   const currentYear = todayDate().slice(0, 4);
-  const activeTransactions = transactions.filter((transaction) => transaction.status !== "Void");
+  const activeTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode);
   const months = Array.from({ length: 12 }, (_, index) => `${currentYear}-${String(index + 1).padStart(2, "0")}`);
 
   const dailySalesRows = Object.values(
@@ -11448,7 +12102,7 @@ function BookingPortal({ services, staff, onSubmit }) {
         </div>
         {step === 1 && (
           <div className="form-grid">
-            <label className="span-2"><span>Choose treatment</span><select value={form.serviceId} onChange={(event) => setForm({ ...form, serviceId: event.target.value })}>{services.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name} - {money.format(item.price)}</option>)}</select></label>
+            <label className="span-2"><span>Choose treatment</span><select value={form.serviceId} onChange={(event) => setForm({ ...form, serviceId: event.target.value })}>{services.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name} - {servicePriceLabel(item)}</option>)}</select></label>
             <RecordItem label="Category" value={service?.category ?? "Treatment"} />
             <RecordItem label="Duration" value={`${service?.duration ?? 0} minutes`} />
             <button className="primary-button" type="button" onClick={() => setStep(2)}>Continue</button>
@@ -11489,7 +12143,91 @@ function BookingPortal({ services, staff, onSubmit }) {
   );
 }
 
-function SettingsModule({ settings, users, auditLogs, discounts, openModal, globalSearch }) {
+function PaymentMethodsSettings({ settings, onSave, canConfigure }) {
+  const [methods, setMethods] = useState(() => configuredPaymentMethods(settings));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setMethods(configuredPaymentMethods(settings));
+  }, [settings]);
+
+  function updateMethod(index, patch) {
+    setMethods((current) => current.map((method, itemIndex) => itemIndex === index ? { ...method, ...patch } : method));
+  }
+
+  function moveMethod(index, direction) {
+    setMethods((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function submit() {
+    const cleaned = methods.map((method, index) => ({
+      id: method.id || createId("payment"),
+      name: String(method.name || "").trim(),
+      active: method.active !== false,
+      order: index,
+    })).filter((method) => method.name);
+    if (!cleaned.length || !cleaned.some((method) => method.active)) {
+      setError("Add and enable at least one payment method.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({ paymentMethods: cleaned });
+    } catch (saveError) {
+      setError(saveError.message || "Payment methods could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="surface-panel full-span payment-method-settings">
+      <SectionHeader icon={WalletCards} title="Payment Methods" action={canConfigure ? "Super Admin configuration" : "View only"} />
+      <p className="section-copy">The enabled methods below appear in POS, split payment, expense recording, and transaction reports in this exact order.</p>
+      <div className="payment-method-config-list">
+        {methods.map((method, index) => (
+          <div className="payment-method-config-row" key={method.id || index}>
+            <span className="payment-method-order">{index + 1}</span>
+            <input
+              aria-label={`Payment method ${index + 1}`}
+              disabled={!canConfigure}
+              value={method.name}
+              onChange={(event) => updateMethod(index, { name: event.target.value })}
+            />
+            <label className="checkbox-field compact">
+              <input disabled={!canConfigure} type="checkbox" checked={method.active !== false} onChange={(event) => updateMethod(index, { active: event.target.checked })} />
+              <span>Enabled</span>
+            </label>
+            {canConfigure && (
+              <div className="payment-method-row-actions">
+                <button type="button" disabled={index === 0} onClick={() => moveMethod(index, -1)} aria-label={`Move ${method.name} up`}>↑</button>
+                <button type="button" disabled={index === methods.length - 1} onClick={() => moveMethod(index, 1)} aria-label={`Move ${method.name} down`}>↓</button>
+                <button type="button" className="danger-text" onClick={() => setMethods((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove ${method.name}`}><Trash2 size={15} /></button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
+      {canConfigure && (
+        <div className="panel-actions">
+          <button className="secondary-button small" type="button" onClick={() => setMethods((current) => [...current, { id: createId("payment"), name: "", active: true, order: current.length }])}><Plus size={16} /> Add method</button>
+          <button className="primary-button small" type="button" onClick={submit} disabled={saving}><Check size={16} /> {saving ? "Saving..." : "Save payment methods"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettingsModule({ settings, users, auditLogs, discounts, promotions = [], consentTemplates = [], openModal, globalSearch, saveSettings, canConfigurePayments }) {
   return (
     <section className="module-grid two">
       <div className="surface-panel wide">
@@ -11514,6 +12252,7 @@ function SettingsModule({ settings, users, auditLogs, discounts, openModal, glob
           ))}
         </div>
       </div>
+      <PaymentMethodsSettings settings={settings} onSave={saveSettings} canConfigure={canConfigurePayments} />
       <div className="surface-panel full-span">
         <SectionHeader icon={Activity} title="Audit Log" action="Sensitive actions" />
         <SmartTable
@@ -11532,6 +12271,7 @@ function SettingsModule({ settings, users, auditLogs, discounts, openModal, glob
       </div>
       <div className="surface-panel full-span">
         <SectionHeader icon={Gift} title="Discounts and Add-ons" action="Configurable" />
+        <button className="primary-button small" type="button" onClick={() => openModal("discount")}><Plus size={16} /> New discount</button>
         <SmartTable
           rows={discounts}
           columns={[
@@ -11541,11 +12281,34 @@ function SettingsModule({ settings, users, auditLogs, discounts, openModal, glob
             { key: "permission", label: "Permission" },
             { key: "applicable", label: "Applicable" },
             { key: "active", label: "Status", render: (row) => <StatusBadge status={row.active ? "Active" : "Inactive"} /> },
+            { key: "actions", label: "", render: (row) => <button type="button" onClick={() => openModal("discount", row)}><Edit3 size={15} /> Edit</button>, exportValue: () => "" },
           ]}
         />
         <div className="workflow-chips add-ons">
           {["Automated SMS Marketing", "SMS credit top-up", "Retraining / face-to-face meetings", "Extra branch", "Extra user", "Advanced analytics", "Custom reports"].map((item) => <span key={item}>{item}</span>)}
         </div>
+      </div>
+      <div className="surface-panel full-span">
+        <SectionHeader icon={Sparkles} title="Promotional Pricing" action={`${promotions.filter((item) => item.active).length} active`} />
+        <button className="primary-button small" type="button" onClick={() => openModal("promotion")}><Plus size={16} /> New promotion</button>
+        <SmartTable rows={promotions} globalSearch={globalSearch} columns={[
+          { key: "name", label: "Promotion" },
+          { key: "discountType", label: "Type" },
+          { key: "value", label: "Value", render: (row) => row.discountType === "Percentage" ? `${row.value}%` : money.format(row.value) },
+          { key: "startDate", label: "Starts", render: (row) => formatDate(row.startDate) },
+          { key: "endDate", label: "Ends", render: (row) => formatDate(row.endDate) },
+          { key: "active", label: "Status", render: (row) => <StatusBadge status={row.active ? "Active" : "Inactive"} /> },
+          { key: "actions", label: "", render: (row) => <button type="button" onClick={() => openModal("promotion", row)}><Edit3 size={15} /> Edit</button>, exportValue: () => "" },
+        ]} />
+      </div>
+      <div className="surface-panel full-span">
+        <SectionHeader icon={FileText} title="Digital Consent Form Templates" action={`${consentTemplates.length} versions`} />
+        <button className="primary-button small" type="button" onClick={() => openModal("consent-template")}><Plus size={16} /> New form version</button>
+        <SmartTable rows={consentTemplates} columns={[
+          { key: "name", label: "Form" }, { key: "version", label: "Version" },
+          { key: "active", label: "Status", render: (row) => <StatusBadge status={row.active ? "Active" : "Inactive"} /> },
+          { key: "actions", label: "", render: (row) => <button type="button" onClick={() => openModal("consent-template", row)}><Edit3 size={15} /> Edit</button>, exportValue: () => "" },
+        ]} />
       </div>
     </section>
   );
@@ -11611,7 +12374,7 @@ function SupportModule() {
             ["Create a booking", "Open Appointments, choose New Appointment, then select client, service, branch, room, staff, and status."],
             ["Complete split payment", "Build the cart in POS, choose Split, add payment methods, then confirm paid amount and change."],
             ["Upload treatment photos", "Open the client or treatment record, then add images under an authorized clinical account."],
-            ["Receive inventory", "Use Inventory, select the item, record quantity received, branch, batch, expiry, and supplier notes."],
+            ["Receive inventory", "Use Inventory, select the item, then record receipt date, supplier, received by, check number, quantity, and unit."],
             ["Export reports", "Open Reports, choose date range and report type, then use CSV or Print for the owner pack."],
             ["Review audit logs", "Open Settings, review actor, role, action, area, and timestamp for sensitive changes."],
           ].map(([title, copy]) => (
@@ -11636,13 +12399,19 @@ function ModalHost({
   saveClient,
   saveService,
   saveInventory,
+  receiveStock,
   saveLead,
   saveTreatment,
   saveExpense,
   saveStaff,
   savePackage,
+  saveGiftCertificate,
   saveCampaign,
   saveSettings,
+  saveDiscount,
+  savePromotion,
+  saveConsentTemplate,
+  saveConsentSubmission,
   saveRoom,
   changePassword,
   clients,
@@ -11655,6 +12424,7 @@ function ModalHost({
   packages,
   giftCertificates,
   appointments,
+  consentTemplates,
 }) {
   if (!modal) return null;
 
@@ -11670,14 +12440,10 @@ function ModalHost({
     ...services.map((service) => service.name),
   ].filter((value, index, values) => value && values.indexOf(value) === index);
   const staffOptions = staff.map((person) => person.name);
-  const inventoryOptions = inventory.map((item) => item.item);
-  const consumableSuggestions = [
-    ...inventoryOptions,
-    ...services.flatMap((service) => (Array.isArray(service.consumables) ? service.consumables : splitList(service.consumables))),
-  ].filter((value, index, values) => value && values.indexOf(value) === index);
   const templateOptions = [{ value: "", label: "Custom message" }, ...(templates ?? []).map((template) => ({ value: template.id, label: template.name }))];
   const defaultMarketingTemplate = (templates ?? []).find((template) => template.category === "Marketing") ?? templates?.[0];
   const canManageProductPhotos = canManageOrganization(session?.role);
+  const paymentMethodNames = activePaymentMethodNames(settings);
 
   if (modal.type === "account") {
     return <AccountSecurityModal account={session} onClose={closeModal} onChangePassword={changePassword} />;
@@ -11689,6 +12455,8 @@ function ModalHost({
         draft={modal.payload}
         packages={packages}
         giftCertificates={giftCertificates}
+        staff={staff}
+        paymentMethods={activePaymentMethodNames(settings, { includePackage: true })}
         onClose={closeModal}
         onSubmit={(payment) => completeTransaction(modal.payload, payment)}
       />
@@ -11723,7 +12491,72 @@ function ModalHost({
     );
   }
 
+  if (modal.type === "consent") {
+    return (
+      <ConsentModal
+        payload={modal.payload}
+        clients={clients}
+        services={services}
+        branches={activeBranches}
+        templates={consentTemplates}
+        witness={session?.name || ""}
+        onClose={closeModal}
+        onSubmit={saveConsentSubmission}
+      />
+    );
+  }
+
   const configs = {
+    discount: {
+      title: modal.payload?.id ? "Edit Discount" : "New Discount",
+      initial: { name: "", type: "Percentage", value: 0, permission: "Super Admin", applicable: "Services and products", expiry: "", usage: 0, active: true, ...modal.payload },
+      submitLabel: "Save discount",
+      onSubmit: saveDiscount,
+      fields: [
+        field("name", "Discount name"),
+        field("type", "Discount type", "select", ["Percentage", "Fixed amount"]),
+        field("value", "Discount value", "number"),
+        field("permission", "Approval required from", "select", ["Super Admin", "Owner", "Branch Manager", "Receptionist", "Cashier"]),
+        field("applicable", "Applies to", "select", ["Services and products", "Services", "Products", "Selected clients", "Birthday month", "Owner approval only"]),
+        field("expiry", "Expiration (optional)", "date", null, "", false),
+        field("active", "Active", "checkbox"),
+      ],
+    },
+    "consent-template": {
+      title: modal.payload?.id ? "Edit Consent Form Version" : "New Consent Form Version",
+      initial: { name: "Patient Consent", version: "v1", content: "", active: true, ...modal.payload, serviceIds: splitList(modal.payload?.serviceIds).join(", "), requiredFields: splitList(modal.payload?.requiredFields).join(", ") },
+      submitLabel: "Save form template",
+      onSubmit: saveConsentTemplate,
+      fields: [field("name", "Form name"), field("version", "Version"), field("serviceIds", "Related services", "multi-select", services.map((service) => ({ value: service.id, label: service.name })), "span-2", false), field("content", "Consent text", "textarea", null, "span-2"), field("requiredFields", "Additional required fields", "text", null, "span-2", false), field("active", "Active", "checkbox")],
+    },
+    promotion: {
+      title: modal.payload?.id ? "Edit Promotion" : "New Promotion",
+      initial: {
+        name: "",
+        discountType: "Percentage",
+        value: 0,
+        startDate: todayDate(),
+        endDate: todayDate(),
+        active: true,
+        ...modal.payload,
+        serviceIds: splitList(modal.payload?.serviceIds).join(", "),
+        packageNames: splitList(modal.payload?.packageNames).join(", "),
+        branches: splitList(modal.payload?.branches).join(", ") || "All branches",
+      },
+      submitLabel: "Save promotion",
+      onSubmit: savePromotion,
+      fields: [
+        field("name", "Promotion name", "text", null, "span-2"),
+        field("serviceIds", "Included services", "multi-select", services.map((service) => ({ value: service.id, label: service.name }))),
+        field("packageNames", "Included packages", "multi-select", packages.map((pkg) => pkg.name), "", false),
+        field("discountType", "Discount type", "select", ["Percentage", "Fixed Amount"]),
+        field("value", "Discount value", "number"),
+        field("startDate", "Start date", "date"),
+        field("endDate", "End date", "date"),
+        field("branches", "Applicable branches", "multi-select", ["All branches", ...branchOptions]),
+        field("active", "Active", "checkbox"),
+      ],
+    },
     appointment: {
       title: modal.payload?.id ? "Edit Appointment" : "New Appointment",
       initial: {
@@ -11760,15 +12593,26 @@ function ModalHost({
       title: modal.payload?.id ? "Edit Client" : "Add Client",
       initial: {
         fullName: "",
+        firstName: "",
+        middleName: "",
+        lastName: "",
         photo: "",
         mobile: "",
         email: "",
         gender: "",
         birthday: "",
         address: "",
+        street: "",
+        barangay: "",
         city: "",
+        province: "",
+        civilStatus: "",
+        occupation: "",
         emergency: "",
+        emergencyName: "",
+        emergencyPhone: "",
         branch: defaultClinicBranch,
+        branchesVisited: defaultClinicBranch ? [defaultClinicBranch] : [],
         source: "Walk-in",
         referral: "",
         medicalNotes: "",
@@ -11787,17 +12631,28 @@ function ModalHost({
         packageBalance: "None",
         giftBalance: 0,
         ...modal.payload,
+        ...clientNameParts(modal.payload),
       },
       submitLabel: "Save client",
       onSubmit: saveClient,
       fields: [
         field("photo", "Profile photo", "photo", null, "span-2"),
-        field("fullName", "Full name"),
+        field("firstName", "First name"),
+        field("middleName", "Middle name", "text", null, "", false),
+        field("lastName", "Last name"),
         field("mobile", "Mobile number"),
         field("email", "Email", "email"),
         field("gender", "Gender", "select", ["", "Female", "Male", "Prefer not to say"]),
-        field("birthday", "Birthday", "date"),
-        field("branch", "Branch", "select", branchOptions),
+        field("birthday", "Date of birth", "date"),
+        field("civilStatus", "Civil status", "select", ["", "Single", "Married", "Widowed", "Separated", "Prefer not to say"], "", false),
+        field("occupation", "Occupation", "text", null, "", false),
+        field("street", "Street", "text", null, "", false),
+        field("barangay", "Barangay", "text", null, "", false),
+        field("city", "City", "text", null, "", false),
+        field("province", "Province", "text", null, "", false),
+        field("emergencyName", "Emergency contact name", "text", null, "", false),
+        field("emergencyPhone", "Emergency contact number", "text", null, "", false),
+        field("branch", "First registered branch", "select", branchOptions),
         field("source", "Source", "select", ["Walk-in", "Website", "Instagram", "Facebook", "Referral", "Online Booking"]),
         field("tag", "Tag", "select", ["New", "VIP", "Returning", "Follow-up", "Online"]),
         field("allergies", "Allergies"),
@@ -11813,8 +12668,15 @@ function ModalHost({
       initial: {
         name: "",
         category: serviceCategories[0],
+        serviceType: "Regular Service",
         duration: 60,
         price: 0,
+        priceModel: "Fixed price",
+        priceUnit: "",
+        packageSessions: 0,
+        packagePrice: 0,
+        serviceValue: 0,
+        recommendedIntervalDays: 0,
         commission: "",
         room: "Treatment Room",
         active: true,
@@ -11823,27 +12685,57 @@ function ModalHost({
         contraindications: "",
         aftercare: "",
         ...modal.payload,
-        consumables: Array.isArray(modal.payload?.consumables) ? modal.payload.consumables.join(", ") : modal.payload?.consumables ?? "",
         branches: Array.isArray(modal.payload?.branches) ? modal.payload.branches.join(", ") : modal.payload?.branches ?? branchOptions.join(", "),
-        staff: Array.isArray(modal.payload?.staff) ? modal.payload.staff.join(", ") : modal.payload?.staff ?? "Doctor, Nurse / Aesthetician",
+        staff: Array.isArray(modal.payload?.staff) ? modal.payload.staff.join(", ") : modal.payload?.staff ?? "Doctor, Nurse, Aesthetician",
       },
       submitLabel: "Save service",
       onSubmit: saveService,
       fields: [
         field("name", "Service name"),
+        field("serviceType", "Service type", "select", ["Regular Service", "Package", "Add-on"]),
         field("category", "Category", "select", serviceCategories),
         field("duration", "Duration minutes", "number"),
-        field("price", "Price", "number"),
-        field("commission", "Commission rule"),
-        field("consumables", "Consumables", "suggest", consumableSuggestions),
+        field("priceModel", "Pricing model", "select", ["Fixed price", "Starts at", "Price after consultation/assessment", "Per unit"]),
+        field("price", "Base price", "number"),
+        field("priceUnit", "Pricing unit", "select", ["", "Per syringe", "Per ml", "Per vial", "Per ampule"], "", false),
+        field("packageSessions", "Package sessions", "number", null, "", false),
+        field("packagePrice", "Package price", "number", null, "", false),
+        field("serviceValue", "Service value per session", "number", null, "", false),
+        field("recommendedIntervalDays", "Recommended interval (days)", "number", null, "", false),
         field("branches", "Branch availability"),
-        field("staff", "Staff allowed"),
+        field("staff", "Staff allowed", "multi-select", ["Doctor", "Nurse", "Head Nurse", "Aesthetician", "Head Aesthetician", "N/A"]),
         field("room", "Room / device required"),
         field("active", "Active", "checkbox"),
         field("pos", "Editable on POS", "checkbox"),
         field("description", "Description", "textarea", null, "span-2"),
         field("contraindications", "Contraindication notes", "textarea", null, "span-2"),
         field("aftercare", "Aftercare notes", "textarea", null, "span-2"),
+      ],
+    },
+    "inventory-receive": {
+      title: "Receive Stock",
+      initial: {
+        inventoryId: inventory[0]?.id || "",
+        date: todayDate(),
+        qty: 1,
+        unit: inventory[0]?.unit || "piece",
+        supplier: "",
+        receivedBy: session?.name || "",
+        checkNumber: "",
+        notes: "",
+        ...modal.payload,
+      },
+      submitLabel: "Post stock receipt",
+      onSubmit: (values) => receiveStock(values.inventoryId, values),
+      fields: [
+        field("inventoryId", "Inventory item", "select", inventory.map((item) => ({ value: item.id, label: `${item.item} · ${item.stock} ${item.unit}` })), "span-2"),
+        field("date", "Date received", "date"),
+        field("qty", "Quantity received", "number"),
+        field("unit", "Unit of measurement"),
+        field("supplier", "Supplier"),
+        field("receivedBy", "Received by"),
+        field("checkNumber", "Check number", "text", null, "", false),
+        field("notes", "Receiving notes", "textarea", null, "span-2", false),
       ],
     },
     inventory: {
@@ -11874,8 +12766,6 @@ function ModalHost({
       fields: [
         ...(canManageProductPhotos ? [field("image", "Product photo", "photo", null, "span-2 product-photo-field")] : []),
         field("item", "Product / consumable"),
-        field("sku", "SKU"),
-        field("brand", "Brand"),
         field("category", "Category", "select", settings.productCategories),
         field("type", "Type", "select", ["Consumable", "Retail"]),
         field("unit", "Unit"),
@@ -11884,9 +12774,6 @@ function ModalHost({
         field("branch", "Branch", "select", branchOptions),
         field("location", "Stock location"),
         field("reorder", "Reorder level", "number"),
-        field("expiry", "Expiry date", "date"),
-        field("batch", "Batch / lot"),
-        field("supplier", "Supplier"),
         field("cost", "Cost", "number"),
         field("price", "Retail price", "number"),
       ],
@@ -11998,7 +12885,7 @@ function ModalHost({
     },
     treatment: {
       title: modal.payload?.id ? "Edit Treatment Record" : "New Treatment Record",
-      initial: { branch: defaultClinicBranch, clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name, room: "Room 1", preNotes: "", postNotes: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
+      initial: { branch: defaultClinicBranch, clientId: clients[0]?.id, date: todayDate(), service: services[0]?.name, provider: staff[0]?.name || "N/A", room: "Room 1", preNotes: "", postNotes: "", aftercare: "", arrivalTime: "", treatmentStartTime: "", completedTime: "", checkoutTime: "", consumables: "", deviceSettings: "", batch: "", consent: "Pending", followUp: "", outcome: "", satisfaction: "", ...modal.payload },
       submitLabel: "Save treatment",
       onSubmit: saveTreatment,
       fields: [
@@ -12006,9 +12893,13 @@ function ModalHost({
         field("clientId", "Client", "select", clientOptions),
         field("date", "Treatment date", "date"),
         field("service", "Service / procedure", "select", services.map((service) => service.name)),
-        field("provider", "Doctor / staff", "select", staffOptions),
+        field("provider", "Doctor / staff", "select", ["N/A", ...staffOptions]),
         field("room", "Room"),
-        field("consumables", "Consumables used"),
+        field("arrivalTime", "Arrival / check-in", "time", null, "", false),
+        field("treatmentStartTime", "Treatment start", "time", null, "", false),
+        field("completedTime", "Treatment completed", "time", null, "", false),
+        field("checkoutTime", "Checkout time", "time", null, "", false),
+        field("consumables", "Consumables used (Item: quantity, ...)", "text", null, "span-2", false),
         field("deviceSettings", "Device settings"),
         field("batch", "Lot / batch"),
         field("consent", "Consent", "select", ["Pending", "Signed"]),
@@ -12016,6 +12907,7 @@ function ModalHost({
         field("satisfaction", "Client satisfaction"),
         field("preNotes", "Pre-treatment notes", "textarea", null, "span-2"),
         field("postNotes", "Post-treatment notes", "textarea", null, "span-2"),
+        field("aftercare", "Aftercare instructions", "textarea", null, "span-2", false),
         field("outcome", "Outcome notes", "textarea", null, "span-2"),
       ],
     },
@@ -12030,7 +12922,7 @@ function ModalHost({
         field("category", "Category", "select", settings.expenseCategories),
         field("branch", "Branch", "select", recordBranchOptions),
         field("amount", "Amount", "number"),
-        field("method", "Payment method", "select", paymentMethods),
+        field("method", "Payment method", "select", paymentMethodNames),
         field("approver", "Approver"),
         field("status", "Status", "select", ["For approval", "Approved", "Rejected"]),
         field("receipt", "Receipt"),
@@ -12039,27 +12931,69 @@ function ModalHost({
     },
     staff: {
       title: modal.payload?.id ? "Edit Employee" : "Add Employee",
-      initial: { name: "", photo: "", role: "Nurse / Aesthetician", branch: defaultClinicBranch, schedule: "9:00 AM - 6:00 PM", commissionType: "", commissionRate: 0, services: "", status: "Available", attendance: "Clocked out", employmentDate: todayDate(), phone: "", ...modal.payload },
+      initial: {
+        name: "", photo: "", role: "Aesthetician", branch: defaultClinicBranch,
+        schedule: "10:00 AM - 7:00 PM", scheduleBranches: "", commissionType: "", commissionRate: 0,
+        services: "", status: "Available", attendance: "Clocked out", employmentDate: todayDate(),
+        employmentStatus: "Regular", birthDate: "", address: "", emergencyContact: "", emergencyPhone: "", phone: "",
+        ...modal.payload,
+        branches: Array.isArray(modal.payload?.branches) ? modal.payload.branches.join(", ") : modal.payload?.branches ?? defaultClinicBranch,
+      },
       submitLabel: "Save employee",
       onSubmit: saveStaff,
       fields: [
         field("photo", "Employee photo", "photo", null, "span-2"),
         field("name", "Name"),
         field("role", "Role", "select", Object.keys(roleAccess)),
-        field("branch", "Branch", "select", branchOptions),
+        field("branch", "Primary branch", "select", branchOptions),
+        field("branches", "Assigned branches", "multi-select", branchOptions),
         field("schedule", "Schedule"),
         field("commissionType", "Commission type", "suggest", ["Percentage per service", "Fixed amount per service", "Tiered commission", "Doctor rate", "Skin care", "Device care", "No commission / N/A"]),
         field("commissionRate", "Commission rate", "number-suggest", [0, 5, 8, 10, 12, 15, 20]),
         field("services", "Services allowed", "multi-select", employeeServiceSuggestions),
         field("status", "Status", "select", ["Available", "In treatment", "On leave", "Inactive"]),
         field("attendance", "Attendance", "select", ["Clocked in", "Clocked out"]),
+        field("employmentStatus", "Employment status", "select", ["Regular", "Probationary", "Part-time", "Contract", "Inactive"]),
         field("employmentDate", "Employment date", "date"),
+        field("birthDate", "Date of birth", "date", null, "", false),
+        field("address", "Address", "textarea", null, "span-2", false),
+        field("emergencyContact", "Emergency contact name", "text", null, "", false),
+        field("emergencyPhone", "Emergency contact number", "text", null, "", false),
         field("phone", "Contact number"),
+      ],
+    },
+    "gift-certificate": {
+      title: modal.payload?.id ? "Edit Gift Certificate" : "Issue Gift Certificate",
+      initial: {
+        code: `MACE-GC-${Date.now().toString(36).toUpperCase()}`,
+        client: clients[0]?.fullName || "",
+        type: "Monetary Value",
+        serviceId: "",
+        service: "",
+        balance: 0,
+        issueDate: todayDate(),
+        expires: "",
+        branch: "All branches",
+        status: "Active",
+        ...modal.payload,
+      },
+      submitLabel: modal.payload?.id ? "Save certificate" : "Issue certificate",
+      onSubmit: saveGiftCertificate,
+      fields: [
+        field("code", "Certificate code"),
+        field("client", "Issued to", "select", clients.map((client) => client.fullName)),
+        field("type", "Certificate type", "select", ["Monetary Value", "Specific Service"]),
+        field("serviceId", "Specific service (when applicable)", "select", [{ value: "", label: "Not service-specific" }, ...serviceOptions], "", false),
+        field("balance", "Value / remaining balance", "number"),
+        field("issueDate", "Issue date", "date"),
+        field("expires", "Expiration (optional)", "date", null, "", false),
+        field("branch", "Redeemable branch", "select", ["All branches", ...recordBranchOptions]),
+        field("status", "Status", "select", ["Active", "Redeemed", "Expired"]),
       ],
     },
     package: {
       title: modal.payload?.id ? "Edit Package" : "Sell Package",
-      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, expires: todayDate(), branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, ...modal.payload },
+      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, expires: "", branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload },
       submitLabel: "Save package",
       onSubmit: savePackage,
       fields: [
@@ -12067,11 +13001,15 @@ function ModalHost({
         field("clientId", "Client", "select", clientOptions),
         field("sessions", "Sessions", "number"),
         field("used", "Used", "number"),
-        field("expires", "Expiration", "date"),
+        field("purchaseDate", "Purchase date", "date"),
+        field("expires", "Expiration (optional)", "date", null, "", false),
         field("branch", "Branch", "select", recordBranchOptions),
         field("transferable", "Transferable", "checkbox"),
         field("status", "Status", "select", ["Active", "Pending", "Completed", "Expired"]),
         field("price", "Price", "number"),
+        field("amountPaid", "Amount paid", "number"),
+        field("nextPayment", "Next expected payment", "date", null, "", false),
+        field("serviceValue", "Service value per session", "number", null, "", false),
       ],
     },
     campaign: {
@@ -12132,6 +13070,125 @@ function ModalHost({
   return <EntityModal config={config} onClose={closeModal} />;
 }
 
+function clientNameParts(client = {}) {
+  if (client.firstName || client.middleName || client.lastName) {
+    return { firstName: client.firstName || "", middleName: client.middleName || "", lastName: client.lastName || "" };
+  }
+  const parts = String(client.fullName || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { firstName: parts[0] || "", middleName: "", lastName: "" };
+  return { firstName: parts[0], middleName: parts.slice(1, -1).join(" "), lastName: parts.at(-1) };
+}
+
+function ageFromBirthday(birthday, today = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(birthday || ""))) return null;
+  const [year, month, day] = birthday.split("-").map(Number);
+  let age = today.getFullYear() - year;
+  if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function branchOperatingWindow(branch, date) {
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) ? new Date(`${date}T00:00:00.000Z`) : null;
+  const dayKey = parsed && !Number.isNaN(parsed.getTime()) ? operatingDayKeys[parsed.getUTCDay()] : "monday";
+  const configured = branch?.operatingHours?.[dayKey] || defaultBranchOperatingHours[dayKey];
+  return {
+    dayKey,
+    closed: Boolean(configured?.closed),
+    open: parseTimeToMinutes(configured?.open || defaultBranchOperatingHours[dayKey].open),
+    close: parseTimeToMinutes(configured?.close || defaultBranchOperatingHours[dayKey].close),
+  };
+}
+
+function freshOperatingHours(value = {}) {
+  return Object.fromEntries(operatingDayKeys.map((dayKey) => [dayKey, {
+    ...defaultBranchOperatingHours[dayKey],
+    ...(value?.[dayKey] || {}),
+  }]));
+}
+
+function operatingHoursSummary(value) {
+  const hours = freshOperatingHours(value);
+  const monday = hours.monday;
+  const sunday = hours.sunday;
+  return `Mon-Sat ${formatScheduleTime(parseTimeToMinutes(monday.open))} - ${formatScheduleTime(parseTimeToMinutes(monday.close))}; Sun ${formatScheduleTime(parseTimeToMinutes(sunday.open))} - ${formatScheduleTime(parseTimeToMinutes(sunday.close))}`;
+}
+
+function ConsentModal({ payload = {}, clients = [], services = [], branches = [], templates = [], witness = "", onClose, onSubmit }) {
+  const activeTemplates = templates.filter((template) => template.active);
+  const branchNames = branches.map((branch) => branch.name);
+  const [form, setForm] = useState(() => ({
+    clientId: payload.clientId || clients[0]?.id || "",
+    templateId: activeTemplates.some((template) => template.id === payload.templateId) ? payload.templateId : activeTemplates[0]?.id || "",
+    service: payload.service || "",
+    treatmentId: payload.treatmentId || "",
+    branch: branchNames.includes(payload.branch) ? payload.branch : branchNames[0] || "",
+    witness: payload.witness || witness,
+    signature: "",
+    accepted: false,
+  }));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const selectedTemplate = activeTemplates.find((template) => template.id === form.templateId);
+  const selectedClient = clients.find((client) => client.id === form.clientId);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      await onSubmit({
+        ...form,
+        answers: {
+          clientName: selectedClient?.fullName || "",
+          confirmation: "Client reviewed the displayed form and accepted its terms.",
+        },
+      });
+    } catch (submitError) {
+      setError(submitError.message || "Unable to attach the signed consent form.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Complete digital consent">
+      <form className="modal-card consent-modal" onSubmit={submit}>
+        <button className="modal-close" type="button" onClick={onClose} aria-label="Close consent form"><X size={18} /></button>
+        <ModalHeader icon={ShieldCheck} title="Complete Digital Consent" action="Permanent client record" />
+
+        {!activeTemplates.length ? (
+          <div className="inline-state warning" role="alert"><AlertCircle size={17} /> Create and activate a consent form template in Settings before collecting a signature.</div>
+        ) : (
+          <>
+            <div className="form-grid">
+              <label><span>Client</span><select required value={form.clientId} onChange={(event) => setForm({ ...form, clientId: event.target.value })}>{clients.map((client) => <option key={client.id} value={client.id}>{client.fullName}</option>)}</select></label>
+              <label><span>Consent form</span><select required value={form.templateId} onChange={(event) => setForm({ ...form, templateId: event.target.value })}>{activeTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.version}</option>)}</select></label>
+              <label><span>Related service</span><select value={form.service} onChange={(event) => setForm({ ...form, service: event.target.value })}><option value="">General consent</option>{services.map((service) => <option key={service.id} value={service.name}>{service.name}</option>)}</select></label>
+              <label><span>Branch</span><select required value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })}>{branchNames.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select></label>
+            </div>
+
+            <section className="consent-document" aria-live="polite">
+              <div><strong>{selectedTemplate?.name}</strong><span>Version {selectedTemplate?.version}</span></div>
+              <p>{selectedTemplate?.content}</p>
+            </section>
+
+            <div className="form-grid">
+              <label><span>Staff / witness</span><input value={form.witness} onChange={(event) => setForm({ ...form, witness: event.target.value })} /></label>
+              <label><span>Electronic signature (full legal name)</span><input required autoComplete="name" value={form.signature} onChange={(event) => setForm({ ...form, signature: event.target.value })} /></label>
+              <label className="checkbox-field span-2 consent-acceptance"><input required type="checkbox" checked={form.accepted} onChange={(event) => setForm({ ...form, accepted: event.target.checked })} /><span>I confirm that I am the client or authorized representative, I have read the form above, and I voluntarily accept its terms.</span></label>
+            </div>
+          </>
+        )}
+
+        {error && <div className="inline-state danger" role="alert"><AlertCircle size={17} /> {error}</div>}
+        <div className="modal-actions">
+          <button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="primary-button" type="submit" disabled={saving || !activeTemplates.length || !form.clientId || !form.templateId || !form.branch || !form.signature.trim() || !form.accepted}><ShieldCheck size={17} /> {saving ? "Attaching..." : "Sign and attach permanently"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function AccountSecurityModal({ account, onClose, onChangePassword }) {
   const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [error, setError] = useState("");
@@ -12184,16 +13241,18 @@ function AccountSecurityModal({ account, onClose, onChangePassword }) {
   );
 }
 
-function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, onSubmit }) {
+function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [], paymentMethods = ["Cash", "Package"], onClose, onSubmit }) {
+  const firstMethod = paymentMethods[0] || "Cash";
+  const splitSecondMethod = paymentMethods.find((method) => method !== firstMethod && method !== "Package") || firstMethod;
   const [payments, setPayments] = useState(() => {
     if (draft.splitPayment) {
       const firstAmount = Math.floor(Number(draft.total || 0) / 2);
       return [
-        { method: "Cash", amount: firstAmount, referenceNumber: "" },
-        { method: "Credit Card", amount: Number(draft.total || 0) - firstAmount, referenceNumber: "" },
+        { method: draft.paymentMethod || firstMethod, amount: firstAmount, referenceNumber: "" },
+        { method: splitSecondMethod, amount: Number(draft.total || 0) - firstAmount, referenceNumber: "" },
       ];
     }
-    return [{ method: draft.paymentMethod || "Cash", amount: draft.total, referenceNumber: "" }];
+    return [{ method: draft.paymentMethod || firstMethod, amount: draft.total, referenceNumber: "" }];
   });
   const [notes, setNotes] = useState(draft.notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -12214,9 +13273,14 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
     && (!pkg.expires || pkg.expires >= today)
     && (pkg.transferable || branchAccepts(pkg.branch))
     && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
+  const salaryDeductionEmployees = staff.filter((person) => {
+    const assigned = splitList(person.branches);
+    return person.status !== "Inactive" && (person.branch === draft.branch || assigned.includes(draft.branch) || person.branch === "All branches");
+  });
   const tenderIncomplete = payments.some((payment) =>
     (payment.method === "Gift Certificate" && !payment.giftCertificateId)
-    || (payment.method === "Package" && !payment.packageId));
+    || (payment.method === "Package" && !payment.packageId)
+    || (payment.method === "Salary Deduction" && !payment.employeeId));
   const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete;
 
   function updatePayment(index, patch) {
@@ -12229,7 +13293,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
   }
 
   function changeMethod(index, method) {
-    updatePayment(index, { method, referenceNumber: "", giftCertificateId: undefined, packageId: undefined });
+    updatePayment(index, { method, referenceNumber: "", giftCertificateId: undefined, packageId: undefined, employeeId: undefined });
   }
 
   function chooseCertificate(index, certificateId) {
@@ -12259,6 +13323,19 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
       setSaving(false);
     }
   }, [canPost, notes, onSubmit, payments, saving]);
+
+  const submitUnpaid = useCallback(async () => {
+    if (saving || !draft.clientId) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onSubmit({ payments: [], notes, status: "Unpaid" });
+    } catch (submitError) {
+      setError(submitError?.message || "The unpaid transaction could not be posted.");
+    } finally {
+      setSaving(false);
+    }
+  }, [draft.clientId, notes, onSubmit, saving]);
 
   useEffect(() => {
     function handlePaymentShortcut(event) {
@@ -12295,7 +13372,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
                   value={payment.method}
                   onChange={(event) => changeMethod(index, event.target.value)}
                 >
-                  {posPaymentMethods.map((method) => <option key={method}>{method}</option>)}
+                  {paymentMethods.map((method) => <option key={method}>{method}</option>)}
                 </select>
                 <input
                   aria-label={`Payment ${index + 1} amount`}
@@ -12356,6 +13433,12 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
                   ))}
                 </select>
               )}
+              {payment.method === "Salary Deduction" && (
+                <select className="payment-tender-select" aria-label={`Payment ${index + 1} employee`} value={payment.employeeId || ""} onChange={(event) => updatePayment(index, { employeeId: event.target.value || undefined })}>
+                  <option value="">Select employee for salary deduction...</option>
+                  {salaryDeductionEmployees.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.role}</option>)}
+                </select>
+              )}
               {payment.method === "Gift Certificate" && !usableCertificates.length && (
                 <span className="payment-tender-hint">No active gift certificates for this branch.</span>
               )}
@@ -12365,7 +13448,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
             </div>
           ))}
         </div>
-        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: "GCash", amount: 0, referenceNumber: "" }])}>
+        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: paymentMethods.find((method) => method !== "Package") || firstMethod, amount: 0, referenceNumber: "" }])}>
           <Plus size={16} /> Add split payment
         </button>
         <label className="stacked-field">
@@ -12375,11 +13458,14 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], onClose, on
         <div className="receipt-preview">
           <div><span>Paid</span><strong>{money.format(paid)}</strong></div>
           <div><span>Change</span><strong>{money.format(change)}</strong></div>
-          <div><span>Status</span><strong>{paid >= draft.total ? "Paid" : "Partial"}</strong></div>
+          <div><span>Status</span><strong>{paid >= draft.total ? "Paid" : paid > 0 ? "Partially Paid" : "Unpaid"}</strong></div>
         </div>
         <div className="modal-actions">
           <span className="modal-keyboard-hint"><kbd>Esc</kbd> cancel · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> post</span>
           <button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="secondary-button" type="button" onClick={submitUnpaid} disabled={saving || !draft.clientId} title={draft.clientId ? "Post the full amount to this client's outstanding balance" : "Select a registered client to post an unpaid sale"}>
+            <WalletCards size={17} /> Post unpaid
+          </button>
           <button className="primary-button" type="button" onClick={submitPayment} disabled={saving || !canPost} aria-keyshortcuts="Control+Enter">
             <Check size={17} /> {saving ? "Posting..." : "Post payment"}
           </button>
@@ -12421,22 +13507,29 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
   const [showTimezoneSelect, setShowTimezoneSelect] = useState(false);
   const selectedService = services.find((item) => item.id === form.serviceId);
   const selectedBranch = branches.find((item) => item.name === form.branch);
-  const availableClients = clients.filter((client) => !form.branch || client.branch === form.branch);
+  const availableClients = clients;
   const availableServices = services.filter((service) => {
     const offered = Array.isArray(service.branches) ? service.branches : [];
     return !form.branch || !offered.length || offered.includes("All branches") || offered.includes(form.branch);
   });
-  const availableRooms = selectedBranch?.rooms || uniqueRoomsFromBranches();
-  const availableStaff = staff.filter((person) => person.branch === form.branch || person.branch === "All branches" || !person.branch);
+  const availableRooms = [
+    ...(selectedBranch?.rooms || uniqueRoomsFromBranches()),
+    ...Array.from({ length: Number(selectedBranch?.couches || 0) }, (_, index) => `Couch ${index + 1}`),
+  ];
+  const availableStaff = staff.filter((person) => {
+    const assignedBranches = Array.isArray(person.branches) ? person.branches : splitList(person.branches);
+    return person.branch === form.branch || assignedBranches.includes(form.branch) || person.branch === "All branches" || !person.branch;
+  });
   const patient = clients.find((client) => client.id === form.clientId);
   const patientPackages = packages.filter((item) => item.clientId === form.clientId || item.client === patient?.fullName);
   const duration = Math.max(15, Number(form.duration || selectedService?.duration || 60));
   const availableSlots = useMemo(() => {
     if (!form.date) return [];
+    const operatingWindow = branchOperatingWindow(selectedBranch, form.date);
+    if (operatingWindow.closed) return [];
     const slots = [];
-    for (let start = scheduleStartMinutes; start + duration <= scheduleEndMinutes; start += 15) {
+    for (let start = operatingWindow.open; start + duration <= operatingWindow.close; start += 15) {
       const end = start + duration;
-      if (start < 13 * 60 && end > 12 * 60) continue;
       const conflicts = appointments.some((appointment) => {
         if (appointment.id === form.id || appointment.date !== form.date || !isActiveAppointmentStatus(appointment.status)) return false;
         if (form.branch && appointment.branch !== form.branch) return false;
@@ -12449,13 +13542,13 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
       if (!conflicts) slots.push(formatTimeInput(start));
     }
     return slots;
-  }, [appointments, duration, form.branch, form.date, form.id, form.room, form.staff, services]);
+  }, [appointments, duration, form.branch, form.date, form.id, form.room, form.staff, selectedBranch, services]);
 
   function update(name, value) {
     setForm((current) => ({
       ...current,
       [name]: value,
-      ...(name === "branch" ? { room: "", staff: "", clientId: "", packageName: "" } : {}),
+      ...(name === "branch" ? { room: "", staff: "", packageName: "" } : {}),
       ...(name === "serviceId" ? { duration: Number(services.find((item) => item.id === value)?.duration || current.duration || 60) } : {}),
     }));
   }
@@ -12484,7 +13577,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
             <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">{form.branch ? "Search or select a client" : "Select a branch first"}</option>{availableClients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
             <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">{form.branch ? "Select a service" : "Select a branch first"}</option>{availableServices.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
             <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
-            {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{money.format(selectedService.price || 0)}</strong></div>}
+            {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{servicePriceLabel(selectedService)}</strong></div>}
             {patientPackages.length > 0 && <label className="stacked-field"><span>Package / membership</span><select value={form.packageName} onChange={(event) => update("packageName", event.target.value)}><option value="">Pay per visit</option>{patientPackages.map((item) => <option value={item.name} key={item.id}>{item.name} · {item.remaining ?? item.balance ?? 0} remaining</option>)}</select></label>}
           </div></section>
           <section className="booking-form-section"><div className="booking-step">2</div><div className="booking-section-content"><h3>Date and location</h3><div className="booking-two-column">
@@ -12496,7 +13589,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
           <section className="booking-form-section"><div className="booking-step">3</div><div className="booking-section-content"><h3>Staff and room</h3><div className="booking-two-column">
             <label className="stacked-field"><span>Staff <RequiredMark /></span><select aria-label="Staff, required" value={form.staff} onChange={(event) => update("staff", event.target.value)}><option value="">Select available staff</option>{availableStaff.map((person) => <option key={person.id || person.name}>{person.name}</option>)}</select></label>
             <label className="stacked-field"><span>Room <RequiredMark /></span><select aria-label="Room, required" value={form.room} onChange={(event) => update("room", event.target.value)}><option value="">Select a room</option>{availableRooms.map((room) => <option key={room}>{room}</option>)}</select></label>
-          </div>{form.staff && form.room && <><div className="availability-note"><Check size={16} /> Available times account for doctor, room, lunch, and existing appointments.</div><div className="appointment-slot-picker" aria-label="Available appointment times">{availableSlots.slice(0, 20).map((slot) => <button className={form.time === slot ? "selected" : ""} type="button" key={slot} onClick={() => update("time", slot)}>{formatScheduleTime(parseTimeToMinutes(slot))}</button>)}{!availableSlots.length && <span>No conflict-free slots for these resources.</span>}</div></>}</div></section>
+          </div>{form.staff && form.room && <><div className="availability-note"><Check size={16} /> Available times account for branch hours, staff, rooms/couches, and existing appointments.</div><div className="appointment-slot-picker" aria-label="Available appointment times">{availableSlots.slice(0, 20).map((slot) => <button className={form.time === slot ? "selected" : ""} type="button" key={slot} onClick={() => update("time", slot)}>{formatScheduleTime(parseTimeToMinutes(slot))}</button>)}{!availableSlots.length && <span>No conflict-free slots for these resources.</span>}</div></>}</div></section>
           <section className="booking-form-section"><div className="booking-step">4</div><div className="booking-section-content"><h3>Payment and notes</h3>
             <div className="booking-two-column"><label className="stacked-field"><span>Deposit (optional)</span><input type="number" min="0" value={form.deposit} onChange={(event) => update("deposit", event.target.value)} /></label><label className="stacked-field"><span>Insurance</span><input value={form.insurance} onChange={(event) => update("insurance", event.target.value)} placeholder="Provider or coverage note" /></label>
             <label className="stacked-field"><span>Recurrence</span><select value={form.recurrence} onChange={(event) => update("recurrence", event.target.value)}>{["None", "Weekly", "Every 2 weeks", "Monthly"].map((item) => <option key={item}>{item}</option>)}</select></label>{form.recurrence !== "None" && <label className="stacked-field"><span>Repeat until</span><input type="date" min={form.date} value={form.recurrenceUntil} onChange={(event) => update("recurrenceUntil", event.target.value)} /></label>}</div>
@@ -12747,7 +13840,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
             {value ? <img src={value} alt="" /> : <Image size={28} aria-hidden="true" />}
           </span>
         ) : (
-          <ClientAvatar client={{ fullName: form.fullName || form.name || "Profile", photo: value }} size="large" />
+          <ClientAvatar client={{ fullName: [form.firstName, form.middleName, form.lastName].filter(Boolean).join(" ") || form.fullName || form.name || "Profile", photo: value }} size="large" />
         )}
         <div>
           <FieldLabel required={required}>{item.label}</FieldLabel>
@@ -12770,6 +13863,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
   }
 
   if (item.type === "multi-select") {
+    const isServiceSelection = item.name === "services";
     const selectedValues = splitList(value).filter((entry, index, entries) => entries.indexOf(entry) === index);
     const options = (item.options ?? []).map((option) => ({
       value: typeof option === "string" ? option : option.value,
@@ -12783,7 +13877,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
 
     function addSelected(nextValue) {
       if (!nextValue) return;
-      if (nextValue === "All services") {
+      if (isServiceSelection && nextValue === "All services") {
         updateSelected([nextValue]);
         return;
       }
@@ -12809,7 +13903,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
             ))}
           </div>
         ) : (
-          <span className="multi-select-empty">No services selected yet.</span>
+          <span className="multi-select-empty">No {item.label.toLowerCase()} selected yet.</span>
         )}
         <select
           id={fieldId}
@@ -12818,10 +13912,10 @@ function FormField({ field: item, form, required = false, value, onChange }) {
           aria-label={`Add ${item.label.toLowerCase()}`}
           disabled={!availableOptions.length}
         >
-          <option value="">{availableOptions.length ? "Add a service…" : "All available services selected"}</option>
+          <option value="">{availableOptions.length ? `Add ${item.label.toLowerCase()}…` : `All available ${item.label.toLowerCase()} selected`}</option>
           {availableOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <small className="field-suggestion-hint">Choose as many services as this employee can perform.</small>
+        <small className="field-suggestion-hint">Choose as many {item.label.toLowerCase()} as needed.</small>
       </div>
     );
   }
@@ -13250,7 +14344,7 @@ function Toast({ toast }) {
 
 function tallyItems(transactions, type) {
   const tally = {};
-  transactions.forEach((transaction) => {
+  transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode).forEach((transaction) => {
     transaction.items
       .filter((item) => item.type === type)
       .forEach((item) => {

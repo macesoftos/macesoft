@@ -20,6 +20,12 @@ test("discount permissions and expiration fail closed", () => {
   assert.throws(() => assertDiscountUsable({ ...discount, expiry: "2026-08-13" }, { role: "Branch Manager", client: { id: "client-1" }, items, today }), /expired/);
 });
 
+test("Super Admin can finalize approval-gated discounts", () => {
+  const discount = { name: "Manual adjustment", active: true, permission: "Super Admin", applicable: "Services and products", expiry: "None" };
+  assert.doesNotThrow(() => assertDiscountUsable(discount, { role: "Super Admin", items, today }));
+  assert.throws(() => assertDiscountUsable(discount, { role: "Receptionist", items, today }), /requires Super Admin approval/);
+});
+
 test("birthday discounts require a stable client in the current birthday month", () => {
   const discount = { name: "Birthday", active: true, permission: "Receptionist", applicable: "Birthday month", expiry: "None" };
   assert.doesNotThrow(() => assertDiscountUsable(discount, { role: "Receptionist", client: { id: "client-1", birthday: "1990-08-22" }, items, today }));

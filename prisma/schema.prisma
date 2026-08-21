@@ -19,39 +19,52 @@ model Organization {
 }
 
 model Client {
-  id                String          @id @default(cuid())
-  fullName          String
-  photo             String          @default("")
-  mobile            String          @default("")
-  email             String          @default("")
-  gender            String          @default("")
-  birthday          String          @default("")
-  address           String          @default("")
-  city              String          @default("")
-  emergency         String          @default("")
-  branch            String          @default("")
-  source            String          @default("Walk-in")
-  referral          String          @default("")
-  medicalNotes      String          @default("")
-  allergies         String          @default("")
-  contraindications String          @default("")
-  skinConcerns      String          @default("")
-  treatmentGoals    String          @default("")
-  consentStatus     String          @default("Pending")
-  marketingOptIn    Boolean         @default(true)
-  preferredStaff    String          @default("")
-  tag               String          @default("New")
-  retention         String          @default("New")
-  lastVisit         String          @default("")
-  nextVisit         String          @default("")
-  balance           Float           @default(0)
-  packageBalance    String          @default("None")
-  giftBalance       Float           @default(0)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  appointments      Appointment[]
-  treatments        Treatment[]
-  packages          ClinicPackage[]
+  id                 String                    @id @default(cuid())
+  fullName           String
+  firstName          String                    @default("")
+  middleName         String                    @default("")
+  lastName           String                    @default("")
+  photo              String                    @default("")
+  mobile             String                    @default("")
+  email              String                    @default("")
+  gender             String                    @default("")
+  birthday           String                    @default("")
+  address            String                    @default("")
+  street             String                    @default("")
+  barangay           String                    @default("")
+  city               String                    @default("")
+  province           String                    @default("")
+  civilStatus        String                    @default("")
+  occupation         String                    @default("")
+  emergency          String                    @default("")
+  emergencyName      String                    @default("")
+  emergencyPhone     String                    @default("")
+  branch             String                    @default("")
+  branchesVisited    String                    @default("[]")
+  source             String                    @default("Walk-in")
+  referral           String                    @default("")
+  medicalNotes       String                    @default("")
+  allergies          String                    @default("")
+  contraindications  String                    @default("")
+  skinConcerns       String                    @default("")
+  treatmentGoals     String                    @default("")
+  consentStatus      String                    @default("Pending")
+  marketingOptIn     Boolean                   @default(true)
+  preferredStaff     String                    @default("")
+  tag                String                    @default("New")
+  retention          String                    @default("New")
+  lastVisit          String                    @default("")
+  nextVisit          String                    @default("")
+  balance            Float                     @default(0)
+  packageBalance     String                    @default("None")
+  giftBalance        Float                     @default(0)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  appointments       Appointment[]
+  treatments         Treatment[]
+  packages           ClinicPackage[]
+  sales              Sale[]
+  consentSubmissions ClientConsentSubmission[]
 
   @@index([fullName])
   @@index([mobile])
@@ -74,6 +87,7 @@ model Branch {
   status                String                 @default("Active")
   archivedAt            DateTime?
   staff                 Int                    @default(0)
+  couches               Int                    @default(0)
   devices               String                 @default("[]")
   image                 String                 @default("")
   rooms                 Room[]
@@ -106,13 +120,20 @@ model StaffMember {
   photo            String                      @default("")
   role             String
   branch           String                      @default("")
+  branches         String                      @default("[]")
   schedule         String                      @default("")
+  scheduleBranches String                      @default("[]")
   commissionType   String                      @default("")
   commissionRate   Float                       @default(0)
   services         String                      @default("")
   status           String                      @default("Available")
   attendance       String                      @default("Clocked out")
   employmentDate   String                      @default("")
+  employmentStatus String                      @default("Regular")
+  birthDate        String                      @default("")
+  address          String                      @default("")
+  emergencyContact String                      @default("")
+  emergencyPhone   String                      @default("")
   phone            String                      @default("")
   account          Account?
   attendanceEvents AttendanceEvent[]
@@ -451,24 +472,31 @@ model FaceTrackKioskChallenge {
 }
 
 model Service {
-  id                String        @id @default(cuid())
-  name              String
-  category          String
-  duration          Int           @default(60)
-  price             Float         @default(0)
-  commission        String        @default("")
-  consumables       String        @default("[]")
-  branches          String        @default("[]")
-  staff             String        @default("[]")
-  room              String        @default("")
-  active            Boolean       @default(true)
-  pos               Boolean       @default(true)
-  description       String        @default("")
-  contraindications String        @default("")
-  aftercare         String        @default("")
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  appointments      Appointment[]
+  id                      String        @id @default(cuid())
+  name                    String
+  category                String
+  serviceType             String        @default("Regular Service")
+  duration                Int           @default(60)
+  price                   Float         @default(0)
+  priceModel              String        @default("Fixed price")
+  priceUnit               String        @default("")
+  packageSessions         Int           @default(0)
+  packagePrice            Float         @default(0)
+  serviceValue            Float         @default(0)
+  recommendedIntervalDays Int           @default(0)
+  commission              String        @default("")
+  consumables             String        @default("[]")
+  branches                String        @default("[]")
+  staff                   String        @default("[]")
+  room                    String        @default("")
+  active                  Boolean       @default(true)
+  pos                     Boolean       @default(true)
+  description             String        @default("")
+  contraindications       String        @default("")
+  aftercare               String        @default("")
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  appointments            Appointment[]
 
   @@index([category])
   @@index([active])
@@ -511,32 +539,93 @@ model Appointment {
 }
 
 model Treatment {
-  id             String           @id @default(cuid())
-  clientId       String?
-  clientRecord   Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  client         String
-  date           String
-  service        String
-  branch         String           @default("")
-  provider       String           @default("")
-  room           String           @default("")
-  preNotes       String           @default("")
-  postNotes      String           @default("")
-  consumables    String           @default("")
-  deviceSettings String           @default("")
-  batch          String           @default("")
-  consent        String           @default("Pending")
-  followUp       String           @default("")
-  outcome        String           @default("")
-  satisfaction   String           @default("")
-  photos         Int              @default(0)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  photoLinks     TreatmentPhoto[]
+  id                 String           @id @default(cuid())
+  clientId           String?
+  clientRecord       Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client             String
+  date               String
+  service            String
+  branch             String           @default("")
+  provider           String           @default("")
+  room               String           @default("")
+  preNotes           String           @default("")
+  postNotes          String           @default("")
+  aftercare          String           @default("")
+  arrivalTime        String           @default("")
+  treatmentStartTime String           @default("")
+  completedTime      String           @default("")
+  checkoutTime       String           @default("")
+  consumables        String           @default("")
+  deviceSettings     String           @default("")
+  batch              String           @default("")
+  consent            String           @default("Pending")
+  followUp           String           @default("")
+  outcome            String           @default("")
+  satisfaction       String           @default("")
+  photos             Int              @default(0)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  photoLinks         TreatmentPhoto[]
 
   @@index([clientId])
   @@index([branch])
   @@index([date])
+}
+
+model Promotion {
+  id           String   @id @default(cuid())
+  name         String
+  serviceIds   String   @default("[]")
+  packageNames String   @default("[]")
+  discountType String   @default("Percentage")
+  value        Float    @default(0)
+  startDate    String
+  endDate      String
+  branches     String   @default("[]")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([startDate, endDate])
+  @@index([active])
+}
+
+model ConsentFormTemplate {
+  id             String                    @id @default(cuid())
+  name           String
+  version        String
+  serviceIds     String                    @default("[]")
+  content        String                    @default("")
+  requiredFields String                    @default("[]")
+  active         Boolean                   @default(true)
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  submissions    ClientConsentSubmission[]
+
+  @@unique([name, version])
+}
+
+model ClientConsentSubmission {
+  id          String              @id @default(cuid())
+  clientId    String
+  client      Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  templateId  String
+  template    ConsentFormTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  formName    String
+  formVersion String
+  service     String              @default("")
+  treatmentId String              @default("")
+  branch      String
+  signature   String
+  witness     String              @default("")
+  answers     String              @default("{}")
+  status      String              @default("Signed")
+  signedAt    DateTime            @default(now())
+  createdAt   DateTime            @default(now())
+
+  @@index([clientId, signedAt])
+  @@index([templateId])
+  @@index([branch])
 }
 
 model TreatmentPhoto {
@@ -580,15 +669,20 @@ model InventoryItem {
 }
 
 model InventoryMovement {
-  id        String   @id @default(cuid())
-  date      String
-  itemId    String   @default("")
-  item      String
-  branch    String   @default("")
-  qty       Float
-  reason    String
-  user      String   @default("System")
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  date        String
+  itemId      String   @default("")
+  item        String
+  branch      String   @default("")
+  qty         Float
+  reason      String
+  user        String   @default("System")
+  supplier    String   @default("")
+  receivedBy  String   @default("")
+  checkNumber String   @default("")
+  unit        String   @default("")
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
 
   @@index([date])
   @@index([itemId])
@@ -600,6 +694,8 @@ model Sale {
   invoice       String     @unique
   date          String
   time          String
+  clientId      String?
+  clientRecord  Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
   client        String
   branch        String
   staff         String
@@ -611,58 +707,100 @@ model Sale {
   leadId        String     @default("")
   appointmentId String?    @unique
   notes         String     @default("")
+  testMode      Boolean    @default(false)
+  enteredAt     DateTime   @default(now())
   items         SaleItem[]
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
   @@index([date])
+  @@index([clientId])
   @@index([branch])
   @@index([status])
   @@index([leadId])
 }
 
 model SaleItem {
-  id     String @id @default(cuid())
-  saleId String
-  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  name   String
-  type   String
-  qty    Float  @default(1)
-  price  Float  @default(0)
+  id                      String @id @default(cuid())
+  saleId                  String
+  sale                    Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  name                    String
+  type                    String
+  qty                     Float  @default(1)
+  price                   Float  @default(0)
+  originalPrice           Float  @default(0)
+  discount                Float  @default(0)
+  provider                String @default("N/A")
+  serviceId               String @default("")
+  aftercare               String @default("")
+  recommendedIntervalDays Int    @default(0)
 }
 
 model ClinicPackage {
-  id           String   @id @default(cuid())
-  name         String
-  clientId     String?
-  clientRecord Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  client       String
-  sessions     Int      @default(0)
-  used         Int      @default(0)
-  expires      String   @default("")
-  branch       String   @default("All branches")
-  transferable Boolean  @default(false)
-  status       String   @default("Active")
-  price        Float    @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(cuid())
+  name           String
+  clientId       String?
+  clientRecord   Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client         String
+  sessions       Int      @default(0)
+  used           Int      @default(0)
+  expires        String   @default("")
+  branch         String   @default("All branches")
+  transferable   Boolean  @default(false)
+  status         String   @default("Active")
+  price          Float    @default(0)
+  amountPaid     Float    @default(0)
+  nextPayment    String   @default("")
+  purchaseDate   String   @default("")
+  serviceValue   Float    @default(0)
+  paymentHistory String   @default("[]")
+  sessionHistory String   @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([clientId])
   @@index([status])
 }
 
 model GiftCertificate {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  client    String
-  branch    String   @default("All branches")
-  balance   Float    @default(0)
-  expires   String   @default("")
-  status    String   @default("Active")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  code           String   @unique
+  client         String
+  type           String   @default("Monetary Value")
+  serviceId      String   @default("")
+  service        String   @default("")
+  issueDate      String   @default("")
+  branch         String   @default("All branches")
+  balance        Float    @default(0)
+  expires        String   @default("")
+  status         String   @default("Active")
+  redeemedDate   String   @default("")
+  redeemedBranch String   @default("")
+  transactionId  String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([branch])
+}
+
+model PosCart {
+  id          String   @id @default(cuid())
+  clientId    String   @default("")
+  client      String   @default("Walk-in")
+  branch      String
+  staff       String   @default("")
+  items       String   @default("[]")
+  discountId  String   @default("")
+  saleDate    String   @default("")
+  testMode    Boolean  @default(false)
+  createdById String   @default("")
+  createdBy   String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([branch, updatedAt])
+  @@index([clientId, branch])
+  @@index([createdById])
 }
 
 model Lead {

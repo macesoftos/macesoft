@@ -8,6 +8,7 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import nodemailer from "nodemailer";
+import QRCode from "qrcode";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess } from "../src/data.js";
@@ -245,20 +246,31 @@ app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
 app.use("/api/public-bookings", publicWriteLimiter);
+app.use("/api/public-registration", publicWriteLimiter);
 app.use("/api/public/flipbooks", publicWriteLimiter);
 app.use("/api/public/marketing/survey", publicWriteLimiter);
 app.use("/api/invitations/accept", publicWriteLimiter);
 app.use("/api/leads/webhooks", publicWriteLimiter);
 
 const clientStringFields = [
+  "firstName",
+  "middleName",
+  "lastName",
   "photo",
   "mobile",
   "email",
   "gender",
   "birthday",
   "address",
+  "street",
+  "barangay",
   "city",
+  "province",
+  "civilStatus",
+  "occupation",
   "emergency",
+  "emergencyName",
+  "emergencyPhone",
   "branch",
   "source",
   "referral",
@@ -288,6 +300,9 @@ const resourceModules = {
   staff: "staff",
   expenses: "expenses",
   discounts: "settings",
+  promotions: "settings",
+  consentTemplates: "settings",
+  consentSubmissions: "clients",
   smsTemplates: "sms",
   campaigns: "sms",
   transactions: "pos",
@@ -525,8 +540,16 @@ const supportedLeadProviders = new Set(integrationDefaults.map((integration) => 
 const webhookRateLimit = new Map();
 const scheduleStartMinutes = 8 * 60;
 const scheduleEndMinutes = 20 * 60;
-const lunchStartMinutes = 12 * 60;
-const lunchEndMinutes = 13 * 60;
+const defaultOperatingHours = Object.freeze({
+  monday: { open: "10:00", close: "19:00", closed: false },
+  tuesday: { open: "10:00", close: "19:00", closed: false },
+  wednesday: { open: "10:00", close: "19:00", closed: false },
+  thursday: { open: "10:00", close: "19:00", closed: false },
+  friday: { open: "10:00", close: "19:00", closed: false },
+  saturday: { open: "10:00", close: "19:00", closed: false },
+  sunday: { open: "13:00", close: "17:00", closed: false },
+});
+const operatingDayKeys = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 function canonicalAppointmentStatus(status) {
   const next = clean(status);
@@ -689,6 +712,13 @@ function parseTimeToMinutes(value) {
     throw apiError("Appointment time must use a valid clock time.", 400);
   }
   return hours * 60 + minutes;
+}
+
+function formatScheduleTime(minutes) {
+  const hours = Math.floor(Number(minutes || 0) / 60);
+  const mins = Number(minutes || 0) % 60;
+  const period = hours >= 12 ? "PM" : "AM";
+  return `${hours % 12 || 12}:${String(mins).padStart(2, "0")} ${period}`;
 }
 
 function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
@@ -894,7 +924,10 @@ async function loadNotificationFeed(account, limit = 30) {
 }
 
 function normalizeClientPayload(payload, existingId = "") {
-  const fullName = requireText(payload.fullName, "Client full name");
+  const firstName = clean(payload.firstName);
+  const middleName = clean(payload.middleName);
+  const lastName = clean(payload.lastName);
+  const fullName = requireText(payload.fullName || [firstName, middleName, lastName].filter(Boolean).join(" "), "Client full name");
   const data = {
     fullName,
     balance: numberValue(payload.balance, "Client balance"),
@@ -909,6 +942,7 @@ function normalizeClientPayload(payload, existingId = "") {
   clientStringFields.forEach((field) => {
     data[field] = String(payload[field] ?? "");
   });
+  data.branchesVisited = jsonList(payload.branchesVisited || payload.branch);
   data.photo = assetReference(data.photo, "Client photo");
 
   if (!data.source) data.source = "Walk-in";
@@ -961,22 +995,33 @@ async function normalizeAppointmentPayload(payload, existingId = "") {
       throw apiError("Selected service is not offered at this branch.", 409);
     }
   }
-  if (client && client.branch !== data.branch) {
-    throw apiError("The selected client belongs to another branch.", 409);
-  }
-
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
 }
 
 function normalizeServicePayload(payload, existingId = "") {
+  const serviceType = clean(payload.serviceType) || "Regular Service";
+  const priceModel = clean(payload.priceModel) || "Fixed price";
+  const packageSessions = numberValue(payload.packageSessions, "Package sessions", { min: 0, integer: true });
+  const price = numberValue(payload.price, "Price", { min: 0 });
+  const packagePrice = numberValue(payload.packagePrice ?? (serviceType === "Package" ? price : 0), "Package price", { min: 0 });
+  if (serviceType === "Package" && packageSessions < 1) {
+    throw apiError("Packages must include at least one session.");
+  }
   const data = {
     name: requireText(payload.name, "Service name"),
     category: requireText(payload.category, "Service category"),
+    serviceType,
     duration: numberValue(payload.duration, "Duration", { min: 1, integer: true }),
-    price: numberValue(payload.price, "Price", { min: 0 }),
+    price,
+    priceModel,
+    priceUnit: clean(payload.priceUnit),
+    packageSessions,
+    packagePrice,
+    serviceValue: numberValue(payload.serviceValue ?? (packageSessions ? packagePrice / packageSessions : price), "Service value", { min: 0 }),
+    recommendedIntervalDays: numberValue(payload.recommendedIntervalDays, "Recommended interval", { min: 0, integer: true }),
     commission: clean(payload.commission),
-    consumables: jsonList(payload.consumables),
+    consumables: jsonList([]),
     branches: jsonList(payload.branches),
     staff: jsonList(payload.staff),
     room: clean(payload.room),
@@ -1018,6 +1063,34 @@ function normalizeInventoryPayload(payload, existingId = "") {
   return data;
 }
 
+function treatmentConsumableUsage(value) {
+  const parsed = Array.isArray(value) ? value : parseJsonList(value);
+  const source = parsed.length ? parsed : clean(value).split(/[;,\n]+/).filter(Boolean);
+  const usage = source.map((entry) => {
+    if (typeof entry === "object" && entry) {
+      return { item: clean(entry.item || entry.name), qty: numberValue(entry.qty || 1, "Consumable quantity", { min: 0 }) };
+    }
+    const match = clean(entry).match(/^(.+?)(?:\s*[:x]\s*(\d+(?:\.\d+)?))?$/i);
+    return { item: clean(match?.[1]), qty: numberValue(match?.[2] || 1, "Consumable quantity", { min: 0 }) };
+  }).filter((entry) => entry.item && entry.qty > 0);
+  const merged = new Map();
+  usage.forEach((entry) => {
+    const key = entry.item.toLowerCase();
+    const current = merged.get(key) || { item: entry.item, qty: 0 };
+    current.qty += entry.qty;
+    merged.set(key, current);
+  });
+  return [...merged.values()];
+}
+
+function treatmentConsumableText(value) {
+  return treatmentConsumableUsage(value).map((entry) => `${entry.item}: ${entry.qty}`).join(", ");
+}
+
+function serializeTreatment(record) {
+  return { ...serializeTreatmentWithPhotos(record), consumables: treatmentConsumableText(record.consumables) };
+}
+
 async function normalizeTreatmentPayload(payload, existingId = "") {
   const clientId = requireText(payload.clientId, "Client");
   const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
@@ -1032,7 +1105,12 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
     room: clean(payload.room),
     preNotes: clean(payload.preNotes),
     postNotes: clean(payload.postNotes),
-    consumables: clean(payload.consumables),
+    aftercare: clean(payload.aftercare),
+    arrivalTime: clean(payload.arrivalTime),
+    treatmentStartTime: clean(payload.treatmentStartTime),
+    completedTime: clean(payload.completedTime),
+    checkoutTime: clean(payload.checkoutTime),
+    consumables: jsonText(treatmentConsumableUsage(payload.consumables), []),
     deviceSettings: clean(payload.deviceSettings),
     batch: clean(payload.batch),
     consent: clean(payload.consent) || "Pending",
@@ -1040,8 +1118,6 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
     outcome: clean(payload.outcome),
     satisfaction: clean(payload.satisfaction),
   };
-  if (client.branch !== data.branch) throw apiError("The selected client belongs to another branch.", 409);
-
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
 }
@@ -1146,18 +1222,27 @@ function normalizeLeadPayload(payload, existingId = "") {
 }
 
 function normalizeStaffPayload(payload, existingId = "") {
+  const branches = parseJsonList(payload.branches || payload.branch);
+  const primaryBranch = clean(payload.branch) || branches[0];
   const data = {
     name: requireText(payload.name, "Employee name"),
     photo: assetReference(payload.photo, "Employee photo"),
     role: requireText(payload.role, "Employee role"),
-    branch: requireText(payload.branch, "Branch"),
+    branch: requireText(primaryBranch, "Primary branch"),
+    branches: jsonList(branches.length ? branches : [primaryBranch]),
     schedule: clean(payload.schedule),
+    scheduleBranches: jsonList(payload.scheduleBranches),
     commissionType: clean(payload.commissionType),
     commissionRate: numberValue(payload.commissionRate, "Commission rate", { min: 0 }),
     services: clean(payload.services),
     status: clean(payload.status) || "Available",
     attendance: clean(payload.attendance) || "Clocked out",
     employmentDate: clean(payload.employmentDate),
+    employmentStatus: clean(payload.employmentStatus) || "Regular",
+    birthDate: clean(payload.birthDate),
+    address: clean(payload.address),
+    emergencyContact: clean(payload.emergencyContact),
+    emergencyPhone: clean(payload.emergencyPhone),
     phone: clean(payload.phone),
   };
 
@@ -1173,6 +1258,9 @@ function assertStaffAccessMutation(request, data, existing = null) {
   }
   if (!canAccessBranch(actor, data.branch) || (existing?.branch && !canAccessBranch(actor, existing.branch))) {
     throw apiError("This employee belongs to another branch.", 403);
+  }
+  if (parseJsonList(data.branches).some((branch) => !canAccessBranch(actor, branch))) {
+    throw apiError("You cannot assign this employee to a branch outside your access.", 403);
   }
   assertAssignableInvitationRole(actor, data.role, roleAccess);
 }
@@ -1208,24 +1296,40 @@ async function normalizePackagePayload(payload, existingId = "") {
     transferable: Boolean(payload.transferable),
     status: clean(payload.status) || (used >= sessions && sessions > 0 ? "Completed" : "Active"),
     price: numberValue(payload.price, "Package price", { min: 0 }),
+    amountPaid: numberValue(payload.amountPaid, "Amount paid", { min: 0 }),
+    nextPayment: clean(payload.nextPayment),
+    purchaseDate: clean(payload.purchaseDate) || new Date().toISOString().slice(0, 10),
+    serviceValue: numberValue(payload.serviceValue ?? (sessions ? Number(payload.price || 0) / sessions : 0), "Service value per session", { min: 0 }),
+    paymentHistory: jsonText(payload.paymentHistory || [], []),
+    sessionHistory: jsonText(payload.sessionHistory || [], []),
   };
-  if (client && data.branch !== "All branches" && client.branch !== data.branch) {
-    throw apiError("The selected client belongs to another branch.", 409);
-  }
-
+  if (data.amountPaid > data.price) throw apiError("Amount paid cannot exceed the package amount.");
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
 }
 
 function normalizeGiftCertificatePayload(payload, existingId = "") {
+  const requestedType = clean(payload.type) || "Monetary Value";
+  const type = ["Service", "Specific Service"].includes(requestedType) ? "Specific Service" : "Monetary Value";
   const data = {
     code: requireText(payload.code, "Gift certificate code"),
     client: requireText(payload.client, "Client"),
+    type,
+    serviceId: clean(payload.serviceId),
+    service: clean(payload.service),
+    issueDate: clean(payload.issueDate) || new Date().toISOString().slice(0, 10),
     branch: clean(payload.branch) || "All branches",
     balance: numberValue(payload.balance, "Gift certificate balance", { min: 0 }),
     expires: clean(payload.expires),
     status: clean(payload.status) || "Active",
+    redeemedDate: clean(payload.redeemedDate),
+    redeemedBranch: clean(payload.redeemedBranch),
+    transactionId: clean(payload.transactionId),
   };
+
+  if (data.type === "Specific Service" && !data.serviceId && !data.service) {
+    throw apiError("Choose the service included in this gift certificate.");
+  }
 
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -1347,6 +1451,116 @@ function serializeService(service) {
   };
 }
 
+function normalizePromotionPayload(payload, existingId = "") {
+  const startDate = requireText(payload.startDate, "Promotion start date");
+  const endDate = requireText(payload.endDate, "Promotion end date");
+  if (endDate < startDate) throw apiError("Promotion end date must be on or after its start date.");
+  const data = {
+    name: requireText(payload.name, "Promotion name"),
+    serviceIds: jsonList(payload.serviceIds),
+    packageNames: jsonList(payload.packageNames),
+    discountType: clean(payload.discountType) || "Percentage",
+    value: numberValue(payload.value, "Promotion value", { min: 0 }),
+    startDate,
+    endDate,
+    branches: jsonList(payload.branches),
+    active: payload.active !== false,
+  };
+  if (payload.id && !existingId) data.id = String(payload.id);
+  return data;
+}
+
+function serializePromotion(promotion) {
+  return { ...promotion, serviceIds: parseJsonList(promotion.serviceIds), packageNames: parseJsonList(promotion.packageNames), branches: parseJsonList(promotion.branches) };
+}
+
+function normalizeConsentTemplatePayload(payload, existingId = "") {
+  const data = {
+    name: requireText(payload.name, "Consent form name"),
+    version: requireText(payload.version, "Form version"),
+    serviceIds: jsonList(payload.serviceIds),
+    content: requireText(payload.content, "Consent form content"),
+    requiredFields: jsonList(payload.requiredFields),
+    active: payload.active !== false,
+  };
+  if (payload.id && !existingId) data.id = String(payload.id);
+  return data;
+}
+
+async function normalizeConsentSubmissionPayload(payload, existingId = "") {
+  if (existingId) throw apiError("Signed consent submissions are permanent and cannot be edited.", 409);
+  if (payload.accepted !== true) throw apiError("The client must accept the consent form before signing.");
+  const client = await prisma.client.findUnique({ where: { id: requireText(payload.clientId, "Client") } });
+  const template = await prisma.consentFormTemplate.findUnique({ where: { id: requireText(payload.templateId, "Consent form") } });
+  if (!client || !template?.active) throw apiError("The client or consent form is unavailable.", 409);
+  const signedAt = new Date();
+  return {
+    clientId: client.id,
+    templateId: template.id,
+    formName: template.name,
+    formVersion: template.version,
+    service: clean(payload.service),
+    treatmentId: clean(payload.treatmentId),
+    branch: requireText(payload.branch, "Branch"),
+    signature: requireText(payload.signature, "Electronic signature"),
+    witness: clean(payload.witness),
+    answers: jsonText({
+      ...parseJsonObject(payload.answers, {}),
+      formContent: template.content,
+      acceptedAt: signedAt.toISOString(),
+    }, {}),
+    status: "Signed",
+    signedAt,
+  };
+}
+
+function serializeConsentTemplate(template) {
+  return { ...template, serviceIds: parseJsonList(template.serviceIds), requiredFields: parseJsonList(template.requiredFields) };
+}
+
+function serializeConsentSubmission(submission) {
+  return { ...submission, answers: parseJsonObject(submission.answers, {}) };
+}
+
+function operatingHoursForDate(branch, date) {
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(clean(date)) ? new Date(`${date}T00:00:00.000Z`) : null;
+  const dayKey = parsed && !Number.isNaN(parsed.getTime()) ? operatingDayKeys[parsed.getUTCDay()] : "monday";
+  const configured = parseJsonObject(branch?.operatingHours, {});
+  const day = configured[dayKey] || defaultOperatingHours[dayKey];
+  if (day?.closed) return { dayKey, closed: true, open: 0, close: 0 };
+  return {
+    dayKey,
+    closed: false,
+    open: parseTimeToMinutes(day?.open || defaultOperatingHours[dayKey].open),
+    close: parseTimeToMinutes(day?.close || defaultOperatingHours[dayKey].close),
+  };
+}
+
+function serializeClient(client) {
+  return {
+    ...client,
+    branchesVisited: parseJsonList(client.branchesVisited),
+  };
+}
+
+function serializeStaff(staffMember) {
+  return {
+    ...staffMember,
+    branches: parseJsonList(staffMember.branches),
+    scheduleBranches: parseJsonList(staffMember.scheduleBranches),
+  };
+}
+
+function serializePackage(pkg) {
+  return {
+    ...pkg,
+    paymentHistory: parseJsonList(pkg.paymentHistory),
+    sessionHistory: parseJsonList(pkg.sessionHistory),
+    remaining: Math.max(0, Number(pkg.sessions || 0) - Number(pkg.used || 0)),
+    outstandingBalance: Math.max(0, Number(pkg.price || 0) - Number(pkg.amountPaid || 0)),
+  };
+}
+
 function serializeSale(sale) {
   return {
     ...sale,
@@ -1385,41 +1599,56 @@ function serializeBranch(branch) {
         }))
       : [],
     employeeCount: Number(branch.employeeCount ?? branch._count?.memberships ?? branch.staff ?? 0),
+    couches: Number(branch.couches || 0),
+  };
+}
+
+function serializePosCart(cart) {
+  return {
+    ...cart,
+    items: parseJsonList(cart.items),
   };
 }
 
 async function syncStaffBranchAssignment(tx, request, staff, _data, previous = null) {
-  if (!previous || previous.branch === staff.branch) return;
-  const branch = await tx.branch.findFirst({
-    where: { organizationId: actorFromRequest(request).organizationId, name: staff.branch, status: "Active" },
+  const assignedNames = [...new Set([staff.branch, ...parseJsonList(staff.branches)].filter(Boolean))];
+  const assignedBranches = await tx.branch.findMany({
+    where: { organizationId: actorFromRequest(request).organizationId, name: { in: assignedNames }, status: "Active" },
     select: { id: true, name: true },
   });
-  if (!branch) throw apiError("Choose an active branch in this organization.", 400);
+  if (assignedBranches.length !== assignedNames.length) throw apiError("Choose only active branches in this organization.", 400);
+  const primaryBranch = assignedBranches.find((branch) => branch.name === staff.branch);
+  if (!primaryBranch) throw apiError("Choose an active primary branch in this organization.", 400);
   const linkedAccount = await tx.account.findFirst({ where: { staffId: staff.id } });
   if (linkedAccount && !["Branch Manager", "Admin"].includes(staff.role)) {
     await tx.branchMembership.updateMany({
-      where: { accountId: linkedAccount.id },
+      where: { accountId: linkedAccount.id, branchId: { notIn: assignedBranches.map((branch) => branch.id) } },
       data: { isPrimary: false, status: "Inactive" },
     });
-    await tx.branchMembership.upsert({
-      where: { branchId_accountId: { branchId: branch.id, accountId: linkedAccount.id } },
-      create: { branchId: branch.id, accountId: linkedAccount.id, role: staff.role, isPrimary: true },
-      update: { role: staff.role, status: "Active", isPrimary: true },
-    });
+    for (const branch of assignedBranches) {
+      await tx.branchMembership.upsert({
+        where: { branchId_accountId: { branchId: branch.id, accountId: linkedAccount.id } },
+        create: { branchId: branch.id, accountId: linkedAccount.id, role: staff.role, isPrimary: branch.id === primaryBranch.id },
+        update: { role: staff.role, status: "Active", isPrimary: branch.id === primaryBranch.id },
+      });
+    }
     await tx.account.update({
       where: { id: linkedAccount.id },
-      data: { branch: branch.name, lastBranchId: branch.id, role: staff.role },
+      data: { branch: primaryBranch.name, lastBranchId: primaryBranch.id, role: staff.role },
     });
   }
+  const previousBranches = previous ? [...new Set([previous.branch, ...parseJsonList(previous.branches)].filter(Boolean))] : [];
+  const changed = !previous || previous.branch !== staff.branch || previous.role !== staff.role || previousBranches.join("\u0000") !== assignedNames.join("\u0000");
+  if (!changed) return;
   await writeAudit(tx, request, {
     area: "Branches",
-    action: "Employee transferred",
-    branchId: branch.id,
+    action: previous ? "Employee branch assignments updated" : "Employee branch assignments created",
+    branchId: primaryBranch.id,
     subjectType: "StaffMember",
     subjectId: staff.id,
-    details: `${staff.name} transferred from ${previous.branch} to ${staff.branch}; historical records retain their original branch.`,
-    beforeValues: { branch: previous.branch, role: previous.role },
-    afterValues: { branch: staff.branch, role: staff.role },
+    details: `${staff.name} assigned to ${assignedNames.join(", ")} with ${staff.branch} as primary branch.`,
+    beforeValues: previous ? { branch: previous.branch, branches: previousBranches, role: previous.role } : {},
+    afterValues: { branch: staff.branch, branches: assignedNames, role: staff.role },
   });
 }
 
@@ -1584,8 +1813,10 @@ const resourceConfigs = {
     label: (record) => record.fullName,
     orderBy: [{ updatedAt: "desc" }, { fullName: "asc" }],
     normalize: normalizeClientPayload,
+    serialize: serializeClient,
     branchField: "branch",
-    posSelect: { id: true, fullName: true, mobile: true, branch: true },
+    unifiedClientAccess: true,
+    posSelect: { id: true, fullName: true, mobile: true, branch: true, branchesVisited: true },
   },
   appointments: {
     delegate: "appointment",
@@ -1595,7 +1826,7 @@ const resourceConfigs = {
     orderBy: [{ date: "desc" }, { time: "asc" }],
     normalize: normalizeAppointmentPayload,
     beforeWrite: assertAppointmentSlotAvailable,
-    afterWrite: expandAppointmentRecurrence,
+    afterWrite: afterAppointmentWrite,
     branchField: "branch",
     relatedClient: true,
   },
@@ -1609,7 +1840,9 @@ const resourceConfigs = {
     serialize: serializeService,
     serviceBranches: true,
     posSelect: {
-      id: true, name: true, category: true, duration: true, price: true,
+      id: true, name: true, category: true, serviceType: true, duration: true, price: true,
+      priceModel: true, priceUnit: true, packageSessions: true, packagePrice: true,
+      serviceValue: true, recommendedIntervalDays: true, aftercare: true, staff: true,
       branches: true, active: true, pos: true,
     },
   },
@@ -1634,8 +1867,9 @@ const resourceConfigs = {
     orderBy: [{ date: "desc" }],
     normalize: normalizeTreatmentPayload,
     include: treatmentPhotoInclude,
-    serialize: serializeTreatmentWithPhotos,
+    serialize: serializeTreatment,
     reloadAfterWrite: true,
+    afterWrite: afterTreatmentWrite,
     branchField: "branch",
     relatedClient: true,
   },
@@ -1646,12 +1880,17 @@ const resourceConfigs = {
     label: (record) => `${record.name} for ${record.client}`,
     orderBy: [{ updatedAt: "desc" }],
     normalize: normalizePackagePayload,
+    serialize: serializePackage,
+    afterWrite: afterPackageWrite,
+    reloadAfterWrite: true,
     branchField: "branch",
     relatedClient: true,
     allowLegacyOrganizationScope: true,
     posSelect: {
       id: true, name: true, clientId: true, client: true, sessions: true, used: true,
       expires: true, branch: true, transferable: true, status: true, price: true,
+      amountPaid: true, nextPayment: true, purchaseDate: true, serviceValue: true,
+      paymentHistory: true, sessionHistory: true,
     },
   },
   giftCertificates: {
@@ -1665,7 +1904,8 @@ const resourceConfigs = {
     allowLegacyOrganizationScope: true,
     posSelect: {
       id: true, code: true, client: true, branch: true, balance: true,
-      expires: true, status: true,
+      expires: true, status: true, type: true, serviceId: true, service: true,
+      issueDate: true, redeemedDate: true, redeemedBranch: true, transactionId: true,
     },
   },
   leads: {
@@ -1696,10 +1936,11 @@ const resourceConfigs = {
     label: (record) => record.name,
     orderBy: [{ name: "asc" }],
     normalize: normalizeStaffPayload,
+    serialize: serializeStaff,
     beforeWrite: validateLinkedStaffIdentity,
     afterWrite: syncStaffBranchAssignment,
     branchField: "branch",
-    posSelect: { id: true, name: true, role: true, branch: true, status: true },
+    posSelect: { id: true, name: true, role: true, branch: true, branches: true, status: true },
   },
   expenses: {
     delegate: "expense",
@@ -1721,6 +1962,38 @@ const resourceConfigs = {
       id: true, name: true, type: true, value: true, permission: true,
       applicable: true, expiry: true, active: true, usage: true,
     },
+  },
+  promotions: {
+    delegate: "promotion",
+    module: "settings",
+    area: "Promotions",
+    label: (record) => record.name,
+    orderBy: [{ startDate: "desc" }],
+    normalize: normalizePromotionPayload,
+    serialize: serializePromotion,
+    posSelect: { id: true, name: true, serviceIds: true, packageNames: true, discountType: true, value: true, startDate: true, endDate: true, branches: true, active: true },
+  },
+  consentTemplates: {
+    delegate: "consentFormTemplate",
+    module: "settings",
+    area: "Consent Forms",
+    label: (record) => `${record.name} ${record.version}`,
+    orderBy: [{ name: "asc" }, { version: "desc" }],
+    normalize: normalizeConsentTemplatePayload,
+    serialize: serializeConsentTemplate,
+    clientSelect: { id: true, name: true, version: true, serviceIds: true, content: true, requiredFields: true, active: true },
+  },
+  consentSubmissions: {
+    delegate: "clientConsentSubmission",
+    module: "clients",
+    area: "Client Consent",
+    label: (record) => `${record.formName} for ${record.clientId}`,
+    orderBy: [{ signedAt: "desc" }],
+    normalize: normalizeConsentSubmissionPayload,
+    serialize: serializeConsentSubmission,
+    branchField: "branch",
+    relatedClient: true,
+    immutable: true,
   },
   smsTemplates: {
     delegate: "smsTemplate",
@@ -1784,10 +2057,14 @@ async function listResource(resource, actor = null) {
   const config = configForResource(resource);
   const directModuleAllowed = !actor || moduleAllowed(actor, config.module, roleAccess);
   const posSupportAllowed = Boolean(actor && config.posSelect && moduleAllowed(actor, "pos", roleAccess));
-  if (!directModuleAllowed && !posSupportAllowed) return [];
+  const clientSupportAllowed = Boolean(actor && config.clientSelect && moduleAllowed(actor, "clients", roleAccess));
+  if (!directModuleAllowed && !posSupportAllowed && !clientSupportAllowed) return [];
   let where = {};
   if (actor) {
-    if (config.branchField) where = branchWhere(actor, config.branchField);
+    if (config.unifiedClientAccess) {
+      const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
+      where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
+    } else if (config.branchField) where = branchWhere(actor, config.branchField);
     if (config.branchField && config.allowLegacyOrganizationScope && actor.access?.scope === "branch") {
       where = { OR: [where, { [config.branchField]: "All branches" }] };
     }
@@ -1805,6 +2082,7 @@ async function listResource(resource, actor = null) {
   }
   const query = { where, orderBy: config.orderBy };
   if (!directModuleAllowed && posSupportAllowed) query.select = config.posSelect;
+  else if (!directModuleAllowed && clientSupportAllowed) query.select = config.clientSelect;
   else if (config.include) query.include = config.include;
   const rows = await prisma[config.delegate].findMany(query);
 
@@ -1823,6 +2101,7 @@ async function resourceRecordForResponse(config, record) {
 
 async function resourceBranch(config, record) {
   if (!record) return "";
+  if (config.unifiedClientAccess) return "";
   if (config.branchField) return clean(record[config.branchField]);
   if (config.clientBranch && record.clientId) {
     const client = await prisma.client.findUnique({ where: { id: record.clientId }, select: { branch: true } });
@@ -1840,12 +2119,18 @@ function assertServiceBranchChangeAllowed(actor, config, data) {
 }
 
 async function assertResourceMutationAllowed(request, config, record) {
+  if (config.unifiedClientAccess) {
+    const actor = assertMutationAllowed(request, config.module);
+    const branchName = clean(record?.branch);
+    const branch = branchName ? await prisma.branch.findFirst({ where: { name: branchName, organizationId: actor.organizationId } }) : null;
+    if (!branch) throw apiError("The client's registration branch is not available in this organization.", 403);
+    return actor;
+  }
   const branch = await resourceBranch(config, record);
   const actor = assertMutationAllowed(request, config.module, branch);
   if (config.relatedClient && record.clientId) {
-    const client = await prisma.client.findUnique({ where: { id: record.clientId }, select: { branch: true } });
+    const client = await prisma.client.findUnique({ where: { id: record.clientId }, select: { id: true } });
     if (!client) throw apiError("Related client was not found.", 404);
-    if (!canAccessBranch(actor, client.branch)) throw apiError("You do not have access to the related client.", 403);
   }
   assertServiceBranchChangeAllowed(actor, config, record);
   return actor;
@@ -1856,6 +2141,7 @@ function branchScopedPayload(request, payload, config) {
   const actor = actorFromRequest(request);
   const access = actor.access;
   if (!access) return payload ?? {};
+  if (config.unifiedClientAccess && request.params?.id) return payload ?? {};
   const suppliedBranch = clean(payload?.[config.branchField]);
   if (
     request.params?.id
@@ -1885,6 +2171,24 @@ async function getPersistedSettings() {
   return row ? { ...initialSettings, ...parseJsonObject(row.value, initialSettings) } : initialSettings;
 }
 
+function normalizePaymentMethods(value) {
+  const source = Array.isArray(value) && value.length ? value : initialSettings.paymentMethods;
+  const methods = source.map((method, index) => ({
+    id: clean(typeof method === "string" ? "" : method?.id) || `payment-${index + 1}`,
+    name: clean(typeof method === "string" ? method : method?.name),
+    active: typeof method === "string" ? true : method?.active !== false,
+    order: index,
+  })).filter((method) => method.name);
+  const uniqueNames = new Set(methods.map((method) => method.name.toLowerCase()));
+  if (!methods.length || !methods.some((method) => method.active)) {
+    throw apiError("At least one payment method must be enabled.", 400);
+  }
+  if (uniqueNames.size !== methods.length) {
+    throw apiError("Payment method names must be unique.", 400);
+  }
+  return methods;
+}
+
 async function savePersistedSettings(values) {
   const next = {
     ...initialSettings,
@@ -1892,6 +2196,7 @@ async function savePersistedSettings(values) {
     taxRate: numberValue(values.taxRate, "Tax rate", { min: 0 }),
     smsCredits: numberValue(values.smsCredits, "SMS credits", { min: 0, integer: true }),
     hiddenSaasPlans: Boolean(values.hiddenSaasPlans),
+    paymentMethods: normalizePaymentMethods(values.paymentMethods),
   };
 
   await prisma.systemSetting.upsert({
@@ -2536,6 +2841,88 @@ async function expandAppointmentRecurrence(tx, request, record, data, previous) 
   }
 }
 
+async function recordClientBranchVisit(tx, clientId, branch) {
+  if (!clientId || !branch || isAllBranches(branch)) return;
+  const client = await tx.client.findUnique({ where: { id: clientId }, select: { branchesVisited: true } });
+  if (!client) return;
+  const branchesVisited = [...new Set([...parseJsonList(client.branchesVisited), branch])];
+  await tx.client.update({ where: { id: clientId }, data: { branchesVisited: JSON.stringify(branchesVisited) } });
+}
+
+async function afterAppointmentWrite(tx, request, record, data, previous) {
+  await recordClientBranchVisit(tx, record.clientId, record.branch);
+  await expandAppointmentRecurrence(tx, request, record, data, previous);
+}
+
+async function adjustTreatmentConsumables(tx, request, record, usages, direction, branch) {
+  const movements = [];
+  for (const usage of usages) {
+    const item = await tx.inventoryItem.findFirst({ where: { item: { equals: usage.item, mode: "insensitive" }, branch } })
+      || await tx.inventoryItem.findFirst({ where: { item: { equals: usage.item, mode: "insensitive" }, branch: "All branches" } });
+    if (!item) throw apiError(`Consumable ${usage.item} was not found in ${branch} inventory.`, 409);
+    const qty = Number(usage.qty || 0) * direction;
+    if (qty > 0) {
+      const reserved = await tx.inventoryItem.updateMany({ where: { id: item.id, stock: { gte: qty } }, data: { stock: { decrement: qty } } });
+      if (reserved.count !== 1) throw apiError(`Inventory is insufficient for ${item.item}.`, 409);
+    } else if (qty < 0) {
+      await tx.inventoryItem.update({ where: { id: item.id }, data: { stock: { increment: -qty } } });
+    }
+    if (qty !== 0) {
+      movements.push(await tx.inventoryMovement.create({
+        data: {
+          date: record.date,
+          itemId: item.id,
+          item: item.item,
+          branch: item.branch || branch,
+          qty: -qty,
+          unit: item.unit,
+          reason: qty > 0 ? `Used in treatment ${record.id}` : `Treatment usage correction ${record.id}`,
+          user: actorFromRequest(request).name,
+          notes: `${record.client} · ${record.service}`,
+        },
+      }));
+    }
+  }
+  return movements;
+}
+
+async function afterTreatmentWrite(tx, request, record, _data, previous) {
+  await recordClientBranchVisit(tx, record.clientId, record.branch);
+  const currentUsage = treatmentConsumableUsage(record.consumables);
+  const previousUsage = treatmentConsumableUsage(previous?.consumables);
+  if (previous && previous.branch !== record.branch) {
+    await adjustTreatmentConsumables(tx, request, record, previousUsage, -1, previous.branch);
+    await adjustTreatmentConsumables(tx, request, record, currentUsage, 1, record.branch);
+    return;
+  }
+  const deltas = new Map();
+  previousUsage.forEach((entry) => deltas.set(entry.item.toLowerCase(), { item: entry.item, qty: -entry.qty }));
+  currentUsage.forEach((entry) => {
+    const key = entry.item.toLowerCase();
+    const current = deltas.get(key) || { item: entry.item, qty: 0 };
+    current.qty += entry.qty;
+    deltas.set(key, current);
+  });
+  const changed = [...deltas.values()].filter((entry) => entry.qty !== 0);
+  await adjustTreatmentConsumables(tx, request, record, changed.filter((entry) => entry.qty > 0), 1, record.branch);
+  await adjustTreatmentConsumables(tx, request, record, changed.filter((entry) => entry.qty < 0).map((entry) => ({ ...entry, qty: Math.abs(entry.qty) })), -1, record.branch);
+}
+
+async function afterPackageWrite(tx, request, record, _data, previous) {
+  const previousPaid = Number(previous?.amountPaid || 0);
+  const difference = Number(record.amountPaid || 0) - previousPaid;
+  if (difference === 0) return;
+  const history = parseJsonList(record.paymentHistory);
+  history.push({
+    date: record.purchaseDate || new Date().toISOString().slice(0, 10),
+    amount: difference,
+    method: "Recorded payment",
+    receivedBy: actorFromRequest(request).name,
+    note: difference > 0 ? "Package payment received" : "Package payment correction",
+  });
+  await tx.clinicPackage.update({ where: { id: record.id }, data: { paymentHistory: jsonText(history, []) } });
+}
+
 async function assertAppointmentStatusTransition(data, existingId = "") {
   if (!existingId) return;
   const existing = await prisma.appointment.findUnique({ where: { id: existingId } });
@@ -2558,15 +2945,22 @@ async function assertAppointmentSlotAvailable(data, existingId = "", { database 
   const duration = await appointmentDurationFor(data, database);
   const start = parseTimeToMinutes(data.time);
   const end = start + duration;
-  if (start < scheduleStartMinutes || end > scheduleEndMinutes) {
-    throw apiError("Appointment must fit inside clinic hours, 8:00 AM to 8:00 PM.", 409);
+  const branch = await database.branch.findFirst({ where: { name: data.branch, status: "Active" }, select: { operatingHours: true } });
+  if (!branch) throw apiError("The selected branch is not active.", 409);
+  const operatingHours = operatingHoursForDate(branch, data.date);
+  if (operatingHours.closed) {
+    throw apiError(`The selected branch is closed on ${operatingHours.dayKey}.`, 409);
   }
-  if (rangesOverlap(start, end, lunchStartMinutes, lunchEndMinutes)) {
-    throw apiError("Appointment overlaps the clinic lunch break from 12:00 PM to 1:00 PM.", 409);
+  if (start < operatingHours.open || end > operatingHours.close) {
+    throw apiError(`Appointment must fit inside branch hours, ${formatScheduleTime(operatingHours.open)} to ${formatScheduleTime(operatingHours.close)}.`, 409);
   }
 
   if (data.staff && !["Any available", "To assign"].includes(data.staff)) {
-    const staffMember = await database.staffMember.findFirst({ where: { name: data.staff, branch: data.branch } });
+    const staffMember = await database.staffMember.findFirst({ where: { name: data.staff } });
+    const staffBranches = parseJsonList(staffMember?.branches);
+    if (staffMember && staffMember.branch !== data.branch && !staffBranches.includes(data.branch)) {
+      throw apiError(`${data.staff} is not assigned to ${data.branch}.`, 409);
+    }
     const unavailable = ["inactive", "on leave", "off duty", "unavailable"].some((status) =>
       clean(staffMember?.status).toLowerCase().includes(status),
     );
@@ -2891,8 +3285,14 @@ async function listBranchesForBootstrap(actor) {
     orderBy: [{ name: "asc" }],
     include: organizationManager ? branchManagementInclude() : { rooms: true, modules: true },
   });
-  const counts = await Promise.all(rows.map((branch) => prisma.staffMember.count({ where: { branch: branch.name } })));
-  return rows.map((branch, index) => serializeBranch({ ...branch, employeeCount: counts[index] }));
+  const staffAssignments = await prisma.staffMember.findMany({ select: { branch: true, branches: true } });
+  return rows.map((branch) => {
+    const employeeCount = staffAssignments.filter((member) => {
+      const assigned = parseJsonList(member.branches);
+      return member.branch === branch.name || assigned.includes(branch.name) || member.branch === "All branches";
+    }).length;
+    return serializeBranch({ ...branch, employeeCount });
+  });
 }
 
 async function buildBootstrapPayload(actor) {
@@ -2909,6 +3309,9 @@ async function buildBootstrapPayload(actor) {
     staff,
     expenses,
     discounts,
+    promotions,
+    consentTemplates,
+    consentSubmissions,
     smsTemplates,
     campaigns,
     auditLogs,
@@ -2917,6 +3320,7 @@ async function buildBootstrapPayload(actor) {
     settings,
     leadIntegrations,
     webhookEvents,
+    posCarts,
   ] = await Promise.all([
     listResource("clients", actor),
     listResource("appointments", actor),
@@ -2930,6 +3334,9 @@ async function buildBootstrapPayload(actor) {
     listResource("staff", actor),
     listResource("expenses", actor),
     listResource("discounts", actor),
+    listResource("promotions", actor),
+    listResource("consentTemplates", actor),
+    listResource("consentSubmissions", actor),
     listResource("smsTemplates", actor),
     listResource("campaigns", actor),
     listResource("auditLogs", actor),
@@ -2943,6 +3350,9 @@ async function buildBootstrapPayload(actor) {
         orderBy: [{ receivedAt: "desc" }],
         take: 50,
       })
+      : [],
+    moduleAllowed(actor, "pos", roleAccess)
+      ? prisma.posCart.findMany({ where: branchWhere(actor), orderBy: [{ updatedAt: "desc" }], take: 100 })
       : [],
   ]);
 
@@ -2959,6 +3369,9 @@ async function buildBootstrapPayload(actor) {
     staff,
     expenses,
     discounts,
+    promotions,
+    consentTemplates,
+    consentSubmissions,
     smsTemplates,
     campaigns,
     auditLogs,
@@ -2967,6 +3380,7 @@ async function buildBootstrapPayload(actor) {
     settings,
     leadIntegrations,
     webhookEvents,
+    posCarts: posCarts.map(serializePosCart),
   };
 }
 
@@ -2987,6 +3401,18 @@ async function buildSaleDraftItems(cart, branch) {
       if (offeredBranches.length && !offeredBranches.includes(branch) && !offeredBranches.includes("All branches")) {
         throw apiError(`${service.name} is not offered at ${branch}.`, 409);
       }
+      const provider = clean(item.provider) || "N/A";
+      if (provider !== "N/A") {
+        const staffMember = await prisma.staffMember.findFirst({ where: { name: provider, status: { not: "Inactive" } } });
+        const assignedBranches = parseJsonList(staffMember?.branches);
+        if (!staffMember || (staffMember.branch !== branch && !assignedBranches.includes(branch))) {
+          throw apiError(`${provider} is not available at ${branch}.`, 409);
+        }
+        const allowedRoles = parseJsonList(service.staff);
+        if (allowedRoles.length && !allowedRoles.includes("All staff") && !allowedRoles.includes(staffMember.role)) {
+          throw apiError(`${provider} is not an allowed provider for ${service.name}.`, 409);
+        }
+      }
       prepared.push({
         source: service,
         sourceId: service.id,
@@ -2994,6 +3420,9 @@ async function buildSaleDraftItems(cart, branch) {
         type: "Service",
         qty,
         price: numberValue(service.price, "Service price", { min: 0 }),
+        provider,
+        aftercare: service.aftercare,
+        recommendedIntervalDays: Number(service.recommendedIntervalDays || 0),
         consumables: parseJsonList(service.consumables),
       });
     } else if (item.type === "Product") {
@@ -3013,6 +3442,7 @@ async function buildSaleDraftItems(cart, branch) {
         type: "Product",
         qty,
         price: numberValue(product.price, "Product price", { min: 0 }),
+        provider: "N/A",
         inventoryId: product.id,
       });
     } else {
@@ -3026,9 +3456,35 @@ async function buildSaleDraftItems(cart, branch) {
 async function calculateCheckout(draft, { actor, branch }) {
   const items = await buildSaleDraftItems(draft.cart, branch);
   const subtotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
+  const saleDate = clean(draft.saleDate) || new Date().toISOString().slice(0, 10);
+  const promotions = await prisma.promotion.findMany({ where: { active: true, startDate: { lte: saleDate }, endDate: { gte: saleDate } } });
+  const appliedPromotionNames = new Set();
+  let promotionDiscount = 0;
+  items.forEach((item) => {
+    if (item.type !== "Service") return;
+    const eligible = promotions.filter((promotion) => {
+      const branches = parseJsonList(promotion.branches);
+      const serviceIds = parseJsonList(promotion.serviceIds);
+      const packageNames = parseJsonList(promotion.packageNames);
+      const targetMatches = (!serviceIds.length && !packageNames.length)
+        || serviceIds.includes(item.sourceId)
+        || (item.source.serviceType === "Package" && packageNames.includes(item.name));
+      return (!branches.length || branches.includes("All branches") || branches.includes(branch))
+        && targetMatches;
+    });
+    const best = eligible.map((promotion) => ({
+      promotion,
+      amount: promotion.discountType === "Percentage"
+        ? (item.price * item.qty * Number(promotion.value || 0)) / 100
+        : Math.min(item.price * item.qty, Number(promotion.value || 0) * item.qty),
+    })).sort((left, right) => right.amount - left.amount)[0];
+    item.promotionDiscount = Math.round(best?.amount || 0);
+    if (best?.promotion) appliedPromotionNames.add(best.promotion.name);
+    promotionDiscount += item.promotionDiscount;
+  });
   const clientId = clean(draft.clientId);
-  const client = clientId ? await prisma.client.findFirst({ where: { id: clientId, branch } }) : null;
-  if (clientId && !client) throw apiError("The selected client is not available at this branch.", 404);
+  const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
+  if (clientId && !client) throw apiError("The selected client was not found.", 404);
   const discountId = clean(draft.discount?.id || draft.discountId);
   const discount = discountId ? await prisma.discount.findUnique({ where: { id: discountId } }) : null;
   if (discountId) assertDiscountUsable(discount, { role: actor.role, client, items });
@@ -3055,7 +3511,7 @@ async function calculateCheckout(draft, { actor, branch }) {
   } else if (requestedDepositCredit > 0) {
     throw apiError("Select the appointment that owns this deposit credit.", 409);
   }
-  const totalDiscount = Math.min(discountAmount + depositCredit, subtotal);
+  const totalDiscount = Math.min(discountAmount + depositCredit + promotionDiscount, subtotal);
 
   return {
     items,
@@ -3065,7 +3521,10 @@ async function calculateCheckout(draft, { actor, branch }) {
     appointmentId: creditedAppointmentId,
     appointmentUpdatedAt: creditedAppointmentUpdatedAt,
     discountAmount: totalDiscount,
+    promotionDiscount,
+    appliedPromotions: [...appliedPromotionNames],
     total: Math.max(0, subtotal - totalDiscount),
+    client,
   };
 }
 
@@ -4057,7 +4516,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
     const primaryBranch = branchRecords[0] || null;
     if (!account) {
       const staff = primaryBranch
-        ? await tx.staffMember.create({ data: { name: invitation.name, role: invitation.role, branch: primaryBranch.name, status: "Available" } })
+        ? await tx.staffMember.create({ data: { name: invitation.name, role: invitation.role, branch: primaryBranch.name, branches: JSON.stringify(branchRecords.map((branch) => branch.name)), status: "Available" } })
         : null;
       account = await tx.account.create({
         data: {
@@ -4394,14 +4853,18 @@ app.put("/api/staff/:id/account", asyncRoute(async (request, response) => {
       throw apiError("The login name and role must match the staff profile before they can be connected.", 409);
     }
 
-    const staffBranch = await tx.branch.findFirst({ where: { organizationId: actor.organizationId, name: staff.branch, status: "Active" } });
-    if (!staffBranch) throw apiError("The employee branch is not active.", 409);
+    const staffBranchNames = [...new Set([staff.branch, ...parseJsonList(staff.branches)].filter(Boolean))];
+    const staffBranches = await tx.branch.findMany({ where: { organizationId: actor.organizationId, name: { in: staffBranchNames }, status: "Active" } });
+    const staffBranch = staffBranches.find((branch) => branch.name === staff.branch);
+    if (!staffBranch || staffBranches.length !== staffBranchNames.length) throw apiError("One or more employee branches are not active.", 409);
     const linked = await tx.account.update({ where: { id: account.id }, data: { staffId, branch: staff.branch, lastBranchId: staffBranch.id } });
-    await tx.branchMembership.upsert({
-      where: { branchId_accountId: { branchId: staffBranch.id, accountId: account.id } },
-      create: { branchId: staffBranch.id, accountId: account.id, role: staff.role, isPrimary: true },
-      update: { role: staff.role, status: "Active", isPrimary: true },
-    });
+    for (const branch of staffBranches) {
+      await tx.branchMembership.upsert({
+        where: { branchId_accountId: { branchId: branch.id, accountId: account.id } },
+        create: { branchId: branch.id, accountId: account.id, role: staff.role, isPrimary: branch.id === staffBranch.id },
+        update: { role: staff.role, status: "Active", isPrimary: branch.id === staffBranch.id },
+      });
+    }
     const auditLog = await writeAudit(tx, request, {
       area: "Access",
       action: "Login connected",
@@ -4649,6 +5112,7 @@ function normalizeBranchForm(payload, existing = null) {
     timezone: clean(payload?.timezone) || "Asia/Manila",
     hours: clean(payload?.hours),
     operatingHours: jsonText(payload?.operatingHours || {}, {}),
+    couches: numberValue(payload?.couches ?? existing?.couches ?? 0, "Number of couches", { min: 0, integer: true }),
     status,
     archivedAt: status === "Archived" ? existing?.archivedAt || new Date() : null,
     devices: jsonText(payload?.devices || [], []),
@@ -4973,7 +5437,7 @@ app.post("/api/treatments/:id/photos", asyncRoute(async (request, response) => {
   }
 
   const record = await prisma.treatment.findUnique({ where: { id: treatmentId }, include: treatmentPhotoInclude });
-  response.status(201).json({ record: serializeTreatmentWithPhotos(record), auditLog });
+  response.status(201).json({ record: serializeTreatment(record), auditLog });
 }));
 
 app.delete("/api/treatments/:id/photos/:photoId", asyncRoute(async (request, response) => {
@@ -5008,7 +5472,7 @@ app.delete("/api/treatments/:id/photos/:photoId", asyncRoute(async (request, res
   });
 
   const record = await prisma.treatment.findUnique({ where: { id: treatmentId }, include: treatmentPhotoInclude });
-  response.json({ record: serializeTreatmentWithPhotos(record), auditLog });
+  response.json({ record: serializeTreatment(record), auditLog });
 }));
 
 app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
@@ -5583,6 +6047,7 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
   if (config.readOnly) {
     throw apiError(`${request.params.resource} cannot be updated through the generic API.`, 405);
   }
+  if (config.immutable) throw apiError(`${config.area} records are permanent after submission.`, 405);
 
   const id = String(request.params.id);
   const existing = await prisma[config.delegate].findUnique({ where: { id } });
@@ -5636,6 +6101,7 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
   if (config.readOnly) {
     throw apiError(`${request.params.resource} cannot be deleted through the generic API.`, 405);
   }
+  if (config.immutable) throw apiError(`${config.area} records cannot be deleted.`, 405);
   if (request.params.resource === "campaigns") {
     throw apiError("Use the Marketing Deleted page to remove campaigns safely.", 405);
   }
@@ -5661,12 +6127,12 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
     prisma.branch.findMany({
       where: { status: "Active", modules: { some: { moduleId: { in: ["leads", "booking"] }, enabled: true } } },
       orderBy: [{ name: "asc" }],
-      select: { id: true, name: true },
+      select: { id: true, name: true, hours: true, operatingHours: true },
     }),
     prisma.service.findMany({
       where: { active: true },
       orderBy: [{ name: "asc" }],
-      select: { id: true, name: true, category: true, branches: true, duration: true },
+      select: { id: true, name: true, category: true, serviceType: true, branches: true, duration: true, price: true, priceModel: true, priceUnit: true },
     }),
   ]);
   const publicServices = [];
@@ -5680,8 +6146,12 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
         id: service.id,
         name: service.name,
         category: service.category,
+        serviceType: service.serviceType,
         branches: parseJsonList(service.branches),
         duration: service.duration,
+        price: service.price,
+        priceModel: service.priceModel,
+        priceUnit: service.priceUnit,
       });
     }
   }
@@ -5689,7 +6159,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
   response.json({
     company: settings.company,
     tagline: settings.receiptFooter,
-    branches: branchRows,
+    branches: branchRows.map((branch) => ({ ...branch, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
     services: publicServices,
   });
 }));
@@ -5778,6 +6248,59 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   }
 }));
 
+app.get("/api/public-registration/qr", asyncRoute(async (request, response) => {
+  const branchName = requireText(request.query.branch, "Branch");
+  const branch = await prisma.branch.findFirst({ where: { name: branchName, status: "Active" }, select: { name: true } });
+  if (!branch) throw apiError("Registration branch is unavailable.", 404);
+  const configuredOrigin = clean(process.env.APP_ORIGIN).split(",")[0];
+  const origin = configuredOrigin || `${request.protocol}://${request.get("host")}`.replace(/:3001$/, ":5173");
+  const url = `${origin.replace(/\/$/, "")}/register?branch=${encodeURIComponent(branch.name)}`;
+  const svg = await QRCode.toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#1f2937", light: "#ffffff" } });
+  response.type("image/svg+xml").set("Cache-Control", "public, max-age=300").send(svg);
+}));
+
+app.post("/api/public-registration", asyncRoute(async (request, response) => {
+  const values = request.body ?? {};
+  if (clean(values.clinicWebsite)) {
+    response.status(202).json({ submitted: true });
+    return;
+  }
+  if (values.privacyConsent !== true) throw apiError("Consent is required before registration.");
+  const branch = await prisma.branch.findFirst({ where: { name: requireText(values.branch, "Branch"), status: "Active" } });
+  if (!branch) throw apiError("Registration branch is unavailable.", 409);
+  const firstName = requireText(values.firstName, "First name");
+  const lastName = requireText(values.lastName, "Last name");
+  const mobile = clean(values.mobile);
+  const email = clean(values.email).toLowerCase();
+  if (!mobile && !email) throw apiError("Enter a mobile number or email address.");
+  const duplicateConditions = [mobile ? { mobile } : null, email ? { email } : null].filter(Boolean);
+  const organizationBranches = await prisma.branch.findMany({ where: { organizationId: branch.organizationId }, select: { name: true } });
+  const existing = duplicateConditions.length ? await prisma.client.findFirst({ where: { branch: { in: organizationBranches.map((item) => item.name) }, OR: duplicateConditions } }) : null;
+  const data = normalizeClientPayload({
+    ...(existing || {}),
+    ...values,
+    firstName,
+    lastName,
+    fullName: [firstName, clean(values.middleName), lastName].filter(Boolean).join(" "),
+    mobile,
+    email,
+    branch: existing?.branch || branch.name,
+    branchesVisited: [...new Set([...parseJsonList(existing?.branchesVisited), branch.name])],
+    source: existing?.source || "QR Registration",
+    consentStatus: "Pending",
+    marketingOptIn: values.marketingOptIn === true,
+  }, existing?.id || "");
+  const result = await prisma.$transaction(async (tx) => {
+    const client = existing
+      ? await tx.client.update({ where: { id: existing.id }, data })
+      : await tx.client.create({ data });
+    const auditLog = await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: "Client QR Registration", role: "Public", area: "Client Records", action: existing ? "Client QR profile updated" : "Client QR profile created", details: `${client.fullName} submitted registration for ${branch.name}.` } });
+    await createAppNotification(tx, { actor: "Client QR Registration", branches: [branch.name], message: `${client.fullName} submitted a ${existing ? "profile update" : "new registration"}.`, module: "clients", recordId: client.id, title: existing ? "Client registration updated" : "New QR client registration" });
+    return { client, auditLog };
+  });
+  response.status(existing ? 200 : 201).json({ submitted: true, clientId: result.client.id, updated: Boolean(existing) });
+}));
+
 app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   const booking = normalizePublicBookingRequest(request.body ?? {});
   if (booking.spam) {
@@ -5802,11 +6325,12 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     const replay = await tx.appointment.findUnique({ where: { publicBookingKey } });
     if (replay) return { appointment: replay, replayed: true };
 
-    const staffCapacity = await tx.staffMember.count({
-      where: { branch: booking.branch, status: { not: "Inactive" } },
-    });
+    const staffCandidates = await tx.staffMember.findMany({ where: { status: { not: "Inactive" } } });
+    const staffCapacity = staffCandidates.filter((staffMember) =>
+      staffMember.branch === booking.branch || parseJsonList(staffMember.branches).includes(booking.branch)).length;
     const roomCapacity = activeRoomRecords(branch.rooms).length;
-    const capacitySignals = [staffCapacity, roomCapacity].filter((value) => value > 0);
+    const physicalCapacity = roomCapacity + Number(branch.couches || 0);
+    const capacitySignals = [staffCapacity, physicalCapacity].filter((value) => value > 0);
     const unassignedCapacity = capacitySignals.length ? Math.min(...capacitySignals) : 1;
 
     const appointmentData = {
@@ -5922,6 +6446,7 @@ app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) =>
   }
 
   assertMutationAllowed(request, "inventory", item.branch);
+  const actor = actorFromRequest(request);
 
   const result = await prisma.$transaction(async (tx) => {
     const nextStock = Number(item.stock || 0) + qty;
@@ -5937,13 +6462,18 @@ app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) =>
         branch: item.branch,
         qty,
         reason: clean(request.body?.reason) || "Stock movement",
-        user: actorFromRequest(request).name,
+        user: actor.name,
+        supplier: clean(request.body?.supplier),
+        receivedBy: clean(request.body?.receivedBy) || actor.name,
+        checkNumber: clean(request.body?.checkNumber),
+        unit: clean(request.body?.unit) || item.unit,
+        notes: clean(request.body?.notes),
       },
     });
     const auditLog = await writeAudit(tx, request, {
       area: "Inventory",
       action: "Stock movement posted",
-      details: `${item.item}: ${qty}.`,
+      details: `${item.item}: ${qty} ${clean(request.body?.unit) || item.unit}${clean(request.body?.supplier) ? ` from ${clean(request.body.supplier)}` : ""}.`,
     });
     return { inventoryItem, movement, auditLog };
   });
@@ -5965,7 +6495,13 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
     assertPackageRedeemable(current);
     const redeemed = await tx.clinicPackage.updateMany({
       where: { id, used: current.used, status: current.status },
-      data: { used: { increment: 1 } },
+      data: {
+        used: { increment: 1 },
+        sessionHistory: jsonText([
+          ...parseJsonList(current.sessionHistory),
+          { date: clean(request.body?.date) || new Date().toISOString().slice(0, 10), branch: clean(request.body?.branch) || current.branch, sessions: 1, service: clean(request.body?.service), provider: clean(request.body?.provider) },
+        ], []),
+      },
     });
     if (redeemed.count !== 1) throw apiError(`Package ${current.name} changed while it was being redeemed. Try again.`, 409);
     let record = await tx.clinicPackage.findUnique({ where: { id } });
@@ -6026,6 +6562,18 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     }
 
     const salePayments = parseJsonList(sale.payments);
+    let updatedClient = null;
+    if (sale.clientId && !sale.testMode) {
+      const paid = salePayments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
+      const outstanding = Math.max(0, Number(sale.total || 0) - paid);
+      const client = await tx.client.findUnique({ where: { id: sale.clientId } });
+      if (client && outstanding > 0) {
+        updatedClient = await tx.client.update({
+          where: { id: client.id },
+          data: { balance: Math.max(0, Number(client.balance || 0) - outstanding) },
+        });
+      }
+    }
     const restoredCertificates = [];
     const certificateRefunds = new Map();
     const packageRestores = new Map();
@@ -6048,6 +6596,9 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
         data: {
           balance: { increment: amount },
           status: "Active",
+          redeemedDate: "",
+          redeemedBranch: "",
+          transactionId: "",
         },
       }));
     }
@@ -6057,7 +6608,11 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
       if (!pkg) continue;
       const restored = await tx.clinicPackage.updateMany({
         where: { id: packageId, used: { gte: sessions } },
-        data: { used: { decrement: sessions }, status: "Active" },
+        data: {
+          used: { decrement: sessions },
+          status: "Active",
+          sessionHistory: jsonText([...parseJsonList(pkg.sessionHistory), { date: new Date().toISOString().slice(0, 10), branch: sale.branch, sessions: -sessions, note: `Void of ${sale.invoice}` }], []),
+        },
       });
       if (restored.count === 1) restoredPackages.push(await tx.clinicPackage.findUnique({ where: { id: packageId } }));
     }
@@ -6082,11 +6637,102 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
       }) : null,
       giftCertificates: restoredCertificates,
       packages: restoredPackages,
+      client: updatedClient ? serializeClient(updatedClient) : null,
       auditLog,
     };
   });
 
   response.json(result);
+}));
+
+app.delete("/api/transactions/:id/test", asyncRoute(async (request, response) => {
+  const actor = actorFromRequest(request);
+  if (!isAdmin(actor.role)) throw apiError("Only Super Admin can reset test transactions.", 403);
+  const id = clean(request.params.id);
+  const sale = await prisma.sale.findUnique({ where: { id } });
+  if (!sale || !sale.testMode) throw apiError("Test transaction not found.", 404);
+  const auditLog = await prisma.$transaction(async (tx) => {
+    await tx.sale.delete({ where: { id } });
+    return writeAudit(tx, request, {
+      area: "POS",
+      action: "POS test transaction reset",
+      details: `${sale.invoice} was permanently removed from the isolated test ledger.`,
+      subjectType: "Sale",
+      subjectId: sale.id,
+      beforeValues: serializeSale(sale),
+    });
+  });
+  response.json({ id, auditLog });
+}));
+
+function normalizePosCartPayload(payload, actor, existing = null) {
+  const branch = requireText(payload?.branch || existing?.branch, "Branch");
+  const items = Array.isArray(payload?.items) ? payload.items : parseJsonList(existing?.items);
+  if (items.length > 100) throw apiError("A POS cart can contain at most 100 service or product lines.");
+  const today = new Date().toISOString().slice(0, 10);
+  const saleDate = clean(payload?.saleDate || existing?.saleDate) || today;
+  if (saleDate && !/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) throw apiError("Choose a valid transaction date.");
+  if (saleDate > today) throw apiError("Future-dated POS transactions are not allowed.");
+  if (saleDate !== today && !canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can prepare a historical transaction.", 403);
+  const testMode = payload?.testMode === undefined ? Boolean(existing?.testMode) : payload.testMode === true;
+  if (testMode && !isAdmin(actor.role)) throw apiError("Only Super Admin can use POS Test Mode.", 403);
+  return {
+    clientId: clean(payload?.clientId),
+    client: clean(payload?.client) || "Walk-in",
+    branch,
+    staff: clean(payload?.staff),
+    items: JSON.stringify(items),
+    discountId: clean(payload?.discountId),
+    saleDate,
+    testMode,
+  };
+}
+
+app.post("/api/pos/carts", asyncRoute(async (request, response) => {
+  const actor = actorFromRequest(request);
+  const data = normalizePosCartPayload(request.body, actor);
+  assertMutationAllowed(request, "pos", data.branch);
+  if (data.clientId) {
+    const client = await prisma.client.findUnique({ where: { id: data.clientId }, select: { id: true, fullName: true } });
+    if (!client) throw apiError("The selected client was not found.", 404);
+    data.client = client.fullName;
+    const existing = await prisma.posCart.findFirst({ where: { clientId: data.clientId } });
+    if (existing) {
+      response.status(409).json({ error: `${client.fullName} already has an open POS cart.`, cart: serializePosCart(existing) });
+      return;
+    }
+  }
+  const cart = await prisma.posCart.create({ data: { ...data, createdById: actor.id, createdBy: actor.name } });
+  response.status(201).json({ cart: serializePosCart(cart) });
+}));
+
+app.put("/api/pos/carts/:id", asyncRoute(async (request, response) => {
+  const id = clean(request.params.id);
+  const existing = await prisma.posCart.findUnique({ where: { id } });
+  if (!existing) throw apiError("Open POS cart not found.", 404);
+  assertMutationAllowed(request, "pos", existing.branch);
+  const actor = actorFromRequest(request);
+  const data = normalizePosCartPayload(request.body, actor, existing);
+  assertMutationAllowed(request, "pos", data.branch);
+  if (data.branch !== existing.branch) throw apiError("Close this cart before changing its branch.", 409);
+  if (data.clientId && data.clientId !== existing.clientId) {
+    const duplicate = await prisma.posCart.findFirst({ where: { clientId: data.clientId, id: { not: id } } });
+    if (duplicate) throw apiError("This client already has another open POS cart.", 409);
+  }
+  const cart = await prisma.posCart.update({ where: { id }, data });
+  response.json({ cart: serializePosCart(cart) });
+}));
+
+app.delete("/api/pos/carts/:id", asyncRoute(async (request, response) => {
+  const id = clean(request.params.id);
+  const existing = await prisma.posCart.findUnique({ where: { id } });
+  if (!existing) {
+    response.status(204).end();
+    return;
+  }
+  assertMutationAllowed(request, "pos", existing.branch);
+  await prisma.posCart.delete({ where: { id } });
+  response.status(204).end();
 }));
 
 app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
@@ -6095,6 +6741,18 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   const branch = requireText(draft.branch, "Branch");
   assertMutationAllowed(request, "pos", branch);
   const actor = actorFromRequest(request);
+  const today = new Date().toISOString().slice(0, 10);
+  const saleDate = clean(draft.saleDate) || today;
+  const testMode = draft.testMode === true;
+  const postUnpaid = clean(paymentData.status) === "Unpaid";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate) || Number.isNaN(Date.parse(`${saleDate}T00:00:00Z`))) {
+    throw apiError("Choose a valid transaction date.");
+  }
+  if (saleDate > today) throw apiError("Future-dated POS transactions are not allowed.");
+  if (saleDate !== today && !canManageOrganization(actor.role)) {
+    throw apiError("Only an Owner or Super Admin can post a historical transaction.", 403);
+  }
+  if (testMode && !isAdmin(actor.role)) throw apiError("Only Super Admin can use POS Test Mode.", 403);
 
   const payments = Array.isArray(paymentData.payments) ? paymentData.payments : [];
   const normalizedPayments = payments.map((payment) => {
@@ -6105,9 +6763,10 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       ...(referenceNumber ? { referenceNumber } : {}),
       ...(clean(payment.giftCertificateId) ? { giftCertificateId: clean(payment.giftCertificateId) } : {}),
       ...(clean(payment.packageId) ? { packageId: clean(payment.packageId) } : {}),
+      ...(clean(payment.employeeId) ? { employeeId: clean(payment.employeeId) } : {}),
     };
   }).filter((payment) => payment.amount > 0);
-  if (!normalizedPayments.length) {
+  if (!normalizedPayments.length && !postUnpaid) {
     throw apiError("At least one payment amount is required.");
   }
   for (const payment of normalizedPayments) {
@@ -6123,16 +6782,39 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     if (payment.packageId && payment.method !== "Package") {
       throw apiError("Package identifiers can only be used with Package payments.");
     }
+    if (payment.method === "Salary Deduction" && !payment.employeeId) {
+      throw apiError("Select the employee linked to the salary deduction.");
+    }
+    if (payment.employeeId && payment.method !== "Salary Deduction") {
+      throw apiError("Employee identifiers can only be used with Salary Deduction payments.");
+    }
+    if (payment.employeeId) {
+      const employee = await prisma.staffMember.findUnique({ where: { id: payment.employeeId } });
+      const assigned = new Set([employee?.branch, ...parseJsonList(employee?.branches)]);
+      if (!employee || employee.status === "Inactive" || (!assigned.has(branch) && !assigned.has("All branches"))) {
+        throw apiError("The selected employee is not active at this branch.", 409);
+      }
+    }
   }
+  const settings = await getPersistedSettings();
+  const allowedPaymentMethods = new Set(normalizePaymentMethods(settings.paymentMethods).filter((method) => method.active).map((method) => method.name));
+  allowedPaymentMethods.add("Package");
+  const disabledPayment = normalizedPayments.find((payment) => !allowedPaymentMethods.has(payment.method));
+  if (disabledPayment) throw apiError(`${disabledPayment.method} is not an enabled payment method. Refresh POS settings and try again.`, 409);
 
   const checkout = await calculateCheckout(draft, { actor, branch });
   const paidAmount = normalizedPayments.reduce((sum, payment) => sum + payment.amount, 0);
-  const deductions = await inventoryDeductionsForSale(checkout.items, branch);
+  const outstandingAmount = Math.max(0, checkout.total - paidAmount);
+  if (outstandingAmount > 0 && !checkout.client && !testMode) {
+    throw apiError("Select a registered client before posting an unpaid or partially paid transaction.");
+  }
+  const deductions = testMode ? [] : await inventoryDeductionsForSale(checkout.items, branch);
+  const operationalPayments = testMode ? [] : normalizedPayments;
 
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
-    if (checkout.appointmentId) {
+    if (checkout.appointmentId && !testMode) {
       const existingDepositSale = await tx.sale.findUnique({ where: { appointmentId: checkout.appointmentId } });
       if (existingDepositSale) throw apiError("This appointment deposit was already applied to another sale.", 409);
       const currentAppointment = await tx.appointment.findFirst({
@@ -6141,7 +6823,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       });
       if (!currentAppointment) throw apiError("The appointment changed during checkout. Review its deposit and try again.", 409);
     }
-    if (checkout.discount) {
+    if (checkout.discount && !testMode) {
       const claimedDiscount = await tx.discount.updateMany({
         where: { id: checkout.discount.id, active: true, updatedAt: checkout.discount.updatedAt },
         data: { usage: { increment: 1 } },
@@ -6166,13 +6848,17 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
 
     const settledCertificates = [];
     const certificateCharges = new Map();
-    for (const payment of normalizedPayments) {
+    for (const payment of operationalPayments) {
       if (!payment.giftCertificateId) continue;
       certificateCharges.set(payment.giftCertificateId, (certificateCharges.get(payment.giftCertificateId) || 0) + payment.amount);
     }
     for (const [certificateId, amount] of certificateCharges) {
       const certificate = await tx.giftCertificate.findUnique({ where: { id: certificateId } });
       assertGiftCertificateUsable(certificate, { branch, amount });
+      if (certificate.type === "Specific Service") {
+        const matchesService = checkout.items.some((item) => item.type === "Service" && (item.sourceId === certificate.serviceId || item.name === certificate.service));
+        if (!matchesService) throw apiError(`Gift certificate ${certificate.code} can only be used for ${certificate.service || "its assigned service"}.`, 409);
+      }
       const charged = await tx.giftCertificate.updateMany({
         where: { id: certificateId, balance: certificate.balance, status: certificate.status },
         data: { balance: { decrement: amount } },
@@ -6180,14 +6866,14 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       if (charged.count !== 1) throw apiError(`Gift certificate ${certificate.code} changed during checkout. Try again.`, 409);
       let settled = await tx.giftCertificate.findUnique({ where: { id: certificateId } });
       if (Number(settled.balance || 0) <= 0) {
-        settled = await tx.giftCertificate.update({ where: { id: certificateId }, data: { status: "Used" } });
+        settled = await tx.giftCertificate.update({ where: { id: certificateId }, data: { status: "Redeemed" } });
       }
       settledCertificates.push(settled);
     }
 
     const settledPackages = [];
     const packageRedemptions = new Map();
-    for (const payment of normalizedPayments) {
+    for (const payment of operationalPayments) {
       if (!payment.packageId) continue;
       packageRedemptions.set(payment.packageId, (packageRedemptions.get(payment.packageId) || 0) + 1);
     }
@@ -6200,7 +6886,13 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       }
       const redeemed = await tx.clinicPackage.updateMany({
         where: { id: packageId, used: pkg.used, status: pkg.status },
-        data: { used: { increment: sessions } },
+        data: {
+          used: { increment: sessions },
+          sessionHistory: jsonText([
+            ...parseJsonList(pkg.sessionHistory),
+            { date: saleDate, branch, sessions, service: checkout.items.filter((item) => item.type === "Service").map((item) => item.name).join(", "), provider: checkout.items.filter((item) => item.type === "Service").map((item) => item.provider).filter((value) => value && value !== "N/A").join(", ") },
+          ], []),
+        },
       });
       if (redeemed.count !== 1) throw apiError(`Package ${pkg.name} changed during checkout. Try again.`, 409);
       let settled = await tx.clinicPackage.findUnique({ where: { id: packageId } });
@@ -6211,12 +6903,14 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     }
 
     const saleCount = await tx.sale.count();
-    const invoice = `${clean(draft.invoicePrefix) || "MACE"}-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${String(saleCount + 1).padStart(3, "0")}`;
+    const invoicePrefix = testMode ? "TEST" : clean(draft.invoicePrefix) || "MACE";
+    const invoice = `${invoicePrefix}-${saleDate.slice(2).replace(/-/g, "")}-${String(saleCount + 1).padStart(3, "0")}`;
     const sale = await tx.sale.create({
       data: {
         invoice,
-        date: new Date().toISOString().slice(0, 10),
+        date: saleDate,
         time: new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
+        clientId: checkout.client?.id || null,
         client: clean(draft.clientName) || "Walk-in",
         branch,
         staff: clean(draft.staff) || actor.name,
@@ -6224,20 +6918,36 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         discount: checkout.discountAmount,
         total: checkout.total,
         payments: JSON.stringify(normalizedPayments),
-        status: paidAmount >= checkout.total ? "Paid" : "Partial",
-        appointmentId: checkout.appointmentId,
+        status: testMode ? "Test" : paidAmount >= checkout.total ? "Paid" : paidAmount > 0 ? "Partially Paid" : "Unpaid",
+        appointmentId: testMode ? null : checkout.appointmentId,
         notes: clean(paymentData.notes || draft.notes),
+        testMode,
         items: {
           create: checkout.items.map((item) => ({
             name: item.name,
             type: item.type,
             qty: item.qty,
             price: item.price,
+            originalPrice: item.price,
+            discount: Number(item.promotionDiscount || 0),
+            provider: item.provider || "N/A",
+            serviceId: item.type === "Service" ? item.sourceId : "",
+            aftercare: item.aftercare || "",
+            recommendedIntervalDays: Number(item.recommendedIntervalDays || 0),
           })),
         },
       },
       include: { items: true },
     });
+
+    for (let index = 0; index < settledCertificates.length; index += 1) {
+      const certificate = settledCertificates[index];
+      if (certificate.status !== "Redeemed") continue;
+      settledCertificates[index] = await tx.giftCertificate.update({
+        where: { id: certificate.id },
+        data: { redeemedDate: saleDate, redeemedBranch: branch, transactionId: sale.id },
+      });
+    }
 
     const movements = [];
     for (const deduction of deductions) {
@@ -6256,13 +6966,32 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       movements.push(movement);
     }
     const tenderNotes = [
+      ...(checkout.appliedPromotions.length ? [`Promotions: ${checkout.appliedPromotions.join(", ")}`] : []),
       ...settledCertificates.map((certificate) => `GC ${certificate.code} balance ${certificate.balance}`),
       ...settledPackages.map((pkg) => `${pkg.name} ${pkg.used}/${pkg.sessions} sessions`),
     ];
+    let updatedClient = null;
+    if (checkout.client && !testMode) {
+      const visited = new Set(parseJsonList(checkout.client.branchesVisited));
+      visited.add(branch);
+      updatedClient = await tx.client.update({
+        where: { id: checkout.client.id },
+        data: {
+          branchesVisited: jsonText([...visited], []),
+          lastVisit: saleDate,
+          balance: { increment: outstandingAmount },
+        },
+      });
+    }
+    const posCartId = clean(draft.posCartId);
+    if (posCartId) {
+      const closedCart = await tx.posCart.deleteMany({ where: { id: posCartId, branch } });
+      if (closedCart.count !== 1) throw apiError("The open POS cart changed before checkout. Refresh and try again.", 409);
+    }
     const auditLog = await writeAudit(tx, request, {
       area: "POS",
-      action: "POS transaction completed",
-      details: `${sale.invoice} posted for ${checkout.total}.${tenderNotes.length ? ` ${tenderNotes.join("; ")}.` : ""}`,
+      action: testMode ? "POS test transaction completed" : saleDate !== today ? "Historical POS transaction completed" : "POS transaction completed",
+      details: `${sale.invoice} posted for ${checkout.total} on ${saleDate}.${outstandingAmount ? ` Outstanding balance ${outstandingAmount}.` : ""}${tenderNotes.length ? ` ${tenderNotes.join("; ")}.` : ""}`,
     });
 
     return {
@@ -6274,6 +7003,8 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       movements,
       giftCertificates: settledCertificates,
       packages: settledPackages,
+      client: updatedClient ? serializeClient(updatedClient) : null,
+      posCartId,
       auditLog,
     };
     });
