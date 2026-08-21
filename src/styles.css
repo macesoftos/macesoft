@@ -8059,6 +8059,41 @@ td,
   font-size: 0.75rem;
 }
 
+.cart-final-price-input {
+  display: grid;
+  grid-template-columns: auto minmax(92px, 118px);
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 7px;
+  color: var(--ink-muted, #75695f);
+  font-size: 0.72rem;
+}
+
+.cart-final-price-input input {
+  width: 100%;
+  text-align: right;
+}
+
+.cart-final-price-input small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.cart-unit-quantity {
+  display: grid;
+  gap: 3px;
+  text-align: center;
+}
+
+.cart-unit-quantity span {
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.cart-unit-quantity input {
+  width: 64px;
+}
+
 .print-receipt-aftercare {
   display: grid;
   gap: 8px;

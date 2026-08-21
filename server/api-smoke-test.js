@@ -246,6 +246,8 @@ try {
   const bgcClientId = `cl-smoke-bgc-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
   const serviceId = `svc-smoke-${suffix}`;
+  const variablePriceServiceId = `svc-variable-${suffix}`;
+  const packageServiceId = `svc-package-${suffix}`;
   const appointmentSeed = Number.parseInt(suffix.slice(-6), 36);
   const appointmentAt = new Date(Date.UTC(2080, 0, 1) + (appointmentSeed % 6_000) * 86_400_000);
   if (appointmentAt.getUTCDay() === 0) appointmentAt.setUTCDate(appointmentAt.getUTCDate() + 1);
@@ -281,6 +283,41 @@ try {
   });
   assert(createdService.response.status === 201, "service create failed");
   assert(createdService.payload.notification?.title === "New service", "service create did not emit a notification");
+
+  const createdVariablePriceService = await jsonRequest("/api/resources/services", {
+    id: variablePriceServiceId,
+    name: "Automated Variable Consultation",
+    category: "Consultations",
+    serviceType: "Regular",
+    duration: 30,
+    price: 1000,
+    priceModel: "Starts at",
+    branches: ["Mace Davao"],
+    staff: ["Doctor", "Nurse"],
+    room: "Room 1",
+    active: true,
+    pos: true,
+  });
+  assert(createdVariablePriceService.response.status === 201, "variable-price service create failed");
+
+  const createdPackageService = await jsonRequest("/api/resources/services", {
+    id: packageServiceId,
+    name: "Automated Three Session Package",
+    category: "Packages",
+    serviceType: "Package",
+    duration: 45,
+    price: 3000,
+    priceModel: "Fixed price",
+    packageSessions: 3,
+    packagePrice: 3000,
+    serviceValue: 1000,
+    branches: ["Mace Davao"],
+    staff: ["Doctor", "Nurse"],
+    room: "Room 1",
+    active: true,
+    pos: true,
+  });
+  assert(createdPackageService.response.status === 201, "package service create failed");
 
   const notificationFeed = await request("/api/notifications", { headers: ownerHeaders });
   assert(notificationFeed.response.ok, "notification feed failed");
@@ -905,6 +942,77 @@ try {
   });
   assert(impossibleCheckout.response.status === 409, "POS insufficient-stock validation failed");
 
+  const variablePriceCart = {
+    clientId,
+    clientName: "Automated Smoke Client Updated",
+    branch: "Mace Davao",
+    staff: "Dr. Mace",
+    invoicePrefix: "MACE",
+    cart: [{
+      key: `service-${variablePriceServiceId}`,
+      serviceId: variablePriceServiceId,
+      type: "Service",
+      name: "Automated Variable Consultation",
+      qty: 1,
+    }],
+  };
+  const belowStartingPrice = await jsonRequest("/api/pos/checkout", {
+    draft: {
+      ...variablePriceCart,
+      cart: variablePriceCart.cart.map((item) => ({ ...item, resolvedPrice: 900 })),
+    },
+    payment: { payments: [{ method: "Cash", amount: 900 }] },
+  });
+  assert(belowStartingPrice.response.status === 400, "POS allowed a final service price below its configured starting price");
+
+  const variablePriceCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: {
+      ...variablePriceCart,
+      cart: variablePriceCart.cart.map((item) => ({ ...item, resolvedPrice: 1350 })),
+    },
+    payment: { payments: [{ method: "Cash", amount: 1350 }] },
+  });
+  assert(variablePriceCheckout.response.status === 201, "variable-price POS checkout failed");
+  const variablePriceSaleId = variablePriceCheckout.payload.sale.id;
+  const variablePriceSaleItem = variablePriceCheckout.payload.sale.items?.[0];
+  assert(variablePriceSaleItem?.price === 1350, "POS did not record the final assessed service price");
+  assert(variablePriceSaleItem?.originalPrice === 1000, "POS did not preserve the service's starting price");
+  assert(variablePriceSaleItem?.priceModel === "Starts at", "POS did not preserve the service pricing model");
+  const voidedVariablePriceSale = await jsonRequest(`/api/transactions/${variablePriceSaleId}/void`, {});
+  assert(voidedVariablePriceSale.response.ok, "variable-price sale void failed");
+  await request(`/api/resources/transactions/${variablePriceSaleId}`, { method: "DELETE", headers: ownerHeaders });
+
+  const packageCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: {
+      clientId,
+      clientName: "Automated Smoke Client Updated",
+      branch: "Mace Davao",
+      staff: "Dr. Mace",
+      invoicePrefix: "MACE",
+      cart: [{
+        key: `service-${packageServiceId}`,
+        serviceId: packageServiceId,
+        type: "Service",
+        name: "Automated Three Session Package",
+        qty: 1,
+      }],
+    },
+    payment: { payments: [{ method: "Cash", amount: 3000 }] },
+  });
+  assert(packageCheckout.response.status === 201, "package POS checkout failed");
+  const packageSaleId = packageCheckout.payload.sale.id;
+  const issuedPackage = packageCheckout.payload.packages?.find((pkg) => pkg.sourceSaleId === packageSaleId);
+  assert(issuedPackage?.sessions === 3 && issuedPackage.used === 0, "package sale did not issue the configured client sessions");
+  assert(issuedPackage?.status === "Active", "newly issued package was not active");
+  const voidedPackageSale = await jsonRequest(`/api/transactions/${packageSaleId}/void`, {});
+  assert(voidedPackageSale.response.ok, "package sale void failed");
+  assert(
+    voidedPackageSale.payload.packages?.some((pkg) => pkg.id === issuedPackage.id && pkg.status === "Cancelled"),
+    "voiding an unused package sale did not cancel the issued sessions",
+  );
+  await request(`/api/resources/packages/${issuedPackage.id}`, { method: "DELETE", headers: ownerHeaders });
+  await request(`/api/resources/transactions/${packageSaleId}`, { method: "DELETE", headers: ownerHeaders });
+
   const certificateCreate = await jsonRequest("/api/resources/giftCertificates", {
     code: `GC-SMOKE-${suffix}`,
     client: "Automated Smoke Client Updated",
@@ -1022,6 +1130,14 @@ try {
   await request(`/api/resources/transactions/${payrollSaleId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/staff/${payrollStaffId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/services/${serviceId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  await request(`/api/resources/services/${variablePriceServiceId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  await request(`/api/resources/services/${packageServiceId}`, {
     method: "DELETE",
     headers: ownerHeaders,
   });

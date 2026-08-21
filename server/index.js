@@ -1004,23 +1004,27 @@ async function normalizeAppointmentPayload(payload, existingId = "") {
 function normalizeServicePayload(payload, existingId = "") {
   const serviceType = clean(payload.serviceType) || "Regular Service";
   const priceModel = clean(payload.priceModel) || "Fixed price";
-  const packageSessions = numberValue(payload.packageSessions, "Package sessions", { min: 0, integer: true });
+  const packageSessions = serviceType === "Package" ? numberValue(payload.packageSessions, "Package sessions", { min: 0, integer: true }) : 0;
   const price = numberValue(payload.price, "Price", { min: 0 });
   const packagePrice = numberValue(payload.packagePrice ?? (serviceType === "Package" ? price : 0), "Package price", { min: 0 });
+  const requestedPriceUnit = clean(payload.priceUnit).toLowerCase() === "per ampule" ? "Per ampoule" : clean(payload.priceUnit);
   if (serviceType === "Package" && packageSessions < 1) {
     throw apiError("Packages must include at least one session.");
   }
+  if (priceModel === "Per unit" && !requestedPriceUnit) {
+    throw apiError("Choose whether the unit price is per syringe, ml, vial, or ampoule.");
+  }
   const data = {
     name: requireText(payload.name, "Service name"),
-    category: requireText(payload.category, "Service category"),
+    category: serviceType === "Package" ? "Packages" : requireText(payload.category, "Service category"),
     serviceType,
     duration: numberValue(payload.duration, "Duration", { min: 1, integer: true }),
     price,
     priceModel,
-    priceUnit: clean(payload.priceUnit),
+    priceUnit: priceModel === "Per unit" ? requestedPriceUnit : "",
     packageSessions,
-    packagePrice,
-    serviceValue: numberValue(payload.serviceValue ?? (packageSessions ? packagePrice / packageSessions : price), "Service value", { min: 0 }),
+    packagePrice: serviceType === "Package" ? packagePrice : 0,
+    serviceValue: numberValue(serviceType === "Package" ? payload.serviceValue ?? (packageSessions ? packagePrice / packageSessions : price) : price, "Service value", { min: 0 }),
     recommendedIntervalDays: numberValue(payload.recommendedIntervalDays, "Recommended interval", { min: 0, integer: true }),
     commission: clean(payload.commission),
     consumables: jsonList([]),
@@ -3397,7 +3401,7 @@ async function buildSaleDraftItems(cart, branch) {
 
   const prepared = [];
   for (const item of cart) {
-    const qty = numberValue(item.qty || 1, "Cart quantity", { min: 1 });
+    const qty = numberValue(item.qty || 1, "Cart quantity", { min: 0.01 });
     if (item.type === "Service") {
       const service = await prisma.service.findUnique({ where: { id: requireText(item.serviceId, "Service") } });
       if (!service || !service.active || !service.pos) {
@@ -3406,6 +3410,27 @@ async function buildSaleDraftItems(cart, branch) {
       const offeredBranches = parseJsonList(service.branches);
       if (offeredBranches.length && !offeredBranches.includes(branch) && !offeredBranches.includes("All branches")) {
         throw apiError(`${service.name} is not offered at ${branch}.`, 409);
+      }
+      if (service.priceModel !== "Per unit" && !Number.isInteger(qty)) {
+        throw apiError(`${service.name} quantity must be a whole number.`);
+      }
+      if (service.priceModel === "Per unit" && clean(service.priceUnit).toLowerCase() !== "per ml" && !Number.isInteger(qty)) {
+        throw apiError(`${service.name} quantity must be a whole ${clean(service.priceUnit).replace(/^Per\s+/i, "").toLowerCase() || "unit"}.`);
+      }
+      if (service.serviceType === "Package" && (!Number.isInteger(qty) || qty < 1)) {
+        throw apiError(`${service.name} package quantity must be a whole number.`);
+      }
+      const catalogPrice = numberValue(
+        service.serviceType === "Package" && Number(service.packagePrice) > 0 ? service.packagePrice : service.price,
+        "Service price",
+        { min: 0 },
+      );
+      const variablePrice = ["Starts at", "Price after consultation/assessment"].includes(service.priceModel);
+      const resolvedPrice = variablePrice
+        ? numberValue(item.resolvedPrice ?? item.price, "Final service price", { min: 0 })
+        : catalogPrice;
+      if (service.priceModel === "Starts at" && resolvedPrice < catalogPrice) {
+        throw apiError(`${service.name} final price cannot be lower than its starting price of ${catalogPrice}.`);
       }
       const provider = clean(item.provider) || "N/A";
       if (provider !== "N/A") {
@@ -3425,13 +3450,17 @@ async function buildSaleDraftItems(cart, branch) {
         name: service.name,
         type: "Service",
         qty,
-        price: numberValue(service.price, "Service price", { min: 0 }),
+        price: resolvedPrice,
+        originalPrice: catalogPrice,
+        priceModel: service.priceModel,
+        priceUnit: service.priceUnit,
         provider,
         aftercare: service.aftercare,
         recommendedIntervalDays: Number(service.recommendedIntervalDays || 0),
         consumables: parseJsonList(service.consumables),
       });
     } else if (item.type === "Product") {
+      if (!Number.isInteger(qty) || qty < 1) throw apiError("Product quantity must be a whole number.");
       const product = await prisma.inventoryItem.findFirst({
         where: inventoryWhereForBranch(requireText(item.inventoryId, "Inventory item"), branch),
       });
@@ -3448,6 +3477,9 @@ async function buildSaleDraftItems(cart, branch) {
         type: "Product",
         qty,
         price: numberValue(product.price, "Product price", { min: 0 }),
+        originalPrice: numberValue(product.price, "Product price", { min: 0 }),
+        priceModel: "Fixed price",
+        priceUnit: clean(product.unit),
         provider: "N/A",
         inventoryId: product.id,
       });
@@ -6554,6 +6586,10 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     const claimed = await tx.sale.updateMany({ where: { id, status: { not: "Void" } }, data: { status: "Void" } });
     if (claimed.count !== 1) throw apiError("This transaction was already voided.", 409);
     const record = await tx.sale.findUnique({ where: { id }, include: { items: true } });
+    const issuedPackages = await tx.clinicPackage.findMany({ where: { sourceSaleId: sale.id } });
+    if (issuedPackages.some((pkg) => Number(pkg.used || 0) > 0)) {
+      throw apiError("This package sale already has redeemed sessions and cannot be voided until those sessions are reversed.", 409);
+    }
 
     const saleMovements = await tx.inventoryMovement.findMany({ where: { reason: `Sold on ${sale.invoice}` } });
     const reversalMovements = [];
@@ -6633,11 +6669,20 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
       });
       if (restored.count === 1) restoredPackages.push(await tx.clinicPackage.findUnique({ where: { id: packageId } }));
     }
+    const cancelledIssuedPackages = [];
+    for (const pkg of issuedPackages) {
+      const cancelled = await tx.clinicPackage.updateMany({
+        where: { id: pkg.id, used: 0, status: { not: "Cancelled" } },
+        data: { status: "Cancelled" },
+      });
+      if (cancelled.count === 1) cancelledIssuedPackages.push(await tx.clinicPackage.findUnique({ where: { id: pkg.id } }));
+    }
 
     const reversalNotes = [
       ...(reversalMovements.length ? [`${reversalMovements.length} stock movement(s) reversed`] : []),
       ...restoredCertificates.map((certificate) => `GC ${certificate.code} restored to ${certificate.balance}`),
       ...restoredPackages.map((pkg) => `${pkg.name} back to ${pkg.used}/${pkg.sessions} sessions`),
+      ...cancelledIssuedPackages.map((pkg) => `${pkg.name} issued sessions cancelled`),
     ];
     const [reversedCommissionEarnings, reversedSalaryDeductions] = await Promise.all([
       tx.payrollCommissionEarning.updateMany({
@@ -6665,7 +6710,7 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
         orderBy: [{ item: "asc" }],
       }) : null,
       giftCertificates: restoredCertificates,
-      packages: restoredPackages,
+      packages: [...restoredPackages, ...cancelledIssuedPackages],
       client: updatedClient ? serializeClient(updatedClient) : null,
       auditLog,
     };
@@ -6833,6 +6878,10 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   if (disabledPayment) throw apiError(`${disabledPayment.method} is not an enabled payment method. Refresh POS settings and try again.`, 409);
 
   const checkout = await calculateCheckout(draft, { actor, branch });
+  const packagePurchaseItems = checkout.items.filter((item) => item.type === "Service" && item.source.serviceType === "Package");
+  if (packagePurchaseItems.length && !checkout.client && !testMode) {
+    throw apiError("Select a registered client before selling a package so its sessions can be issued.");
+  }
   const paidAmount = normalizedPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const outstandingAmount = Math.max(0, checkout.total - paidAmount);
   if (outstandingAmount > 0 && !checkout.client && !testMode) {
@@ -6958,7 +7007,9 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
             type: item.type,
             qty: item.qty,
             price: item.price,
-            originalPrice: item.price,
+            originalPrice: item.originalPrice,
+            priceModel: item.priceModel,
+            priceUnit: item.priceUnit,
             discount: Number(item.promotionDiscount || 0),
             provider: item.provider || "N/A",
             serviceId: item.type === "Service" ? item.sourceId : "",
@@ -6969,6 +7020,48 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       },
       include: { items: true },
     });
+
+    const issuedPackages = [];
+    if (!testMode && checkout.client) {
+      const paidRatio = checkout.total > 0 ? Math.min(1, paidAmount / checkout.total) : 1;
+      const paymentMethod = [...new Set(normalizedPayments.map((payment) => payment.method))].join(" + ");
+      for (const item of packagePurchaseItems) {
+        const sessions = Number(item.source.packageSessions || 0) * Number(item.qty || 1);
+        if (sessions < 1) throw apiError(`${item.name} must include at least one package session.`);
+        const grossLineTotal = Number(item.price || 0) * Number(item.qty || 1);
+        const netPackagePrice = checkout.subtotal > 0
+          ? Math.round(((grossLineTotal / checkout.subtotal) * checkout.total) * 100) / 100
+          : 0;
+        const packageAmountPaid = Math.round((netPackagePrice * paidRatio) * 100) / 100;
+        issuedPackages.push(await tx.clinicPackage.create({
+          data: {
+            name: item.name,
+            clientId: checkout.client.id,
+            client: checkout.client.fullName,
+            sessions,
+            used: 0,
+            expires: "",
+            branch,
+            transferable: false,
+            status: "Active",
+            price: netPackagePrice,
+            amountPaid: packageAmountPaid,
+            nextPayment: "",
+            purchaseDate: saleDate,
+            serviceValue: Number(item.source.serviceValue || (sessions ? netPackagePrice / sessions : 0)),
+            paymentHistory: jsonText(packageAmountPaid > 0 ? [{
+              date: saleDate,
+              amount: packageAmountPaid,
+              method: paymentMethod || "Payment",
+              saleId: sale.id,
+              invoice: sale.invoice,
+            }] : [], []),
+            sessionHistory: jsonText([], []),
+            sourceSaleId: sale.id,
+          },
+        }));
+      }
+    }
 
     for (const payment of operationalPayments) {
       if (payment.method !== "Salary Deduction" || !payment.employeeId) continue;
@@ -7020,6 +7113,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       ...(checkout.appliedPromotions.length ? [`Promotions: ${checkout.appliedPromotions.join(", ")}`] : []),
       ...settledCertificates.map((certificate) => `GC ${certificate.code} balance ${certificate.balance}`),
       ...settledPackages.map((pkg) => `${pkg.name} ${pkg.used}/${pkg.sessions} sessions`),
+      ...issuedPackages.map((pkg) => `${pkg.name} issued with ${pkg.sessions} sessions`),
     ];
     let updatedClient = null;
     if (checkout.client && !testMode) {
@@ -7053,7 +7147,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       }),
       movements,
       giftCertificates: settledCertificates,
-      packages: settledPackages,
+      packages: [...settledPackages, ...issuedPackages],
       client: updatedClient ? serializeClient(updatedClient) : null,
       posCartId,
       auditLog,
