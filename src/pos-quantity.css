@@ -1621,6 +1621,72 @@
   padding: 14px;
 }
 
+.package-installment-allocation {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dfcfd5;
+  border-radius: 12px;
+  background: #fbf7f8;
+}
+
+.package-installment-allocation > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.package-installment-allocation > div:first-child small,
+.package-installment-row small {
+  color: var(--muted);
+}
+
+.package-installment-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) minmax(120px, 1fr) minmax(145px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding-top: 12px;
+  border-top: 1px solid #eadde2;
+}
+
+.package-installment-row > span,
+.package-installment-row label {
+  display: grid;
+  gap: 5px;
+}
+
+.package-installment-row label > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.package-installment-row input {
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid #d9cbd1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.package-installment-row > b {
+  padding-bottom: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .package-installment-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .package-installment-row > span,
+  .package-installment-row > b {
+    grid-column: 1 / -1;
+  }
+}
+
 .payment-modal .receipt-preview strong {
   font-size: clamp(18px, 1.4vw, 22px);
   font-weight: var(--font-weight-bold);

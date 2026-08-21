@@ -127,6 +127,7 @@ import {
   markNotificationsRead,
   postInventoryMovement,
   redeemPackageRecord,
+  recordPackageInstallment,
   recordAttendance,
   requestPasswordReset,
   resetAccountPassword,
@@ -2305,6 +2306,23 @@ function App() {
     notify(values.id ? "Gift certificate updated." : "Gift certificate issued.");
   }
 
+  async function savePackageInstallment(values) {
+    const result = await recordPackageInstallment(values.id, {
+      amount: Number(values.amount || 0),
+      date: values.date || todayDate(),
+      method: values.method || "Cash",
+      referenceNumber: values.referenceNumber || "",
+      nextPayment: values.nextPayment || "",
+      notes: values.notes || "",
+    });
+    upsertById(setPackages, result.record);
+    if (result.sale) upsertById(setTransactions, result.sale);
+    if (result.client) upsertById(setClients, result.client);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify("Package installment recorded.");
+  }
+
   async function redeemPackage(id) {
     try {
       const result = await redeemPackageRecord(id);
@@ -3161,6 +3179,7 @@ function App() {
         saveExpense={saveExpense}
         saveStaff={saveStaff}
         savePackage={savePackage}
+        savePackageInstallment={savePackageInstallment}
         saveGiftCertificate={saveGiftCertificate}
         saveCampaign={saveCampaign}
         saveSettings={saveSettings}
@@ -5331,6 +5350,7 @@ function POSModule({
   const canManagePosCatalog = canManageOrganization(sessionRole);
   const canPostHistoricalSale = canManageOrganization(sessionRole);
   const canUseTestMode = isAdmin(sessionRole);
+  const canApprovePosAdjustments = canManageOrganization(sessionRole);
   const posPaymentOptions = useMemo(() => posQuickPaymentOptions(settings), [settings]);
   const posScreens = canManagePosCatalog ? ["Checkout", "Service Prices"] : ["Checkout"];
   const openCartsForBranch = useMemo(
@@ -6307,12 +6327,14 @@ function POSModule({
                   }}
                 >
                   <option value="">No discount</option>
-                  <option value="__manual__">Manual discount</option>
-                  <optgroup label="Saved discount rules">
-                    {discounts.filter((item) => item.active).map((item) => (
-                      <option key={item.id} value={item.id}>{item.name} - {item.type}</option>
-                    ))}
-                  </optgroup>
+                  {canApprovePosAdjustments && <option value="__manual__">Manual adjustment · Owner/Admin approved</option>}
+                  {canApprovePosAdjustments && (
+                    <optgroup label="Saved discount rules">
+                      {discounts.filter((item) => item.active).map((item) => (
+                        <option key={item.id} value={item.id}>{item.name} - {item.type}</option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </label>
               {manualDiscountType && (
@@ -6378,6 +6400,7 @@ function POSModule({
                 </div>
               )}
               {promotionDiscountAmount > 0 && <small className="automatic-promotion-note">Eligible promotion applied automatically: {money.format(promotionDiscountAmount)}.</small>}
+              {!canApprovePosAdjustments && <small className="automatic-promotion-note">Discounts and manual price adjustments require an Owner or Super Admin to review and post the checkout. Pre-approved promotions still apply automatically.</small>}
               </div>
             )}
           </section>
@@ -10181,6 +10204,9 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
               </details>
               <div className="inline-actions">
                 <button type="button" onClick={() => redeemPackage(pkg.id)}>Redeem session</button>
+                {Number(pkg.outstandingBalance ?? Math.max(0, Number(pkg.price || 0) - Number(pkg.amountPaid || 0))) > 0 && (
+                  <button type="button" onClick={() => openModal("package-payment", pkg)}><HandCoins size={15} /> Record installment</button>
+                )}
                 <button type="button" onClick={() => openModal("package", pkg)}><Edit3 size={15} /> Edit</button>
               </div>
             </article>
@@ -12736,6 +12762,7 @@ function ModalHost({
   saveExpense,
   saveStaff,
   savePackage,
+  savePackageInstallment,
   saveGiftCertificate,
   saveCampaign,
   saveSettings,
@@ -12775,6 +12802,7 @@ function ModalHost({
   const defaultMarketingTemplate = (templates ?? []).find((template) => template.category === "Marketing") ?? templates?.[0];
   const canManageProductPhotos = canManageOrganization(session?.role);
   const paymentMethodNames = activePaymentMethodNames(settings);
+  const installmentPaymentMethods = paymentMethodNames.filter((method) => !["Package", "Gift Certificate", "Salary Deduction"].includes(method));
 
   if (modal.type === "account") {
     return <AccountSecurityModal account={session} onClose={closeModal} onChangePassword={changePassword} />;
@@ -13343,6 +13371,28 @@ function ModalHost({
         field("serviceValue", "Service value per session", "number", null, "", false),
       ],
     },
+    "package-payment": {
+      title: `Record installment · ${modal.payload?.name || "Package"}`,
+      initial: {
+        id: modal.payload?.id || "",
+        amount: modal.payload?.outstandingBalance ?? Math.max(0, Number(modal.payload?.price || 0) - Number(modal.payload?.amountPaid || 0)),
+        date: todayDate(),
+        method: installmentPaymentMethods[0] || "Cash",
+        referenceNumber: "",
+        nextPayment: modal.payload?.nextPayment || "",
+        notes: "",
+      },
+      submitLabel: "Record installment",
+      onSubmit: savePackageInstallment,
+      fields: [
+        field("amount", "Amount received", "number"),
+        field("date", "Payment date", "date"),
+        field("method", "Payment method", "select", installmentPaymentMethods.length ? installmentPaymentMethods : ["Cash"]),
+        field("referenceNumber", "Reference number (optional)", "text", null, "", false),
+        field("nextPayment", "Next expected payment (optional)", "date", null, "", false),
+        field("notes", "Notes (optional)", "textarea", null, "span-2", false),
+      ],
+    },
     campaign: {
       title: modal.payload?.id ? "Edit Campaign" : "New Campaign",
       initial: {
@@ -13575,6 +13625,13 @@ function AccountSecurityModal({ account, onClose, onChangePassword }) {
 function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [], paymentMethods = ["Cash", "Package"], onClose, onSubmit }) {
   const firstMethod = paymentMethods[0] || "Cash";
   const splitSecondMethod = paymentMethods.find((method) => method !== firstMethod && method !== "Package") || firstMethod;
+  const packagePurchaseLines = (draft.cart || []).filter((item) => item.type === "Service" && item.serviceType === "Package");
+  const packageLineAmount = (item) => {
+    const gross = Number(item?.price || 0) * Number(item?.qty || 1);
+    return Number(draft.subtotal || 0) > 0
+      ? Math.round((((gross / Number(draft.subtotal)) * Number(draft.total || 0)) + Number.EPSILON) * 100) / 100
+      : 0;
+  };
   const [payments, setPayments] = useState(() => {
     if (draft.splitPayment) {
       const firstAmount = Math.floor(Number(draft.total || 0) / 2);
@@ -13586,10 +13643,24 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     return [{ method: draft.paymentMethod || firstMethod, amount: draft.total, referenceNumber: "" }];
   });
   const [notes, setNotes] = useState(draft.notes ?? "");
+  const [packageInstallments, setPackageInstallments] = useState(() => packagePurchaseLines.map((item) => ({
+    lineKey: item.key,
+    name: item.name,
+    amountPaid: packageLineAmount(item),
+    nextPayment: "",
+  })));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const change = Math.max(0, paid - draft.total);
+  const packageNetTotal = packagePurchaseLines.reduce((sum, item) => sum + packageLineAmount(item), 0);
+  const nonPackageNetTotal = Math.max(0, Number(draft.total || 0) - packageNetTotal);
+  const requiredPackageAllocation = Math.max(0, Math.min(packageNetTotal, Math.min(paid, Number(draft.total || 0)) - nonPackageNetTotal));
+  const packageAllocationTotal = packageInstallments.reduce((sum, installment) => sum + Number(installment.amountPaid || 0), 0);
+  const packageAllocationInvalid = packageInstallments.some((installment) => {
+    const line = packagePurchaseLines.find((item) => item.key === installment.lineKey);
+    return Number(installment.amountPaid || 0) < 0 || Number(installment.amountPaid || 0) > packageLineAmount(line);
+  }) || Math.abs(packageAllocationTotal - requiredPackageAllocation) > 0.009;
 
   const today = todayDate();
   const branchAccepts = (recordBranch) => !recordBranch || recordBranch === "All branches" || recordBranch === draft.branch;
@@ -13612,7 +13683,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     (payment.method === "Gift Certificate" && !payment.giftCertificateId)
     || (payment.method === "Package" && !payment.packageId)
     || (payment.method === "Salary Deduction" && !payment.employeeId));
-  const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete;
+  const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete && !packageAllocationInvalid;
 
   function updatePayment(index, patch) {
     setPayments((current) => current.map((payment, itemIndex) => (itemIndex === index ? { ...payment, ...patch } : payment)));
@@ -13642,18 +13713,22 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     });
   }
 
+  function updatePackageInstallment(lineKey, patch) {
+    setPackageInstallments((current) => current.map((installment) => installment.lineKey === lineKey ? { ...installment, ...patch } : installment));
+  }
+
   const submitPayment = useCallback(async () => {
     if (saving || !canPost) return;
     setSaving(true);
     setError("");
     try {
-      await onSubmit({ payments, notes });
+      await onSubmit({ payments, notes, packageInstallments });
     } catch (submitError) {
       setError(submitError?.message || "Payment could not be completed.");
     } finally {
       setSaving(false);
     }
-  }, [canPost, notes, onSubmit, payments, saving]);
+  }, [canPost, notes, onSubmit, packageInstallments, payments, saving]);
 
   const submitUnpaid = useCallback(async () => {
     if (saving || !draft.clientId) return;
@@ -13782,6 +13857,28 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
         <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: paymentMethods.find((method) => method !== "Package") || firstMethod, amount: 0, referenceNumber: "" }])}>
           <Plus size={16} /> Add split payment
         </button>
+        {packageInstallments.length > 0 && (
+          <section className="package-installment-allocation" aria-label="Package installment allocation">
+            <div>
+              <strong>Package installment allocation</strong>
+              <small>Non-package services are settled first. Choose how much of today&apos;s payment is applied to each package.</small>
+            </div>
+            {packageInstallments.map((installment) => {
+              const line = packagePurchaseLines.find((item) => item.key === installment.lineKey);
+              const packagePrice = packageLineAmount(line);
+              const balance = Math.max(0, packagePrice - Number(installment.amountPaid || 0));
+              return (
+                <div className="package-installment-row" key={installment.lineKey}>
+                  <span><strong>{installment.name}</strong><small>{money.format(packagePrice)} package total</small></span>
+                  <label><span>Paid today</span><input aria-label={`${installment.name} package amount paid today`} type="number" min="0" max={packagePrice} step="0.01" value={installment.amountPaid} onChange={(event) => updatePackageInstallment(installment.lineKey, { amountPaid: Number(event.target.value) })} /></label>
+                  <label><span>Next payment</span><input aria-label={`${installment.name} next payment date`} type="date" disabled={balance <= 0} value={installment.nextPayment} onChange={(event) => updatePackageInstallment(installment.lineKey, { nextPayment: event.target.value })} /></label>
+                  <b>{money.format(balance)} balance</b>
+                </div>
+              );
+            })}
+            <small className={packageAllocationInvalid ? "field-error" : ""}>Apply {money.format(requiredPackageAllocation)} of the current payment to package installment(s). Currently allocated: {money.format(packageAllocationTotal)}.</small>
+          </section>
+        )}
         <label className="stacked-field">
           <span>Payment notes</span>
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />

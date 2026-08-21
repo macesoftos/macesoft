@@ -1011,6 +1011,12 @@ try {
   });
   assert(excessiveTargetedAmount.response.status === 400, "POS allowed a manual discount above the selected service total");
 
+  const unapprovedManualDiscount = await jsonRequestAs("/api/pos/checkout", {
+    draft: { ...manualDiscountCart, manualDiscount: { type: "Fixed amount", value: 100, scope: "Transaction" } },
+    payment: { payments: [{ method: "Cash", amount: 2900 }] },
+  }, branchHeaders("Receptionist", "Mace Davao"));
+  assert(unapprovedManualDiscount.response.status === 403, "a branch POS user posted a manual adjustment without Owner or Super Admin approval");
+
   const manualDiscountCheckout = await jsonRequest("/api/pos/checkout", {
     draft: { ...manualDiscountCart, manualDiscount: { type: "Percentage", value: 10, scope: "Service", targetKey: `service-${serviceId}-manual-discount-target` } },
     payment: { payments: [{ method: "Cash", amount: 2850 }] },
@@ -1097,6 +1103,47 @@ try {
   );
   await request(`/api/resources/packages/${issuedPackage.id}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/transactions/${packageSaleId}`, { method: "DELETE", headers: ownerHeaders });
+
+  const mixedPackageCheckout = await jsonRequest("/api/pos/checkout", {
+    draft: {
+      clientId,
+      clientName: "Automated Smoke Client Updated",
+      branch: "Mace Davao",
+      staff: "Dr. Mace",
+      invoicePrefix: "MACE",
+      cart: [
+        { key: `service-${serviceId}-mixed`, serviceId, type: "Service", name: "Automated Smoke Consultation", qty: 1 },
+        { key: `service-${packageServiceId}-installment`, serviceId: packageServiceId, type: "Service", name: "Automated Three Session Package", qty: 1 },
+      ],
+    },
+    payment: {
+      payments: [{ method: "Cash", amount: 2000 }],
+      packageInstallments: [{ lineKey: `service-${packageServiceId}-installment`, amountPaid: 500, nextPayment: "2026-09-15" }],
+    },
+  });
+  assert(mixedPackageCheckout.response.status === 201, "mixed service and package installment checkout failed");
+  assert(mixedPackageCheckout.payload.sale.status === "Partially Paid", "partial mixed checkout did not remain partially paid");
+  const mixedPackageSaleId = mixedPackageCheckout.payload.sale.id;
+  const installmentPackage = mixedPackageCheckout.payload.packages?.find((pkg) => pkg.sourceSaleId === mixedPackageSaleId);
+  assert(installmentPackage?.amountPaid === 500, "package did not preserve its explicitly allocated first installment");
+  assert(installmentPackage?.outstandingBalance === Number(installmentPackage?.price || 0) - 500, "package installment balance is incorrect");
+  assert(installmentPackage?.nextPayment === "2026-09-15", "package next-payment date was not saved");
+
+  const followUpInstallment = await jsonRequest(`/api/packages/${installmentPackage.id}/payments`, {
+    amount: 1000,
+    date: posCalendarDate(),
+    method: "Cash",
+    referenceNumber: `INSTALLMENT-${suffix}`,
+    nextPayment: "2026-10-15",
+  });
+  assert(followUpInstallment.response.status === 201, "follow-up package installment failed");
+  assert(followUpInstallment.payload.record.amountPaid === 1500, "follow-up installment did not update package paid amount");
+  assert(followUpInstallment.payload.record.paymentHistory.length === 2, "package payment history did not preserve both installments");
+  assert(followUpInstallment.payload.sale.status === "Partially Paid", "follow-up installment did not update the original sale ledger");
+  const voidedMixedPackageSale = await jsonRequest(`/api/transactions/${mixedPackageSaleId}/void`, {});
+  assert(voidedMixedPackageSale.response.ok, "mixed package installment sale void failed");
+  await request(`/api/resources/packages/${installmentPackage.id}`, { method: "DELETE", headers: ownerHeaders });
+  await request(`/api/resources/transactions/${mixedPackageSaleId}`, { method: "DELETE", headers: ownerHeaders });
 
   const certificateCreate = await jsonRequest("/api/resources/giftCertificates", {
     code: `GC-SMOKE-${suffix}`,
