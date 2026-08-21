@@ -744,6 +744,13 @@ export function savePayrollSchedule(schedule) {
   });
 }
 
+export function savePayrollDayOffSwap(swap) {
+  return requestJson("/api/payroll/schedule-swaps", {
+    method: "POST",
+    body: JSON.stringify(swap),
+  });
+}
+
 export function deletePayrollSchedule(id) {
   return requestJson(`/api/payroll/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

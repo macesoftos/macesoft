@@ -314,6 +314,23 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByText("Nurse standard 10%", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Schedule & Leave" }).click();
   await expect(page.getByRole("heading", { name: "Schedule or leave" })).toBeVisible();
+
+  await gotoAuthenticatedWorkspace(page, "/staff-schedule");
+  await expect(page.getByRole("heading", { name: "Schedule, leave, and day-off swaps" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Approved leave calendar" })).toBeVisible();
+  await page.getByLabel("Schedule employee").selectOption(payrollStaffId);
+  await page.getByLabel("Schedule date").fill("2001-02-03");
+  await page.getByLabel("Schedule type").selectOption("Vacation Leave");
+  await page.getByLabel("Schedule branch").selectOption({ label: "Mace Davao" });
+  await page.getByText("Paid leave — use one credit", { exact: true }).click();
+  const leaveCreation = page.waitForResponse((response) => response.url().endsWith("/api/payroll/schedules") && response.request().method() === "POST");
+  await page.getByRole("button", { name: "Save approved entry" }).click();
+  expect((await leaveCreation).status()).toBe(201);
+  await page.getByLabel("Leave calendar month").fill("2001-02");
+  await expect(page.getByRole("region", { name: "Approved leave calendar" }).getByText(payrollStaffName, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record day-off swap" })).toBeVisible();
+
+  await gotoAuthenticatedWorkspace(page, "/payroll");
   await page.getByRole("button", { name: "Payroll Runs" }).click();
   if (!await page.getByLabel("Cutoff start").isVisible()) await page.getByText("Generate payroll", { exact: true }).click();
   await page.getByLabel("Cutoff start").fill("2001-01-01");

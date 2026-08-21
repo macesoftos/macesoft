@@ -14,6 +14,7 @@ import {
 const payTypes = new Set(["Monthly", "Daily", "Hourly"]);
 const commissionRuleTypes = new Set(["Percentage", "Fixed amount"]);
 const payrollRunStatuses = new Set(["Draft", "Approved", "Finalized"]);
+const paidLeaveTypes = new Set(["Vacation Leave", "Emergency Leave", "Sick Leave"]);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -201,7 +202,7 @@ function normalizeProfile(payload) {
 function normalizeSchedule(payload) {
   const type = clean(payload.type) || "Work Day";
   if (!payrollScheduleTypes.includes(type)) throw new Error("Schedule type is invalid.");
-  const paid = ["Vacation Leave", "Emergency Leave", "Sick Leave"].includes(type) && payload.paid === true;
+  const paid = paidLeaveTypes.has(type) && payload.paid === true;
   return {
     staffId: clean(payload.staffId),
     workDate: assertPayrollDate(payload.workDate, "Schedule date"),
@@ -212,6 +213,32 @@ function normalizeSchedule(payload) {
     status: "Approved",
     notes: clean(payload.notes).slice(0, 1000),
   };
+}
+
+function staffBranch(person, requestedBranch = "") {
+  const requested = clean(requestedBranch);
+  if (requested) return requested;
+  if (clean(person?.branch) && person.branch !== "All branches") return person.branch;
+  const assigned = parseList(person?.branches);
+  return assigned.length === 1 ? assigned[0] : "";
+}
+
+function staffCanWorkAtBranch(person, branch) {
+  if (!person || !branch) return false;
+  return person.branch === branch || person.branch === "All branches" || parseList(person.branches).includes(branch);
+}
+
+async function finalizedPayrollForDate(database, organizationId, workDate, branch) {
+  return database.payrollRun.findFirst({
+    where: {
+      organizationId,
+      status: "Finalized",
+      cutoffStart: { lte: workDate },
+      cutoffEnd: { gte: workDate },
+      OR: [{ branch: "All branches" }, { branch }],
+    },
+    select: { id: true },
+  });
 }
 
 function normalizeRule(payload) {
@@ -499,8 +526,31 @@ export function createPayrollRouter(prisma, { apiError, asyncRoute, writeAudit }
       const { staff, branchRecords } = await organizationStaff(prisma, actor.organizationId);
       const person = staff.find((item) => item.id === data.staffId);
       if (!person) throw apiError("Employee was not found in this organization.", 404);
-      if (data.branch && !branchRecords.some((branch) => branch.name === data.branch)) throw apiError("Choose an organization branch.", 400);
+      data.branch = staffBranch(person, data.branch);
+      if (!data.branch || !branchRecords.some((branch) => branch.name === data.branch) || !staffCanWorkAtBranch(person, data.branch)) {
+        throw apiError("Choose one of the employee's assigned organization branches.", 400);
+      }
       const existing = await prisma.payrollScheduleEntry.findUnique({ where: { staffId_workDate: { staffId: data.staffId, workDate: data.workDate } } });
+      if (await finalizedPayrollForDate(prisma, actor.organizationId, data.workDate, data.branch)) {
+        throw apiError("This schedule date is already included in finalized payroll.", 409);
+      }
+      if (paidLeaveTypes.has(data.type)) {
+        const staffById = new Map(staff.map((item) => [item.id, item]));
+        const sameDayLeaves = await prisma.payrollScheduleEntry.findMany({
+          where: {
+            staffId: { in: staff.map((item) => item.id) },
+            workDate: data.workDate,
+            status: "Approved",
+            type: { in: [...paidLeaveTypes] },
+            ...(existing ? { id: { not: existing.id } } : {}),
+          },
+        });
+        const conflict = sameDayLeaves.find((entry) => staffBranch(staffById.get(entry.staffId), entry.branch) === data.branch);
+        if (conflict) {
+          const employee = staffById.get(conflict.staffId);
+          throw apiError(`${employee?.name || "Another employee"} already has approved leave at ${data.branch} on ${data.workDate}. Only one employee may be on leave per branch per day.`, 409);
+        }
+      }
       if (data.paid) {
         const [profile, paidLeaveUsed] = await Promise.all([
           prisma.payrollEmployeeProfile.findUnique({ where: { staffId: data.staffId } }),
@@ -524,6 +574,88 @@ export function createPayrollRouter(prisma, { apiError, asyncRoute, writeAudit }
         return { schedule, auditLog };
       });
       response.status(existing ? 200 : 201).json(result);
+    } catch (error) {
+      throw payloadError(error, apiError);
+    }
+  }));
+
+  router.post("/schedule-swaps", asyncRoute(async (request, response) => {
+    const actor = payrollActor(request, apiError);
+    try {
+      const staffId = clean(request.body?.staffId);
+      const swapWithStaffId = clean(request.body?.swapWithStaffId);
+      const originalDayOff = assertPayrollDate(request.body?.originalDayOff, "Employee's original day off");
+      const coworkerDayOff = assertPayrollDate(request.body?.coworkerDayOff, "Coworker's original day off");
+      if (!staffId || !swapWithStaffId || staffId === swapWithStaffId) throw apiError("Choose two different employees for the day-off swap.", 400);
+      if (originalDayOff === coworkerDayOff) throw apiError("The two original day-off dates must be different.", 400);
+
+      const { staff, branchRecords } = await organizationStaff(prisma, actor.organizationId);
+      const employee = staff.find((item) => item.id === staffId);
+      const coworker = staff.find((item) => item.id === swapWithStaffId);
+      if (!employee || !coworker) throw apiError("Both employees must belong to this organization.", 404);
+      const branch = staffBranch(employee, request.body?.branch);
+      if (!branch || !branchRecords.some((item) => item.name === branch) || !staffCanWorkAtBranch(employee, branch) || !staffCanWorkAtBranch(coworker, branch)) {
+        throw apiError("Choose a branch assigned to both employees.", 400);
+      }
+      if (await finalizedPayrollForDate(prisma, actor.organizationId, originalDayOff, branch)
+        || await finalizedPayrollForDate(prisma, actor.organizationId, coworkerDayOff, branch)) {
+        throw apiError("One of these dates is already included in finalized payroll.", 409);
+      }
+
+      const existingRows = await prisma.payrollScheduleEntry.findMany({
+        where: {
+          staffId: { in: [staffId, swapWithStaffId] },
+          workDate: { in: [originalDayOff, coworkerDayOff] },
+        },
+      });
+      const protectedEntry = existingRows.find((entry) => paidLeaveTypes.has(entry.type) || entry.type === "Absent");
+      if (protectedEntry) throw apiError("A leave or absence already exists on one of the swap dates. Remove it before recording the day-off swap.", 409);
+
+      const profiles = await prisma.payrollEmployeeProfile.findMany({ where: { staffId: { in: [staffId, swapWithStaffId] } } });
+      const minutesByStaff = new Map(profiles.map((profile) => [profile.staffId, Number(profile.standardMinutesPerDay || 480)]));
+      const notes = clean(request.body?.notes).slice(0, 700);
+      const swapNote = `Day-off swap: ${employee.name} (${originalDayOff}) ↔ ${coworker.name} (${coworkerDayOff})${notes ? ` · ${notes}` : ""}`;
+      const entries = [
+        { staffId, workDate: originalDayOff, type: "Work Day", scheduledMinutes: minutesByStaff.get(staffId) || 480 },
+        { staffId: swapWithStaffId, workDate: originalDayOff, type: "Day Off", scheduledMinutes: 0 },
+        { staffId: swapWithStaffId, workDate: coworkerDayOff, type: "Work Day", scheduledMinutes: minutesByStaff.get(swapWithStaffId) || 480 },
+        { staffId, workDate: coworkerDayOff, type: "Day Off", scheduledMinutes: 0 },
+      ];
+      const existingByKey = new Map(existingRows.map((entry) => [`${entry.staffId}:${entry.workDate}`, entry]));
+      const result = await prisma.$transaction(async (tx) => {
+        const schedules = [];
+        for (const entry of entries) {
+          const current = existingByKey.get(`${entry.staffId}:${entry.workDate}`);
+          const recordData = {
+            ...entry,
+            branch,
+            paid: false,
+            status: "Approved",
+            notes: swapNote,
+            createdById: current?.createdById || actor.id,
+            createdBy: current?.createdBy || actor.name,
+            approvedById: actor.id,
+            approvedBy: actor.name,
+            approvedAt: new Date(),
+          };
+          schedules.push(await tx.payrollScheduleEntry.upsert({
+            where: { staffId_workDate: { staffId: entry.staffId, workDate: entry.workDate } },
+            create: recordData,
+            update: recordData,
+          }));
+        }
+        const auditLog = await writeAudit(tx, request, {
+          area: "Payroll",
+          action: "Employee day-off swap recorded",
+          subjectType: "PayrollScheduleEntry",
+          subjectId: schedules[0].id,
+          details: swapNote,
+          beforeValues: existingRows,
+          afterValues: schedules,
+        });
+        return { schedules, auditLog };
+      });
+      response.status(201).json(result);
     } catch (error) {
       throw payloadError(error, apiError);
     }
