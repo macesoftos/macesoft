@@ -199,9 +199,9 @@ export const initialInventory = [
 export const initialTreatments = [];
 
 export const initialPackages = [
-  { id: "pkg-001", name: "Glow Maintenance Plan", clientId: "cl-celine", client: "Celine Ann Hernandez", sessions: 6, used: 2, expires: "2026-12-31", branch: "All branches", transferable: false, status: "Active", price: 18500 },
-  { id: "pkg-002", name: "Acne Recovery Plan", clientId: "cl-trisha", client: "Trisha Uy", sessions: 4, used: 1, expires: "2026-10-30", branch: "Mace Davao", transferable: false, status: "Active", price: 14000 },
-  { id: "pkg-003", name: "Lift & Define Plan", clientId: "cl-andrea", client: "Andrea Lee", sessions: 3, used: 0, expires: "2026-12-15", branch: "All branches", transferable: true, status: "Pending", price: 48000 },
+  { id: "pkg-001", name: "Glow Maintenance Plan", clientId: "cl-celine", client: "Celine Ann Hernandez", sessions: 6, used: 2, expires: "", branch: "All branches", transferable: false, status: "Active", price: 18500 },
+  { id: "pkg-002", name: "Acne Recovery Plan", clientId: "cl-trisha", client: "Trisha Uy", sessions: 4, used: 1, expires: "", branch: "Mace Davao", transferable: false, status: "Active", price: 14000 },
+  { id: "pkg-003", name: "Lift & Define Plan", clientId: "cl-andrea", client: "Andrea Lee", sessions: 3, used: 0, expires: "", branch: "All branches", transferable: true, status: "Pending", price: 48000 },
 ];
 
 export const initialGiftCertificates = [

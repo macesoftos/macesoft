@@ -185,6 +185,24 @@ const audienceDefinitions = [
     matches: () => true,
   },
   {
+    id: "Due for next session",
+    name: "Due for next session",
+    description: "Clients whose recommended next visit is overdue or due within seven days.",
+    matches: (client) => {
+      const dueInDays = daysUntil(client.nextVisit);
+      return dueInDays !== null && dueInDays <= 7;
+    },
+  },
+  {
+    id: "Active clients",
+    name: "Active clients",
+    description: "Clients who visited within the last 90 days and are not marked inactive.",
+    matches: (client) => {
+      const lastVisitAge = daysSince(client.lastVisit);
+      return !client.retention?.toLowerCase().includes("inactive") && lastVisitAge >= 0 && lastVisitAge < 90;
+    },
+  },
+  {
     id: "Inactive clients",
     name: "Inactive 90+ days",
     description: "Clients whose last appointment was at least 90 days ago.",
@@ -230,6 +248,7 @@ const audienceDefinitions = [
 
 const automationDefinitions = [
   { name: "Birthday care message", segment: "Birthday month", timing: "On the first day of the birthday month", channel: "Email + SMS" },
+  { name: "Next-session reminder", segment: "Due for next session", timing: "When the recommended service interval is due", channel: "Email + SMS" },
   { name: "Rebooking reminder", segment: "Inactive 30 days", timing: "30 days after the last appointment", channel: "Email" },
   { name: "Inactive-client campaign", segment: "Inactive clients", timing: "90 days after the last appointment", channel: "Email + SMS" },
   { name: "Post-appointment follow-up", segment: "Returning clients", timing: "Two days after a completed appointment", channel: "Email" },
@@ -598,6 +617,13 @@ function daysSince(value) {
   const timestamp = new Date(value).getTime();
   if (Number.isNaN(timestamp)) return -1;
   return Math.floor((Date.now() - timestamp) / 86_400_000);
+}
+
+function daysUntil(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return null;
+  return Math.ceil((timestamp - Date.now()) / 86_400_000);
 }
 
 function monthOf(value) {

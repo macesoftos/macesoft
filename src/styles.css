@@ -3374,6 +3374,83 @@ img { max-width: 100%; }
   padding: 11px;
 }
 
+.gift-certificate-checker {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0;
+}
+
+.gift-certificate-checker > span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gift-certificate-checker > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--muted);
+}
+
+.gift-certificate-checker input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+
+.gift-certificate-check-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 9px;
+  background: #f0fdf4;
+}
+
+.gift-certificate-check-result.expired,
+.gift-certificate-check-result.redeemed {
+  border-color: var(--line);
+  background: var(--surface-soft);
+}
+
+.gift-certificate-check-result div,
+.gift-certificate-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gift-certificate-check-result div {
+  min-width: 0;
+}
+
+.gift-certificate-check-result div span,
+.gift-certificate-check-result small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.gift-certificate-check-result small {
+  grid-column: 1 / -1;
+}
+
+.gift-certificate-row-actions {
+  justify-content: flex-end;
+}
+
 .rank-list article span {
   display: grid;
   place-items: center;

@@ -564,6 +564,12 @@ try {
     consumables: createdService.payload.record.consumables,
   });
   assert(createdTreatment.response.status === 201, "treatment with structured consumables failed");
+  const expectedNextVisit = new Date(`${posCalendarDate()}T00:00:00Z`);
+  expectedNextVisit.setUTCDate(expectedNextVisit.getUTCDate() + 21);
+  assert(createdTreatment.payload.record.followUp === expectedNextVisit.toISOString().slice(0, 10), "treatment did not apply the service interval");
+  const treatmentClient = await prisma.client.findUnique({ where: { id: clientId } });
+  assert(treatmentClient?.lastVisit === posCalendarDate(), "treatment did not update the client's last visit");
+  assert(treatmentClient?.nextVisit === expectedNextVisit.toISOString().slice(0, 10), "treatment did not update the client's next-session due date");
   assert(
     Number((await prisma.inventoryItem.findUnique({ where: { id: "inv-syringe" } }))?.stock) === syringeStockBeforeTreatment - 1,
     "treatment did not deduct the actual syringe quantity",
@@ -1286,12 +1292,13 @@ try {
     client: "Automated Smoke Client Updated",
     sessions: 2,
     used: 0,
-    expires: "",
+    expires: "2030-12-31",
     branch: "Mace Davao",
     status: "Active",
     price: 0,
   });
   assert(packageCreate.response.status === 201, "package create failed");
+  assert(packageCreate.payload.record.expires === "", "service packages must never persist an expiration date");
   const packageId = packageCreate.payload.record.id;
 
   const stockBefore = Number(

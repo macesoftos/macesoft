@@ -79,6 +79,7 @@ import {
   marketingAudienceMemberMatchesSegment,
   normalizeMarketingAudienceMember,
 } from "./marketingAudienceMembers.js";
+import { marketingClientMatchesSegment } from "./marketingSegments.js";
 import {
   normalizeMarketingMediaName,
   normalizeMarketingMediaSelection,
@@ -1113,17 +1114,26 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
   const clientId = requireText(payload.clientId, "Client");
   const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
   if (!client) throw apiError("Selected client was not found.", 404);
+  const treatmentDate = requireText(payload.date, "Treatment date");
+  const serviceName = requireText(payload.service, "Service");
+  const service = clean(payload.serviceId)
+    ? await prisma.service.findUnique({ where: { id: clean(payload.serviceId) } })
+    : await prisma.service.findFirst({ where: { name: { equals: serviceName, mode: "insensitive" } } });
+  const intervalDays = Number(service?.recommendedIntervalDays || 0);
+  const intervalDate = new Date(`${treatmentDate}T00:00:00Z`);
+  if (intervalDays > 0 && !Number.isNaN(intervalDate.getTime())) intervalDate.setUTCDate(intervalDate.getUTCDate() + intervalDays);
+  const followUp = clean(payload.followUp) || (intervalDays > 0 && !Number.isNaN(intervalDate.getTime()) ? intervalDate.toISOString().slice(0, 10) : "");
   const data = {
     clientId,
     client: clean(client?.fullName) || requireText(payload.client, "Client"),
-    date: requireText(payload.date, "Treatment date"),
-    service: requireText(payload.service, "Service"),
+    date: treatmentDate,
+    service: serviceName,
     branch: requireText(payload.branch || client.branch, "Branch"),
     provider: clean(payload.provider),
     room: clean(payload.room),
     preNotes: clean(payload.preNotes),
     postNotes: clean(payload.postNotes),
-    aftercare: clean(payload.aftercare),
+    aftercare: clean(payload.aftercare) || clean(service?.aftercare),
     arrivalTime: clean(payload.arrivalTime),
     treatmentStartTime: clean(payload.treatmentStartTime),
     completedTime: clean(payload.completedTime),
@@ -1132,7 +1142,7 @@ async function normalizeTreatmentPayload(payload, existingId = "") {
     deviceSettings: clean(payload.deviceSettings),
     batch: clean(payload.batch),
     consent: clean(payload.consent) || "Pending",
-    followUp: clean(payload.followUp),
+    followUp,
     outcome: clean(payload.outcome),
     satisfaction: clean(payload.satisfaction),
   };
@@ -1303,16 +1313,20 @@ async function normalizePackagePayload(payload, existingId = "") {
     throw apiError("Used sessions cannot exceed total sessions.");
   }
 
+  const requestedStatus = clean(payload.status);
+  const packageStatus = requestedStatus === "Expired"
+    ? (used >= sessions && sessions > 0 ? "Completed" : "Active")
+    : requestedStatus || (used >= sessions && sessions > 0 ? "Completed" : "Active");
   const data = {
     name: requireText(payload.name, "Package name"),
     clientId,
     client: clean(client?.fullName) || requireText(payload.client, "Client"),
     sessions,
     used,
-    expires: clean(payload.expires),
+    expires: "",
     branch: clean(payload.branch) || "All branches",
     transferable: Boolean(payload.transferable),
-    status: clean(payload.status) || (used >= sessions && sessions > 0 ? "Completed" : "Active"),
+    status: packageStatus,
     price: numberValue(payload.price, "Package price", { min: 0 }),
     amountPaid: numberValue(payload.amountPaid, "Amount paid", { min: 0 }),
     nextPayment: clean(payload.nextPayment),
@@ -2910,6 +2924,19 @@ async function adjustTreatmentConsumables(tx, request, record, usages, direction
 
 async function afterTreatmentWrite(tx, request, record, _data, previous) {
   await recordClientBranchVisit(tx, record.clientId, record.branch);
+  if (record.clientId) {
+    const client = await tx.client.findUnique({ where: { id: record.clientId }, select: { lastVisit: true } });
+    if (client) {
+      const isLatestTreatment = !client.lastVisit || record.date >= client.lastVisit;
+      await tx.client.update({
+        where: { id: record.clientId },
+        data: {
+          lastVisit: !client.lastVisit || record.date > client.lastVisit ? record.date : client.lastVisit,
+          ...(isLatestTreatment ? { nextVisit: clean(record.followUp) } : {}),
+        },
+      });
+    }
+  }
   const currentUsage = treatmentConsumableUsage(record.consumables);
   const previousUsage = treatmentConsumableUsage(previous?.consumables);
   if (previous && previous.branch !== record.branch) {
@@ -3057,39 +3084,8 @@ function normalizePhone(value) {
   return countryCode ? `+${countryCode}${digits.replace(/^0+/, "")}` : digits;
 }
 
-function dateAgeDays(value) {
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return null;
-  return Math.floor((Date.now() - timestamp) / 86_400_000);
-}
-
-function isBirthdayMonth(client) {
-  const birthday = clean(client.birthday);
-  if (!birthday) return false;
-  const month = Number(birthday.slice(5, 7));
-  return month === new Date().getMonth() + 1;
-}
-
 function matchesMarketingSegment(client, campaign) {
-  const segment = clean(campaign.segment).toLowerCase();
-  if (!segment) return true;
-
-  const tag = clean(client.tag).toLowerCase();
-  const retention = clean(client.retention).toLowerCase();
-  const source = clean(client.source).toLowerCase();
-  const packageBalance = clean(client.packageBalance).toLowerCase();
-  const lastVisitAge = dateAgeDays(client.lastVisit);
-
-  if (segment.includes("birthday")) return isBirthdayMonth(client);
-  if (segment.includes("vip")) return tag.includes("vip");
-  if (segment.includes("inactive 60")) return lastVisitAge !== null && lastVisitAge >= 60;
-  if (segment.includes("inactive 30")) return lastVisitAge !== null && lastVisitAge >= 30;
-  if (segment.includes("inactive")) return retention.includes("inactive") || (lastVisitAge !== null && lastVisitAge >= 90);
-  if (segment.includes("new")) return retention.includes("new") || source.includes("online");
-  if (segment.includes("package")) return Boolean(packageBalance && packageBalance !== "none");
-  if (segment.includes("last visit")) return Boolean(clean(client.lastVisit));
-
-  return true;
+  return marketingClientMatchesSegment(client, campaign.segment);
 }
 
 function selectMarketingRecipients({ clients, members = [], campaign, channel }) {

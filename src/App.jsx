@@ -2288,6 +2288,7 @@ function App() {
       price: Number(values.price || 0),
       amountPaid: Number(values.amountPaid || 0),
       serviceValue: Number(values.serviceValue || (Number(values.sessions) ? Number(values.price) / Number(values.sessions) : 0)),
+      expires: "",
       purchaseDate: values.purchaseDate || todayDate(),
       paymentHistory: Array.isArray(values.paymentHistory) ? values.paymentHistory : [],
       sessionHistory: Array.isArray(values.sessionHistory) ? values.sessionHistory : [],
@@ -4557,6 +4558,7 @@ function Dashboard({
       const revenue = branchTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
       return { ...branch, revenue };
     });
+  const activeBranchCount = branchRecords.filter((branch) => branch.status === "Active").length;
   const config = buildRoleWorkspace({
     session,
     stats,
@@ -4575,6 +4577,7 @@ function Dashboard({
     topServices,
     topProducts,
     branchCards,
+    activeBranchCount,
     allowedModules,
     setActiveModule,
     openModal,
@@ -4995,6 +4998,7 @@ function buildRoleWorkspace({
   topServices,
   topProducts,
   branchCards,
+  activeBranchCount,
   allowedModules,
   setActiveModule,
   openModal,
@@ -5122,7 +5126,7 @@ function buildRoleWorkspace({
       metrics: [
         { icon: ShieldCheck, label: "Users", value: users.length, tone: "blue" },
         { icon: LayoutDashboard, label: "Modules", value: navItems.length - 1, tone: "wine" },
-        { icon: Store, label: "Branches", value: branches.length, tone: "green" },
+        { icon: Store, label: "Branches", value: activeBranchCount, tone: "green" },
         commonMetrics.lowStock,
         commonMetrics.revenueMonth,
         { icon: MessageSquareText, label: "SMS credits", value: settings.smsCredits, tone: "amber" },
@@ -5139,7 +5143,7 @@ function buildRoleWorkspace({
       focusItems: [
         moduleAction("settings", Settings, settings.taxMode, "Tax and receipt configuration"),
         moduleAction("staff", BriefcaseBusiness, `${staff.length} staff records`, "Review roles and attendance"),
-        moduleAction("branches", Store, `${branches.length} branches active`, "Confirm branch setup"),
+        moduleAction("branches", Store, `${activeBranchCount} ${activeBranchCount === 1 ? "branch" : "branches"} active`, "Confirm branch setup"),
       ].filter(Boolean),
       panels: [
         { icon: ShieldCheck, title: "Access Map", action: `${users.length} users`, rows: users.slice(0, 6).map((item) => ({ title: item.name, meta: item.branch, value: item.role })), empty: "No users configured" },
@@ -6000,6 +6004,19 @@ function POSModule({
                 </button>
               ))}
             </div>
+            {canUseTestMode && (
+              <button
+                className={`secondary-button pos-test-checkout-button${testMode ? " active" : ""}`}
+                type="button"
+                onClick={() => {
+                  if (!testMode) setTestMode(true);
+                  setIsSaleContextOpen(true);
+                }}
+              >
+                <ShieldCheck size={17} aria-hidden="true" />
+                {testMode ? "Test mode on" : "Test checkout"}
+              </button>
+            )}
             <button
               className="secondary-button"
               type="button"
@@ -10369,7 +10386,23 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
   );
 }
 
-function PackagesModule({ packages, giftCertificates, clients, openModal, redeemPackage, globalSearch }) {
+function PackagesModule({ packages, giftCertificates = [], clients, openModal, redeemPackage, globalSearch }) {
+  const [giftCertificateQuery, setGiftCertificateQuery] = useState("");
+  const normalizedGiftCertificateQuery = giftCertificateQuery.trim().toLowerCase();
+  const visibleGiftCertificates = normalizedGiftCertificateQuery
+    ? giftCertificates.filter((certificate) => [certificate.code, certificate.client, certificate.service, certificate.status]
+      .some((value) => String(value || "").toLowerCase().includes(normalizedGiftCertificateQuery)))
+    : giftCertificates;
+  const exactGiftCertificate = normalizedGiftCertificateQuery
+    ? giftCertificates.find((certificate) => String(certificate.code || "").trim().toLowerCase() === normalizedGiftCertificateQuery)
+    : null;
+  const giftCertificateStatus = (certificate) => {
+    if (certificate.status !== "Active") return certificate.status;
+    if (certificate.expires && certificate.expires < todayDate()) return "Expired";
+    if (Number(certificate.balance || 0) <= 0) return "Redeemed";
+    return "Active";
+  };
+
   return (
     <section className="module-grid two">
       <div className="surface-panel wide">
@@ -10406,15 +10439,27 @@ function PackagesModule({ packages, giftCertificates, clients, openModal, redeem
       <div className="surface-panel">
         <SectionHeader icon={CreditCard} title="Gift Certificates" action="Cross-branch" />
         <button className="primary-button small" type="button" onClick={() => openModal("gift-certificate")}><Plus size={16} /> Issue certificate</button>
+        <label className="gift-certificate-checker">
+          <span>Check certificate number</span>
+          <div><Search size={16} aria-hidden="true" /><input type="search" value={giftCertificateQuery} onChange={(event) => setGiftCertificateQuery(event.target.value)} placeholder="Enter or scan gift certificate number" /></div>
+        </label>
+        {normalizedGiftCertificateQuery && exactGiftCertificate && (
+          <div className={`gift-certificate-check-result ${giftCertificateStatus(exactGiftCertificate).toLowerCase().replace(/\s+/g, "-")}`} role="status">
+            <div><strong>{exactGiftCertificate.code}</strong><span>{exactGiftCertificate.client}</span></div>
+            <StatusBadge status={giftCertificateStatus(exactGiftCertificate)} />
+            <small>{exactGiftCertificate.type === "Specific Service" ? exactGiftCertificate.service : `${money.format(exactGiftCertificate.balance)} remaining`} · {exactGiftCertificate.expires ? `valid until ${formatDate(exactGiftCertificate.expires)}` : "no expiration"}</small>
+          </div>
+        )}
+        {normalizedGiftCertificateQuery && !visibleGiftCertificates.length && <div className="inline-state warning"><AlertCircle size={16} />No gift certificate matches that number.</div>}
         <div className="stock-list">
-          {giftCertificates.map((gc) => (
+          {visibleGiftCertificates.map((gc) => (
             <article className="stock-row" key={gc.id}>
               <div>
                 <strong>{gc.code}</strong>
                 <span>{gc.client} · issued {formatDate(gc.issueDate)} · {gc.expires ? `expires ${formatDate(gc.expires)}` : "no expiration"}</span>
                 {gc.redeemedDate && <small>Redeemed {formatDate(gc.redeemedDate)} at {gc.redeemedBranch} · transaction {gc.transactionId}</small>}
               </div>
-              <div className="gift-certificate-row-actions"><b>{gc.type === "Specific Service" ? gc.service : money.format(gc.balance)}</b><button type="button" onClick={() => openModal("gift-certificate", gc)}><Edit3 size={14} /> Edit</button></div>
+              <div className="gift-certificate-row-actions"><StatusBadge status={giftCertificateStatus(gc)} /><b>{gc.type === "Specific Service" ? gc.service : money.format(gc.balance)}</b><button type="button" onClick={() => openModal("gift-certificate", gc)}><Edit3 size={14} /> Edit</button></div>
             </article>
           ))}
         </div>
@@ -13560,7 +13605,7 @@ function ModalHost({
     },
     package: {
       title: modal.payload?.id ? "Edit Package" : "Sell Package",
-      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, expires: "", branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload },
+      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload, expires: "" },
       submitLabel: "Save package",
       onSubmit: savePackage,
       fields: [
@@ -13569,10 +13614,9 @@ function ModalHost({
         field("sessions", "Sessions", "number"),
         field("used", "Used", "number"),
         field("purchaseDate", "Purchase date", "date"),
-        field("expires", "Expiration (optional)", "date", null, "", false),
         field("branch", "Branch", "select", recordBranchOptions),
         field("transferable", "Transferable", "checkbox"),
-        field("status", "Status", "select", ["Active", "Pending", "Completed", "Expired"]),
+        field("status", "Status", "select", ["Active", "Pending", "Completed"]),
         field("price", "Price", "number"),
         field("amountPaid", "Amount paid", "number"),
         field("nextPayment", "Next expected payment", "date", null, "", false),
