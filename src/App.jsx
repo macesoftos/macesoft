@@ -78,6 +78,7 @@ import { navItems, navSections } from "./config/sidebar.jsx";
 import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import GlobalModuleSearch from "./components/GlobalModuleSearch.jsx";
+import { inventoryCsvExportColumns, inventoryRecordsFromCsv } from "./inventoryCsv.js";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
 import PayrollWorkspace from "./payroll/PayrollWorkspace.jsx";
@@ -137,6 +138,7 @@ import {
   restoreMarketingCampaign,
   revokeInvitation,
   inspectInvitation,
+  importInventoryCsvRecords,
   scheduleLeadFollowUp,
   saveResourceRecord,
   savePayrollDayOffSwap,
@@ -771,7 +773,9 @@ function downloadCsv(filename, rows, columns) {
       columns
         .map((column) => {
           const raw = column.exportValue ? column.exportValue(row) : row[column.key];
-          return `"${String(raw ?? "").replace(/"/g, '""')}"`;
+          const text = String(raw ?? "");
+          const safeText = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+          return `"${safeText.replace(/"/g, '""')}"`;
         })
         .join(","),
     )
@@ -2117,6 +2121,14 @@ function App() {
     notify(values.id ? "Inventory updated." : "Inventory item added.");
   }
 
+  async function importInventory(records) {
+    const result = await importInventoryCsvRecords(records);
+    for (const record of result.records ?? []) upsertById(setInventory, record);
+    if (result.auditLog) applyAuditLog(result.auditLog);
+    notify(`Inventory CSV imported: ${result.created || 0} created, ${result.updated || 0} updated.`);
+    return result;
+  }
+
   async function receiveStock(id, values = {}) {
     try {
       const result = await postInventoryMovement(id, {
@@ -3123,6 +3135,9 @@ function App() {
               movements={inventoryMovements}
               openModal={openModal}
               globalSearch={globalSearch}
+              branchScope={branchScope}
+              importInventory={importInventory}
+              notify={notify}
             />
           )}
           {activeModule === "packages" && (
@@ -10328,8 +10343,23 @@ function ServicesModule({ services, openModal, toggleService, globalSearch }) {
   );
 }
 
-function InventoryModule({ inventory, movements, openModal, globalSearch }) {
+function InventoryModule({ inventory, movements, openModal, globalSearch, branchScope, importInventory, notify }) {
   const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy");
+  const importInputRef = useRef(null);
+
+  async function handleInventoryImport(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const records = inventoryRecordsFromCsv(await file.text(), {
+        defaultBranch: branchScope === "All branches" ? "" : branchScope,
+      });
+      await importInventory(records);
+    } catch (error) {
+      notify(error.message || "Unable to import that inventory CSV.", "error");
+    }
+  }
 
   return (
     <section className="module-grid two">
@@ -10345,6 +10375,17 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
           globalSearch={globalSearch}
           toolbarActions={(
             <>
+              <input
+                ref={importInputRef}
+                className="sr-only"
+                type="file"
+                accept=".csv,text/csv"
+                onChange={handleInventoryImport}
+                tabIndex={-1}
+              />
+              <button className="secondary-button small" type="button" onClick={() => importInputRef.current?.click()}>
+                <Upload size={16} /> Import CSV
+              </button>
               <button className="secondary-button small" type="button" onClick={() => openModal("inventory-receive")}>
                 <PackagePlus size={16} /> Receive stock
               </button>
@@ -10353,6 +10394,10 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
               </button>
             </>
           )}
+          exportColumns={inventoryCsvExportColumns}
+          exportFilename="mace-inventory.csv"
+          exportLabel="Export CSV"
+          allowEmptyExport
           columns={[
             { key: "photo", label: "Photo", sortable: false, render: (row) => <ProductThumbnail item={row} />, exportValue: () => "" },
             { key: "item", label: "Item", render: (row) => <strong className="inventory-product-name">{row.item}</strong> },
@@ -14765,6 +14810,8 @@ function SmartTable({
   showSearch = false,
   exportFilename = "mace-export.csv",
   exportLabel = "CSV",
+  exportColumns = null,
+  allowEmptyExport = false,
   compactPagination = false,
 }) {
   const [query, setQuery] = useState("");
@@ -14864,7 +14911,7 @@ function SmartTable({
             </label>
           )}
         </div>
-        <button className="secondary-button small" type="button" onClick={() => downloadCsv(exportFilename, filtered, columns)} disabled={!filtered.length}>
+        <button className="secondary-button small" type="button" onClick={() => downloadCsv(exportFilename, filtered, exportColumns || columns)} disabled={!allowEmptyExport && !filtered.length}>
           <Download size={16} aria-hidden="true" /> {exportLabel}
         </button>
       </div>
@@ -14873,7 +14920,7 @@ function SmartTable({
         {selectedKeys.size > 0 && (
           <div className="bulk-actions">
             <strong>{selectedKeys.size} selected</strong>
-            <button className="secondary-button small" type="button" onClick={() => downloadCsv("mace-selected-export.csv", selectedRows, columns)}>
+            <button className="secondary-button small" type="button" onClick={() => downloadCsv(`selected-${exportFilename}`, selectedRows, exportColumns || columns)}>
               <Download size={15} aria-hidden="true" /> Export selected
             </button>
             <button className="ghost-button small" type="button" onClick={() => setSelectedKeys(new Set())}>Clear</button>
