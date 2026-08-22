@@ -853,6 +853,8 @@ function App() {
   const [printReceiptNonce, setPrintReceiptNonce] = useState(0);
   const inventoryImportInputRef = useRef(null);
   const clientImportInputRef = useRef(null);
+  const staffUsersExportRef = useRef(null);
+  const staffProfilesExportRef = useRef(null);
   const [isBooting, setIsBooting] = useState(true);
   const [clients, setClients] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -1884,6 +1886,14 @@ function App() {
         { key: "balance", label: "Balance" },
         { key: "packageBalance", label: "Package" },
       ]);
+      return;
+    }
+    if (action.handler === "staff-users-export") {
+      staffUsersExportRef.current?.();
+      return;
+    }
+    if (action.handler === "staff-profiles-export") {
+      staffProfilesExportRef.current?.();
       return;
     }
     if (action.modal) openModal(action.modal, action.payload ?? {});
@@ -3273,6 +3283,8 @@ function App() {
               onCloseDetail={() => setActiveModule("staff")}
               createRequest={inviteCreateRequest}
               onCreateRequestHandled={setInviteCreateRequest}
+              usersExportRef={staffUsersExportRef}
+              profilesExportRef={staffProfilesExportRef}
             />
           )}
           {activeModule === "branches" && (
@@ -11653,7 +11665,7 @@ function MyWorkspaceModule({ session, notify }) {
   );
 }
 
-function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify, onOpenStaff, onCloseDetail, createRequest = 0, onCreateRequestHandled }) {
+function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, setSession, openModal, toggleAttendance, globalSearch, applyAuditLog, notify, onOpenStaff, onCloseDetail, createRequest = 0, onCreateRequestHandled, usersExportRef, profilesExportRef }) {
   const canInvite = canManageOrganization(session.role)
     || (["Branch Manager", "Admin"].includes(session.role) && session.access?.permissions?.includes("staff.invite"));
   const canManageAccounts = canManageOrganization(session.role)
@@ -11848,6 +11860,56 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
   ));
   const filterModules = [...new Set(Object.values(capabilities.roleModules || roleAccess).flat())];
 
+  if (usersExportRef) {
+    usersExportRef.current = () => downloadCsv("mace-users-and-invitations.csv", [
+      ...accounts.map((account) => ({
+        recordType: "User",
+        name: account.name,
+        email: account.email,
+        branch: account.organizationWideAccess ? "Organization-wide" : account.access?.branches?.map((branch) => branch.name).join(", ") || "Unassigned",
+        role: account.role,
+        status: account.status,
+        date: account.createdAt || "",
+      })),
+      ...invitations.map((invitation) => ({
+        recordType: "Invitation",
+        name: invitation.name,
+        email: invitation.email,
+        branch: invitation.branches?.map((branch) => branch.name).join(", ") || "Organization-wide",
+        role: invitation.role,
+        status: invitation.status,
+        date: invitation.createdAt || "",
+      })),
+    ], [
+      { key: "recordType", label: "Record Type" },
+      { key: "name", label: "Name" },
+      { key: "email", label: "Email" },
+      { key: "branch", label: "Branch" },
+      { key: "role", label: "Role" },
+      { key: "status", label: "Status" },
+      { key: "date", label: "Created / Invited" },
+    ]);
+  }
+
+  if (profilesExportRef) {
+    profilesExportRef.current = () => downloadCsv("mace-employee-profiles.csv", staff, [
+      { key: "id", label: "Employee ID" },
+      { key: "name", label: "Name" },
+      { key: "role", label: "Role" },
+      { key: "branch", label: "Primary Branch" },
+      { key: "branches", label: "Assigned Branches", exportValue: (person) => splitList(person.branches).join(", ") },
+      { key: "schedule", label: "Schedule" },
+      { key: "status", label: "Status" },
+      { key: "attendance", label: "Attendance" },
+      { key: "employmentStatus", label: "Employment Status" },
+      { key: "employmentDate", label: "Employment Date" },
+      { key: "phone", label: "Phone" },
+      { key: "commissionRate", label: "Commission Rate" },
+      { key: "services", label: "Assigned Services", exportValue: (person) => splitList(person.services).join(", ") },
+      { key: "login", label: "Login", exportValue: (person) => accountByStaffId.get(person.id)?.email || "" },
+    ]);
+  }
+
   if (detailStaffId) {
     if (!selectedStaff) return <RecordDetailNotFound label="Staff member" onBack={onCloseDetail} />;
     return (
@@ -11887,24 +11949,20 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
             const canAct = capabilities.organizationManager || row.invitedBy?.id === session.id;
             return <div className="inline-actions">{canAct && row.status === "Pending" && <button type="button" onClick={() => openInvitation(row)}><Edit3 size={14} /> Edit</button>}{canAct && ["Pending", "Expired"].includes(row.status) && <button type="button" onClick={() => runInvitationAction("resend", row)}><RefreshCw size={14} /> Resend</button>}{canAct && row.status === "Pending" && <button type="button" onClick={() => runInvitationAction("revoke", row)}><X size={14} /> Cancel</button>}</div>;
           }, exportValue: () => "" },
-        ]} /> : <SmartTable rows={accountRows} columns={[
+        ]} showToolbar={false} /> : <SmartTable rows={accountRows} columns={[
           { key: "name", label: "User", render: (row) => <div><strong>{row.name}</strong><small>{row.email}</small></div> },
           { key: "branch", label: "Branch", render: (row) => row.organizationWideAccess ? "Organization-wide" : row.access?.branches?.map((branch) => branch.name).join(", ") || "Unassigned" },
           { key: "role", label: "Role" },
           { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
           { key: "createdAt", label: "Joined", render: (row) => row.createdAt ? new Date(row.createdAt).toLocaleDateString("en-PH") : "—" },
           { key: "actions", label: "Actions", render: (row) => <div className="inline-actions">{row.staffId && staff.some((person) => person.id === row.staffId) && <button type="button" onClick={() => onOpenStaff?.(staff.find((person) => person.id === row.staffId))}><Eye size={14} /> View</button>}{canManageAccounts && (canManageOrganization(session.role) || (!canManageOrganization(row.role) && (!["Branch Manager", "Admin"].includes(row.role) || capabilities.canInviteManagers))) && <button type="button" onClick={() => openAccess(row)}><ShieldCheck size={14} /> Manage access</button>}</div>, exportValue: () => "" },
-        ]} />}
+        ]} showToolbar={false} />}
       </div>
       {workspaceTab === "Active Users" && <div className="surface-panel">
         <SectionHeader icon={BriefcaseBusiness} title="Employee Profiles" action={`${staff.length} employees`} />
         <SmartTable
           rows={staff}
-          toolbarActions={(
-            <div className="inline-actions">
-              {canInvite && <button className="primary-button small" type="button" onClick={() => openInvitation()}><Mail size={16} /> Invite user</button>}
-            </div>
-          )}
+          showToolbar={false}
           columns={[
             { key: "name", label: "Name", className: "staff-name-column", render: (row) => <button className="staff-record-link" type="button" onClick={() => onOpenStaff?.(row)}><ClientAvatar client={{ fullName: row.name, photo: row.photo }} size="small" /><strong>{row.name}</strong></button> },
             { key: "role", label: "Role" },
