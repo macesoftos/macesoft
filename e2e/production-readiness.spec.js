@@ -404,6 +404,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await page.keyboard.press("Alt+P");
   await expect(page.getByRole("heading", { name: "Build checkout" })).toBeVisible();
+  await expect(page.getByText("Open client carts", { exact: true })).toHaveCount(0);
 
   await page.keyboard.press("F4");
   await expect(page.getByRole("dialog", { name: "Select sale details" })).toBeVisible();
