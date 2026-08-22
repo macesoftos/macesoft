@@ -11949,20 +11949,21 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
             const canAct = capabilities.organizationManager || row.invitedBy?.id === session.id;
             return <div className="inline-actions">{canAct && row.status === "Pending" && <button type="button" onClick={() => openInvitation(row)}><Edit3 size={14} /> Edit</button>}{canAct && ["Pending", "Expired"].includes(row.status) && <button type="button" onClick={() => runInvitationAction("resend", row)}><RefreshCw size={14} /> Resend</button>}{canAct && row.status === "Pending" && <button type="button" onClick={() => runInvitationAction("revoke", row)}><X size={14} /> Cancel</button>}</div>;
           }, exportValue: () => "" },
-        ]} showToolbar={false} /> : <SmartTable rows={accountRows} columns={[
+        ]} showToolbar={false} showStatus={false} /> : <SmartTable rows={accountRows} columns={[
           { key: "name", label: "User", render: (row) => <div><strong>{row.name}</strong><small>{row.email}</small></div> },
           { key: "branch", label: "Branch", render: (row) => row.organizationWideAccess ? "Organization-wide" : row.access?.branches?.map((branch) => branch.name).join(", ") || "Unassigned" },
           { key: "role", label: "Role" },
           { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
           { key: "createdAt", label: "Joined", render: (row) => row.createdAt ? new Date(row.createdAt).toLocaleDateString("en-PH") : "—" },
           { key: "actions", label: "Actions", render: (row) => <div className="inline-actions">{row.staffId && staff.some((person) => person.id === row.staffId) && <button type="button" onClick={() => onOpenStaff?.(staff.find((person) => person.id === row.staffId))}><Eye size={14} /> View</button>}{canManageAccounts && (canManageOrganization(session.role) || (!canManageOrganization(row.role) && (!["Branch Manager", "Admin"].includes(row.role) || capabilities.canInviteManagers))) && <button type="button" onClick={() => openAccess(row)}><ShieldCheck size={14} /> Manage access</button>}</div>, exportValue: () => "" },
-        ]} showToolbar={false} />}
+        ]} showToolbar={false} showStatus={false} />}
       </div>
       {workspaceTab === "Active Users" && <div className="surface-panel">
         <SectionHeader icon={BriefcaseBusiness} title="Employee Profiles" action={`${staff.length} employees`} />
         <SmartTable
           rows={staff}
           showToolbar={false}
+          showStatus={false}
           columns={[
             { key: "name", label: "Name", className: "staff-name-column", render: (row) => <button className="staff-record-link" type="button" onClick={() => onOpenStaff?.(row)}><ClientAvatar client={{ fullName: row.name, photo: row.photo }} size="small" /><strong>{row.name}</strong></button> },
             { key: "role", label: "Role" },
