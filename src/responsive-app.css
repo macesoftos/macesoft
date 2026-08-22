@@ -2006,6 +2006,25 @@ button,
   align-self: center;
 }
 
+@media (max-width: 760px) {
+  .record-detail-page > .lead-detail-panel .lead-contact-grid,
+  .record-detail-page > .lead-detail-panel .lead-simple-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .record-detail-page > .lead-detail-panel .lead-contact-grid > div,
+  .record-detail-page > .lead-detail-panel .lead-simple-workflow label,
+  .record-detail-page > .lead-detail-panel .lead-simple-workflow > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .record-detail-page > .lead-detail-panel .lead-contact-grid > div:last-child,
+  .record-detail-page > .lead-detail-panel .lead-simple-workflow > :last-child {
+    border-bottom: 0;
+  }
+}
+
 .appointment-scheduler-toolbar .appointment-date-navigator > button,
 .appointment-scheduler-toolbar .appointment-toolbar-filter-bar select,
 .appointment-scheduler-toolbar .appointment-toolbar-filter-bar button {
