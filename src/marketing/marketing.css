@@ -299,6 +299,29 @@
   line-height: 1.05;
 }
 
+.marketing-header-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.marketing-header-actions .global-module-search {
+  width: min(370px, 32vw);
+}
+
+.marketing-header-actions .search-box {
+  width: 100%;
+  min-width: 0;
+  border-color: var(--marketing-border);
+  background: #fff;
+}
+
+.marketing-header-actions .global-module-search-panel {
+  border-color: var(--marketing-border);
+}
+
 .marketing-builder-branch {
   display: grid;
   min-width: 150px;
@@ -2135,6 +2158,8 @@
   .marketing-sidebar nav button span { font-size: 11px; }
   .marketing-header { min-height: 86px; padding: 15px 14px; }
   .marketing-header h1 { font-size: 25px; }
+  .marketing-header-actions { flex: 1; }
+  .marketing-header-actions .global-module-search { width: min(360px, 48vw); }
   .marketing-global-menu { display: inline-flex; }
   .marketing-header > .marketing-primary-button { min-height: 39px; padding-inline: 12px; font-size: 11px; }
   .marketing-page-scroll { padding: 16px 12px calc(20px + env(safe-area-inset-bottom)); }
@@ -2210,6 +2235,10 @@
 }
 
 @media (max-width: 480px) {
+  .marketing-header { align-items: stretch; flex-direction: column; }
+  .marketing-header-actions { width: 100%; }
+  .marketing-header-actions .global-module-search { width: 100%; }
+  .marketing-header-actions .marketing-primary-button { flex: 0 0 auto; }
   .marketing-header .marketing-primary-button svg { display: none; }
   .marketing-header .marketing-primary-button { padding-inline: 10px; }
   .marketing-breadcrumb { display: none; }

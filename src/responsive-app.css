@@ -718,6 +718,9 @@
 }
 
 @media (max-width: 1180px) {
+  .appointment-compact-filter-region .advanced-filters {
+    grid-template-columns: repeat(3, minmax(145px, 1fr));
+  }
   .leads-directory-navigation {
     align-items: flex-start;
     flex-direction: column;
@@ -1849,6 +1852,50 @@
 }
 
 @media (max-width: 640px) {
+  .topbar-actions .global-module-search {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .global-module-search-panel {
+    right: auto;
+    min-width: min(430px, calc(100vw - 24px));
+  }
+
+  .global-module-search-result {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .global-module-search-result-meta { display: none; }
+
+  .appointment-compact-filter-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appointment-compact-filter-bar .appointment-filter-field {
+    display: none;
+    width: auto;
+  }
+
+  .appointment-compact-filter-region.is-expanded .appointment-compact-filter-bar .appointment-filter-field {
+    display: block;
+  }
+
+  .appointment-compact-filter-bar .appointment-filter-toggle,
+  .appointment-compact-filter-bar .appointment-filter-reset {
+    width: 100%;
+  }
+
+  .appointment-compact-filter-region .advanced-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .appointment-filter-desktop-label { display: none; }
+  .appointment-filter-mobile-label { display: inline; }
+
   .appointment-details-drawer {
     width: 100vw;
     max-width: none;

@@ -98,6 +98,7 @@ import {
   sendMarketingTestEmail,
 } from "../lib/api.js";
 import { downloadAudienceCsv, parseAudienceCsv, validAudienceEmail } from "./audienceCsv.js";
+import GlobalModuleSearch from "../components/GlobalModuleSearch.jsx";
 
 const draftStorageKey = "mace-marketing-campaign-draft-v1";
 const templateStorageKey = "mace-marketing-design-templates-v1";
@@ -747,6 +748,7 @@ export default function MarketingWorkspace({
   moveCampaignToDeleted,
   notify,
   onOpenDashboard,
+  onGlobalSearchChange = () => {},
   openModal,
   restoreCampaign,
   saveCampaign,
@@ -851,6 +853,7 @@ export default function MarketingWorkspace({
   function navigate(section, mode = "index") {
     navigateToMarketing(section, mode);
     setRoute({ section, mode });
+    onGlobalSearchChange("");
   }
 
   function beginCampaign(preset = {}) {
@@ -864,7 +867,7 @@ export default function MarketingWorkspace({
     navigate("campaigns", "create");
   }
 
-  function useTemplate(template) {
+  function applyTemplate(template) {
     const design = template.design && typeof template.design === "object" ? template.design : template;
     beginCampaign({
       name: template.name,
@@ -893,6 +896,49 @@ export default function MarketingWorkspace({
       step: 2,
     }));
     navigate("campaigns", "create");
+  }
+
+  const marketingSearchMeta = useMemo(() => {
+    if (route.mode === "deleted") return { label: "Search deleted campaigns", placeholder: "Campaign name, channel, audience, or status" };
+    const labels = {
+      campaigns: ["Search campaigns", "Campaign name, channel, audience, or status"],
+      templates: ["Search templates", "Template name, category, or message"],
+      audiences: ["Search audiences", "Audience name or description"],
+      automations: ["Search automations", "Workflow, timing, channel, or audience"],
+      reports: ["Search campaign reports", "Campaign name, channel, audience, or status"],
+    };
+    const [label = "Search unavailable", placeholder = "No searchable records in this section"] = labels[route.section] || [];
+    return { label, placeholder, disabled: !labels[route.section] };
+  }, [route.mode, route.section]);
+
+  const getMarketingSearchResults = useCallback((rawQuery) => {
+    const query = rawQuery.trim().toLowerCase();
+    if (!query) return [];
+    const match = (...values) => values.filter(Boolean).join(" ").toLowerCase().includes(query);
+    if (route.section === "campaigns" || route.section === "reports") {
+      const source = route.mode === "deleted" ? deletedCampaigns : activeCampaigns;
+      return source.filter((item) => match(item.name, item.subject, item.segment, item.channel, item.status)).slice(0, 8).map((item) => ({
+        id: item.id, kind: route.mode === "deleted" ? "Deleted campaign" : "Campaign", title: item.name, subtitle: `${item.channel} · ${item.segment}`, meta: item.status, record: item, action: "campaign",
+      }));
+    }
+    if (route.section === "templates") return [...starterTemplates, ...savedTemplates, ...templates]
+      .filter((item) => match(item.name, item.category, item.description, item.text)).slice(0, 8).map((item) => ({
+        id: item.id, kind: "Template", title: item.name, subtitle: item.category || "Saved design", record: item, action: "template",
+      }));
+    if (route.section === "audiences") return audienceDefinitions.filter((item) => match(item.name, item.description)).slice(0, 8).map((item) => ({
+      id: item.id, kind: "Audience", title: item.name, subtitle: item.description, record: item, action: "audience",
+    }));
+    if (route.section === "automations") return automationDefinitions.filter((item) => match(item.name, item.timing, item.channel, item.segment)).slice(0, 8).map((item) => ({
+      id: item.name, kind: "Automation", title: item.name, subtitle: `${item.timing} · ${item.channel}`, record: item, action: "automation",
+    }));
+    return [];
+  }, [activeCampaigns, deletedCampaigns, route.mode, route.section, savedTemplates, templates]);
+
+  function selectMarketingSearchResult(result) {
+    if (result.action === "campaign") editCampaign(result.record);
+    if (result.action === "template") applyTemplate(result.record);
+    if (result.action === "audience") beginCampaign({ segment: result.record.id, step: 1 });
+    if (result.action === "automation") beginCampaign({ name: result.record.name, channel: result.record.channel, segment: result.record.segment, managerApproval: true, step: 1 });
   }
 
   async function persistTemplate(template) {
@@ -991,9 +1037,14 @@ export default function MarketingWorkspace({
         ) : (
           <>
             <MarketingHeader
+              globalSearch={globalSearch}
+              getSearchResults={getMarketingSearchResults}
               mode={route.mode}
               onCreate={() => beginCampaign()}
+              onSearchChange={onGlobalSearchChange}
+              onSearchSelect={selectMarketingSearchResult}
               onOpenDashboard={onOpenDashboard}
+              searchMeta={marketingSearchMeta}
               section={route.section}
             />
             <div className="marketing-page-scroll">
@@ -1056,7 +1107,7 @@ export default function MarketingWorkspace({
                   sendingCampaignId={sendingCampaignId}
                   settings={settings}
                   templates={templates}
-                  onUseTemplate={useTemplate}
+                  onUseTemplate={applyTemplate}
                   uploadImage={uploadMarketingImage}
                 />
               )}
@@ -1068,7 +1119,7 @@ export default function MarketingWorkspace({
   );
 }
 
-function MarketingHeader({ mode, onCreate, onOpenDashboard, section }) {
+function MarketingHeader({ globalSearch, getSearchResults, mode, onCreate, onOpenDashboard, onSearchChange, onSearchSelect, searchMeta, section }) {
   const sectionLabel = workspaceNavigation.find((item) => item.id === section)?.label ?? "Overview";
   const isDeleted = section === "campaigns" && mode === "deleted";
   const label = isDeleted ? "Deleted campaigns" : sectionLabel;
@@ -1083,11 +1134,22 @@ function MarketingHeader({ mode, onCreate, onOpenDashboard, section }) {
           <h1>{label}</h1>
         </div>
       </div>
-      {section !== "settings" && section !== "media" && !isDeleted && (
-        <button className="marketing-primary-button" onClick={onCreate} type="button">
-          <Plus size={17} aria-hidden="true" /> Create campaign
-        </button>
-      )}
+      <div className="marketing-header-actions">
+        <GlobalModuleSearch
+          value={globalSearch}
+          onChange={onSearchChange}
+          label={searchMeta.label}
+          placeholder={searchMeta.placeholder}
+          disabled={searchMeta.disabled}
+          getResults={getSearchResults}
+          onSelect={onSearchSelect}
+        />
+        {section !== "settings" && section !== "media" && !isDeleted && (
+          <button className="marketing-primary-button" onClick={onCreate} type="button">
+            <Plus size={17} aria-hidden="true" /> Create campaign
+          </button>
+        )}
+      </div>
     </header>
   );
 }
@@ -1146,10 +1208,9 @@ function MarketingOverview({ campaigns, navigate, onCreate }) {
 function CampaignsPage({ approveCampaign, askConfirm, campaigns, canApproveMarketing, deletedCampaigns, globalSearch, moveCampaignToDeleted, navigate, notify, onCreate, onEditCampaign, sendCampaign, sendingCampaignId }) {
   const [channel, setChannel] = useState("All channels");
   const [status, setStatus] = useState("All statuses");
-  const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState("");
   const filtered = campaigns.filter((campaign) => {
-    const search = `${globalSearch} ${query}`.trim().toLowerCase();
+    const search = globalSearch.trim().toLowerCase();
     return (!search || `${campaign.name} ${campaign.segment} ${campaign.channel} ${campaign.status}`.toLowerCase().includes(search))
       && (channel === "All channels" || campaign.channel === channel)
       && (status === "All statuses" || campaign.status === status);
@@ -1194,7 +1255,6 @@ function CampaignsPage({ approveCampaign, askConfirm, campaigns, canApproveMarke
         <button onClick={() => navigate("campaigns", "deleted")} type="button"><Trash2 size={15} aria-hidden="true" /> Deleted <b>{deletedCampaigns.length}</b></button>
       </div>
       <div className="marketing-toolbar">
-        <label className="marketing-search"><Search size={16} /><input aria-label="Search campaigns" onChange={(event) => setQuery(event.target.value)} placeholder="Search campaigns" type="search" value={query} /></label>
         <label><span>Channel</span><select aria-label="Filter by channel" value={channel} onChange={(event) => setChannel(event.target.value)}><option>All channels</option><option>Email</option><option>SMS</option><option>Email + SMS</option></select></label>
         <label><span>Status</span><select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option>All statuses</option><option>Draft</option><option>Pending approval</option><option>Scheduled</option><option>Sending</option><option>Sent</option><option>Partial</option><option>Failed</option></select></label>
       </div>
@@ -1227,9 +1287,8 @@ function CampaignsPage({ approveCampaign, askConfirm, campaigns, canApproveMarke
 }
 
 function DeletedCampaignsPage({ askConfirm, deletedCampaigns, deleteCampaignForever, globalSearch, navigate, notify, restoreCampaign }) {
-  const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState("");
-  const search = `${globalSearch} ${query}`.trim().toLowerCase();
+  const search = globalSearch.trim().toLowerCase();
   const filtered = [...deletedCampaigns]
     .sort((left, right) => new Date(right.deletedAt || 0) - new Date(left.deletedAt || 0))
     .filter((campaign) => !search || `${campaign.name} ${campaign.segment} ${campaign.channel} ${campaign.status}`.toLowerCase().includes(search));
@@ -1271,9 +1330,6 @@ function DeletedCampaignsPage({ askConfirm, deletedCampaigns, deleteCampaignFore
       <div className="marketing-list-actions">
         <div><strong>{deletedCampaigns.length.toLocaleString("en-PH")} deleted campaign{deletedCampaigns.length === 1 ? "" : "s"}</strong><span>Restore campaigns or delete them forever when they are no longer needed.</span></div>
         <button onClick={() => navigate("campaigns")} type="button"><ArrowLeft size={15} aria-hidden="true" /> Back to campaigns</button>
-      </div>
-      <div className="marketing-toolbar single">
-        <label className="marketing-search"><Search size={16} /><input aria-label="Search deleted campaigns" onChange={(event) => setQuery(event.target.value)} placeholder="Search deleted campaigns" type="search" value={query} /></label>
       </div>
       {filtered.length ? (
         <div className="marketing-table-wrap">
@@ -1320,9 +1376,11 @@ function TemplateCardPreview({ index, template }) {
   );
 }
 
-function TemplatesPage({ onDeleteTemplate, onDuplicateTemplate, onUseTemplate, savedTemplates, templates }) {
+function TemplatesPage({ globalSearch, onDeleteTemplate, onDuplicateTemplate, onUseTemplate, savedTemplates, templates }) {
   const [previewTemplate, setPreviewTemplate] = useState(null);
-  const allTemplates = [...starterTemplates, ...savedTemplates];
+  const query = globalSearch.trim().toLowerCase();
+  const allTemplates = [...starterTemplates, ...savedTemplates].filter((template) => !query || `${template.name} ${template.category || ""} ${template.description || ""}`.toLowerCase().includes(query));
+  const visibleMessageTemplates = templates.filter((template) => !query || `${template.name} ${template.category || ""} ${template.text || ""}`.toLowerCase().includes(query));
   return (
     <div className="marketing-template-page">
       <section className="marketing-section-block no-surface">
@@ -1343,20 +1401,22 @@ function TemplatesPage({ onDeleteTemplate, onDuplicateTemplate, onUseTemplate, s
       </section>
       <section className="marketing-section-block">
         <div className="marketing-section-heading"><div><h2>Text message templates</h2><p>Your existing templates and delivery integration remain available.</p></div><span>{templates.length} active</span></div>
-        {templates.length ? <div className="marketing-message-templates">{templates.map((template) => <article key={template.id}><div><MessageSquareText size={18} /><strong>{template.name}</strong><StatusPill value={template.active ? "Active" : "Inactive"} /></div><p>{template.text}</p><small>{template.category}</small></article>)}</div> : <MarketingEmpty title="No text message templates" copy="Templates saved through the current service will appear here." />}
+        {visibleMessageTemplates.length ? <div className="marketing-message-templates">{visibleMessageTemplates.map((template) => <article key={template.id}><div><MessageSquareText size={18} /><strong>{template.name}</strong><StatusPill value={template.active ? "Active" : "Inactive"} /></div><p>{template.text}</p><small>{template.category}</small></article>)}</div> : <MarketingEmpty title={query ? "No matching text message templates" : "No text message templates"} copy={query ? "Try another search in the Marketing header." : "Templates saved through the current service will appear here."} />}
       </section>
       {previewTemplate && <div className="marketing-template-dialog" role="dialog" aria-modal="true" aria-label={`Preview ${previewTemplate.name}`}><button className="marketing-dialog-backdrop" onClick={() => setPreviewTemplate(null)} type="button" aria-label="Close template preview" /><article><header><div><span>Template preview</span><h2>{previewTemplate.name}</h2></div><button onClick={() => setPreviewTemplate(null)} type="button" aria-label="Close template preview"><X size={18} /></button></header><div className="marketing-template-live-preview"><iframe sandbox="" srcDoc={previewPersonalizedHtml(previewTemplate.html || buildVisualEmailHtml({ name: previewTemplate.name, subject: previewTemplate.name, previewText: previewTemplate.description, blocks: previewTemplate.design?.blocks || previewTemplate.blocks || createDefaultBlocks(), theme: previewTemplate.design?.theme || previewTemplate.theme || defaultEmailTheme }))} title={`${previewTemplate.name} template preview`} /></div><footer><button onClick={() => setPreviewTemplate(null)} type="button">Close</button><button className="marketing-primary-button" onClick={() => onUseTemplate(previewTemplate)} type="button">Use this template</button></footer></article></div>}
     </div>
   );
 }
 
-function AudiencesPage({ audienceMembers = [], audienceMembersLoading, branches = [], branchScope, clients, notify, onAddAudienceMember, onCreate, onImportAudienceMembers }) {
+function AudiencesPage({ audienceMembers = [], audienceMembersLoading, branches = [], branchScope, clients, globalSearch, notify, onAddAudienceMember, onCreate, onImportAudienceMembers }) {
   const [selectedAudience, setSelectedAudience] = useState(null);
+  const query = globalSearch.trim().toLowerCase();
+  const visibleAudiences = audienceDefinitions.filter((audience) => !query || `${audience.name} ${audience.description}`.toLowerCase().includes(query));
   return (
     <div className="marketing-audience-page">
       <div className="marketing-consent-notice"><UserCheck size={20} /><div><strong>Consent is applied per channel</strong><p>Estimates use channel-specific consent when available and the existing opt-in for legacy contacts. Suppressions and delivery failures must be rechecked by the provider before sending.</p></div></div>
       <div className="marketing-audience-grid">
-        {audienceDefinitions.map((audience) => {
+        {visibleAudiences.map((audience) => {
           const emailCount = audienceRecipients(clients, audienceMembers, audience.id, "Email").length;
           const smsCount = audienceRecipients(clients, audienceMembers, audience.id, "SMS").length;
           return (
@@ -1592,23 +1652,27 @@ function ImportAudienceEmailsDialog({ audience, branches, branchScope, draft, on
   );
 }
 
-function AutomationsPage({ onCreate }) {
+function AutomationsPage({ globalSearch, onCreate }) {
+  const query = globalSearch.trim().toLowerCase();
+  const visibleAutomations = automationDefinitions.filter((automation) => !query || `${automation.name} ${automation.timing} ${automation.channel} ${automation.segment}`.toLowerCase().includes(query));
   return (
     <div className="marketing-automation-page">
       <div className="marketing-consent-notice neutral"><Workflow size={20} /><div><strong>Start with simple clinic workflows</strong><p>Each automation opens as a reviewable draft. Delivery remains off until timing, channel consent and manager approval are confirmed.</p></div></div>
       <div className="marketing-automation-list">
-        {automationDefinitions.map((automation) => <article key={automation.name}><span className="marketing-automation-icon"><CalendarClock size={20} /></span><div><h3>{automation.name}</h3><p>{automation.timing}</p><span>{automation.channel} · {automation.segment}</span></div><StatusPill value="Setup required" /><button onClick={() => onCreate({ name: automation.name, channel: automation.channel, segment: automation.segment, managerApproval: true, step: 1 })} type="button">Set up</button></article>)}
+        {visibleAutomations.map((automation) => <article key={automation.name}><span className="marketing-automation-icon"><CalendarClock size={20} /></span><div><h3>{automation.name}</h3><p>{automation.timing}</p><span>{automation.channel} · {automation.segment}</span></div><StatusPill value="Setup required" /><button onClick={() => onCreate({ name: automation.name, channel: automation.channel, segment: automation.segment, managerApproval: true, step: 1 })} type="button">Set up</button></article>)}
       </div>
     </div>
   );
 }
 
-function ReportsPage({ campaigns }) {
-  const totalSent = campaigns.reduce((sum, campaign) => sum + Number(campaign.sent || 0), 0);
-  const emailSent = campaigns.filter((campaign) => campaign.channel?.toLowerCase().includes("email")).reduce((sum, campaign) => sum + Number(campaign.sent || 0), 0);
-  const smsSent = campaigns.filter((campaign) => campaign.channel === "SMS").reduce((sum, campaign) => sum + Number(campaign.sent || 0), 0);
-  const totalBooked = campaigns.reduce((sum, campaign) => sum + Number(campaign.booked || 0), 0);
-  const maxSent = Math.max(1, ...campaigns.map((campaign) => Number(campaign.sent || 0)));
+function ReportsPage({ campaigns, globalSearch }) {
+  const query = globalSearch.trim().toLowerCase();
+  const visibleCampaigns = campaigns.filter((campaign) => !query || `${campaign.name} ${campaign.segment} ${campaign.channel} ${campaign.status}`.toLowerCase().includes(query));
+  const totalSent = visibleCampaigns.reduce((sum, campaign) => sum + Number(campaign.sent || 0), 0);
+  const emailSent = visibleCampaigns.filter((campaign) => campaign.channel?.toLowerCase().includes("email")).reduce((sum, campaign) => sum + Number(campaign.sent || 0), 0);
+  const smsSent = visibleCampaigns.filter((campaign) => campaign.channel === "SMS").reduce((sum, campaign) => sum + Number(campaign.sent || 0), 0);
+  const totalBooked = visibleCampaigns.reduce((sum, campaign) => sum + Number(campaign.booked || 0), 0);
+  const maxSent = Math.max(1, ...visibleCampaigns.map((campaign) => Number(campaign.sent || 0)));
   return (
     <div className="marketing-reports-page">
       <div className="marketing-summary-strip reports">
@@ -1618,7 +1682,7 @@ function ReportsPage({ campaigns }) {
       </div>
       <section className="marketing-section-block">
         <div className="marketing-section-heading"><div><h2>Delivery by campaign</h2><p>Open, click, bounce and unsubscribe metrics will appear when the email provider boundary is connected.</p></div></div>
-        {campaigns.length ? <div className="marketing-report-bars">{campaigns.slice(0, 8).map((campaign) => <article key={campaign.id}><div><strong>{campaign.name}</strong><span>{campaign.channel}</span></div><div className="marketing-report-track"><i style={{ width: `${Math.max(4, (Number(campaign.sent || 0) / maxSent) * 100)}%` }} /></div><b>{Number(campaign.sent || 0).toLocaleString("en-PH")}</b></article>)}</div> : <MarketingEmpty title="No delivery results yet" copy="Sent campaign results will appear here." />}
+        {visibleCampaigns.length ? <div className="marketing-report-bars">{visibleCampaigns.slice(0, 8).map((campaign) => <article key={campaign.id}><div><strong>{campaign.name}</strong><span>{campaign.channel}</span></div><div className="marketing-report-track"><i style={{ width: `${Math.max(4, (Number(campaign.sent || 0) / maxSent) * 100)}%` }} /></div><b>{Number(campaign.sent || 0).toLocaleString("en-PH")}</b></article>)}</div> : <MarketingEmpty title={query ? "No campaign reports match your search" : "No delivery results yet"} copy={query ? "Try another campaign name, channel, audience, or status." : "Sent campaign results will appear here."} />}
       </section>
       <div className="marketing-metric-table"><div><span>Metric</span><span>Email</span><span>SMS</span></div>{["Delivered", "Opened", "Clicked", "Bounced", "Unsubscribed"].map((metric) => <div key={metric}><strong>{metric}</strong><span>{metric === "Delivered" ? emailSent : "—"}</span><span>{metric === "Delivered" ? smsSent : "—"}</span></div>)}</div>
     </div>
