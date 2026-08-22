@@ -612,6 +612,112 @@ button svg,
   flex: 1 1 300px;
 }
 
+.topbar-actions .global-module-search {
+  min-width: 260px;
+  max-width: 380px;
+  flex: 1 1 320px;
+}
+
+.global-module-search {
+  position: relative;
+  z-index: 80;
+}
+
+.global-module-search .search-box {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.global-module-search-input.is-disabled {
+  opacity: 0.62;
+}
+
+.global-module-search-clear {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.global-module-search-clear:hover,
+.global-module-search-clear:focus-visible {
+  background: var(--paper);
+  color: var(--wine);
+}
+
+.global-module-search-panel {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  z-index: 220;
+  min-width: min(430px, calc(100vw - 28px));
+  max-height: min(420px, 70vh);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(55, 31, 36, 0.18);
+}
+
+.global-module-search-result {
+  display: grid;
+  width: 100%;
+  min-height: 58px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.global-module-search-result.is-active,
+.global-module-search-result:hover {
+  background: var(--paper);
+}
+
+.global-module-search-result-kind {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wine) 10%, white);
+  color: var(--wine);
+  font-size: 0.61rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.global-module-search-result-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.global-module-search-result-copy strong,
+.global-module-search-result-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-module-search-result-copy strong { font-size: 0.76rem; }
+.global-module-search-result-copy small { color: var(--muted); font-size: 0.66rem; }
+.global-module-search-result-meta { color: var(--muted); font-size: 0.64rem; white-space: nowrap; }
+.global-module-search-state { display: flex; min-height: 64px; align-items: center; justify-content: center; gap: 8px; padding: 12px; color: var(--muted); font-size: 0.72rem; text-align: center; }
+.global-module-search-state.is-error { color: var(--danger); }
+
 .topbar-actions .account-menu,
 .topbar-actions .icon-button,
 .topbar-actions .topbar-pos-button,
@@ -3036,6 +3142,73 @@ td {
 .appointment-filter-panel {
   padding: 0;
   overflow: hidden;
+}
+
+.appointment-compact-filter-region {
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.appointment-compact-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 46px;
+  padding: 4px 0 8px;
+}
+
+.appointment-compact-filter-bar .appointment-filter-field {
+  width: min(210px, 24vw);
+}
+
+.appointment-compact-filter-bar select,
+.appointment-compact-filter-region .advanced-filters input,
+.appointment-compact-filter-region .advanced-filters select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+
+.appointment-compact-filter-bar button {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 0.68rem;
+}
+
+.appointment-compact-filter-region .advanced-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  gap: 9px;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--line);
+}
+
+.appointment-compact-filter-region .advanced-filters .appointment-filter-field {
+  display: grid;
+  gap: 4px;
+}
+
+.appointment-compact-filter-region .advanced-filters .appointment-filter-field > span {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 650;
+}
+
+.appointment-filter-mobile-label { display: none; }
+
+.compact-filter-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .appointment-filter-panel-heading {

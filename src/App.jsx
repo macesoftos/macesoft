@@ -77,6 +77,7 @@ import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationR
 import { navItems, navSections } from "./config/sidebar.jsx";
 import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
+import GlobalModuleSearch from "./components/GlobalModuleSearch.jsx";
 import FaceTrackAttendance from "./facetrack/FaceTrackAttendance.jsx";
 import FaceTrackKiosk from "./facetrack/FaceTrackKiosk.jsx";
 import PayrollWorkspace from "./payroll/PayrollWorkspace.jsx";
@@ -1148,6 +1149,7 @@ function App() {
         : fallbackModule;
       if (!nextModule) return;
       setActiveModuleState(nextModule);
+      setGlobalSearch("");
 
       if (typeof window !== "undefined") {
         const nextUrl = nextModule === "flipbooks"
@@ -1186,6 +1188,7 @@ function App() {
     if (!recordDetailModules.has(moduleId) || !recordId) return;
     const nextUrl = recordDetailPath(moduleId, recordId);
     setActiveModuleState(moduleId);
+    setGlobalSearch("");
     if (typeof window !== "undefined") {
       window.history.pushState(null, "", nextUrl);
       setCurrentPath(normalizedPathname(window.location.pathname));
@@ -1509,6 +1512,121 @@ function App() {
     ));
   }, [branchScope, scopedClients, treatments]);
   const scopedPackages = useMemo(() => scopeRecords(packages), [packages, scopeRecords]);
+
+  const searchableServices = useMemo(
+    () => services.filter((service) => branchScope === "All branches" || !splitList(service.branches).length || splitList(service.branches).includes(branchScope)),
+    [branchScope, services],
+  );
+
+  const headerSearchMeta = useMemo(() => {
+    const labels = {
+      appointments: ["Search appointments", "Client, phone, service, staff, or booking ID"],
+      "card-view": ["Search appointments", "Client, service, staff, or booking ID"],
+      clients: ["Search clients", "Name, mobile, email, client ID, or package"],
+      leads: ["Search leads", "Name, phone, service, campaign, or owner"],
+      treatments: ["Search treatments", "Client, procedure, provider, room, or batch"],
+      services: ["Search services", "Service name, category, room, or description"],
+      inventory: ["Search inventory", "Item, category, supplier, branch, or stock status"],
+      packages: ["Search packages", "Package, client, certificate, or status"],
+      staff: ["Search staff", "Name, role, branch, phone, or email"],
+      branches: ["Search branches", "Branch name, code, city, address, or email"],
+      expenses: ["Search expenses", "Expense, category, vendor, reference, or branch"],
+      reports: ["Search report records", "Invoice, client, service, branch, or status"],
+      pos: ["Search POS", "Client, service, product, package, or invoice"],
+      settings: ["Search settings records", "Promotion, discount, consent, or payment method"],
+    };
+    const [label = "Search unavailable", placeholder = "No searchable records in this section"] = labels[activeModule] || [];
+    return { label, placeholder, disabled: !labels[activeModule] || Boolean(activeRecordRoute) };
+  }, [activeModule, activeRecordRoute]);
+
+  const getHeaderSearchResults = useCallback((rawQuery) => {
+    const query = normalize(rawQuery);
+    if (!query) return [];
+    const includesQuery = (...values) => normalize(values.filter(Boolean).join(" ")).includes(query);
+    const take = (records, mapResult) => records.filter((record) => mapResult(record).matches).slice(0, 8).map((record) => {
+      const result = mapResult(record);
+      delete result.matches;
+      return result;
+    });
+
+    if (["appointments", "card-view"].includes(activeModule)) return take(scopedAppointments, (item) => {
+      const client = clients.find((person) => person.id === item.clientId || person.fullName === item.client);
+      return {
+        matches: includesQuery(item.id, item.client, client?.mobile, item.service, item.staff, item.room, item.branch, item.status),
+        id: item.id, kind: "Appointment", title: item.client || "Unlinked client",
+        subtitle: `${item.service || "Service pending"} · ${formatDate(item.date)} ${item.time || ""}`,
+        meta: canonicalAppointmentStatus(item.status), routeModule: "appointments",
+      };
+    });
+    if (activeModule === "clients") return take(scopedClients, (item) => ({
+      matches: includesQuery(item.id, item.fullName, item.firstName, item.middleName, item.lastName, item.mobile, item.email, item.branch, item.tag, item.packageBalance),
+      id: item.id, kind: "Client", title: item.fullName, subtitle: [item.mobile, item.email].filter(Boolean).join(" · "), meta: item.branch, routeModule: "clients",
+    }));
+    if (activeModule === "leads") return take(scopedLeads, (item) => ({
+      matches: includesQuery(item.id, item.externalLeadId, item.name, item.mobile, item.email, item.interest, item.interestedTreatment, item.interestedPackage, item.campaign, item.utmCampaign, item.owner, item.source, item.branch),
+      id: item.id, kind: "Lead", title: item.name, subtitle: [item.interest || item.interestedTreatment || item.interestedPackage, item.source].filter(Boolean).join(" · "), meta: canonicalLeadStatus(item.status), routeModule: "leads",
+    }));
+    if (activeModule === "treatments") return take(scopedTreatments, (item) => ({
+      matches: includesQuery(item.id, item.client, item.service, item.provider, item.room, item.batch, item.preNotes, item.postNotes),
+      id: item.id, kind: "Treatment", title: item.client || "Unlinked client", subtitle: `${item.service || "Treatment"} · ${item.provider || "Provider pending"}`, meta: formatDate(item.date), routeModule: "treatments",
+    }));
+    if (activeModule === "services") return take(searchableServices, (item) => ({
+      matches: includesQuery(item.id, item.name, item.category, item.room, item.description, item.status),
+      id: item.id, kind: "Service", title: item.name, subtitle: `${item.category || "Uncategorized"} · ${item.duration || 0} min`, meta: servicePriceLabel(item), modalType: "service", record: item,
+    }));
+    if (activeModule === "inventory") return take(scopedInventory, (item) => ({
+      matches: includesQuery(item.id, item.item, item.category, item.supplier, item.branch, item.unit, stockStatus(item)),
+      id: item.id, kind: "Inventory", title: item.item, subtitle: `${item.stock || 0} ${item.unit || "units"} · ${item.branch || "All branches"}`, meta: stockStatus(item), modalType: "inventory", record: item,
+    }));
+    if (activeModule === "packages") {
+      const packageResults = take(scopedPackages, (item) => ({
+        matches: includesQuery(item.id, item.name, item.client, item.status, item.service),
+        id: item.id, kind: "Package", title: item.name, subtitle: `${item.client || "Unassigned"} · ${item.used || 0}/${item.sessions || 0} sessions`, meta: item.status || "Active",
+      }));
+      const certificateResults = take(giftCertificates, (item) => ({
+        matches: includesQuery(item.id, item.code, item.client, item.service, item.status),
+        id: item.id, kind: "Gift certificate", title: item.code, subtitle: [item.client, item.service].filter(Boolean).join(" · "), meta: item.status || "Active",
+      }));
+      return [...packageResults, ...certificateResults].slice(0, 8);
+    }
+    if (activeModule === "staff") return take(scopedStaff, (item) => ({
+      matches: includesQuery(item.id, item.name, item.role, item.department, item.branch, item.branches, item.phone, item.email, item.status),
+      id: item.id, kind: "Staff", title: item.name, subtitle: `${item.role || "Team member"} · ${item.branch || "Unassigned"}`, meta: item.status, routeModule: "staff",
+    }));
+    if (activeModule === "branches") return take(branchRecords, (item) => ({
+      matches: includesQuery(item.id, item.name, item.code, item.city, item.address, item.phone, item.email, item.status),
+      id: item.id, kind: "Branch", title: item.name, subtitle: item.address || item.city, meta: item.status,
+    }));
+    if (activeModule === "expenses") return take(scopedExpenses, (item) => ({
+      matches: includesQuery(item.id, item.name, item.category, item.vendor, item.reference, item.branch, item.status),
+      id: item.id, kind: "Expense", title: item.name || item.category, subtitle: [item.vendor, item.branch].filter(Boolean).join(" · "), meta: money.format(Number(item.amount || 0)), modalType: "expense", record: item,
+    }));
+    if (["reports", "pos"].includes(activeModule)) return take(scopedTransactions, (item) => ({
+      matches: includesQuery(item.id, item.invoice, item.client, item.branch, item.status, item.paymentMethod, ...(item.items || []).map((entry) => entry.name)),
+      id: item.id, kind: "Transaction", title: item.invoice || item.id, subtitle: `${item.client || "Walk-in"} · ${formatDate(item.date)}`, meta: money.format(Number(item.total || 0)), receipt: item,
+    }));
+    if (activeModule === "settings") {
+      const rows = [...discounts.map((item) => ({ ...item, kind: "Discount" })), ...promotions.map((item) => ({ ...item, kind: "Promotion" })), ...consentTemplates.map((item) => ({ ...item, kind: "Consent" }))];
+      return take(rows, (item) => ({
+        matches: includesQuery(item.id, item.name, item.code, item.description, item.type, item.status, item.kind),
+        id: item.id, kind: item.kind, title: item.name || item.code || item.id, subtitle: item.description || item.type, meta: item.status,
+      }));
+    }
+    return [];
+  }, [activeModule, branchRecords, clients, consentTemplates, discounts, giftCertificates, promotions, scopedAppointments, scopedClients, scopedExpenses, scopedInventory, scopedLeads, scopedPackages, scopedStaff, scopedTransactions, scopedTreatments, searchableServices]);
+
+  function handleHeaderSearchSelect(result) {
+    if (result.routeModule) {
+      setGlobalSearch("");
+      openRecordPage(result.routeModule, result.id);
+      return;
+    }
+    if (result.modalType) {
+      openModal(result.modalType, result.record);
+      return;
+    }
+    if (result.receipt) printReceipt(result.receipt);
+  }
 
   const stats = useMemo(() => {
     const today = todayDate();
@@ -2776,15 +2894,15 @@ function App() {
             </div>
             <div className="topbar-actions">
               <GlobalCreateMenu actions={globalCreateActions} onSelect={handleGlobalCreateAction} />
-              <label className="search-box">
-                <Search size={17} aria-hidden="true" />
-                <input
-                  aria-label="Search records"
-                  placeholder={activeModule === "leads" ? "Search by name, phone, service, campaign..." : "Search clients, bookings, reports..."}
-                  value={globalSearch}
-                  onChange={(event) => setGlobalSearch(event.target.value)}
-                />
-              </label>
+              <GlobalModuleSearch
+                value={globalSearch}
+                onChange={setGlobalSearch}
+                label={headerSearchMeta.label}
+                placeholder={headerSearchMeta.placeholder}
+                disabled={headerSearchMeta.disabled}
+                getResults={getHeaderSearchResults}
+                onSelect={handleHeaderSearchSelect}
+              />
               {canOpenPos && !isPosView && (
                 <button
                   className="topbar-pos-button"
@@ -2940,13 +3058,13 @@ function App() {
             <AppointmentsModule
               detailAppointmentId={activeRecordRoute?.moduleId === "appointments" ? activeRecordRoute.recordId : ""}
               appointments={scopedAppointments}
-              clients={clients}
+              clients={scopedClients}
               services={services}
-              staff={staff}
+              staff={scopedStaff}
               transactions={scopedTransactions}
               auditLogs={auditLogs}
               treatments={treatments}
-              packages={packages}
+              packages={scopedPackages}
               consentTemplates={consentTemplates}
               consentSubmissions={consentSubmissions}
               openModal={openModal}
@@ -2963,7 +3081,7 @@ function App() {
           {activeModule === "clients" && (
             <ClientsModule
               detailClientId={activeRecordRoute?.moduleId === "clients" ? activeRecordRoute.recordId : ""}
-              clients={clients}
+              clients={scopedClients}
               selectedClient={selectedClient}
               selectedClientId={selectedClientId}
               setSelectedClientId={(id) => {
@@ -2971,10 +3089,10 @@ function App() {
                 const client = clients.find((item) => item.id === id);
                 addAudit("Client profile viewed", `${client?.fullName ?? "Client"} profile opened.`, "Client Records");
               }}
-              treatments={treatments}
-              appointments={appointments}
-              transactions={transactions}
-              packages={packages}
+              treatments={scopedTreatments}
+              appointments={scopedAppointments}
+              transactions={scopedTransactions}
+              packages={scopedPackages}
               openModal={openModal}
               importClients={importClients}
               deleteClient={deleteClient}
@@ -2988,8 +3106,8 @@ function App() {
           {activeModule === "treatments" && (
             <TreatmentsModule
               detailTreatmentId={activeRecordRoute?.moduleId === "treatments" ? activeRecordRoute.recordId : ""}
-              treatments={treatments}
-              clients={clients}
+              treatments={scopedTreatments}
+              clients={scopedClients}
               openModal={openModal}
               globalSearch={globalSearch}
               onUploadPhoto={addTreatmentPhoto}
@@ -3003,6 +3121,7 @@ function App() {
               services={services}
               openModal={openModal}
               toggleService={toggleService}
+              globalSearch={globalSearch}
             />
           )}
           {activeModule === "inventory" && (
@@ -3015,7 +3134,7 @@ function App() {
           )}
           {activeModule === "packages" && (
             <PackagesModule
-              packages={packages}
+              packages={scopedPackages}
               giftCertificates={giftCertificates}
               clients={clients}
               openModal={openModal}
@@ -3026,11 +3145,11 @@ function App() {
           {activeModule === "leads" && (
             <LeadsModule
               detailLeadId={activeRecordRoute?.moduleId === "leads" ? activeRecordRoute.recordId : ""}
-              leads={leads}
-              clients={clients}
-              appointments={appointments}
+              leads={scopedLeads}
+              clients={scopedClients}
+              appointments={scopedAppointments}
               services={services}
-              staff={staff}
+              staff={scopedStaff}
               branches={branchRecords}
               integrations={leadIntegrations}
               webhookEvents={webhookEvents}
@@ -3073,6 +3192,7 @@ function App() {
               sendCampaign={sendCampaign}
               sendingCampaignId={sendingCampaignId}
               globalSearch={globalSearch}
+              onGlobalSearchChange={setGlobalSearch}
               isLoading={isBooting}
               loadMarketingMedia={loadMarketingMedia}
               notify={notify}
@@ -3082,7 +3202,7 @@ function App() {
           {activeModule === "staff" && (
             <StaffModule
               detailStaffId={activeRecordRoute?.moduleId === "staff" ? activeRecordRoute.recordId : ""}
-              staff={staff}
+              staff={scopedStaff}
               branchRecords={branchRecords}
               session={session}
               setSession={setSession}
@@ -3114,6 +3234,7 @@ function App() {
               onManageEmployees={(branch) => { void switchBranch(branch.id).then(() => setActiveModule("staff")); }}
               createRequest={branchCreateRequest}
               onCreateRequestHandled={setBranchCreateRequest}
+              globalSearch={globalSearch}
             />
           )}
           {activeModule === "expenses" && (
@@ -8478,7 +8599,6 @@ function AppointmentsModule({
     appointmentType: "All",
     insurance: "All",
     tags: "",
-    query: "",
   };
   const [view, setView] = useStoredState("appointment-scheduler-view", "Schedule");
   const activeView = view === "Schedule" ? "Day" : view;
@@ -8530,14 +8650,14 @@ function AppointmentsModule({
   )];
   const appointmentTypeOptions = [...new Set(appointments.map((item) => item.appointmentType).filter(Boolean))];
   const insuranceOptions = [...new Set(appointments.map((item) => item.insurance).filter(Boolean))];
-  const activeFilterCount = ["status", "doctor", "room", "service", "branch", "payment", "deposit", "clientType", "appointmentType", "insurance", "tags", "query"]
+  const activeFilterCount = ["status", "doctor", "room", "service", "branch", "payment", "deposit", "clientType", "appointmentType", "insurance", "tags"]
     .filter((key) => normalizedFilters[key] !== defaultFilters[key]).length;
   const clientAppointmentCounts = appointments.reduce((counts, appointment) => {
     const key = appointment.clientId || normalize(appointment.client);
     counts[key] = (counts[key] || 0) + 1;
     return counts;
   }, {});
-  const combinedQuery = normalize(`${globalSearch} ${normalizedFilters.query}`.trim());
+  const combinedQuery = normalize(globalSearch.trim());
 
   const matchingRows = appointments
     .filter((item) => normalizedFilters.status === "All" || canonicalAppointmentStatus(item.status) === normalizedFilters.status)
@@ -8814,42 +8934,26 @@ function AppointmentsModule({
 
   return (
     <section className="appointments-workspace appointment-scheduler-redesign">
-      <div className="surface-panel appointment-filter-panel">
-        <div className="appointment-filter-panel-heading">
-          <div className="appointment-filter-heading-copy">
-            <Filter size={17} />
-            <span>
-              <strong>Filter schedule</strong>
-              <small>{displayedRows.length} appointment{displayedRows.length === 1 ? "" : "s"} in this view</small>
-            </span>
-            {activeFilterCount > 0 && <b aria-label={`${activeFilterCount} active filters`}>{activeFilterCount}</b>}
-          </div>
-          <div className="appointment-filter-actions">
-            {activeFilterCount > 0 && <button className="ghost-button appointment-filter-reset" type="button" onClick={resetScheduleFilters}><RefreshCw size={15} /> Clear</button>}
-            <button className="secondary-button appointment-filter-toggle" type="button" aria-expanded={showAdvancedFilters} onClick={() => setShowAdvancedFilters((value) => !value)}>
-              <SlidersHorizontal size={15} /> {showAdvancedFilters ? "Fewer filters" : "More filters"}
-            </button>
-          </div>
-        </div>
-        <div className="appointment-filters primary-filters">
+      <div className={`appointment-compact-filter-region ${showAdvancedFilters ? "is-expanded" : ""}`}>
+        <div className="appointment-compact-filter-bar" aria-label="Appointment filters">
           <label className="appointment-filter-field">
-            <span>Status</span>
-            <select value={normalizedFilters.status} onChange={(event) => setFilter("status", event.target.value)}>
+            <span className="sr-only">Status</span>
+            <select aria-label="Filter by appointment status" value={normalizedFilters.status} onChange={(event) => setFilter("status", event.target.value)}>
               <option>All</option>
               {appointmentStatuses.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
-          <label className="appointment-filter-field appointment-filter-query">
-            <span>Search appointments</span>
-            <input value={normalizedFilters.query} onChange={(event) => setFilter("query", event.target.value)} placeholder="Patient, phone, doctor, or booking ID" />
-          </label>
           <label className="appointment-filter-field">
-            <span>Doctor / Staff</span>
-            <select value={normalizedFilters.doctor} onChange={(event) => setFilter("doctor", event.target.value)}>
+            <span className="sr-only">Doctor or staff</span>
+            <select aria-label="Filter by doctor or staff" value={normalizedFilters.doctor} onChange={(event) => setFilter("doctor", event.target.value)}>
               <option>All</option>
               {doctorOptions.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
+          <button className={`secondary-button appointment-filter-toggle ${showAdvancedFilters ? "active" : ""}`} type="button" aria-expanded={showAdvancedFilters} onClick={() => setShowAdvancedFilters((value) => !value)}>
+            <SlidersHorizontal size={15} /> <span className="appointment-filter-desktop-label">{showAdvancedFilters ? "Fewer filters" : "More filters"}</span><span className="appointment-filter-mobile-label">Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</span>
+          </button>
+          <button className="ghost-button appointment-filter-reset" type="button" disabled={!activeFilterCount} onClick={resetScheduleFilters}><RefreshCw size={15} /> Clear</button>
         </div>
         {showAdvancedFilters && (
           <div className="appointment-filters advanced-filters">
@@ -9332,7 +9436,6 @@ function ClientsModule({
   onOpenClient,
   onCloseDetail,
 }) {
-  const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryBranch, setDirectoryBranch] = useState("All branches");
   const [directoryView, setDirectoryView] = useStoredState("client-directory-view", "list");
   const [directorySort, setDirectorySort] = useState("recent");
@@ -9347,7 +9450,7 @@ function ClientsModule({
   const profilePackages = packages.filter((item) => item.clientId === profileClient?.id);
   const profileConsents = consentSubmissions.filter((item) => item.clientId === profileClient?.id);
   const safeDirectoryView = directoryView === "cards" ? "cards" : "list";
-  const activeDirectoryQuery = `${directoryQuery} ${globalSearch}`.trim();
+  const activeDirectoryQuery = globalSearch.trim();
   const directoryBranches = useMemo(
     () => ["All branches", ...new Set(clients.flatMap((client) => [client.branch, ...splitList(client.branchesVisited)]).filter(Boolean))],
     [clients],
@@ -9408,7 +9511,7 @@ function ClientsModule({
       return String(right.lastVisit || "").localeCompare(String(left.lastVisit || ""));
     });
   }, [activeDirectoryQuery, appointments, clients, directoryBranch, directorySort, packages]);
-  const activeDirectoryFilters = Number(Boolean(directoryQuery.trim())) + Number(directoryBranch !== "All branches");
+  const activeDirectoryFilters = Number(directoryBranch !== "All branches");
   const pageSize = safeDirectoryView === "cards" ? 8 : 10;
   const pageCount = Math.max(1, Math.ceil(filteredClients.length / pageSize));
   const visibleClients = filteredClients.slice((directoryPage - 1) * pageSize, directoryPage * pageSize);
@@ -9593,15 +9696,6 @@ function ClientsModule({
         </div>
 
         <div className="clients-filter-bar">
-          <label className="search-box clients-directory-search">
-            <Search size={16} aria-hidden="true" />
-            <input
-              aria-label="Search clients"
-              value={directoryQuery}
-              onChange={(event) => setDirectoryQuery(event.target.value)}
-              placeholder="Name, mobile, email, ID, package..."
-            />
-          </label>
           <label className="clients-select-control">
             <Filter size={15} aria-hidden="true" />
             <select aria-label="Filter clients by branch" value={directoryBranch} onChange={(event) => setDirectoryBranch(event.target.value)}>
@@ -9625,7 +9719,7 @@ function ClientsModule({
             </button>
           </div>
           {activeDirectoryFilters > 0 && (
-            <button className="ghost-button clients-clear-filter" type="button" onClick={() => { setDirectoryQuery(""); setDirectoryBranch("All branches"); }}>
+            <button className="ghost-button clients-clear-filter" type="button" onClick={() => setDirectoryBranch("All branches")}>
               <X size={15} aria-hidden="true" /> Clear
             </button>
           )}
@@ -9975,7 +10069,6 @@ function TreatmentPhotoPanel({ record, onUploadPhoto, onDeletePhoto }) {
 }
 
 function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openModal, globalSearch, onUploadPhoto, onDeletePhoto, onOpenTreatment, onCloseDetail }) {
-  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All records");
   const [provider, setProvider] = useState("All providers");
   const [selectedId, setSelectedId] = useState(treatments[0]?.id ?? "");
@@ -9989,7 +10082,7 @@ function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openMod
     [today],
   );
   const filteredTreatments = useMemo(() => {
-    const terms = [globalSearch, query]
+    const terms = [globalSearch]
       .map((value) => normalize(value).trim())
       .filter(Boolean);
 
@@ -10015,7 +10108,7 @@ function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openMod
         return matchesQuery && matchesProvider && matchesFilter;
       })
       .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-  }, [filter, followUpDue, globalSearch, provider, query, treatments]);
+  }, [filter, followUpDue, globalSearch, provider, treatments]);
 
   useEffect(() => {
     if (filteredTreatments.some((record) => record.id === selectedId)) return;
@@ -10026,7 +10119,6 @@ function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openMod
     ?? filteredTreatments.find((record) => record.id === selectedId)
     ?? filteredTreatments[0];
   const resetFilters = () => {
-    setQuery("");
     setFilter("All records");
     setProvider("All providers");
   };
@@ -10062,15 +10154,6 @@ function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openMod
         ) : (
           <>
           <div className="treatments-toolbar">
-          <label className="search-box treatments-search">
-            <Search size={16} aria-hidden="true" />
-            <input
-              aria-label="Search treatment records"
-              placeholder="Search client, procedure, provider, or batch..."
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
           <label className="treatments-select">
             <span>Provider</span>
             <select aria-label="Filter by provider" value={provider} onChange={(event) => setProvider(event.target.value)}>
@@ -10089,7 +10172,7 @@ function TreatmentsModule({ detailTreatmentId = "", treatments, clients, openMod
           <aside className="treatments-index" aria-label="Treatment record list">
             <div className="treatments-index-heading">
               <div><strong>Clinical records</strong><span>{filteredTreatments.length} of {treatments.length}</span></div>
-              {(query || filter !== "All records" || provider !== "All providers") && <button type="button" onClick={resetFilters}>Clear filters</button>}
+              {(filter !== "All records" || provider !== "All providers") && <button type="button" onClick={resetFilters}>Clear filters</button>}
             </div>
             <div className="treatments-index-list">
               {filteredTreatments.map((record) => {
@@ -10242,11 +10325,10 @@ function TreatmentRecordPage({ record, client, followUpDue, onEdit, onUploadPhot
   );
 }
 
-function ServicesModule({ services, openModal, toggleService }) {
+function ServicesModule({ services, openModal, toggleService, globalSearch }) {
   const [category, setCategory] = useState("All");
-  const [serviceQuery, setServiceQuery] = useState("");
   const [catalogView, setCatalogView] = useState("list");
-  const normalizedServiceQuery = serviceQuery.trim().toLowerCase();
+  const normalizedServiceQuery = globalSearch.trim().toLowerCase();
   const filtered = services.filter((service) => {
     const matchesCategory = category === "All" || service.category === category;
     const matchesSearch =
@@ -10262,15 +10344,6 @@ function ServicesModule({ services, openModal, toggleService }) {
       <div className="surface-panel">
         <SectionHeader icon={Sparkles} title="Service Catalog" action={`${filtered.length} services`} />
         <div className="toolbar-row service-catalog-toolbar">
-          <label className="search-box compact service-catalog-search">
-            <Search size={16} aria-hidden="true" />
-            <input
-              aria-label="Search services"
-              value={serviceQuery}
-              onChange={(event) => setServiceQuery(event.target.value)}
-              placeholder="Search services..."
-            />
-          </label>
           <label className="service-category-filter">
             <Filter className="service-category-filter-icon" size={15} aria-hidden="true" />
             <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter services by category">
@@ -10389,9 +10462,15 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
 function PackagesModule({ packages, giftCertificates = [], clients, openModal, redeemPackage, globalSearch }) {
   const [giftCertificateQuery, setGiftCertificateQuery] = useState("");
   const normalizedGiftCertificateQuery = giftCertificateQuery.trim().toLowerCase();
-  const visibleGiftCertificates = normalizedGiftCertificateQuery
-    ? giftCertificates.filter((certificate) => [certificate.code, certificate.client, certificate.service, certificate.status]
-      .some((value) => String(value || "").toLowerCase().includes(normalizedGiftCertificateQuery)))
+  const normalizedPackageQuery = globalSearch.trim().toLowerCase();
+  const visiblePackages = normalizedPackageQuery
+    ? packages.filter((pkg) => [pkg.id, pkg.name, pkg.client, pkg.service, pkg.status]
+      .some((value) => String(value || "").toLowerCase().includes(normalizedPackageQuery)))
+    : packages;
+  const combinedGiftCertificateQuery = [normalizedGiftCertificateQuery, normalizedPackageQuery].filter(Boolean);
+  const visibleGiftCertificates = combinedGiftCertificateQuery.length
+    ? giftCertificates.filter((certificate) => combinedGiftCertificateQuery.every((term) => [certificate.code, certificate.client, certificate.service, certificate.status]
+      .some((value) => String(value || "").toLowerCase().includes(term))))
     : giftCertificates;
   const exactGiftCertificate = normalizedGiftCertificateQuery
     ? giftCertificates.find((certificate) => String(certificate.code || "").trim().toLowerCase() === normalizedGiftCertificateQuery)
@@ -10406,9 +10485,9 @@ function PackagesModule({ packages, giftCertificates = [], clients, openModal, r
   return (
     <section className="module-grid two">
       <div className="surface-panel wide">
-        <SectionHeader icon={Gift} title="Packages and Sessions" action={`${packages.length} packages`} />
+        <SectionHeader icon={Gift} title="Packages and Sessions" action={`${visiblePackages.length} packages`} />
         <div className="package-list">
-          {packages.map((pkg) => (
+          {visiblePackages.map((pkg) => (
             <article className="package-card" key={pkg.id}>
               <strong>{pkg.name}</strong>
               <span>{pkg.client}</span>
@@ -10434,6 +10513,7 @@ function PackagesModule({ packages, giftCertificates = [], clients, openModal, r
               </div>
             </article>
           ))}
+          {!visiblePackages.length && <EmptyState title="No matching packages" copy="Try another search in the page header." />}
         </div>
       </div>
       <div className="surface-panel">
@@ -10516,7 +10596,6 @@ function LeadsModule({
   onCloseDetail,
 }) {
   const [storedTab, setStoredTab] = useStoredState("leads-directory-tab", "all");
-  const [leadQuery, setLeadQuery] = useState("");
   const [filters, setFilters] = useState({ source: "All", branch: "All", owner: "All", priority: "All", followUp: "All" });
   const [showFilters, setShowFilters] = useState(false);
   const [showCaptureSources, setShowCaptureSources] = useState(false);
@@ -10550,7 +10629,7 @@ function LeadsModule({
   const ownerOptions = useMemo(() => ["All", "Unassigned", ...new Set([...staff.map((person) => person.name), ...normalizedLeads.map((lead) => lead.owner)].filter(Boolean))], [normalizedLeads, staff]);
 
   const filteredLeads = useMemo(() => {
-    const query = normalize(`${leadQuery} ${globalSearch}`.trim());
+    const query = normalize(globalSearch.trim());
     const matches = normalizedLeads.filter((lead) => {
       if (activeTabConfig.statuses && !activeTabConfig.statuses.includes(lead.status)) return false;
       if (filters.source !== "All" && lead.source !== filters.source) return false;
@@ -10579,7 +10658,7 @@ function LeadsModule({
       const comparison = leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: "base" });
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [activeTabConfig.statuses, filters, globalSearch, leadQuery, normalizedLeads, sort]);
+  }, [activeTabConfig.statuses, filters, globalSearch, normalizedLeads, sort]);
 
   const selectedLead = detailLeadId
     ? normalizedLeads.find((lead) => lead.id === detailLeadId) ?? null
@@ -10611,7 +10690,7 @@ function LeadsModule({
 
   useEffect(() => {
     setPage(1);
-  }, [activeTab, filters, globalSearch, leadQuery]);
+  }, [activeTab, filters, globalSearch]);
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -10913,16 +10992,6 @@ function LeadsModule({
         <div className="leads-directory-toolbar">
           <strong aria-live="polite">{filteredLeads.length.toLocaleString()} {filteredLeads.length === 1 ? "Lead" : "Leads"}</strong>
           <div className="leads-toolbar-controls">
-            <label className="search-box leads-directory-search">
-              <Search size={16} aria-hidden="true" />
-              <input
-                type="search"
-                aria-label="Search leads"
-                placeholder="Search name, mobile, service, campaign..."
-                value={leadQuery}
-                onChange={(event) => setLeadQuery(event.target.value)}
-              />
-            </label>
             <button
               className={`secondary-button lead-filter-button ${showFilters ? "active" : ""}`}
               type="button"
@@ -12119,7 +12188,7 @@ function AcceptInvitationScreen({ token, session, onLogin, onLogout }) {
   </form></section></main>;
 }
 
-function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, accounts, canManage, onCreateBranch, onUpdateBranch, onArchiveBranch, onReactivateBranch, onManageCompany, onManageEmployees, createRequest = 0, onCreateRequestHandled }) {
+function BranchesModule({ branchScope, branchRecords, staff, transactions, appointments, accounts, canManage, onCreateBranch, onUpdateBranch, onArchiveBranch, onReactivateBranch, onManageCompany, onManageEmployees, createRequest = 0, onCreateRequestHandled, globalSearch }) {
   const [showCreate, setShowCreate] = useState(false);
   const [branchToEdit, setBranchToEdit] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -12127,8 +12196,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   const [branchToArchive, setBranchToArchive] = useState(null);
   const [archiveError, setArchiveError] = useState("");
   const [archiving, setArchiving] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("Active");
   const branchModuleOptions = useMemo(() => navItems.filter((item) => !["my-workspace", "applications", "branches", "settings"].includes(item.id)), []);
   const emptyForm = useCallback(() => ({
     name: "", code: "", city: "", address: "", phone: "", email: "", timezone: "Asia/Manila",
@@ -12146,7 +12214,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
   const filteredBranches = branchRecords.filter((branch) => {
     if (statusFilter !== "All" && branch.status !== statusFilter) return false;
     const haystack = `${branch.name} ${branch.code} ${branch.city} ${branch.address} ${branch.email}`.toLowerCase();
-    return haystack.includes(search.trim().toLowerCase());
+    return haystack.includes(globalSearch.trim().toLowerCase());
   });
 
   function resetEditor() {
@@ -12280,8 +12348,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
         <article><CircleDollarSign size={19} /><div><strong>{money.format(totalSales)}</strong><span>Recorded sales</span></div></article>
       </div>
 
-      <div className="branch-list-toolbar surface-panel">
-        <label className="search-box"><Search size={17} aria-hidden="true" /><input aria-label="Search branches" placeholder="Search branches, codes, or locations" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+      <div className="branch-list-toolbar compact-filter-toolbar">
         <label><span className="sr-only">Filter branch status</span><select aria-label="Filter branch status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option>All</option><option>Active</option><option>Inactive</option><option>Archived</option></select></label>
       </div>
 
@@ -14756,7 +14823,7 @@ function SmartTable({
   pageSize = 6,
   emptyTitle = "No records found",
   toolbarActions = null,
-  showSearch = true,
+  showSearch = false,
   exportFilename = "mace-export.csv",
   exportLabel = "CSV",
   compactPagination = false,
