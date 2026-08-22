@@ -6663,6 +6663,46 @@ body:has(.public-lead-page-embedded) #root {
   line-height: 1.25;
 }
 
+.inventory-management-panel .smart-table table {
+  table-layout: fixed;
+}
+
+.inventory-management-panel .smart-table th,
+.inventory-management-panel .smart-table td {
+  vertical-align: middle;
+}
+
+.inventory-management-panel .inventory-col-photo { width: 12%; }
+.inventory-management-panel .inventory-col-item { width: 16%; }
+.inventory-management-panel .inventory-col-category { width: 17%; }
+.inventory-management-panel .inventory-col-branch { width: 17%; }
+.inventory-management-panel .inventory-col-stock { width: 13%; }
+.inventory-management-panel .inventory-col-status { width: 13%; }
+.inventory-management-panel .inventory-col-actions { width: 12%; }
+
+.inventory-management-panel .inventory-col-center {
+  text-align: center;
+}
+
+.inventory-management-panel th.inventory-col-center button {
+  width: 100%;
+  justify-content: center;
+}
+
+.inventory-management-panel td.inventory-col-actions .inline-actions {
+  justify-content: center;
+}
+
+@media (max-width: 760px) {
+  .inventory-management-panel .inventory-col-center {
+    text-align: left;
+  }
+
+  .inventory-management-panel td.inventory-col-actions .inline-actions {
+    justify-content: flex-start;
+  }
+}
+
 .staff-leave-day small b,
 .staff-leave-day small i {
   overflow: hidden;

@@ -10377,7 +10377,7 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
 
   return (
     <section className="module-grid two">
-      <div className="surface-panel full-span">
+      <div className="surface-panel full-span inventory-management-panel">
         <SectionHeader icon={Boxes} title="Inventory Management" action={`${lowStock.length} alerts`} />
         <SmartTable
           rows={inventory}
@@ -10386,15 +10386,16 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
           showStatus={false}
           selectable={false}
           columns={[
-            { key: "photo", label: "Photo", sortable: false, render: (row) => <ProductThumbnail item={row} />, exportValue: () => "" },
-            { key: "item", label: "Item", render: (row) => <strong className="inventory-product-name">{row.item}</strong> },
-            { key: "category", label: "Category" },
-            { key: "branch", label: "Branch" },
-            { key: "stock", label: "Stock", render: (row) => `${row.stock} ${row.unit}` },
-            { key: "status", label: "Status", render: (row) => <StatusBadge status={stockStatus(row)} /> },
+            { key: "photo", label: "Photo", className: "inventory-col-photo inventory-col-center", sortable: false, render: (row) => <ProductThumbnail item={row} />, exportValue: () => "" },
+            { key: "item", label: "Item", className: "inventory-col-item", render: (row) => <strong className="inventory-product-name">{row.item}</strong> },
+            { key: "category", label: "Category", className: "inventory-col-category" },
+            { key: "branch", label: "Branch", className: "inventory-col-branch" },
+            { key: "stock", label: "Stock", className: "inventory-col-stock inventory-col-center", render: (row) => `${row.stock} ${row.unit}` },
+            { key: "status", label: "Status", className: "inventory-col-status inventory-col-center", render: (row) => <StatusBadge status={stockStatus(row)} /> },
             {
               key: "actions",
               label: "Actions",
+              className: "inventory-col-actions inventory-col-center",
               render: (row) => (
                 <div className="inline-actions">
                   <button type="button" onClick={() => openModal("inventory-receive", { inventoryId: row.id, unit: row.unit, supplier: row.supplier })}><PackagePlus size={15} /> Receive</button>
