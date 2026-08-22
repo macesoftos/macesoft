@@ -624,6 +624,13 @@ export function postInventoryMovement(id, movement) {
   });
 }
 
+export function importInventoryCsvRecords(records) {
+  return requestJson("/api/inventory/import", {
+    method: "POST",
+    body: JSON.stringify({ records }),
+  });
+}
+
 export function submitPublicRegistration(payload) {
   return requestJson("/api/public-registration", { method: "POST", body: JSON.stringify(payload) });
 }

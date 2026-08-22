@@ -6526,6 +6526,72 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   });
 }));
 
+app.post("/api/inventory/import", asyncRoute(async (request, response) => {
+  const inputRecords = Array.isArray(request.body?.records) ? request.body.records : [];
+  if (!inputRecords.length) throw apiError("The CSV does not contain any inventory rows.", 400);
+  if (inputRecords.length > 500) throw apiError("Import up to 500 inventory rows at a time.", 400);
+
+  const config = resourceConfigs.inventory;
+  const scopedRecords = [];
+  const seenIds = new Set();
+  const seenItems = new Set();
+  for (let index = 0; index < inputRecords.length; index += 1) {
+    const rowNumber = index + 2;
+    const scoped = branchScopedPayload(request, inputRecords[index], config);
+    const idKey = clean(scoped.id).toLowerCase();
+    const itemKey = `${clean(scoped.item).toLowerCase()}|${clean(scoped.branch).toLowerCase()}`;
+    if (idKey && seenIds.has(idKey)) throw apiError(`Row ${rowNumber}: duplicate Inventory ID.`, 400);
+    if (itemKey !== "|" && seenItems.has(itemKey)) throw apiError(`Row ${rowNumber}: duplicate Item and Branch.`, 400);
+    if (idKey) seenIds.add(idKey);
+    if (itemKey !== "|") seenItems.add(itemKey);
+    scopedRecords.push({ rowNumber, scoped });
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const records = [];
+    let created = 0;
+    let updated = 0;
+
+    for (const { rowNumber, scoped } of scopedRecords) {
+      try {
+        const requestedId = clean(scoped.id);
+        let existing = requestedId
+          ? await tx.inventoryItem.findUnique({ where: { id: requestedId } })
+          : null;
+        if (!existing) {
+          existing = await tx.inventoryItem.findFirst({
+            where: {
+              item: { equals: requireText(scoped.item, "Product or consumable"), mode: "insensitive" },
+              branch: clean(scoped.branch),
+            },
+          });
+        }
+
+        if (existing) await assertResourceMutationAllowed(request, config, existing);
+        const data = normalizeInventoryPayload(existing ? { ...existing, ...scoped } : scoped, existing?.id || "");
+        await assertResourceMutationAllowed(request, config, data);
+        const record = existing
+          ? await tx.inventoryItem.update({ where: { id: existing.id }, data: stripMeta(data) })
+          : await tx.inventoryItem.create({ data: stripMeta(data) });
+        records.push(record);
+        if (existing) updated += 1;
+        else created += 1;
+      } catch (error) {
+        throw apiError(`Row ${rowNumber}: ${error.message || "Invalid inventory data."}`, error.status || 400);
+      }
+    }
+
+    const auditLog = await writeAudit(tx, request, {
+      area: "Inventory",
+      action: "Inventory CSV imported",
+      details: `${created} inventory item${created === 1 ? "" : "s"} created and ${updated} updated from CSV.`,
+    });
+    return { records, created, updated, auditLog };
+  });
+
+  response.status(201).json(result);
+}));
+
 app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
   const qty = numberValue(request.body?.qty, "Movement quantity");
