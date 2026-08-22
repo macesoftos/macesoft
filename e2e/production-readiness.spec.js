@@ -72,7 +72,10 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Back to dashboard" })).toBeVisible();
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
+  await expect(page.getByText("Filter schedule", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Filter by appointment status")).toBeVisible();
+  await expect(page.getByLabel("Filter by doctor or staff")).toBeVisible();
+  await expect(page.getByRole("button", { name: "More filters" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
 
   await gotoAuthenticatedWorkspace(page, "/appointments/nonexistent-release-check");
