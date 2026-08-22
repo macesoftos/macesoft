@@ -8917,94 +8917,6 @@ function AppointmentsModule({
 
   return (
     <section className="appointments-workspace appointment-scheduler-redesign">
-      <div className={`appointment-compact-filter-region ${showAdvancedFilters ? "is-expanded" : ""}`}>
-        <div className="appointment-compact-filter-bar" aria-label="Appointment filters">
-          <label className="appointment-filter-field">
-            <span className="sr-only">Status</span>
-            <select aria-label="Filter by appointment status" value={normalizedFilters.status} onChange={(event) => setFilter("status", event.target.value)}>
-              <option>All</option>
-              {appointmentStatuses.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label className="appointment-filter-field">
-            <span className="sr-only">Doctor or staff</span>
-            <select aria-label="Filter by doctor or staff" value={normalizedFilters.doctor} onChange={(event) => setFilter("doctor", event.target.value)}>
-              <option>All</option>
-              {doctorOptions.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <button className={`secondary-button appointment-filter-toggle ${showAdvancedFilters ? "active" : ""}`} type="button" aria-expanded={showAdvancedFilters} onClick={() => setShowAdvancedFilters((value) => !value)}>
-            <SlidersHorizontal size={15} /> <span className="appointment-filter-desktop-label">{showAdvancedFilters ? "Fewer filters" : "More filters"}</span><span className="appointment-filter-mobile-label">Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</span>
-          </button>
-          <button className="ghost-button appointment-filter-reset" type="button" disabled={!activeFilterCount} onClick={resetScheduleFilters}><RefreshCw size={15} /> Clear</button>
-        </div>
-        {showAdvancedFilters && (
-          <div className="appointment-filters advanced-filters">
-            <label className="appointment-filter-field">
-              <span>Room</span>
-              <select value={normalizedFilters.room} onChange={(event) => setFilter("room", event.target.value)}>
-                <option>All</option>
-                {roomOptions.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            <label className="appointment-filter-field">
-              <span>Service</span>
-              <select value={normalizedFilters.service} onChange={(event) => setFilter("service", event.target.value)}>
-                <option>All</option>
-                {serviceOptions.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            <label className="appointment-filter-field">
-              <span>Branch</span>
-              <select value={normalizedFilters.branch} onChange={(event) => setFilter("branch", event.target.value)}>
-                <option>All</option>
-                {branchOptions.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            <label className="appointment-filter-field">
-              <span>Payment</span>
-              <select value={normalizedFilters.payment} onChange={(event) => setFilter("payment", event.target.value)}>
-                {["All", "Paid", "Partial", "Unpaid", "No charge"].map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            <label className="appointment-filter-field">
-              <span>Deposit</span>
-              <select value={normalizedFilters.deposit} onChange={(event) => setFilter("deposit", event.target.value)}>
-                {["All", "With Deposit", "No Deposit"].map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            <label className="appointment-filter-field">
-              <span>Client type</span>
-              <select value={normalizedFilters.clientType} onChange={(event) => setFilter("clientType", event.target.value)}>
-                {["All", "New Client", "Returning Client"].map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            {appointmentTypeOptions.length > 0 && (
-              <label className="appointment-filter-field">
-                <span>Appointment type</span>
-                <select value={normalizedFilters.appointmentType} onChange={(event) => setFilter("appointmentType", event.target.value)}>
-                  <option>All</option>
-                  {appointmentTypeOptions.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-            )}
-            {insuranceOptions.length > 0 && (
-              <label className="appointment-filter-field">
-                <span>Insurance</span>
-                <select value={normalizedFilters.insurance} onChange={(event) => setFilter("insurance", event.target.value)}>
-                  <option>All</option>
-                  {insuranceOptions.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-            )}
-            <label className="appointment-filter-field">
-              <span>Tags</span>
-              <input value={normalizedFilters.tags} onChange={(event) => setFilter("tags", event.target.value)} placeholder="Search appointment tags" />
-            </label>
-          </div>
-        )}
-      </div>
-
       <div className="appointment-scheduler-layout">
         <aside className="surface-panel appointment-scheduler-sidebar">
           <div className="appointment-sidebar-title"><strong>Appointment Calendar</strong><CalendarDays size={17} /></div>
@@ -9047,6 +8959,93 @@ function AppointmentsModule({
             <div className="segmented-control appointment-view-tabs" role="tablist" aria-label="Appointment view">
               {["Day", "Week", "Month", "Kanban", "Timeline", "Rooms"].map((item) => <button type="button" role="tab" aria-selected={activeView === item} className={activeView === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}
             </div>
+            <div className={`appointment-compact-filter-bar appointment-toolbar-filter-bar ${showAdvancedFilters ? "is-expanded" : ""}`} aria-label="Appointment filters">
+              <label className="appointment-filter-field">
+                <span className="sr-only">Status</span>
+                <select aria-label="Filter by appointment status" value={normalizedFilters.status} onChange={(event) => setFilter("status", event.target.value)}>
+                  <option>All</option>
+                  {appointmentStatuses.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <label className="appointment-filter-field">
+                <span className="sr-only">Doctor or staff</span>
+                <select aria-label="Filter by doctor or staff" value={normalizedFilters.doctor} onChange={(event) => setFilter("doctor", event.target.value)}>
+                  <option>All</option>
+                  {doctorOptions.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <button className={`secondary-button appointment-filter-toggle ${showAdvancedFilters ? "active" : ""}`} type="button" aria-expanded={showAdvancedFilters} onClick={() => setShowAdvancedFilters((value) => !value)}>
+                <SlidersHorizontal size={15} /> <span className="appointment-filter-desktop-label">{showAdvancedFilters ? "Fewer filters" : "More filters"}</span><span className="appointment-filter-mobile-label">Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</span>
+              </button>
+              <button className="ghost-button appointment-filter-reset" type="button" disabled={!activeFilterCount} onClick={resetScheduleFilters}><RefreshCw size={15} /> Clear</button>
+            </div>
+            {showAdvancedFilters && (
+              <div className="appointment-compact-filter-region is-expanded appointment-advanced-filter-region">
+                <div className="appointment-filters advanced-filters">
+                  <label className="appointment-filter-field">
+                    <span>Room</span>
+                    <select value={normalizedFilters.room} onChange={(event) => setFilter("room", event.target.value)}>
+                      <option>All</option>
+                      {roomOptions.map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label className="appointment-filter-field">
+                    <span>Service</span>
+                    <select value={normalizedFilters.service} onChange={(event) => setFilter("service", event.target.value)}>
+                      <option>All</option>
+                      {serviceOptions.map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label className="appointment-filter-field">
+                    <span>Branch</span>
+                    <select value={normalizedFilters.branch} onChange={(event) => setFilter("branch", event.target.value)}>
+                      <option>All</option>
+                      {branchOptions.map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label className="appointment-filter-field">
+                    <span>Payment</span>
+                    <select value={normalizedFilters.payment} onChange={(event) => setFilter("payment", event.target.value)}>
+                      {["All", "Paid", "Partial", "Unpaid", "No charge"].map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label className="appointment-filter-field">
+                    <span>Deposit</span>
+                    <select value={normalizedFilters.deposit} onChange={(event) => setFilter("deposit", event.target.value)}>
+                      {["All", "With Deposit", "No Deposit"].map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label className="appointment-filter-field">
+                    <span>Client type</span>
+                    <select value={normalizedFilters.clientType} onChange={(event) => setFilter("clientType", event.target.value)}>
+                      {["All", "New Client", "Returning Client"].map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  {appointmentTypeOptions.length > 0 && (
+                    <label className="appointment-filter-field">
+                      <span>Appointment type</span>
+                      <select value={normalizedFilters.appointmentType} onChange={(event) => setFilter("appointmentType", event.target.value)}>
+                        <option>All</option>
+                        {appointmentTypeOptions.map((item) => <option key={item}>{item}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  {insuranceOptions.length > 0 && (
+                    <label className="appointment-filter-field">
+                      <span>Insurance</span>
+                      <select value={normalizedFilters.insurance} onChange={(event) => setFilter("insurance", event.target.value)}>
+                        <option>All</option>
+                        {insuranceOptions.map((item) => <option key={item}>{item}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="appointment-filter-field">
+                    <span>Tags</span>
+                    <input value={normalizedFilters.tags} onChange={(event) => setFilter("tags", event.target.value)} placeholder="Search appointment tags" />
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
           {scheduleFeedback && <div className={`appointment-schedule-feedback ${scheduleFeedback.type}`}><span>{scheduleFeedback.message}</span><button type="button" onClick={() => setScheduleFeedback(null)} aria-label="Dismiss message"><X size={14} /></button></div>}
           {activeView === "Day" && <AppointmentScheduleGrid resources={practitionerResources} appointments={dayRows} services={services} getResource={appointmentPractitionerKey} selectedDate={selectedDate} selectedId={selectedId} onSelect={(id) => { const appointment = appointments.find((item) => item.id === id); if (appointment) openAppointmentDetails(appointment); }} onContext={(event, appointment) => setContextMenu({ x: event.clientX, y: event.clientY, appointment })} onChangeAppointment={changeAppointment} />}
