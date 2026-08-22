@@ -1994,6 +1994,12 @@ button,
   touch-action: manipulation;
 }
 
+/* Keep the appointment toolbar groups on the same 44px visual baseline. */
+.appointment-scheduler-toolbar .appointment-view-tabs button {
+  min-width: 0;
+  min-height: 36px;
+}
+
 input,
 select,
 textarea {
