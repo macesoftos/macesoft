@@ -4,6 +4,7 @@ import {
   Building2,
   CalendarPlus,
   DoorOpen,
+  Download,
   HeartPulse,
   Inbox,
   MailPlus,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   UserPlus,
   UserRoundPlus,
+  Upload,
 } from "lucide-react";
 
 const actionIcons = {
@@ -25,6 +27,8 @@ const actionIcons = {
   expense: ReceiptText,
   inventory: Boxes,
   "inventory-receive": PackagePlus,
+  import: Upload,
+  export: Download,
   lead: Inbox,
   package: PackagePlus,
   room: DoorOpen,
