@@ -246,7 +246,8 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   for (const viewport of [{ width: 820, height: 980 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await gotoAuthenticatedWorkspace(page, "/appointments");
-    await expect(page.getByText("Filter schedule", { exact: true })).toBeVisible();
+    await expect(page.getByText("Filter schedule", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: viewport.width <= 640 ? /Filters/ : "More filters" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Day" })).toBeVisible();
     await createTrigger.click();
     await expect(createMenu).toBeVisible();
