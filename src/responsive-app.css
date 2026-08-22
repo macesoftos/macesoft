@@ -1120,6 +1120,11 @@
   gap: 8px;
 }
 
+.clients-workspace-actions .clients-view-toggle {
+  width: 320px;
+  max-width: 100%;
+}
+
 .clients-workspace-actions button {
   min-height: 42px;
   white-space: nowrap;

@@ -852,6 +852,7 @@ function App() {
   const [receiptToPrint, setReceiptToPrint] = useState(null);
   const [printReceiptNonce, setPrintReceiptNonce] = useState(0);
   const inventoryImportInputRef = useRef(null);
+  const clientImportInputRef = useRef(null);
   const [isBooting, setIsBooting] = useState(true);
   const [clients, setClients] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -1864,6 +1865,25 @@ function App() {
     }
     if (action.handler === "inventory-export") {
       downloadCsv("mace-inventory.csv", scopedInventory, inventoryCsvExportColumns);
+      return;
+    }
+    if (action.handler === "client-import") {
+      clientImportInputRef.current?.click();
+      return;
+    }
+    if (action.handler === "client-export") {
+      downloadCsv("mace-clients.csv", scopedClients, [
+        { key: "id", label: "Client ID" },
+        { key: "fullName", label: "Name" },
+        { key: "mobile", label: "Mobile", exportValue: (client) => sensitiveAllowed ? client.mobile : maskMobile(client.mobile) },
+        { key: "email", label: "Email", exportValue: (client) => sensitiveAllowed ? client.email : "Restricted" },
+        { key: "branch", label: "Branch" },
+        { key: "tag", label: "Type", exportValue: (client) => client.tag || client.retention },
+        { key: "lastVisit", label: "Last Visit" },
+        { key: "nextVisit", label: "Next Visit" },
+        { key: "balance", label: "Balance" },
+        { key: "packageBalance", label: "Package" },
+      ]);
       return;
     }
     if (action.modal) openModal(action.modal, action.payload ?? {});
@@ -3132,6 +3152,7 @@ function App() {
               packages={scopedPackages}
               openModal={openModal}
               importClients={importClients}
+              importInputRef={clientImportInputRef}
               deleteClient={deleteClient}
               sensitiveAllowed={sensitiveAllowed}
               globalSearch={globalSearch}
@@ -9411,6 +9432,7 @@ function ClientsModule({
   consentSubmissions = [],
   openModal,
   importClients,
+  importInputRef,
   deleteClient,
   sensitiveAllowed,
   globalSearch,
@@ -9424,7 +9446,6 @@ function ClientsModule({
   const [directoryPage, setDirectoryPage] = useState(1);
   const [selectedClientIds, setSelectedClientIds] = useState(() => new Set());
   const [profileClientId, setProfileClientId] = useState(null);
-  const importInputRef = useRef(null);
   const profileClient = clients.find((client) => client.id === (detailClientId || profileClientId));
   const profileTreatments = treatments.filter((item) => item.clientId === profileClient?.id);
   const profileAppointments = appointments.filter((item) => item.clientId === profileClient?.id);
@@ -9493,7 +9514,6 @@ function ClientsModule({
       return String(right.lastVisit || "").localeCompare(String(left.lastVisit || ""));
     });
   }, [activeDirectoryQuery, appointments, clients, directoryBranch, directorySort, packages]);
-  const activeDirectoryFilters = Number(directoryBranch !== "All branches");
   const pageSize = safeDirectoryView === "cards" ? 8 : 10;
   const pageCount = Math.max(1, Math.ceil(filteredClients.length / pageSize));
   const visibleClients = filteredClients.slice((directoryPage - 1) * pageSize, directoryPage * pageSize);
@@ -9501,28 +9521,11 @@ function ClientsModule({
   const visibleEnd = Math.min(directoryPage * pageSize, filteredClients.length);
   const visibleIds = visibleClients.map((client) => client.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedClientIds.has(id));
-  const selectedClients = filteredClients.filter((client) => selectedClientIds.has(client.id));
   const paginationItems = pageCount <= 5
     ? Array.from({ length: pageCount }, (_, index) => index + 1)
     : [...new Set([1, directoryPage - 1, directoryPage, directoryPage + 1, pageCount])]
       .filter((page) => page >= 1 && page <= pageCount)
       .sort((left, right) => left - right);
-  const activeClients = clients.filter((client) => normalize(client.retention) !== "at risk").length;
-  const newClients = clients.filter((client) => normalize(client.retention) === "new").length;
-  const returningClients = clients.filter((client) => normalize(client.retention) === "returning").length;
-  const vipClients = clients.filter((client) => normalize(client.tag) === "vip").length;
-  const exportColumns = [
-    { key: "id", label: "Client ID" },
-    { key: "fullName", label: "Name" },
-    { key: "mobile", label: "Mobile", exportValue: (client) => sensitiveAllowed ? client.mobile : maskMobile(client.mobile) },
-    { key: "email", label: "Email", exportValue: (client) => sensitiveAllowed ? client.email : "Restricted" },
-    { key: "branch", label: "Branch" },
-    { key: "tag", label: "Type", exportValue: (client) => client.tag || client.retention },
-    { key: "lastVisit", label: "Last Visit" },
-    { key: "nextVisit", label: "Next Visit" },
-    { key: "balance", label: "Balance" },
-    { key: "packageBalance", label: "Package" },
-  ];
 
   useEffect(() => {
     setDirectoryPage(1);
@@ -9633,21 +9636,6 @@ function ClientsModule({
 
   return (
     <section className="clients-directory-page">
-      <div className="client-insights" aria-label="Client directory summary">
-        {[
-          { icon: Users, label: "Total clients", value: clients.length, copy: "All clinic records", tone: "total" },
-          { icon: UserCheck, label: "Active clients", value: activeClients, copy: "Currently engaged", tone: "active" },
-          { icon: Sparkles, label: "New clients", value: newClients, copy: "First-time profiles", tone: "new" },
-          { icon: RefreshCw, label: "Returning", value: returningClients, copy: "Ongoing relationships", tone: "returning" },
-          { icon: Star, label: "VIP clients", value: vipClients, copy: "Priority experience", tone: "vip" },
-        ].map(({ icon: Icon, label, value, copy, tone }) => (
-          <article className={`client-insight-card ${tone}`} key={label}>
-            <span className="client-insight-icon"><Icon size={18} aria-hidden="true" /></span>
-            <span><small>{label}</small><strong>{value.toLocaleString()}</strong><em>{copy}</em></span>
-          </article>
-        ))}
-      </div>
-
       <div className="surface-panel clients-workspace-panel">
         <div className="clients-workspace-heading">
           <div>
@@ -9663,48 +9651,15 @@ function ClientsModule({
               onChange={handleClientImport}
               tabIndex={-1}
             />
-            <button className="secondary-button" type="button" onClick={() => importInputRef.current?.click()}>
-              <Upload size={16} aria-hidden="true" /> Import clients
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={!filteredClients.length}
-              onClick={() => downloadCsv("mace-clients.csv", selectedClients.length ? selectedClients : filteredClients, exportColumns)}
-            >
-              <Download size={16} aria-hidden="true" /> {selectedClients.length ? "Export selected" : "Export"}
-            </button>
+            <div className="segmented-control clients-view-toggle" aria-label="Client directory view">
+              <button className={safeDirectoryView === "list" ? "active" : ""} type="button" onClick={() => setDirectoryView("list")}>
+                <List size={16} aria-hidden="true" /> List
+              </button>
+              <button className={safeDirectoryView === "cards" ? "active" : ""} type="button" onClick={() => setDirectoryView("cards")}>
+                <LayoutGrid size={16} aria-hidden="true" /> Grid
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div className="clients-filter-bar">
-          <label className="clients-select-control">
-            <Filter size={15} aria-hidden="true" />
-            <select aria-label="Filter clients by branch" value={directoryBranch} onChange={(event) => setDirectoryBranch(event.target.value)}>
-              {directoryBranches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
-            </select>
-          </label>
-          <label className="clients-select-control sort-control">
-            <span>Sort</span>
-            <select aria-label="Sort clients" value={directorySort} onChange={(event) => setDirectorySort(event.target.value)}>
-              <option value="recent">Recent visit</option>
-              <option value="name">Name A–Z</option>
-              <option value="branch">Branch</option>
-            </select>
-          </label>
-          <div className="segmented-control clients-view-toggle" aria-label="Client directory view">
-            <button className={safeDirectoryView === "list" ? "active" : ""} type="button" onClick={() => setDirectoryView("list")}>
-              <List size={16} aria-hidden="true" /> List
-            </button>
-            <button className={safeDirectoryView === "cards" ? "active" : ""} type="button" onClick={() => setDirectoryView("cards")}>
-              <LayoutGrid size={16} aria-hidden="true" /> Grid
-            </button>
-          </div>
-          {activeDirectoryFilters > 0 && (
-            <button className="ghost-button clients-clear-filter" type="button" onClick={() => setDirectoryBranch("All branches")}>
-              <X size={15} aria-hidden="true" /> Clear
-            </button>
-          )}
         </div>
 
         {safeDirectoryView === "list" ? (
@@ -9780,7 +9735,7 @@ function ClientsModule({
           <div className="clients-empty-state">
             <EmptyState
               title="No clients found"
-              copy="Adjust the search or branch filter, or use Create new in the header."
+              copy="Adjust the search, or use Create new in the header."
             />
           </div>
         )}
