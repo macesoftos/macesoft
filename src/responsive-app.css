@@ -1999,7 +1999,24 @@ button,
   touch-action: manipulation;
 }
 
-/* Keep the appointment toolbar groups on the same 44px visual baseline. */
+/* Keep every appointment toolbar group on the same 44px visual baseline. */
+.appointment-scheduler-toolbar .appointment-date-navigator,
+.appointment-scheduler-toolbar .appointment-view-tabs,
+.appointment-scheduler-toolbar .appointment-toolbar-filter-bar {
+  align-self: center;
+}
+
+.appointment-scheduler-toolbar .appointment-date-navigator > button,
+.appointment-scheduler-toolbar .appointment-toolbar-filter-bar select,
+.appointment-scheduler-toolbar .appointment-toolbar-filter-bar button {
+  height: 44px;
+  min-height: 44px;
+}
+
+.appointment-scheduler-toolbar .appointment-view-tabs {
+  min-height: 44px;
+}
+
 .appointment-scheduler-toolbar .appointment-view-tabs button {
   min-width: 0;
   min-height: 36px;
