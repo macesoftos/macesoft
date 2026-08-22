@@ -109,7 +109,6 @@ import {
   convertLeadToClient,
   deleteMarketingCampaignForever,
   deleteResourceRecord,
-  deletePosCart,
   deleteTestTransactionRecord,
   listResourceRecords,
   loadBootstrap,
@@ -1900,11 +1899,6 @@ function App() {
     return result.cart;
   }
 
-  async function discardOpenPosCart(id) {
-    await deletePosCart(id);
-    removeById(setPosCarts, id);
-  }
-
   async function completeTransaction(draft, paymentData) {
     const result = await completePosCheckout(
       {
@@ -3010,7 +3004,6 @@ function App() {
               branchRecords={branchRecords}
               posCarts={posCarts}
               saveOpenCart={saveOpenPosCart}
-              discardOpenCart={discardOpenPosCart}
               notify={notify}
               settings={settings}
             />
@@ -5455,7 +5448,6 @@ function POSModule({
   branchRecords = [],
   posCarts = [],
   saveOpenCart,
-  discardOpenCart,
   notify,
   settings,
 }) {
@@ -5770,44 +5762,6 @@ function POSModule({
     addCartItem(item);
   }
 
-  async function closeOpenCart(openCart) {
-    try {
-      const next = openCart.id === activeCartId
-        ? openCartsForBranch.find((item) => item.id !== openCart.id)
-        : null;
-      await discardOpenCart(openCart.id);
-      if (openCart.id === activeCartId) {
-        if (next) {
-          setActiveCartId(next.id);
-          setClientId(next.clientId || "");
-          setStaffName(next.staff || "");
-          setDiscountId(next.discountId || "");
-          setManualDiscountType(next.manualDiscountType || "");
-          setManualDiscountValue(next.manualDiscountType ? String(next.manualDiscountValue || "") : "");
-          setManualDiscountScope(next.manualDiscountScope || "Transaction");
-          setManualDiscountTargetKey(next.manualDiscountTargetKey || "");
-          setSaleDate(next.saleDate || todayDate());
-          setTestMode(Boolean(next.testMode));
-          setCart(Array.isArray(next.items) ? next.items : []);
-          setCheckoutStep("review");
-        } else {
-          setActiveCartId("");
-          setCart([]);
-          setDiscountId("");
-          setManualDiscountType("");
-          setManualDiscountValue("");
-          setManualDiscountScope("Transaction");
-          setManualDiscountTargetKey("");
-          setSaleDate(todayDate());
-          setTestMode(false);
-        }
-      }
-      notify("Open POS cart discarded.");
-    } catch (error) {
-      notify(error.message || "Unable to discard this POS cart.", "error");
-    }
-  }
-
   useEffect(() => {
     setCatalogPage(1);
   }, [catalogQuery, catalogTab, categoryFilter]);
@@ -6091,21 +6045,6 @@ function POSModule({
 
   return (
     <section className="module-grid pos-layout">
-      <div className="surface-panel full-span pos-open-carts-bar">
-        <div><strong>Open client carts</strong><span>{openCartsForBranch.length} active at {branch}</span></div>
-        <div className="pos-open-cart-tabs" role="tablist" aria-label="Open POS carts">
-          {openCartsForBranch.map((openCart) => (
-            <div className={`pos-open-cart-tab ${openCart.id === activeCartId ? "active" : ""}`} key={openCart.id}>
-              <button type="button" role="tab" aria-selected={openCart.id === activeCartId} onClick={() => void activateOpenCart(openCart)}>
-                <span>{openCart.testMode ? "TEST · " : ""}{openCart.client || "Walk-in"}</span>
-                <small>{Array.isArray(openCart.items) ? openCart.items.length : 0} line(s)</small>
-              </button>
-              <button type="button" aria-label={`Discard ${openCart.client || "Walk-in"} cart`} title="Discard open cart" onClick={() => void closeOpenCart(openCart)}><X size={13} /></button>
-            </div>
-          ))}
-          <button className="pos-new-cart-button" type="button" onClick={() => setIsSaleContextOpen(true)}><Plus size={15} /> New / switch client</button>
-        </div>
-      </div>
       <div className="surface-panel wide pos-catalog-panel">
         <div className="pos-header">
           <div>
