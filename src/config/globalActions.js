@@ -74,6 +74,20 @@ const actionDefinitions = {
     modal: "inventory-receive",
     requiredModules: ["inventory"],
   },
+  inventoryImport: {
+    id: "inventory-import",
+    label: "Import CSV",
+    icon: "import",
+    handler: "inventory-import",
+    requiredModules: ["inventory"],
+  },
+  inventoryExport: {
+    id: "inventory-export",
+    label: "Export CSV",
+    icon: "export",
+    handler: "inventory-export",
+    requiredModules: ["inventory"],
+  },
   expense: {
     id: "expense",
     label: "Record expense",
@@ -132,7 +146,7 @@ export const globalActionsByModule = {
   packages: ["package"],
   staff: ["invite", "staff"],
   branches: ["invite", "branch"],
-  inventory: ["inventory", "inventoryReceive"],
+  inventory: ["inventory", "inventoryReceive", "inventoryImport", "inventoryExport"],
   expenses: ["expense"],
   sms: ["campaign", "emailCampaign"],
 };

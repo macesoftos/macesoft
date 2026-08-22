@@ -851,6 +851,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [receiptToPrint, setReceiptToPrint] = useState(null);
   const [printReceiptNonce, setPrintReceiptNonce] = useState(0);
+  const inventoryImportInputRef = useRef(null);
   const [isBooting, setIsBooting] = useState(true);
   const [clients, setClients] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -1857,6 +1858,14 @@ function App() {
       setInviteCreateRequest((current) => current + 1);
       return;
     }
+    if (action.handler === "inventory-import") {
+      inventoryImportInputRef.current?.click();
+      return;
+    }
+    if (action.handler === "inventory-export") {
+      downloadCsv("mace-inventory.csv", scopedInventory, inventoryCsvExportColumns);
+      return;
+    }
     if (action.modal) openModal(action.modal, action.payload ?? {});
   }
 
@@ -2127,6 +2136,20 @@ function App() {
     if (result.auditLog) applyAuditLog(result.auditLog);
     notify(`Inventory CSV imported: ${result.created || 0} created, ${result.updated || 0} updated.`);
     return result;
+  }
+
+  async function handleInventoryCsvFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const records = inventoryRecordsFromCsv(await file.text(), {
+        defaultBranch: branchScope === "All branches" ? "" : branchScope,
+      });
+      await importInventory(records);
+    } catch (error) {
+      notify(error.message || "Unable to import that inventory CSV.", "error");
+    }
   }
 
   async function receiveStock(id, values = {}) {
@@ -2899,6 +2922,15 @@ function App() {
               />
             </div>
             <div className="topbar-actions">
+              {activeModule === "inventory" && (
+                <input
+                  ref={inventoryImportInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={handleInventoryCsvFile}
+                  hidden
+                />
+              )}
               <GlobalCreateMenu actions={globalCreateActions} onSelect={handleGlobalCreateAction} />
               <GlobalModuleSearch
                 value={globalSearch}
@@ -3135,9 +3167,6 @@ function App() {
               movements={inventoryMovements}
               openModal={openModal}
               globalSearch={globalSearch}
-              branchScope={branchScope}
-              importInventory={importInventory}
-              notify={notify}
             />
           )}
           {activeModule === "packages" && (
@@ -10343,61 +10372,19 @@ function ServicesModule({ services, openModal, toggleService, globalSearch }) {
   );
 }
 
-function InventoryModule({ inventory, movements, openModal, globalSearch, branchScope, importInventory, notify }) {
+function InventoryModule({ inventory, movements, openModal, globalSearch }) {
   const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy");
-  const importInputRef = useRef(null);
-
-  async function handleInventoryImport(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    try {
-      const records = inventoryRecordsFromCsv(await file.text(), {
-        defaultBranch: branchScope === "All branches" ? "" : branchScope,
-      });
-      await importInventory(records);
-    } catch (error) {
-      notify(error.message || "Unable to import that inventory CSV.", "error");
-    }
-  }
 
   return (
     <section className="module-grid two">
       <div className="surface-panel full-span">
         <SectionHeader icon={Boxes} title="Inventory Management" action={`${lowStock.length} alerts`} />
-        <div className="inventory-workflow-note">
-          <div><ShoppingBag size={18} /><span><strong>Retail products</strong>Stock is deducted automatically after a completed POS sale and restored if the sale is voided.</span></div>
-          <div><Activity size={18} /><span><strong>Treatment consumables</strong>Save the actual syringe, ml, vial, or item quantity used in the treatment record to deduct stock.</span></div>
-          <div><PackagePlus size={18} /><span><strong>Deliveries</strong>Use Receive stock to add quantity and record the delivery date, supplier, receiver, and optional check number.</span></div>
-        </div>
         <SmartTable
           rows={inventory}
           globalSearch={globalSearch}
-          toolbarActions={(
-            <>
-              <input
-                ref={importInputRef}
-                className="sr-only"
-                type="file"
-                accept=".csv,text/csv"
-                onChange={handleInventoryImport}
-                tabIndex={-1}
-              />
-              <button className="secondary-button small" type="button" onClick={() => importInputRef.current?.click()}>
-                <Upload size={16} /> Import CSV
-              </button>
-              <button className="secondary-button small" type="button" onClick={() => openModal("inventory-receive")}>
-                <PackagePlus size={16} /> Receive stock
-              </button>
-              <button className="secondary-button small" type="button" onClick={() => openModal("inventory")}>
-                <Plus size={16} /> Add item
-              </button>
-            </>
-          )}
-          exportColumns={inventoryCsvExportColumns}
-          exportFilename="mace-inventory.csv"
-          exportLabel="Export CSV"
-          allowEmptyExport
+          showToolbar={false}
+          showStatus={false}
+          selectable={false}
           columns={[
             { key: "photo", label: "Photo", sortable: false, render: (row) => <ProductThumbnail item={row} />, exportValue: () => "" },
             { key: "item", label: "Item", render: (row) => <strong className="inventory-product-name">{row.item}</strong> },
@@ -14812,6 +14799,9 @@ function SmartTable({
   exportLabel = "CSV",
   exportColumns = null,
   allowEmptyExport = false,
+  showToolbar = true,
+  showStatus = true,
+  selectable = true,
   compactPagination = false,
 }) {
   const [query, setQuery] = useState("");
@@ -14896,7 +14886,7 @@ function SmartTable({
 
   return (
     <div className="smart-table">
-      <div className="table-toolbar">
+      {showToolbar && <div className="table-toolbar">
         <div className="table-toolbar-main">
           {toolbarActions && <div className="table-toolbar-actions">{toolbarActions}</div>}
           {showSearch && (
@@ -14914,8 +14904,8 @@ function SmartTable({
         <button className="secondary-button small" type="button" onClick={() => downloadCsv(exportFilename, filtered, exportColumns || columns)} disabled={!allowEmptyExport && !filtered.length}>
           <Download size={16} aria-hidden="true" /> {exportLabel}
         </button>
-      </div>
-      <div className="table-status-row" aria-live="polite">
+      </div>}
+      {showStatus && <div className="table-status-row" aria-live="polite">
         <span>{compactPagination ? `Showing ${visibleStart} to ${visibleEnd} of ${filtered.length} result${filtered.length === 1 ? "" : "s"}` : `${visibleStart}-${visibleEnd} of ${filtered.length} result${filtered.length === 1 ? "" : "s"}`}</span>
         {selectedKeys.size > 0 && (
           <div className="bulk-actions">
@@ -14926,19 +14916,19 @@ function SmartTable({
             <button className="ghost-button small" type="button" onClick={() => setSelectedKeys(new Set())}>Clear</button>
           </div>
         )}
-      </div>
+      </div>}
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th className="select-column" scope="col">
+              {selectable && <th className="select-column" scope="col">
                 <input
                   type="checkbox"
                   aria-label={allVisibleSelected ? "Clear visible row selection" : "Select visible rows"}
                   checked={allVisibleSelected}
                   onChange={toggleVisibleRows}
                 />
-              </th>
+              </th>}
               {columns.map((column) => (
                 <th className={column.className ?? ""} key={column.key} scope="col" aria-sort={sort.key === column.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
                   {!isSortable(column) ? (
@@ -14956,14 +14946,14 @@ function SmartTable({
           <tbody>
             {visibleRows.map((row, index) => (
               <tr key={rowKey(row, (page - 1) * pageSize + index)} className={selectedKeys.has(rowKey(row, (page - 1) * pageSize + index)) ? "is-selected" : ""}>
-                <td className="select-column" data-label="Select">
+                {selectable && <td className="select-column" data-label="Select">
                   <input
                     type="checkbox"
                     aria-label={`Select row ${visibleStart + index}`}
                     checked={selectedKeys.has(rowKey(row, (page - 1) * pageSize + index))}
                     onChange={() => toggleRow(row, (page - 1) * pageSize + index)}
                   />
-                </td>
+                </td>}
                 {columns.map((column) => (
                   <td className={column.className ?? ""} key={column.key} data-label={column.label}>{column.render ? column.render(row) : String(row[column.key] ?? "")}</td>
                 ))}

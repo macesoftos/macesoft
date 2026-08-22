@@ -8518,39 +8518,6 @@ td,
   padding-top: 0.4rem;
   color: var(--muted-text, #64748b);
 }
-.inventory-workflow-note {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0 0 14px;
-}
-
-.inventory-workflow-note > div {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 12px;
-  border: 1px solid var(--line, #ddd4c8);
-  border-radius: 10px;
-  background: var(--surface-soft, #f8f4ef);
-  color: var(--muted, #75695f);
-}
-
-.inventory-workflow-note svg {
-  flex: 0 0 auto;
-  color: var(--primary, #8b1538);
-}
-
-.inventory-workflow-note span,
-.inventory-workflow-note strong {
-  display: block;
-}
-
-.inventory-workflow-note strong {
-  margin-bottom: 2px;
-  color: var(--ink, #241b18);
-}
-
 .consumable-usage-field {
   display: grid;
   gap: 9px;
@@ -8595,10 +8562,6 @@ td,
 }
 
 @media (max-width: 760px) {
-  .inventory-workflow-note {
-    grid-template-columns: 1fr;
-  }
-
   .consumable-usage-row {
     grid-template-columns: 1fr minmax(100px, 0.4fr) auto;
   }

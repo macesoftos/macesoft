@@ -22,14 +22,15 @@ test("route actions are hidden when the account lacks the required module", () =
   assert.deepEqual(actions.map((action) => action.id), ["appointment"]);
 });
 
-test("inventory exposes new item and receive stock in order", () => {
+test("inventory exposes all item, stock, and CSV actions in order", () => {
   const actions = getGlobalCreateActions({
     moduleId: "inventory",
     sessionModules: ["inventory"],
   });
 
-  assert.deepEqual(actions.map((action) => action.label), ["New inventory item", "Receive stock"]);
-  assert.deepEqual(actions.map((action) => action.modal), ["inventory", "inventory-receive"]);
+  assert.deepEqual(actions.map((action) => action.label), ["New inventory item", "Receive stock", "Import CSV", "Export CSV"]);
+  assert.deepEqual(actions.map((action) => action.modal), ["inventory", "inventory-receive", undefined, undefined]);
+  assert.deepEqual(actions.map((action) => action.handler), [undefined, undefined, "inventory-import", "inventory-export"]);
 });
 
 test("branch creation requires organization management permission", () => {
