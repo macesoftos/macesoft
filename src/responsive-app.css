@@ -1884,6 +1884,10 @@
     display: block;
   }
 
+  .appointment-toolbar-filter-bar.is-expanded .appointment-filter-field {
+    display: block;
+  }
+
   .appointment-compact-filter-bar .appointment-filter-toggle,
   .appointment-compact-filter-bar .appointment-filter-reset {
     width: 100%;
@@ -3368,6 +3372,11 @@ button:active {
     grid-template-columns: repeat(3, 1fr);
     flex: 0 0 auto;
     width: 100%;
+  }
+
+  .appointment-toolbar-filter-bar {
+    width: 100%;
+    margin-left: 0;
   }
 
   .appointment-kanban-scope-toolbar {
