@@ -24,6 +24,7 @@ const actionIcons = {
   email: MailPlus,
   expense: ReceiptText,
   inventory: Boxes,
+  "inventory-receive": PackagePlus,
   lead: Inbox,
   package: PackagePlus,
   room: DoorOpen,

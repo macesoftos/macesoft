@@ -22,6 +22,16 @@ test("route actions are hidden when the account lacks the required module", () =
   assert.deepEqual(actions.map((action) => action.id), ["appointment"]);
 });
 
+test("inventory exposes new item and receive stock in order", () => {
+  const actions = getGlobalCreateActions({
+    moduleId: "inventory",
+    sessionModules: ["inventory"],
+  });
+
+  assert.deepEqual(actions.map((action) => action.label), ["New inventory item", "Receive stock"]);
+  assert.deepEqual(actions.map((action) => action.modal), ["inventory", "inventory-receive"]);
+});
+
 test("branch creation requires organization management permission", () => {
   assert.deepEqual(
     getGlobalCreateActions({ moduleId: "branches", sessionModules: ["branches"] }),

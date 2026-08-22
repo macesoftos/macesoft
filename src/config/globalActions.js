@@ -67,6 +67,13 @@ const actionDefinitions = {
     modal: "inventory",
     requiredModules: ["inventory"],
   },
+  inventoryReceive: {
+    id: "inventory-receive",
+    label: "Receive stock",
+    icon: "inventory-receive",
+    modal: "inventory-receive",
+    requiredModules: ["inventory"],
+  },
   expense: {
     id: "expense",
     label: "Record expense",
@@ -125,7 +132,7 @@ export const globalActionsByModule = {
   packages: ["package"],
   staff: ["invite", "staff"],
   branches: ["invite", "branch"],
-  inventory: ["inventory"],
+  inventory: ["inventory", "inventoryReceive"],
   expenses: ["expense"],
   sms: ["campaign", "emailCampaign"],
 };
