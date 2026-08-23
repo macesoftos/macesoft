@@ -2942,9 +2942,9 @@ function App() {
                   <button
                     className="topbar-back-button"
                     type="button"
-                    onClick={() => setActiveModule("overview")}
-                    title="Back to dashboard"
-                    aria-label="Back to dashboard"
+                    onClick={() => setActiveModule("applications")}
+                    title="Back to applications"
+                    aria-label="Back to applications"
                   >
                     <ArrowLeft size={18} aria-hidden="true" />
                   </button>
