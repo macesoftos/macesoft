@@ -87,16 +87,16 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 img { max-width: 100%; }
 
-/* Standalone luxury application launcher. */
+/* Standalone application launcher. */
 .applications-page {
   position: relative;
   min-height: calc(100vh - 190px);
   min-height: calc(100dvh - 190px);
-  padding: clamp(18px, 3vw, 42px);
-  border: 1px solid rgba(222, 213, 200, 0.82);
-  border-radius: 22px;
-  background: var(--wine-dark);
-  box-shadow: 0 28px 70px rgba(63, 51, 41, 0.22);
+  padding: clamp(24px, 5vw, 72px);
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
   overflow: hidden;
   isolation: isolate;
 }
@@ -106,7 +106,7 @@ img { max-width: 100%; }
   height: 100dvh;
   min-height: 100vh;
   min-height: 100dvh;
-  background: var(--wine-dark);
+  background: #fff;
   overflow: hidden;
 }
 
@@ -138,9 +138,9 @@ img { max-width: 100%; }
 }
 
 .applications-glass {
-  width: min(1540px, 100%);
+  width: min(1280px, 100%);
   margin: 0 auto;
-  padding: clamp(18px, 2vw, 28px);
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -152,16 +152,16 @@ img { max-width: 100%; }
 .applications-header {
   display: flex;
   justify-content: space-between;
-  align-items: end;
+  align-items: center;
   gap: 24px;
-  padding: 12px 0 16px;
+  padding: 0 0 clamp(28px, 4vw, 48px);
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  transform: translateY(-96px);
+  transform: none;
 }
 
 .applications-title-wrap {
@@ -196,22 +196,22 @@ img { max-width: 100%; }
 
 .applications-heading h2 {
   margin: 5px 0 4px;
-  color: #fff;
-  font-size: clamp(1.8rem, 3.2vw, 3rem);
-  font-weight: 600;
-  line-height: 0.98;
-  letter-spacing: -0.045em;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.48);
+  color: var(--ink);
+  font-size: clamp(1.65rem, 2.8vw, 2.35rem);
+  font-weight: 650;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-shadow: none;
 }
 
 .applications-heading p {
   margin: 0;
-  color: rgba(255, 255, 255, 0.8);
-  font-weight: 600;
+  color: #746b62;
+  font-weight: 500;
 }
 
 .applications-kicker {
-  color: rgba(255, 255, 255, 0.82);
+  color: #7a6049;
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.15em;
@@ -225,13 +225,11 @@ img { max-width: 100%; }
   align-items: center;
   gap: 10px;
   padding: 0 15px;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.16);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  border: 1px solid #dcd6cf;
+  border-radius: 12px;
+  background: #fff;
+  color: #514941;
+  box-shadow: 0 1px 2px rgba(41, 38, 33, 0.04);
 }
 
 .applications-search:focus-within {
@@ -244,49 +242,47 @@ img { max-width: 100%; }
   border: 0;
   outline: 0;
   background: transparent;
-  color: #fff;
+  color: var(--ink);
 }
 
-.applications-search input::placeholder { color: rgba(255, 255, 255, 0.72); }
+.applications-search input::placeholder { color: #918980; }
 
 .applications-desktop-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  align-content: center;
-  gap: clamp(10px, 1.3vw, 18px);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-content: start;
+  gap: 14px;
   min-height: 0;
-  margin-top: 14px;
+  margin-top: 0;
 }
 
 .desktop-application {
   min-width: 0;
-  min-height: 116px;
+  min-height: 124px;
   display: grid;
   place-items: center;
   align-content: center;
   gap: 10px;
   padding: 14px 10px;
-  border: 1px solid rgba(255, 253, 249, 0.38);
-  border-radius: 16px;
-  background: rgba(255, 253, 249, 0.2);
-  color: #fffdf9;
+  border: 1px solid #e4ded6;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
   text-align: center;
-  text-shadow: 0 1px 8px rgba(41, 38, 33, 0.65);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 10px 24px rgba(41, 38, 33, 0.14);
-  -webkit-backdrop-filter: blur(10px) saturate(110%);
-  backdrop-filter: blur(10px) saturate(110%);
+  text-shadow: none;
+  box-shadow: 0 1px 2px rgba(41, 38, 33, 0.04);
   transition: transform 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .desktop-application:hover {
-  transform: translateY(-4px);
-  border-color: rgba(241, 230, 211, 0.82);
-  background: rgba(255, 253, 249, 0.34);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 16px 30px rgba(41, 38, 33, 0.22);
+  transform: translateY(-2px);
+  border-color: #bda58c;
+  background: #fcfaf7;
+  box-shadow: 0 8px 20px rgba(63, 51, 41, 0.09);
 }
 
 .desktop-application:focus-visible {
-  outline: 3px solid rgba(241, 230, 211, 0.86);
+  outline: 3px solid rgba(165, 125, 72, 0.35);
   outline-offset: 2px;
 }
 
@@ -295,12 +291,12 @@ img { max-width: 100%; }
   height: 58px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(255, 253, 249, 0.56);
-  border-radius: 15px;
-  background: linear-gradient(145deg, rgba(255, 253, 249, 0.82), rgba(238, 231, 220, 0.62));
+  border: 1px solid #e1d8ce;
+  border-radius: 13px;
+  background: #f5f1ec;
   color: var(--wine-dark);
   text-shadow: none;
-  box-shadow: inset 0 1px 0 #fff, 0 8px 20px rgba(41, 38, 33, 0.18);
+  box-shadow: none;
 }
 
 .desktop-application strong {
@@ -409,18 +405,16 @@ img { max-width: 100%; }
   align-content: center;
   gap: 8px;
   padding: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  border: 1px dashed #d8d1c9;
   border-radius: 18px;
-  background: rgba(0, 0, 0, 0.24);
-  color: #fff;
+  background: #fff;
+  color: var(--ink);
   text-align: center;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  text-shadow: none;
 }
 
-.applications-empty svg { color: #fff; }
-.applications-empty span { color: rgba(255, 255, 255, 0.78); }
+.applications-empty svg { color: var(--wine); }
+.applications-empty span { color: #746b62; }
 
 @media (max-width: 1180px) {
   .applications-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
