@@ -3440,7 +3440,6 @@ function PrintableReceipt({ receipt, settings, services = [] }) {
       {receipt && (
         <article className="print-receipt" aria-label={`Receipt ${receipt.invoice}`}>
           <header className="print-receipt-header">
-            <img src={assets.logo} alt="" />
             <strong>{settings.company}</strong>
             <span>{settings.productName}</span>
           </header>
@@ -3615,9 +3614,6 @@ function SidebarNavigation({
         aria-label="ClinicOS modules"
       >
         <div className="sidebar-header">
-          <div className="brand-mark">
-            <img src={assets.logo} alt="MACE by Dr. Mace" />
-          </div>
           <button
             className="sidebar-collapse-button"
             type="button"
@@ -4068,7 +4064,6 @@ function PublicClientRegistrationPage() {
   return (
     <main className="public-registration-page">
       <section className="public-registration-card">
-        <img src={assets.logo} alt="MACE Medical Aesthetics Clinic & Essentials" />
         {submitted ? (
           <div className="confirmation-panel"><Check size={30} /><h2>Registration received</h2><p>Thank you. The {branch || "MACE"} team can now review your unified client profile.</p></div>
         ) : (
@@ -4247,7 +4242,6 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
       <section className="public-lead-shell">
         {!isContactEmbed && (
           <div className="public-lead-brand">
-            <img className="public-lead-logo" src={assets.logo} alt={config.company} />
             <div>
               <p className="eyebrow">{formMode === "appointment" ? "Online appointment request" : "Private consultation request"}</p>
               <h1>{formMode === "appointment" ? "Choose a visit time that works for you." : "Let’s talk about the care that feels right for you."}</h1>
@@ -4516,7 +4510,6 @@ function LoginScreen({ notice, onLogin, settings }) {
     <main className="login-page">
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
-          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
           <div>
             <p className="eyebrow">Secure role login</p>
             <h2>Sign in to your workspace</h2>
@@ -4570,7 +4563,7 @@ function ResetPasswordScreen({ token }) {
     }
   }
 
-  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />{done ? <><p className="eyebrow">Password updated</p><h2>Your account is secure</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Secure password reset</p><h2>Create a new password</h2><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p><label><span>New password</span><input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label><span>Confirm password</span><input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}<button className="primary-button full" disabled={submitting || !password || !confirmPassword}>{submitting ? "Updating password..." : "Reset password"}</button></>}</form></section></main>;
+  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}>{done ? <><p className="eyebrow">Password updated</p><h2>Your account is secure</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Secure password reset</p><h2>Create a new password</h2><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p><label><span>New password</span><input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label><span>Confirm password</span><input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}<button className="primary-button full" disabled={submitting || !password || !confirmPassword}>{submitting ? "Updating password..." : "Reset password"}</button></>}</form></section></main>;
 }
 
 function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
@@ -4601,7 +4594,6 @@ function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
     <main className="login-page">
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
-          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
           <div>
             <p className="eyebrow">First-time security setup</p>
             <h2>Create your private password</h2>
@@ -4669,9 +4661,6 @@ function ApplicationsModule({ session, visibleNav, setActiveModule }) {
       <div className="applications-glass">
         <header className="applications-header">
           <div className="applications-title-wrap">
-            <button className="applications-brand" type="button" onClick={() => setActiveModule("overview")} aria-label="Return to overview">
-              <img src={assets.logo} alt="" />
-            </button>
             <div className="applications-heading">
               <span className="applications-kicker">MACE ClinicOS</span>
               <h2 id="applications-title">All applications</h2>
@@ -12166,9 +12155,9 @@ function AcceptInvitationScreen({ token, session, onLogin, onLogout }) {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
   if (invitation?.accountExists && !session) {
-    return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={signIn}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" /><p className="eyebrow">Sign in to continue</p><h2>This invitation is for an existing MACE user</h2><p className="login-helper">Sign in as <strong>{invitation.email}</strong>, then review and accept the invitation.</p><label><span>Email</span><input value={invitation.email} readOnly /></label><label><span>Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button></form></section></main>;
+    return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={signIn}><p className="eyebrow">Sign in to continue</p><h2>This invitation is for an existing MACE user</h2><p className="login-helper">Sign in as <strong>{invitation.email}</strong>, then review and accept the invitation.</p><label><span>Email</span><input value={invitation.email} readOnly /></label><label><span>Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button></form></section></main>;
   }
-  return <main className="login-page"><section className="login-panel"><form className="login-card invitation-accept-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+  return <main className="login-page"><section className="login-panel"><form className="login-card invitation-accept-card" onSubmit={submit}>
     {done ? <><p className="eyebrow">Invitation accepted</p><h2>Your workspace is ready</h2><p className="login-helper">Your approved role, branch access, modules, and permissions are active.</p><a className="primary-button full" href={redirectPath}>Continue to your dashboard</a></> : <><p className="eyebrow">Secure organization invitation</p><h2>{loading && !invitation ? "Checking invitation..." : invitation ? `Welcome, ${invitation.firstName || invitation.name}` : "Invitation unavailable"}</h2>{invitation && <div className="invitation-summary"><div><span>Organization</span><strong>{invitation.organization?.name}</strong></div><div><span>Branch</span><strong>{invitation.branches?.map((branch) => branch.name).join(", ") || "Organization-wide"}</strong></div><div><span>Role</span><strong>{invitation.role}</strong></div><div><span>Expires</span><strong>{new Date(invitation.expiresAt).toLocaleDateString("en-PH")}</strong></div></div>}{invitation && invitation.status !== "Pending" && <div className="inline-state danger"><AlertCircle size={16} />{invitation.status === "Expired" ? "This invitation has expired. Ask an administrator to resend it." : invitation.status === "Revoked" ? "This invitation was cancelled. Contact your administrator." : "This invitation has already been accepted."}</div>}{emailMismatch && <div className="inline-state danger"><AlertCircle size={16} />This invitation belongs to {invitation.email}, but you are signed in as {session.email}.</div>}{emailMismatch && <button className="ghost-button full" type="button" onClick={onLogout}>Sign out and use the invited email</button>}{invitation && !invitation.accountExists && !session && <><label><span>Create password</span><input required type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label><span>Confirm password</span><input required type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p></>} {invitation?.status === "Pending" && !emailMismatch && <><label className="confirmation-check"><input required type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I accept the applicable Terms of Service.</span></label><label className="confirmation-check"><input required type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} /><span>I acknowledge the Privacy Policy.</span></label></>}{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading || !invitation || invitation.status !== "Pending" || emailMismatch}>{loading ? "Joining..." : "Accept invitation"}</button></>}
   </form></section></main>;
 }

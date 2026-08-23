@@ -134,13 +134,7 @@ img { max-width: 100%; }
 }
 
 .applications-page::before {
-  content: "";
-  position: absolute;
-  inset: -14px;
-  z-index: -1;
-  background: url("/brand/applications-background.png") center / 110% 100% no-repeat;
-  filter: blur(7px) saturate(105%);
-  transform: scale(1.015);
+  content: none;
 }
 
 .applications-glass {
