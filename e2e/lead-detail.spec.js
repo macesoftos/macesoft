@@ -8,7 +8,7 @@ const session = {
   branch: "All branches",
   status: "Active",
   mustChangePassword: false,
-  access: { active: true, modules: ["overview", "leads", "appointments", "clients"] },
+  access: { active: true, modules: ["overview", "applications", "leads", "appointments", "clients"] },
 };
 
 const branch = {
@@ -118,6 +118,10 @@ test("reveals the navigation when the pointer reaches the left edge", async ({ p
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
 
+  await page.mouse.move(400, 320);
+  await page.mouse.move(4, 320);
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+
   await page.mouse.move(1, 320);
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
   await expect(navigation).toHaveClass(/is-open/);
@@ -126,6 +130,22 @@ test("reveals the navigation when the pointer reaches the left edge", async ({ p
   await page.mouse.move(400, 320);
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
   await expect(navigation).not.toHaveClass(/is-open/);
+});
+
+test("gives the mobile back arrow a comfortable tap target", async ({ page }) => {
+  await page.setViewportSize({ width: 349, height: 779 });
+  await page.goto("/leads");
+
+  const backButton = page.getByRole("button", { name: "Back to applications" });
+  await expect(backButton).toBeVisible();
+  await expect(backButton).toBeEnabled();
+  await expect.poll(() => backButton.evaluate((button) => ({
+    height: button.getBoundingClientRect().height,
+    width: button.getBoundingClientRect().width,
+  }))).toEqual({ height: 52, width: 52 });
+
+  await backButton.click();
+  await expect(page).toHaveURL(/\/applications$/);
 });
 
 test("reveals focused follow-up and booking forms from the main actions", async ({ page }) => {

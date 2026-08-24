@@ -3620,6 +3620,18 @@ function DataTable(props) {
 }
 
 function EdgeRevealNavigation({ activeModule, open, onClose, onNavigate, onOpen, sections, session }) {
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const closeOutsideSidebar = (event) => {
+      const sidebar = document.getElementById("edge-primary-sidebar");
+      if (sidebar && event.clientX > sidebar.getBoundingClientRect().right) onClose();
+    };
+
+    window.addEventListener("pointermove", closeOutsideSidebar, { passive: true });
+    return () => window.removeEventListener("pointermove", closeOutsideSidebar);
+  }, [onClose, open]);
+
   if (!sections.length) return null;
 
   return (

@@ -1125,7 +1125,8 @@
     inset: 0 auto 0 0;
     z-index: 119;
     display: block;
-    width: 12px;
+    width: 2px;
+    min-width: 0;
     height: 100vh;
     height: 100dvh;
     padding: 0;
@@ -2634,7 +2635,7 @@ button:active {
     width: 100%;
     min-height: 46px;
     display: grid;
-    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-columns: var(--touch-target-lg) minmax(0, 1fr);
     align-items: center;
     gap: 8px;
   }
@@ -2664,8 +2665,13 @@ button:active {
   }
 
   .topbar-back-button {
-    width: 46px;
-    height: 46px;
+    width: var(--touch-target-lg);
+    height: var(--touch-target-lg);
+  }
+
+  .topbar-back-button svg {
+    width: 22px;
+    height: 22px;
   }
 
   .topbar-actions {
