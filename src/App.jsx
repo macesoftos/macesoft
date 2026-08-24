@@ -94,6 +94,7 @@ import {
 import {
   checkApiHealth,
   changeAccountPassword,
+  createDemoAccount,
   acceptInvitation,
   createInvitation,
   editInvitation,
@@ -4597,17 +4598,25 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
 function LoginScreen({ notice, onLogin, settings }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [demoOpen, setDemoOpen] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
+  const demoSignupAvailable = typeof window !== "undefined" && ["localhost", "127.0.0.1", "lightcoral-crab-954053.hostingersite.com"].includes(window.location.hostname.toLowerCase());
 
   async function submit(event) {
     event.preventDefault();
     setError("");
     setSubmitting(true);
     try {
+      if (demoOpen) {
+        if (password !== confirmPassword) throw new Error("Passwords do not match.");
+        await createDemoAccount(name, email, password);
+      }
       await onLogin(email, password);
     } catch (loginError) {
       setError(loginError.message || "Unable to sign in.");
@@ -4633,32 +4642,41 @@ function LoginScreen({ notice, onLogin, settings }) {
   return (
     <main className="login-page">
       <section className="login-panel">
-        <form className="login-card" onSubmit={submit}>
+        <form className={`login-card${demoOpen ? " is-demo-signup" : ""}`} onSubmit={submit}>
           <BrandWordmark className="login-logo" />
           <div>
-            <p className="eyebrow">Secure role login</p>
-            <h2>Sign in to your workspace</h2>
+            <p className="eyebrow">{demoOpen ? "Staging demo" : "Secure role login"}</p>
+            <h2>{demoOpen ? "Create your demo account" : "Sign in to your workspace"}</h2>
+            {demoOpen && <p className="login-helper">Get a private sandbox with sample data created only for your account.</p>}
           </div>
+          {demoOpen && <label><span>Full name</span><input autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></label>}
           <label>
             <span>Email</span>
             <input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
           <label>
             <span>Password</span>
-            <input autoComplete="current-password" type="password" placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <input autoComplete={demoOpen ? "new-password" : "current-password"} type="password" placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} />
           </label>
+          {demoOpen && <label><span>Confirm password</span><input autoComplete="new-password" type="password" placeholder="Confirm your password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>}
           {notice && <div className="inline-state warning" role="alert"><AlertCircle size={17} /><span>{notice}</span></div>}
           {error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}
-          <button className="primary-button full" type="submit" disabled={submitting || !email || !password}>
-            <LockKeyhole size={17} aria-hidden="true" />
-            {submitting ? "Signing in..." : "Sign in securely"}
+          <button className="primary-button full" type="submit" disabled={submitting || !email || !password || (demoOpen && (!name.trim() || !confirmPassword))}>
+            {demoOpen ? <UserCheck size={17} aria-hidden="true" /> : <LockKeyhole size={17} aria-hidden="true" />}
+            {submitting ? (demoOpen ? "Creating account..." : "Signing in...") : (demoOpen ? "Create account and enter demo" : "Sign in securely")}
           </button>
-          <button className="ghost-button full" type="button" onClick={() => setForgotOpen((value) => !value)}>
+          {!demoOpen && <button className="ghost-button full" type="button" onClick={() => setForgotOpen((value) => !value)}>
             Forgot password
-          </button>
-          {forgotOpen && (
+          </button>}
+          {!demoOpen && forgotOpen && (
             <div className="inline-state warning" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
+          {demoSignupAvailable && <>
+            <div className="login-demo-separator"><span>or</span></div>
+            <button className="ghost-button full demo-account-button" type="button" onClick={() => { setDemoOpen((value) => !value); setError(""); setForgotOpen(false); }}>
+              {demoOpen ? "Back to sign in" : "Create a demo account"}
+            </button>
+          </>}
         </form>
       </section>
     </main>

@@ -240,6 +240,13 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many sign-in attempts. Please wait 15 minutes." },
 });
+const demoRegistrationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: Number(process.env.DEMO_REGISTRATION_RATE_LIMIT || 10),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many demo accounts were requested. Please try again later." },
+});
 const publicWriteLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: Number(process.env.PUBLIC_WRITE_RATE_LIMIT || 20),
@@ -257,6 +264,7 @@ const invitationSendLimiter = rateLimit({
 
 app.use("/api", apiLimiter);
 app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth/demo-register", demoRegistrationLimiter);
 app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
@@ -3761,6 +3769,109 @@ function clearSessionCookie(response) {
   );
 }
 
+function demoRegistrationAllowed(request) {
+  const hostname = clean(request.hostname).toLowerCase();
+  return envFlag(process.env.DEMO_SIGNUP_ENABLED)
+    || hostname === "localhost"
+    || hostname === "127.0.0.1"
+    || hostname === "lightcoral-crab-954053.hostingersite.com";
+}
+
+function demoDate(offsetDays = 0) {
+  const value = new Date();
+  value.setUTCHours(12, 0, 0, 0);
+  value.setUTCDate(value.getUTCDate() + offsetDays);
+  return posCalendarDate(value);
+}
+
+async function seedDemoWorkspace(tx, { branchName, demoKey, ownerName }) {
+  const suffix = demoKey.slice(0, 6).toUpperCase();
+  const variant = Number.parseInt(demoKey.slice(0, 2), 16) % 5;
+  const services = await Promise.all([
+    tx.service.create({ data: { name: `Signature Facial ${suffix}`, category: "Facials", duration: 60, price: 3200 + (variant * 250), branches: jsonText([branchName], []) } }),
+    tx.service.create({ data: { name: `Laser Rejuvenation ${suffix}`, category: "Laser", duration: 45, price: 4800 + (variant * 300), branches: jsonText([branchName], []) } }),
+    tx.service.create({ data: { name: `Skin Consultation ${suffix}`, category: "Consultation", duration: 30, price: 1200, branches: jsonText([branchName], []) } }),
+  ]);
+  const clientNames = [
+    `${ownerName} Sample Client`,
+    `Ari Santos ${suffix}`,
+    `Mika Reyes ${suffix}`,
+    `Sam Cruz ${suffix}`,
+  ];
+  const clients = await Promise.all(clientNames.map((fullName, index) => tx.client.create({
+    data: {
+      fullName,
+      firstName: fullName.split(" ")[0],
+      lastName: fullName.split(" ").slice(1).join(" "),
+      email: `sample-${index + 1}-${demoKey}@example.test`,
+      mobile: `0917${String((Number.parseInt(demoKey.slice(0, 6), 16) + index) % 10_000_000).padStart(7, "0")}`,
+      branch: branchName,
+      branchesVisited: jsonText([branchName], []),
+      source: index % 2 ? "Instagram" : "Website",
+      tag: index === 0 ? "VIP" : "New",
+      retention: index === 0 ? "Returning" : "New",
+      lastVisit: demoDate(-(index + 1)),
+    },
+  })));
+
+  const appointmentRows = [
+    { date: demoDate(), time: "09:00", clientRecord: clients[0], serviceRecord: services[0], staff: "Dr. Demo Reyes", status: "Completed" },
+    { date: demoDate(), time: "11:30", clientRecord: clients[1], serviceRecord: services[1], staff: "Nurse Demo Ana", status: "In Progress" },
+    { date: demoDate(), time: "14:00", clientRecord: clients[2], serviceRecord: services[2], staff: "Dr. Demo Tan", status: "Confirmed" },
+    { date: demoDate(-1), time: "10:00", clientRecord: clients[2], serviceRecord: services[0], staff: "Dr. Demo Reyes", status: "Completed" },
+    { date: demoDate(-1), time: "15:30", clientRecord: clients[3], serviceRecord: services[1], staff: "Dr. Demo Tan", status: "Completed" },
+  ];
+  await Promise.all(appointmentRows.map(({ clientRecord, serviceRecord, ...appointment }) => tx.appointment.create({
+    data: {
+      ...appointment,
+      clientId: clientRecord.id,
+      client: clientRecord.fullName,
+      serviceId: serviceRecord.id,
+      service: serviceRecord.name,
+      branch: branchName,
+      duration: serviceRecord.duration,
+    },
+  })));
+
+  const saleAmounts = [7850 + (variant * 300), 12400 + (variant * 450), 5600 + (variant * 200), 4200];
+  await Promise.all(saleAmounts.map((total, index) => tx.sale.create({
+    data: {
+      invoice: `DEMO-${suffix}-${index + 1}`,
+      date: demoDate(index === 3 ? -9 : -(index * 2)),
+      time: ["09:15", "13:40", "16:10", "11:20"][index],
+      clientId: clients[index % clients.length].id,
+      client: clients[index % clients.length].fullName,
+      branch: branchName,
+      staff: index % 2 ? "Nurse Demo Ana" : "Dr. Demo Reyes",
+      subtotal: total,
+      total,
+      payments: jsonText([{ method: index % 2 ? "Card" : "Cash", amount: total }], []),
+      status: "Paid",
+      notes: "Generated sample transaction for this private demo workspace.",
+    },
+  })));
+
+  await Promise.all([
+    { item: `Hyaluronic Serum ${suffix}`, sku: `HS-${suffix}`, category: "Skin Care", unit: "units", stock: 3, reorder: 8, cost: 950, price: 1800 },
+    { item: `Laser Gel ${suffix}`, sku: `LG-${suffix}`, category: "Consumables", unit: "bottles", stock: 6, reorder: 10, cost: 420, price: 750 },
+    { item: `SPF 50 ${suffix}`, sku: `SPF-${suffix}`, category: "Retail", unit: "units", stock: 18, reorder: 8, cost: 600, price: 1200 },
+  ].map((item) => tx.inventoryItem.create({ data: { ...item, beginning: item.stock, branch: branchName, location: "Demo stockroom" } })));
+
+  await Promise.all([
+    { name: `Jamie Inquiry ${suffix}`, status: "New Inquiry", interest: services[0].name, source: "Website", score: 82 },
+    { name: `Taylor Prospect ${suffix}`, status: "Contacted", interest: services[1].name, source: "Instagram", score: 68 },
+    { name: `Casey Lead ${suffix}`, status: "Qualified", interest: services[2].name, source: "Referral", score: 74 },
+  ].map((lead, index) => tx.lead.create({ data: {
+    ...lead,
+    branch: branchName,
+    assignedBranch: branchName,
+    created: demoDate(-index),
+    owner: ownerName,
+    nextStep: "Schedule a demo consultation",
+    permissionToContact: true,
+  } })));
+}
+
 async function accountFromSession(request) {
   const token = parseCookies(request)[authCookieName];
   if (!token) return null;
@@ -4081,6 +4192,95 @@ async function expireInvitations() {
     });
   }
 }
+
+app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
+  if (!demoRegistrationAllowed(request)) throw apiError("Demo account creation is available on the staging site only.", 404);
+
+  const name = requireText(request.body?.name, "Name").replace(/\s+/g, " ").slice(0, 100);
+  const email = requireText(request.body?.email, "Email").toLowerCase().slice(0, 160);
+  const password = requireText(request.body?.password, "Password");
+  if (name.length < 2) throw apiError("Enter your full name.", 400);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.", 400);
+  if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.", 400);
+  }
+
+  const existingAccount = await prisma.account.findUnique({ where: { email }, select: { id: true } });
+  if (existingAccount) throw apiError("An account already exists for this email. Sign in instead.", 409);
+  const demoAccountCount = await prisma.account.count({ where: { role: { in: ["Demo User", "Demo Viewer"] } } });
+  const demoAccountLimit = Number(process.env.DEMO_ACCOUNT_LIMIT || 5000);
+  if (demoAccountCount >= demoAccountLimit) throw apiError("Demo account capacity has been reached. Contact the site administrator.", 503);
+
+  const demoModules = roleAccess["Demo User"];
+  const demoKey = randomBytes(8).toString("hex");
+  const suffix = demoKey.slice(0, 6).toUpperCase();
+  const ownerLabel = name.split(" ")[0].replace(/[^A-Za-z0-9'-]/g, "").slice(0, 30) || "Prospect";
+  const organizationName = `${ownerLabel}'s ZenshoTech Demo ${suffix}`;
+  const branchName = `${ownerLabel}'s Demo Clinic ${suffix}`;
+  try {
+    await prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.create({
+        data: { name: organizationName, slug: `zenshotech-demo-${demoKey}`, status: "Active" },
+      });
+      const branch = await tx.branch.create({ data: {
+        organizationId: organization.id,
+        name: branchName,
+        code: `ZEN-${demoKey.slice(0, 8).toUpperCase()}`,
+        city: "Demo City",
+        status: "Active",
+      } });
+      for (const moduleId of demoModules) {
+        await tx.branchModule.upsert({
+          where: { branchId_moduleId: { branchId: branch.id, moduleId } },
+          create: { branchId: branch.id, moduleId, enabled: true },
+          update: { enabled: true },
+        });
+      }
+      const account = await tx.account.create({
+        data: {
+          name,
+          email,
+          passwordHash: hashPassword(password),
+          role: "Demo User",
+          branch: branch.name,
+          organizationId: organization.id,
+          lastBranchId: branch.id,
+          status: "Active",
+          mustChangePassword: false,
+        },
+      });
+      await tx.branchMembership.create({
+        data: {
+          branchId: branch.id,
+          accountId: account.id,
+          role: "Demo User",
+          modules: jsonText(demoModules, []),
+          permissions: "[]",
+          status: "Active",
+          isPrimary: true,
+        },
+      });
+      await seedDemoWorkspace(tx, { branchName, demoKey, ownerName: ownerLabel });
+      await tx.auditLog.create({ data: {
+        time: new Date().toLocaleString("en-PH"),
+        actor: name,
+        role: "Demo User",
+        actorAccountId: account.id,
+        branchId: branch.id,
+        area: "Authentication",
+        action: "Demo account created",
+        subjectType: "Account",
+        subjectId: account.id,
+        details: "A private staging sandbox and isolated sample dataset were created through self-service registration.",
+      } });
+    });
+  } catch (error) {
+    if (error?.code === "P2002") throw apiError("An account already exists for this email. Sign in instead.", 409);
+    throw error;
+  }
+
+  response.status(201).json({ created: true, email, message: "Your private demo workspace is ready." });
+}));
 
 app.use("/api", asyncRoute(async (request, _response, next) => {
   const authenticated = await accountFromSession(request);

@@ -190,6 +190,50 @@ try {
   const unauthenticatedBootstrap = await request("/api/bootstrap");
   assert(unauthenticatedBootstrap.response.status === 401, "unauthenticated bootstrap was not blocked");
 
+  const demoPassword = "PrivateDemo2026!Pass";
+  async function createAndOpenDemo(index) {
+    const email = `private-demo-${Date.now()}-${index}@example.test`;
+    const registration = await request("/api/auth/demo-register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `Prospect ${index}`, email, password: demoPassword }),
+    });
+    assert(registration.response.status === 201, `demo registration ${index} failed`);
+    const login = await request("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: demoPassword }),
+    });
+    assert(login.response.ok && login.payload.account.role === "Demo User", `demo login ${index} failed`);
+    const cookie = login.response.headers.get("set-cookie")?.split(";")[0];
+    assert(cookie, `demo login ${index} did not issue a session cookie`);
+    const workspace = await request("/api/bootstrap", { headers: { Cookie: cookie } });
+    assert(workspace.response.ok, `demo bootstrap ${index} failed`);
+    assert(workspace.payload.clients.length === 4, `demo workspace ${index} did not receive its private clients`);
+    assert(workspace.payload.appointments.length === 5, `demo workspace ${index} did not receive its private appointments`);
+    assert(workspace.payload.transactions.length === 4, `demo workspace ${index} did not receive its private transactions`);
+    assert(workspace.payload.inventory.length === 3, `demo workspace ${index} did not receive its private inventory`);
+    assert(workspace.payload.leads.length === 3, `demo workspace ${index} did not receive its private leads`);
+    return { account: login.payload.account, cookie, workspace: workspace.payload };
+  }
+
+  const firstDemo = await createAndOpenDemo(1);
+  const secondDemo = await createAndOpenDemo(2);
+  assert(firstDemo.account.organizationId !== secondDemo.account.organizationId, "demo signups shared an organization");
+  assert(firstDemo.account.branch !== secondDemo.account.branch, "demo signups shared a branch");
+  const firstClientIds = new Set(firstDemo.workspace.clients.map((client) => client.id));
+  assert(secondDemo.workspace.clients.every((client) => !firstClientIds.has(client.id)), "demo signups shared client records");
+  const demoMutation = await request("/api/resources/clients", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Mace-Request": "app", Cookie: firstDemo.cookie },
+    body: JSON.stringify({ fullName: "Private Sandbox Client", branch: firstDemo.account.branch }),
+  });
+  assert(demoMutation.response.status === 201, "a demo account could not use its private sandbox");
+  const firstDemoAfterMutation = await request("/api/bootstrap", { headers: { Cookie: firstDemo.cookie } });
+  const secondDemoAfterMutation = await request("/api/bootstrap", { headers: { Cookie: secondDemo.cookie } });
+  assert(firstDemoAfterMutation.payload.clients.length === 5, "the first demo did not retain its sandbox change");
+  assert(secondDemoAfterMutation.payload.clients.length === 4, "a sandbox change leaked into another demo account");
+
   const bootstrap = await request("/api/bootstrap", { headers: ownerHeaders });
   assert(bootstrap.response.ok, "bootstrap endpoint failed");
   assert(Array.isArray(bootstrap.payload.clients), "bootstrap clients missing");

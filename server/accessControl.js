@@ -3,6 +3,7 @@ import { canManageOrganization } from "../src/organizationRoles.js";
 /** @type {Array<[string, RegExp]>} */
 const PUBLIC_API_RULES = [
   ["POST", /^\/api\/auth\/login$/],
+  ["POST", /^\/api\/auth\/demo-register$/],
   ["POST", /^\/api\/auth\/forgot-password$/],
   ["POST", /^\/api\/auth\/reset-password$/],
   ["GET", /^\/api\/invitations\/accept\/[^/]+$/],

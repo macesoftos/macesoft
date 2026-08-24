@@ -21,6 +21,7 @@ export const serviceCategories = [
 ];
 
 export const roleAccess = {
+  "Demo User": ["overview", "applications", "pos", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "reports", "booking", "support"],
   "Super Admin": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
   Admin: ["pos", "staff", "facetrack-attendance"],
   Owner: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],

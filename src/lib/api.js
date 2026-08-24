@@ -56,6 +56,13 @@ export function loginAccount(email, password) {
   });
 }
 
+export function createDemoAccount(name, email, password) {
+  return requestJson("/api/auth/demo-register", {
+    method: "POST",
+    body: JSON.stringify({ name, email, password }),
+  });
+}
+
 export function requestPasswordReset(email) {
   return requestJson("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
 }

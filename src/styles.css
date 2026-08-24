@@ -6047,6 +6047,32 @@ body:has(.public-lead-page-embedded) #root {
   filter: brightness(0) invert(1);
 }
 
+.login-demo-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.login-card.is-demo-signup .login-logo {
+  margin-bottom: 24px;
+}
+
+.login-demo-separator::before,
+.login-demo-separator::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.demo-account-button {
+  color: var(--wine);
+  font-weight: 750;
+}
+
 .zenshotech-wordmark.public-lead-logo {
   min-height: 92px;
   justify-content: flex-start;

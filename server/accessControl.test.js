@@ -20,6 +20,7 @@ const invalidReceptionist = { role: "Receptionist", branch: "All branches" };
 
 test("only explicitly public API methods and paths bypass session authentication", () => {
   assert.equal(isPublicApiRequest("POST", "/api/auth/login"), true);
+  assert.equal(isPublicApiRequest("POST", "/api/auth/demo-register"), true);
   assert.equal(isPublicApiRequest("POST", "/api/auth/forgot-password"), true);
   assert.equal(isPublicApiRequest("POST", "/api/auth/reset-password"), true);
   assert.equal(isPublicApiRequest("GET", "/api/health/ready"), true);
