@@ -8,7 +8,7 @@ const session = {
   branch: "All branches",
   status: "Active",
   mustChangePassword: false,
-  access: { active: true, modules: ["overview", "branches", "settings"] },
+  access: { active: true, modules: ["overview", "applications", "branches", "settings"] },
 };
 
 const branch = {
