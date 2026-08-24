@@ -4613,6 +4613,7 @@ function LoginScreen({ notice, onLogin, settings }) {
     <main className="login-page">
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
+          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
           <div>
             <p className="eyebrow">Secure role login</p>
             <h2>Sign in to your workspace</h2>
