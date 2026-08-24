@@ -3643,13 +3643,42 @@ td {
   box-shadow: var(--shadow);
 }
 
-.client-profile-modal.is-standalone .client-profile-modal-layout {
-  height: auto;
-  min-height: 620px;
-}
+@media (min-width: 761px) {
+  .workspace.client-profile-workspace {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
 
-.client-profile-modal.is-standalone .client-profile-detail-pane {
-  overflow: visible;
+  .client-profile-workspace > .content-area,
+  .client-record-detail-page,
+  .modal-card.client-profile-modal.is-standalone,
+  .client-profile-modal.is-standalone .client-profile-modal-layout {
+    min-height: 0;
+  }
+
+  .client-profile-workspace > .content-area,
+  .client-record-detail-page {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .client-record-detail-page {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .modal-card.client-profile-modal.is-standalone,
+  .client-profile-modal.is-standalone .client-profile-modal-layout {
+    height: 100%;
+  }
+
+  .client-profile-modal.is-standalone .client-profile-detail-pane {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .record-detail-page > .lead-detail-panel {

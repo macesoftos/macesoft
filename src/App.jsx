@@ -2925,7 +2925,7 @@ function App() {
           />
         )}
 
-        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isStandaloneWorkspaceView ? "standalone-module-workspace" : ""} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
+        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isStandaloneWorkspaceView ? "standalone-module-workspace" : ""} ${activeModule === "clients" && activeRecordRoute?.moduleId === "clients" ? "client-profile-workspace" : ""} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
           {isPosView && (
             <div
               aria-label="Show POS header"
@@ -3574,9 +3574,9 @@ function PageHeader({ eyebrow, title, subtitle, leading = null }) {
   );
 }
 
-function RecordDetailPageHeader({ label, title, onBack, children }) {
+function RecordDetailPageHeader({ label, title, onBack, children, className = "" }) {
   return (
-    <section className="record-detail-page">
+    <section className={`record-detail-page ${className}`.trim()}>
       <header className="record-detail-page-header">
         <button type="button" onClick={onBack} aria-label={`Back to ${label}`}><ArrowLeft size={18} /></button>
         <div><span>{label}</span><strong>{title}</strong></div>
@@ -9758,7 +9758,7 @@ function ClientsModule({
   if (detailClientId) {
     if (!profileClient) return <RecordDetailNotFound label="Client" onBack={onCloseDetail} />;
     return (
-      <RecordDetailPageHeader label="Clients" title={profileClient.fullName} onBack={onCloseDetail}>
+      <RecordDetailPageHeader className="client-record-detail-page" label="Clients" title={profileClient.fullName} onBack={onCloseDetail}>
         <ClientProfileDialog
           standalone
           client={profileClient}
