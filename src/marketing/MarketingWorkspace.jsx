@@ -299,19 +299,19 @@ function newSection(type) {
       [withPatch("product", { title: "Pico-Rejuvenation", description: "Support clarity, tone and texture with minimal downtime.", src: "/brand/result-2.jpg", alt: "Pico-Rejuvenation treatment" })],
     ],
     reviews: [
-      [withPatch("text", { content: "“The whole experience felt calm, considered and completely personal.”\n— MACE client", fontFamily: "Georgia", fontSize: 17 })],
-      [withPatch("text", { content: "“I understood every option and never felt rushed.”\n— MACE client", fontFamily: "Georgia", fontSize: 17 })],
+      [withPatch("text", { content: "“The whole experience felt calm, considered and completely personal.”\n— ZenshoTech client", fontFamily: "Georgia", fontSize: 17 })],
+      [withPatch("text", { content: "“I understood every option and never felt rushed.”\n— ZenshoTech client", fontFamily: "Georgia", fontSize: 17 })],
     ],
     gallery: [
-      [withPatch("image", { src: "/brand/result-1.jpg", alt: "MACE treatment result" })],
-      [withPatch("image", { src: "/brand/result-2.jpg", alt: "MACE skincare consultation" })],
+      [withPatch("image", { src: "/brand/result-1.jpg", alt: "ZenshoTech treatment result" })],
+      [withPatch("image", { src: "/brand/result-2.jpg", alt: "ZenshoTech skincare consultation" })],
     ],
     footer: [
       [withPatch("footer", { align: "left", padding: 10, columnLayout: "single" })],
       [withPatch("social", { align: "left", padding: 10 })],
     ],
-    event: [[withPatch("heading", { content: "You’re invited to MACE", fontSize: 28 }), withPatch("text", { content: "Join us for an evening of personalised skin education and one-to-one consultation guidance." }), withPatch("button", { content: "Reserve a place" })]],
-    people: [[withPatch("image", { alt: "MACE clinic team member" }), withPatch("heading", { content: "Meet your MACE care team", fontSize: 28 }), withPatch("text", { content: "Get to know the clinicians behind your considered, personalised treatment plan." }), withPatch("button", { content: "Meet the team" })]],
+    event: [[withPatch("heading", { content: "You’re invited to ZenshoTech", fontSize: 28 }), withPatch("text", { content: "Join us for an evening of personalised skin education and one-to-one consultation guidance." }), withPatch("button", { content: "Reserve a place" })]],
+    people: [[withPatch("image", { alt: "ZenshoTech clinic team member" }), withPatch("heading", { content: "Meet your ZenshoTech care team", fontSize: 28 }), withPatch("text", { content: "Get to know the clinicians behind your considered, personalised treatment plan." }), withPatch("button", { content: "Meet the team" })]],
   };
   section.columns = presets[type] || presets.hero;
   return section;
@@ -360,17 +360,17 @@ function createStarterTemplateDesign(id) {
 
   const designs = {
     "monthly-newsletter": () => finish({
-      subject: "The MACE Edit: this month at the clinic",
+      subject: "The ZenshoTech Edit: this month at the clinic",
       previewText: "Clinic notes, featured care and considered advice for the month ahead.",
-      preview: { layout: "newsletter", kicker: "THE MACE EDIT", title: "Monthly notes", image: "/brand/clinic-davao.jpg", accent: "#795743", surface: "#eee5db" },
+      preview: { layout: "newsletter", kicker: "THE ZENSHOTECH EDIT", title: "Monthly notes", image: "/brand/clinic-davao.jpg", accent: "#795743", surface: "#eee5db" },
       theme: templateTheme({ canvasBackground: "#eee8e1", headingColor: "#35261e", buttonBackground: "#6d4935", contentWidth: 680 }),
       blocks: [
         logo({ align: "left", padding: 18 }),
-        heading("The MACE Edit", { align: "left", fontSize: 38, padding: 20 }),
+        heading("The ZenshoTech Edit", { align: "left", fontSize: 38, padding: 20 }),
         text("A considered monthly note with clinic news, thoughtful skincare guidance and services worth discovering.", { align: "left", fontSize: 16, padding: 20 }),
         templateBlock("divider", { padding: 4, spacingTop: 8, spacingBottom: 8 }),
         templateLayout("layout-2", [
-          [image("/brand/clinic-davao.jpg", "MACE Davao clinic", { borderRadius: 8, padding: 8 })],
+          [image("/brand/clinic-davao.jpg", "Davao clinic", { borderRadius: 8, padding: 8 })],
           [heading("Inside this issue", { level: "h2", align: "left", fontSize: 25, padding: 10 }), text("A clinic update, one featured treatment and simple ways to care for your skin between visits.", { align: "left", padding: 10 }), button("Read this month’s edit", { align: "left", padding: 10 })],
         ], { gap: 18, padding: 18, background: "#f6f1eb", borderRadius: 10 }),
         heading("Featured this month", { level: "h2", align: "left", fontSize: 26, padding: 20 }),
@@ -382,14 +382,14 @@ function createStarterTemplateDesign(id) {
       ],
     }),
     "treatment-promotion": () => finish({
-      subject: "A focused treatment offer from MACE",
+      subject: "A focused treatment offer from ZenshoTech",
       previewText: "Discover a considered treatment option and reserve your preferred consultation time.",
       preview: { layout: "promotion", kicker: "LIMITED APPOINTMENTS", title: "Treatment focus", image: "/brand/result-1.jpg", accent: "#5b3826", surface: "#ead8ce" },
       theme: templateTheme({ canvasBackground: "#eadfd7", headingColor: "#382319", buttonBackground: "#4d2b1c", sectionPadding: 12 }),
       blocks: [
         logo({ padding: 16 }),
-        image("/brand/result-1.jpg", "MACE signature facial treatment", { padding: 0, borderRadius: 0 }),
-        text("THIS MONTH AT MACE", { fontSize: 11, fontWeight: 700, letterSpacing: 2, padding: 14, color: "#9a684f" }),
+        image("/brand/result-1.jpg", "ZenshoTech signature facial treatment", { padding: 0, borderRadius: 0 }),
+        text("THIS MONTH AT ZENSHOTECH", { fontSize: 11, fontWeight: 700, letterSpacing: 2, padding: 14, color: "#9a684f" }),
         heading("Refresh your skin with a considered treatment plan", { fontSize: 36, padding: 14 }),
         text("Begin with a consultation and explore an option selected around your goals, comfort and schedule.", { fontSize: 16, padding: 14 }),
         templateBlock("offer", { content: "Treatment focus\nLimited consultation appointments are available this month.", background: "#f1e2d9", color: "#4a2f22", padding: 20 }),
@@ -398,15 +398,15 @@ function createStarterTemplateDesign(id) {
       ],
     }),
     "new-treatment": () => finish({
-      subject: "Introducing a new treatment at MACE",
+      subject: "Introducing a new treatment at ZenshoTech",
       previewText: "Meet the newest addition to our considered treatment menu.",
       preview: { layout: "announcement", kicker: "NOW AVAILABLE", title: "Meet something new", image: "/brand/result-2.jpg", accent: "#416557", surface: "#e2ebe6" },
       theme: templateTheme({ canvasBackground: "#e7eee9", headingColor: "#263d34", textColor: "#3f554c", buttonBackground: "#365b4d", linkColor: "#365b4d", contentWidth: 680 }),
       blocks: [
         logo({ align: "left", padding: 18 }),
         templateLayout("layout-1-2", [
-          [text("NEW AT MACE", { align: "left", fontSize: 11, letterSpacing: 2, color: "#557c6d", padding: 10 }), heading("A new way to support brighter-looking skin", { align: "left", fontSize: 34, padding: 10 }), text("Discover our newest clinician-led treatment and whether it may suit your individual goals.", { align: "left", padding: 10 }), button("Explore the treatment", { align: "left", padding: 10 })],
-          [image("/brand/result-2.jpg", "Client receiving personalised MACE care", { borderRadius: 10, padding: 6 })],
+          [text("NEW AT ZENSHOTECH", { align: "left", fontSize: 11, letterSpacing: 2, color: "#557c6d", padding: 10 }), heading("A new way to support brighter-looking skin", { align: "left", fontSize: 34, padding: 10 }), text("Discover our newest clinician-led treatment and whether it may suit your individual goals.", { align: "left", padding: 10 }), button("Explore the treatment", { align: "left", padding: 10 })],
+          [image("/brand/result-2.jpg", "Client receiving personalised ZenshoTech care", { borderRadius: 10, padding: 6 })],
         ], { columnWidths: [2, 3], gap: 20, padding: 20, background: "#edf3ef", borderRadius: 12 }),
         heading("Designed around you", { level: "h2", fontSize: 27, padding: 18 }),
         templateLayout("layout-3", [
@@ -419,7 +419,7 @@ function createStarterTemplateDesign(id) {
     }),
     "birthday-offer": () => finish({
       subject: "A birthday-month treat, just for you",
-      previewText: "Celebrate your month with a thoughtful MACE invitation.",
+      previewText: "Celebrate your month with a thoughtful ZenshoTech invitation.",
       preview: { layout: "birthday", kicker: "JUST FOR YOU", title: "Birthday glow", badge: "BIRTHDAY", accent: "#a75d70", surface: "#f3dfe3" },
       theme: templateTheme({ canvasBackground: "#f5e8e7", headingColor: "#663744", textColor: "#684b53", buttonBackground: "#8f4d60", linkColor: "#8f4d60" }),
       blocks: [
@@ -428,7 +428,7 @@ function createStarterTemplateDesign(id) {
         heading("Happy birthday, {{first_name}}", { fontSize: 39, color: "#6d3948", padding: 14 }),
         text("We hope the year ahead brings confidence, calm and plenty of reasons to celebrate.", { fontSize: 16, padding: 14 }),
         templateLayout("layout-1-2", [
-          [image("/brand/products/post-care-cream.png", "MACE post-care cream", { background: "#f8edef", borderRadius: 999, padding: 14, aspectRatio: "original" })],
+          [image("/brand/products/post-care-cream.png", "Post-care cream", { background: "#f8edef", borderRadius: 999, padding: 14, aspectRatio: "original" })],
           [heading("A little something for you", { level: "h2", align: "left", fontSize: 25, padding: 10 }), text("Enjoy a birthday-month consultation invitation and ask our team about the offer available to you.", { align: "left", padding: 10 }), button("View your birthday invitation", { align: "left", padding: 10, background: "#8f4d60", borderColor: "#8f4d60" })],
         ], { columnWidths: [1, 2], gap: 18, padding: 20, background: "#f3dfe3", borderRadius: 14 }),
         templateBlock("social", { iconColor: "#8f4d60", padding: 18 }),
@@ -437,7 +437,7 @@ function createStarterTemplateDesign(id) {
     }),
     "rebooking-reminder": () => finish({
       subject: "A gentle reminder when you’re ready to return",
-      previewText: "Choose a convenient time for your next MACE visit.",
+      previewText: "Choose a convenient time for your next ZenshoTech visit.",
       preview: { layout: "reminder", kicker: "A GENTLE REMINDER", title: "Time for your next visit?", badge: "30", accent: "#755747", surface: "#eee9e4" },
       theme: templateTheme({ canvasBackground: "#efebe7", headingColor: "#3e3028", textColor: "#5a5049", buttonBackground: "#654637", contentWidth: 620 }),
       blocks: [
@@ -456,12 +456,12 @@ function createStarterTemplateDesign(id) {
       ],
     }),
     "inactive-client": () => finish({
-      subject: "We’d love to welcome you back to MACE",
+      subject: "We’d love to welcome you back to ZenshoTech",
       previewText: "Reconnect with considered care whenever you feel ready.",
       preview: { layout: "inactive", kicker: "WELCOME BACK", title: "It’s been a while", image: "/brand/clinic.jpg", accent: "#6c5142", surface: "#ded7d1" },
       theme: templateTheme({ canvasBackground: "#e7e1dc", headingColor: "#352820", buttonBackground: "#5b4031", contentWidth: 680 }),
       blocks: [
-        image("/brand/clinic.jpg", "The welcoming MACE clinic interior", { padding: 0, maxWidth: 680 }),
+        image("/brand/clinic.jpg", "The welcoming clinic interior", { padding: 0, maxWidth: 680 }),
         logo({ padding: 18 }),
         text("WELCOME BACK", { fontSize: 11, letterSpacing: 2, color: "#8d6d5c", padding: 10 }),
         heading("It’s been a while, {{first_name}}", { fontSize: 37, padding: 14 }),
@@ -470,12 +470,12 @@ function createStarterTemplateDesign(id) {
           [templateBlock("productRecommendation", { recommendationLabel: "A FRESH START", title: "Skin consultation", description: "Revisit your goals with a calm, personalised consultation.", src: "/brand/result-1.jpg" })],
           [templateBlock("productRecommendation", { recommendationLabel: "DISCOVER AGAIN", title: "Signature care", description: "Explore current services and what may suit you now.", src: "/brand/result-2.jpg" })],
         ], { gap: 14, padding: 14 }),
-        button("Reconnect with MACE", { padding: 20 }),
+        button("Reconnect with ZenshoTech", { padding: 20 }),
         templateFooter(),
       ],
     }),
     "seasonal-skincare": () => finish({
-      subject: "Your seasonal skin guide from MACE",
+      subject: "Your seasonal skin guide from ZenshoTech",
       previewText: "Three considered ways to adjust your routine for the season ahead.",
       preview: { layout: "seasonal", kicker: "SEASONAL EDIT", title: "Skin in season", image: "/brand/clinic-davao.jpg", accent: "#587266", surface: "#dfe9e3" },
       theme: templateTheme({ canvasBackground: "#e5ece7", headingColor: "#30473d", textColor: "#495f55", buttonBackground: "#49685a", linkColor: "#49685a", contentWidth: 680 }),
@@ -483,7 +483,7 @@ function createStarterTemplateDesign(id) {
         logo({ align: "left", padding: 18 }),
         text("THE SEASONAL EDIT", { align: "left", fontSize: 11, letterSpacing: 2, color: "#668276", padding: 14 }),
         heading("A calmer approach to seasonal skin", { align: "left", fontSize: 38, padding: 14 }),
-        image("/brand/clinic-davao.jpg", "Quiet consultation space at MACE Davao", { borderRadius: 10, padding: 14 }),
+        image("/brand/clinic-davao.jpg", "Quiet consultation space in Davao", { borderRadius: 10, padding: 14 }),
         text("As weather, routines and environments change, a few thoughtful adjustments can help keep your skincare feeling consistent.", { align: "left", fontSize: 16, padding: 18 }),
         templateLayout("layout-3", [
           [heading("01", { level: "h3", fontSize: 22, color: "#6b8a7c", padding: 8 }), heading("Simplify", { level: "h3", fontSize: 18, padding: 6 }), text("Keep the essentials steady.", { fontSize: 13, padding: 6 })],
@@ -495,16 +495,16 @@ function createStarterTemplateDesign(id) {
       ],
     }),
     "clinic-event": () => finish({
-      subject: "You’re invited: an evening at MACE",
+      subject: "You’re invited: an evening at ZenshoTech",
       previewText: "Save the date for clinic news, thoughtful conversation and personalised guidance.",
-      preview: { layout: "event", kicker: "SAVE THE DATE", title: "An evening at MACE", badge: "24 AUG", accent: "#d9b89d", surface: "#392820" },
+      preview: { layout: "event", kicker: "SAVE THE DATE", title: "An evening at ZenshoTech", badge: "24 AUG", accent: "#d9b89d", surface: "#392820" },
       theme: templateTheme({ canvasBackground: "#ded5cf", headingColor: "#32241d", buttonBackground: "#3d291f", contentWidth: 680 }),
       blocks: [
         templateLayout("layout-1-2", [
-          [templateBlock("offer", { content: "24 AUG\n6:00 PM\nMACE Davao", background: "#d6b79d", color: "#322219", fontSize: 16, padding: 22 })],
-          [text("SAVE THE DATE", { align: "left", fontSize: 11, letterSpacing: 2, color: "#d8b89f", padding: 8 }), heading("An evening at MACE", { align: "left", fontSize: 37, color: "#ffffff", padding: 8 }), text("Join us for clinic news, thoughtful conversation and personalised skincare guidance.", { align: "left", color: "#eadfd7", padding: 8 }), button("Reserve your place", { align: "left", padding: 8, background: "#d6b79d", borderColor: "#d6b79d", textColor: "#342219" })],
+          [templateBlock("offer", { content: "24 AUG\n6:00 PM\nZenshoTech Davao", background: "#d6b79d", color: "#322219", fontSize: 16, padding: 22 })],
+          [text("SAVE THE DATE", { align: "left", fontSize: 11, letterSpacing: 2, color: "#d8b89f", padding: 8 }), heading("An evening at ZenshoTech", { align: "left", fontSize: 37, color: "#ffffff", padding: 8 }), text("Join us for clinic news, thoughtful conversation and personalised skincare guidance.", { align: "left", color: "#eadfd7", padding: 8 }), button("Reserve your place", { align: "left", padding: 8, background: "#d6b79d", borderColor: "#d6b79d", textColor: "#342219" })],
         ], { columnWidths: [1, 2], gap: 22, padding: 26, background: "#392820", borderRadius: 12 }),
-        image("/brand/clinic.jpg", "MACE clinic event setting", { padding: 14, borderRadius: 10 }),
+        image("/brand/clinic.jpg", "Clinic event setting", { padding: 14, borderRadius: 10 }),
         heading("What to expect", { level: "h2", fontSize: 26, padding: 16 }),
         templateLayout("layout-3", [
           [text("Clinic updates", { fontSize: 14, padding: 10 })],
@@ -516,7 +516,7 @@ function createStarterTemplateDesign(id) {
       ],
     }),
     aftercare: () => finish({
-      subject: "Your general MACE aftercare guide",
+      subject: "Your general ZenshoTech aftercare guide",
       previewText: "Simple general reminders to support comfort after your visit.",
       preview: { layout: "aftercare", kicker: "CARE GUIDE", title: "After your visit", badge: "✓", accent: "#607970", surface: "#e6ece9" },
       theme: templateTheme({ canvasBackground: "#e9eeeb", headingColor: "#30443d", textColor: "#4d5f58", buttonBackground: "#506c62", linkColor: "#506c62", contentWidth: 640 }),
@@ -537,7 +537,7 @@ function createStarterTemplateDesign(id) {
       ],
     }),
     consultation: () => finish({
-      subject: "Begin with a personalised MACE consultation",
+      subject: "Begin with a personalised ZenshoTech consultation",
       previewText: "Meet the team, discuss your goals and understand the options available to you.",
       preview: { layout: "consultation", kicker: "YOUR FIRST STEP", title: "Let’s begin with you", image: "/brand/dr-mace.jpg", accent: "#7c523d", surface: "#eee2d9" },
       theme: templateTheme({ canvasBackground: "#eee6df", headingColor: "#39271e", textColor: "#59483e", buttonBackground: "#684531", contentWidth: 700 }),
@@ -574,7 +574,7 @@ function createDefaultDraft() {
     channel: "Email",
     segment: "Inactive clients",
     subject: "A thoughtful reset for your summer skin",
-    previewText: "Simple, personalised care from MACE Signature Wellness.",
+    previewText: "Simple, personalised care from ZenshoTech.",
     message: "",
     status: "Draft",
     scheduledAt: "",
@@ -785,9 +785,9 @@ export default function MarketingWorkspace({
   useEffect(() => {
     const label = workspaceNavigation.find((item) => item.id === route.section)?.label ?? "Marketing";
     const pageLabel = route.mode === "deleted" ? "Deleted campaigns" : label;
-    document.title = route.mode === "create" ? `${draft.name || "Create campaign"} — Marketing — MACE` : `${pageLabel} — Marketing — MACE`;
+    document.title = route.mode === "create" ? `${draft.name || "Create campaign"} — Marketing — ZenshoTech` : `${pageLabel} — Marketing — ZenshoTech`;
     return () => {
-      document.title = "Mace Clinic System";
+      document.title = "ZenshoTech";
     };
   }, [draft.name, route.mode, route.section]);
 
@@ -963,9 +963,9 @@ export default function MarketingWorkspace({
           className="marketing-sidebar-brand"
           onClick={onOpenDashboard}
           type="button"
-          aria-label="Return to MACE dashboard"
+          aria-label="Return to ZenshoTech dashboard"
         >
-          <img src="/brand/mace-logo.png" alt="MACE" />
+          <img src="/brand/zenshotech-wordmark.svg" alt="ZenshoTech" />
           <span>Dashboard</span>
           <ArrowLeft size={16} aria-hidden="true" />
         </button>
@@ -1126,7 +1126,7 @@ function MarketingHeader({ globalSearch, getSearchResults, mode, onCreate, onOpe
   return (
     <header className="marketing-header">
       <div className="marketing-heading-row">
-        <button className="marketing-global-menu" onClick={onOpenDashboard} type="button" aria-label="Return to MACE dashboard">
+        <button className="marketing-global-menu" onClick={onOpenDashboard} type="button" aria-label="Return to ZenshoTech dashboard">
           <Menu size={20} aria-hidden="true" />
         </button>
         <div>
@@ -1359,7 +1359,7 @@ function DeletedCampaignsPage({ askConfirm, deletedCampaigns, deleteCampaignFore
 
 function TemplateCardPreview({ index, template }) {
   if (template.thumbnail) return <div className="marketing-template-preview has-thumbnail"><img src={template.thumbnail} alt="" /></div>;
-  if (!template.preview) return <div className={`marketing-template-preview generic preview-${index % 4}`}><span>MACE</span><i /><i /><b /></div>;
+  if (!template.preview) return <div className={`marketing-template-preview generic preview-${index % 4}`}><span>ZenshoTech</span><i /><i /><b /></div>;
   const preview = template.preview;
   return (
     <div
@@ -1367,7 +1367,7 @@ function TemplateCardPreview({ index, template }) {
       data-template-layout={preview.layout}
       style={{ "--template-accent": preview.accent, "--template-surface": preview.surface }}
     >
-      <div className="template-mini-brand">MACE</div>
+      <div className="template-mini-brand">ZenshoTech</div>
       {preview.image ? <div className="template-mini-media"><img src={preview.image} alt="" /></div> : null}
       <div className="template-mini-copy"><span>{preview.kicker}</span><strong>{preview.title}</strong><i /><i /><b /></div>
       {preview.badge ? <div className="template-mini-badge">{preview.badge}</div> : null}
@@ -1518,7 +1518,7 @@ function AudienceEmailManager({ audience, branches, branchScope, clients, member
 
   function exportContacts() {
     const slug = audience.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    downloadAudienceCsv(`mace-${slug || "audience"}-contacts.csv`, filteredRecipients);
+    downloadAudienceCsv(`zenshotech-${slug || "audience"}-contacts.csv`, filteredRecipients);
     notify?.(`${filteredRecipients.length} contact${filteredRecipients.length === 1 ? "" : "s"} exported.`);
   }
 
@@ -1692,9 +1692,9 @@ function ReportsPage({ campaigns, globalSearch }) {
 function MarketingSettingsPage({ canApproveMarketing, notify, openModal, saveMarketingSettings, settings }) {
   const [localSettings, setLocalSettings] = useState(() => ({
     ...safeJsonRead("mace-marketing-settings-v1", {}),
-    senderName: settings.marketingSenderName || settings.company || "MACE Signature Wellness",
+    senderName: settings.marketingSenderName || settings.company || "ZenshoTech",
     replyTo: settings.marketingReplyTo || "hello@macebydrmace.com",
-    unsubscribeText: settings.marketingUnsubscribeText || "You are receiving this because you opted in to MACE marketing. Unsubscribe at any time.",
+    unsubscribeText: settings.marketingUnsubscribeText || "You are receiving this because you opted in to ZenshoTech marketing. Unsubscribe at any time.",
     managerApproval: settings.managerApproval !== false,
   }));
   const [saving, setSaving] = useState(false);
@@ -1911,7 +1911,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
     const link = document.createElement("a");
     const objectUrl = URL.createObjectURL(blob);
     link.href = objectUrl;
-    link.download = `${draft.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mace-campaign"}.html`;
+    link.download = `${draft.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "zenshotech-campaign"}.html`;
     link.click();
     URL.revokeObjectURL(objectUrl);
     notify?.("Email HTML exported.");
@@ -2271,7 +2271,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
       const html = buildVisualEmailHtml(sectionDraft, settings, typeof window === "undefined" ? "https://app.macebydrmace.com" : window.location.origin);
       await onSaveTemplate?.({
         name: `Saved ${selectedBlock.type === "layout" ? "section" : selectedBlock.type}`,
-        description: "Reusable section saved from the MACE visual email builder.",
+        description: "Reusable section saved from the ZenshoTech visual email builder.",
         thumbnail: flattenEmailBlocks(sectionBlocks).find((block) => block.src)?.src || "",
         editorMode: "visual",
         html,
@@ -2287,7 +2287,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
     <div className={`marketing-builder builder-step-${draft.step}`}>
       <header className="marketing-builder-header">
         <div className="marketing-builder-title">
-          <button className="marketing-global-menu" onClick={onOpenDashboard} type="button" aria-label="Return to MACE dashboard"><Menu size={20} /></button>
+          <button className="marketing-global-menu" onClick={onOpenDashboard} type="button" aria-label="Return to ZenshoTech dashboard"><Menu size={20} /></button>
           <button className="marketing-back-button" onClick={onBack} type="button" aria-label="Back to campaigns"><ArrowLeft size={18} /></button>
           <div><p>Campaigns <ChevronRight size={13} /> Create campaign</p><h1>{draft.name || "Untitled campaign"} <StatusPill value={draft.status || "Draft"} /></h1></div>
           <label className="marketing-builder-branch"><span>Branch</span><select aria-label="Campaign branch" value={draft.branch || ""} onChange={(event) => updateDraft({ branch: event.target.value })}><option value="" disabled>Select a branch</option>{draft.id && draft.branch === "All branches" ? <option value="All branches">Organization-wide legacy</option> : null}{branches.map((branch) => <option key={branch.id || branch.name} value={branch.name}>{branch.name}</option>)}</select></label>
@@ -2368,7 +2368,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
                 {sectionTab === "prebuilt" && <div className="marketing-prebuilt-sections">
                   {sectionDefinitions.map(({ type, label, preset, description, icon: Icon }) => <article key={type}><div><span><Icon size={16} /></span><p><strong>{label}</strong><small>{description}</small></p></div><button draggable onClick={() => addSection(type)} onDragEnd={endDrag} onDragStart={(event) => startSectionDrag(event, type)} type="button"><span>{preset}</span><Plus size={15} /></button></article>)}
                 </div>}
-                {sectionTab === "saved" && <div className="marketing-saved-library"><Sparkles size={23} /><h3>Reusable MACE sections</h3><p>Select a section on the canvas, then save it for another campaign.</p><button disabled={!selectedBlock} onClick={() => { void saveSelectedSection(); }} type="button">Save selected section</button></div>}
+                {sectionTab === "saved" && <div className="marketing-saved-library"><Sparkles size={23} /><h3>Reusable ZenshoTech sections</h3><p>Select a section on the canvas, then save it for another campaign.</p><button disabled={!selectedBlock} onClick={() => { void saveSelectedSection(); }} type="button">Save selected section</button></div>}
               </>}
               {libraryTab === "styles" && <>
                 <div className="marketing-library-heading"><h2>Email styles</h2><p>Edit the look of your entire email</p></div>
@@ -2419,7 +2419,7 @@ function CampaignBuilder({ askConfirm, audienceMembers = [], branches = [], canA
                 selectedId={selectedId}
                 uploadImage={uploadImage}
               />
-              <footer><strong>{settings.company || "MACE Signature Wellness"}</strong><span>Davao City, Philippines · hello@macebydrmace.com</span><a href="#unsubscribe" onClick={(event) => event.preventDefault()}>Unsubscribe</a></footer>
+              <footer><strong>{settings.company || "ZenshoTech"}</strong><span>Davao City, Philippines · hello@macebydrmace.com</span><a href="#unsubscribe" onClick={(event) => event.preventDefault()}>Unsubscribe</a></footer>
             </div>
             <span className="marketing-drag-announcement" aria-live="polite">{dragAnnouncement}</span>
             {warnings.length > 0 && <div className="marketing-builder-warning"><CircleAlert size={17} /><span>{warnings.length} campaign check{warnings.length === 1 ? "" : "s"} remaining</span></div>}
@@ -2477,7 +2477,7 @@ function EmailPreviewDialog({ error, html, name, onClose, previewText, subject }
           <button aria-label="Close email preview" onClick={onClose} type="button"><X size={19} aria-hidden="true" /></button>
         </header>
         <div className="marketing-email-preview-toolbar">
-          <dl><div><dt>From</dt><dd>MACE Signature Wellness</dd></div><div><dt>Subject</dt><dd>{subject || "No subject"}</dd></div><div><dt>Preview text</dt><dd>{previewText || "No preview text"}</dd></div></dl>
+          <dl><div><dt>From</dt><dd>ZenshoTech</dd></div><div><dt>Subject</dt><dd>{subject || "No subject"}</dd></div><div><dt>Preview text</dt><dd>{previewText || "No preview text"}</dd></div></dl>
           <div aria-label="Email preview device" className="marketing-preview-toggle" role="group"><button aria-pressed={device === "desktop"} className={device === "desktop" ? "active" : ""} onClick={() => setDevice("desktop")} type="button"><Monitor size={16} aria-hidden="true" /> Desktop</button><button aria-pressed={device === "tablet"} className={device === "tablet" ? "active" : ""} onClick={() => setDevice("tablet")} type="button"><Monitor size={15} aria-hidden="true" /> Tablet</button><button aria-pressed={device === "mobile"} className={device === "mobile" ? "active" : ""} onClick={() => setDevice("mobile")} type="button"><Smartphone size={16} aria-hidden="true" /> Mobile</button></div>
         </div>
         <div className="marketing-email-preview-stage">
@@ -2553,7 +2553,7 @@ function SmsDesignStep({ draft, templates, updateDraft, warnings }) {
       </div>
       <aside className="marketing-phone-preview">
         <div className="marketing-phone-speaker" />
-        <span className="marketing-phone-label">MACE</span>
+        <span className="marketing-phone-label">ZenshoTech</span>
         <div className="marketing-message-bubble">{draft.message || "Your message preview will appear here."}</div>
         <small>Reply STOP to opt out.</small>
       </aside>
@@ -2877,7 +2877,7 @@ function SocialPlatformIcon({ platform, size }) {
 
 function RenderedBlock({ block, preview, style }) {
   const mobile = preview === "mobile";
-  if (block.type === "logo") return <div className="marketing-email-logo" style={{ ...style, background: block.background, justifyItems: block.align === "left" ? "start" : block.align === "right" ? "end" : "center" }}><a href={block.link || "#logo"} onClick={(event) => event.preventDefault()}><img src={block.src || "/brand/mace-logo.png"} alt={block.decorative ? "" : block.alt || "MACE"} style={{ maxWidth: "100%", width: mobile ? block.mobileWidth || block.width || 140 : block.width || 140 }} /></a></div>;
+  if (block.type === "logo") return <div className="marketing-email-logo" style={{ ...style, background: block.background, justifyItems: block.align === "left" ? "start" : block.align === "right" ? "end" : "center" }}><a href={block.link || "#logo"} onClick={(event) => event.preventDefault()}><img src={block.src || "/brand/zenshotech-wordmark.svg"} alt={block.decorative ? "" : block.alt || "ZenshoTech"} style={{ maxWidth: "100%", width: mobile ? block.mobileWidth || block.width || 140 : block.width || 140 }} /></a></div>;
   if (block.type === "image") {
     return <div className="marketing-email-image" style={{ ...style, background: block.background, textAlign: block.align }}><img src={block.src || "/brand/result-1.jpg"} alt={block.decorative ? "" : block.alt || ""} style={{ border: `${block.borderWidth || 0}px solid ${block.borderColor || "transparent"}`, borderRadius: block.borderRadius || 0, height: "auto", marginLeft: block.align === "right" ? "auto" : block.align === "center" ? "auto" : 0, marginRight: block.align === "left" ? "auto" : block.align === "center" ? "auto" : 0, maxWidth: 600, width: "100%" }} />{block.caption && <small>{block.caption}</small>}</div>;
   }
@@ -2900,7 +2900,7 @@ function RenderedBlock({ block, preview, style }) {
   if (block.type === "code") return <div className="marketing-code-block" style={style} dangerouslySetInnerHTML={{ __html: sanitizeEmailFragment(block.content) }} />;
   if (["product", "productRecommendation"].includes(block.type)) {
     return <div className={`marketing-product-block image-${block.imagePosition || "top"}`} style={{ ...style, background: block.background, border: `${block.borderWidth || 0}px solid ${block.borderColor || "transparent"}`, borderRadius: block.borderRadius }}>
-      {!block.hideImage && <img src={block.src || "/brand/result-1.jpg"} alt={block.decorative ? "" : block.alt || block.title || "MACE treatment"} style={{ aspectRatio: block.aspectRatio?.replace(":", " / ") || "4 / 3", objectFit: block.crop || "cover", objectPosition: `${block.focalX ?? 50}% ${block.focalY ?? 50}%` }} />}
+      {!block.hideImage && <img src={block.src || "/brand/result-1.jpg"} alt={block.decorative ? "" : block.alt || block.title || "ZenshoTech treatment"} style={{ aspectRatio: block.aspectRatio?.replace(":", " / ") || "4 / 3", objectFit: block.crop || "cover", objectPosition: `${block.focalX ?? 50}% ${block.focalY ?? 50}%` }} />}
       <div style={{ alignSelf: block.contentAlign, padding: block.internalPadding, textAlign: block.align }}>
         {!block.hideCategory && <small style={{ color: block.categoryColor, fontFamily: block.categoryFontFamily, fontSize: block.categoryFontSize }}>{block.type === "productRecommendation" ? block.recommendationLabel || block.category : block.category}</small>}
         <strong style={{ color: block.titleColor, fontFamily: block.titleFontFamily, fontSize: block.titleFontSize, fontWeight: block.titleFontWeight }}>{block.title}</strong>
@@ -3071,8 +3071,8 @@ const personalizationOptions = [
   { value: "first_name", label: "First name", fallback: "there" },
   { value: "client", label: "Full name", fallback: "valued client" },
   { value: "email", label: "Email", fallback: "" },
-  { value: "branch", label: "Clinic", fallback: "MACE" },
-  { value: "company", label: "Company", fallback: "MACE" },
+  { value: "branch", label: "Clinic", fallback: "ZenshoTech" },
+  { value: "company", label: "Company", fallback: "ZenshoTech" },
   { value: "campaign", label: "Campaign", fallback: "this campaign" },
   { value: "date", label: "Current date", fallback: "today" },
 ];
@@ -3178,7 +3178,7 @@ function SurveyContentSettings({ block, updateBlock }) {
   const choices = Array.isArray(block.choices) ? block.choices : [];
   function updateChoice(id, patch) { updateBlock({ choices: choices.map((choice) => choice.id === id ? { ...choice, ...patch } : choice) }); }
   function moveChoice(index, direction) { const next = [...choices]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; updateBlock({ choices: next }); }
-  return <><PersonalizationField label="Survey question" multiline rows={3} value={block.content || ""} onChange={(content) => updateBlock({ content })} /><div className="marketing-repeater"><h4>Answer choices</h4>{choices.map((choice, index) => <article key={choice.id}><header><strong>Choice {index + 1}</strong><div><button disabled={index === 0} onClick={() => moveChoice(index, -1)} aria-label="Move answer up" type="button"><MoveUp size={14} /></button><button disabled={index === choices.length - 1} onClick={() => moveChoice(index, 1)} aria-label="Move answer down" type="button"><MoveDown size={14} /></button><button disabled={choices.length <= 2} onClick={() => updateBlock({ choices: choices.filter((item) => item.id !== choice.id) })} aria-label="Delete answer" type="button"><Trash2 size={14} /></button></div></header><label><span>Answer label</span><input value={choice.label || ""} onChange={(event) => updateChoice(choice.id, { label: event.target.value, value: choice.value || event.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-") })} /></label><label><span>Stored value</span><input value={choice.value || ""} onChange={(event) => updateChoice(choice.id, { value: event.target.value })} /></label></article>)}<button className="marketing-add-repeater" onClick={() => updateBlock({ choices: [...choices, { id: createBlockId("answer"), label: "New answer", value: `answer-${choices.length + 1}` }] })} type="button"><Plus size={15} /> Add answer</button></div><label><span>Custom response destination</span><input placeholder="Leave blank to use MACE response recording" value={block.responseUrl || ""} onChange={(event) => updateBlock({ responseUrl: event.target.value })} /><small>When blank, MACE records the selected answer against this campaign.</small></label><label><span>Confirmation message</span><textarea rows="3" value={block.confirmationMessage || ""} onChange={(event) => updateBlock({ confirmationMessage: event.target.value })} /></label></>;
+  return <><PersonalizationField label="Survey question" multiline rows={3} value={block.content || ""} onChange={(content) => updateBlock({ content })} /><div className="marketing-repeater"><h4>Answer choices</h4>{choices.map((choice, index) => <article key={choice.id}><header><strong>Choice {index + 1}</strong><div><button disabled={index === 0} onClick={() => moveChoice(index, -1)} aria-label="Move answer up" type="button"><MoveUp size={14} /></button><button disabled={index === choices.length - 1} onClick={() => moveChoice(index, 1)} aria-label="Move answer down" type="button"><MoveDown size={14} /></button><button disabled={choices.length <= 2} onClick={() => updateBlock({ choices: choices.filter((item) => item.id !== choice.id) })} aria-label="Delete answer" type="button"><Trash2 size={14} /></button></div></header><label><span>Answer label</span><input value={choice.label || ""} onChange={(event) => updateChoice(choice.id, { label: event.target.value, value: choice.value || event.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-") })} /></label><label><span>Stored value</span><input value={choice.value || ""} onChange={(event) => updateChoice(choice.id, { value: event.target.value })} /></label></article>)}<button className="marketing-add-repeater" onClick={() => updateBlock({ choices: [...choices, { id: createBlockId("answer"), label: "New answer", value: `answer-${choices.length + 1}` }] })} type="button"><Plus size={15} /> Add answer</button></div><label><span>Custom response destination</span><input placeholder="Leave blank to use ZenshoTech response recording" value={block.responseUrl || ""} onChange={(event) => updateBlock({ responseUrl: event.target.value })} /><small>When blank, ZenshoTech records the selected answer against this campaign.</small></label><label><span>Confirmation message</span><textarea rows="3" value={block.confirmationMessage || ""} onChange={(event) => updateBlock({ confirmationMessage: event.target.value })} /></label></>;
 }
 
 function FooterContentSettings({ block, updateBlock }) {

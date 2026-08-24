@@ -292,7 +292,7 @@ export default function PayrollWorkspace({ notify, onAudit, onExit }) {
     <section className="payroll-workspace">
       <header className="payroll-hero">
         <div>
-          <button className="payroll-back" type="button" onClick={onExit}><ArrowLeft size={17} /> ClinicOS</button>
+          <button className="payroll-back" type="button" onClick={onExit}><ArrowLeft size={17} /> ZenshoTech</button>
           <p className="eyebrow">Finance · Restricted</p>
           <h2>Payroll workspace</h2>
           <span>Cutoff payroll from FaceTrack attendance, approved schedules, commissions, and POS salary deductions.</span>

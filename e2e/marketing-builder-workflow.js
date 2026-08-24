@@ -192,8 +192,8 @@ export async function verifyMarketingBuilder(page, expect) {
 
   await page.getByRole("button", { name: "Drag or click to add Social", exact: true }).click();
   const socialBlock = page.locator(".marketing-email-block.type-social.selected");
-  await expect(socialBlock.getByRole("link", { name: "Follow MACE on Instagram" }).locator("svg")).toHaveCount(1);
-  await expect(socialBlock.getByRole("link", { name: "Visit the MACE website" }).locator("svg")).toHaveCount(1);
+  await expect(socialBlock.getByRole("link", { name: "Follow ZenshoTech on Instagram" }).locator("svg")).toHaveCount(1);
+  await expect(socialBlock.getByRole("link", { name: "Visit the ZenshoTech website" }).locator("svg")).toHaveCount(1);
   await expect(socialBlock.getByText(/^[IW]$/)).toHaveCount(0);
 
   const visualBlocksBeforeHtml = await page.locator(".marketing-email-block").count();
@@ -334,7 +334,7 @@ export async function verifyMarketingBuilder(page, expect) {
   await savedTemplatePreview.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.getByRole("button", { name: "Show Marketing menu" }).click();
-  await page.getByRole("button", { name: "Return to MACE dashboard" }).click();
+  await page.getByRole("button", { name: "Return to ZenshoTech dashboard" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.getByRole("button", { name: "My Workspace", exact: true }).click();
   await expect(page.getByLabel(/open account menu for/i)).toBeVisible();

@@ -576,6 +576,23 @@ img { max-width: 100%; }
   object-fit: contain;
 }
 
+.zenshotech-wordmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #2d2520;
+  font-size: 25px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.brand-mark .zenshotech-wordmark {
+  width: 176px;
+  min-height: 48px;
+}
+
 .sidebar-collapse-button,
 .sidebar-mobile-button {
   display: grid;
@@ -737,6 +754,19 @@ img { max-width: 100%; }
 .sidebar.is-collapsed .brand-mark img {
   width: 42px;
   max-height: 42px;
+}
+
+.sidebar.is-collapsed .brand-mark .zenshotech-wordmark {
+  position: relative;
+  width: 42px;
+  min-height: 42px;
+  overflow: hidden;
+  font-size: 0;
+}
+
+.sidebar.is-collapsed .brand-mark .zenshotech-wordmark::after {
+  content: "Z";
+  font-size: 25px;
 }
 
 .sidebar.is-collapsed .sidebar-collapse-button {
@@ -5864,8 +5894,8 @@ td .inline-actions { flex-wrap: nowrap; }
   place-items: center;
   padding: 28px 20px;
   background:
-    linear-gradient(rgba(54, 43, 32, 0.14), rgba(54, 43, 32, 0.14)),
-    url("/brand/login-background.jpg") center / cover no-repeat fixed;
+    linear-gradient(rgba(54, 43, 32, 0.12), rgba(54, 43, 32, 0.12)),
+    url("/brand/applications-background.png") center / cover no-repeat fixed;
 }
 
 .login-panel {
@@ -5874,9 +5904,14 @@ td .inline-actions { flex-wrap: nowrap; }
 
 .login-logo {
   width: 190px;
+  min-height: 76px;
   max-height: 76px;
   object-fit: contain;
   margin: 0 auto 64px;
+}
+
+.zenshotech-wordmark.login-logo {
+  font-size: 30px;
 }
 
 .login-card {
@@ -6010,6 +6045,14 @@ body:has(.public-lead-page-embedded) #root {
   object-fit: contain;
   object-position: left center;
   filter: brightness(0) invert(1);
+}
+
+.zenshotech-wordmark.public-lead-logo {
+  min-height: 92px;
+  justify-content: flex-start;
+  color: #fff;
+  font-size: 32px;
+  filter: none;
 }
 
 .public-lead-brand .eyebrow,
@@ -8314,6 +8357,15 @@ body:has(.public-lead-page-embedded) #root {
     width: 176px;
     max-height: 48px;
   }
+  .sidebar.is-collapsed .brand-mark .zenshotech-wordmark {
+    width: 176px;
+    min-height: 48px;
+    overflow: visible;
+    font-size: 25px;
+  }
+  .sidebar.is-collapsed .brand-mark .zenshotech-wordmark::after {
+    content: none;
+  }
   .sidebar.is-collapsed .sidebar-section-label,
   .sidebar.is-collapsed .nav-item span,
   .sidebar.is-collapsed .sidebar-account-copy {
@@ -9217,10 +9269,16 @@ td,
   box-shadow: 0 24px 70px rgb(45 38 32 / 12%);
 }
 
-.public-registration-card > img {
+.public-registration-card > img,
+.public-registration-wordmark {
   display: block;
   width: min(240px, 60%);
   margin: 0 auto 1.5rem;
+}
+
+.public-registration-wordmark {
+  min-height: 64px;
+  font-size: 30px;
 }
 
 .public-registration-card h1 {

@@ -210,11 +210,11 @@ function blockEmailHtmlContent(block, origin, theme, draft) {
   const style = `padding:${padding}px 28px;text-align:${align};color:${color};`;
 
   if (block.type === "logo") {
-    const src = safeEmailUrl(block.src || "/brand/mace-logo.png", origin);
+    const src = safeEmailUrl(block.src || "/brand/zenshotech-wordmark.svg", origin);
     const link = trackedEmailUrl(block, block.link, origin);
     const width = safeNumber(block.width, 40, 420, 140);
-    const image = `<img src="${escapeEmailHtml(src)}" alt="${escapeEmailHtml(block.decorative ? "" : block.alt || "MACE")}" width="${width}" style="display:inline-block;width:${width}px;max-width:100%;height:auto;border:0">`;
-    return `<div style="${style}background:${safeColor(block.background, "transparent")}">${link ? `<a href="${escapeEmailHtml(link)}" target="_blank" title="${escapeEmailHtml(block.linkTitle || block.alt || "MACE")}">${image}</a>` : image}</div>`;
+    const image = `<img src="${escapeEmailHtml(src)}" alt="${escapeEmailHtml(block.decorative ? "" : block.alt || "ZenshoTech")}" width="${width}" style="display:inline-block;width:${width}px;max-width:100%;height:auto;border:0">`;
+    return `<div style="${style}background:${safeColor(block.background, "transparent")}">${link ? `<a href="${escapeEmailHtml(link)}" target="_blank" title="${escapeEmailHtml(block.linkTitle || block.alt || "ZenshoTech")}">${image}</a>` : image}</div>`;
   }
   if (block.type === "image") {
     const src = safeEmailUrl(block.src, origin);
@@ -386,7 +386,7 @@ export function buildVisualEmailHtml(draft, settings = {}, origin = "https://app
     sectionPadding: safeNumber(suppliedTheme.sectionPadding, 0, 60, 16),
     mobilePadding: safeNumber(suppliedTheme.mobilePadding, 0, 40, 16),
   };
-  const company = settings.company || "MACE Signature Wellness";
+  const company = settings.company || "ZenshoTech";
   const previewText = escapeEmailHtml(draft?.previewText || "");
   const content = blocks.map((block) => blockEmailHtml(block, origin, theme, draft)).join("\n");
   const protectedFooter = hasEditableFooter(blocks) ? "" : `<tr><td style="padding:22px 28px;border-top:1px solid ${theme.dividerColor};text-align:center;font-family:${fontStack(theme.fontFamily)};font-size:11px;line-height:1.6;color:${theme.textColor}"><strong>${escapeEmailHtml(company)}</strong><br>Davao City, Philippines<br><a href="#unsubscribe" style="color:${theme.linkColor}">Unsubscribe</a> · <a href="#preferences" style="color:${theme.linkColor}">Manage preferences</a></td></tr>`;
@@ -527,8 +527,8 @@ function renderPreviewToken(_match, key, fallback = "") {
     client: "Alex Rivera",
     name: "Alex Rivera",
     email: "alex@example.com",
-    branch: "MACE Signature Wellness",
-    company: "MACE Signature Wellness",
+    branch: "ZenshoTech",
+    company: "ZenshoTech",
     campaign: "Summer Skin Reset",
     current_year: String(new Date().getFullYear()),
     unsubscribe_url: "#unsubscribe",

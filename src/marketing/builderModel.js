@@ -67,8 +67,8 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
   const definitions = {
     logo: {
       ...base,
-      src: "/brand/mace-logo.png",
-      alt: "MACE Signature Wellness",
+      src: "/brand/zenshotech-wordmark.svg",
+      alt: "ZenshoTech",
       link: "https://macebydrmace.com/",
       width: 140,
       mobileWidth: 120,
@@ -77,7 +77,7 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     image: {
       ...base,
       src: "/brand/result-1.jpg",
-      alt: "MACE skincare client",
+      alt: "ZenshoTech skincare client",
       decorative: false,
       caption: "",
       link: "",
@@ -167,7 +167,7 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
       content: "Watch our treatment story",
       videoUrl: "https://macebydrmace.com/",
       src: "/brand/result-1.jpg",
-      alt: "MACE treatment video preview",
+      alt: "ZenshoTech treatment video preview",
       link: "https://macebydrmace.com/",
       caption: "",
       aspectRatio: "16:9",
@@ -179,8 +179,8 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     social: {
       ...base,
       items: [
-        { id: createId("social"), platform: "Instagram", url: "https://instagram.com/", label: "Follow MACE on Instagram" },
-        { id: createId("social"), platform: "Website", url: "https://macebydrmace.com/", label: "Visit the MACE website" },
+        { id: createId("social"), platform: "Instagram", url: "https://instagram.com/", label: "Follow ZenshoTech on Instagram" },
+        { id: createId("social"), platform: "Website", url: "https://macebydrmace.com/", label: "Visit the ZenshoTech website" },
       ],
       iconStyle: "outline",
       iconSize: 24,
@@ -189,7 +189,7 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     },
     survey: {
       ...base,
-      content: "How was your MACE experience?",
+      content: "How was your ZenshoTech experience?",
       choices: [
         { id: createId("answer"), label: "Excellent", value: "excellent" },
         { id: createId("answer"), label: "Good", value: "good" },
@@ -210,10 +210,10 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     product: {
       ...base,
       src: "/brand/result-1.jpg",
-      alt: "MACE signature treatment",
+      alt: "ZenshoTech signature treatment",
       decorative: false,
-      category: "MACE TREATMENT",
-      title: "MACE Signature Treatment",
+      category: "ZENSHOTECH TREATMENT",
+      title: "ZenshoTech Signature Treatment",
       description: "Personalised care selected for you.",
       ctaLabel: "Explore",
       ctaUrl: "https://macebydrmace.com/",
@@ -258,12 +258,12 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     productRecommendation: {
       ...base,
       src: "/brand/result-2.jpg",
-      alt: "Recommended MACE treatment",
+      alt: "Recommended ZenshoTech treatment",
       decorative: false,
       recommendationLabel: "RECOMMENDED FOR YOU",
       sourceType: "manual",
       productId: "",
-      category: "MACE TREATMENT",
+      category: "ZENSHOTECH TREATMENT",
       title: "Recommended treatment",
       description: "Explore a treatment chosen around your goals.",
       ctaLabel: "Explore",
@@ -308,17 +308,17 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     },
     footer: {
       ...base,
-      businessName: "MACE Signature Wellness",
+      businessName: "ZenshoTech",
       address: "Davao City, Philippines",
       email: "hello@macebydrmace.com",
       phone: "",
       website: "https://macebydrmace.com/",
-      legalText: "You are receiving this because you opted in to MACE marketing.",
+      legalText: "You are receiving this because you opted in to ZenshoTech marketing.",
       unsubscribeText: "Unsubscribe",
       unsubscribeUrl: "#unsubscribe",
       preferencesText: "Manage preferences",
       preferencesUrl: "#preferences",
-      copyrightText: "© {{current_year}} MACE Signature Wellness. All rights reserved.",
+      copyrightText: "© {{current_year}} ZenshoTech. All rights reserved.",
       socialItems: [],
       background: "#ffffff",
       linkColor: "#4a3324",
@@ -329,7 +329,7 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
     },
     contact: {
       ...base,
-      content: "MACE Signature Wellness\nDavao City, Philippines\nhello@macebydrmace.com",
+      content: "ZenshoTech\nDavao City, Philippines\nhello@macebydrmace.com",
       fontSize: 12,
     },
   };
@@ -379,7 +379,10 @@ export function normalizeEmailBlock(block, createId, layoutDefinitions = []) {
   if (["product", "productRecommendation"].includes(block.type)) {
     Object.assign(normalized, legacyProductFields(block, fallback));
   }
-  if (block.type === "logo" && !block.src) normalized.src = "/brand/mace-logo.png";
+  if (block.type === "logo" && (!block.src || /\/brand\/mace-logo(?:-white)?\.(?:png|svg)$/i.test(block.src))) {
+    normalized.src = "/brand/zenshotech-wordmark.svg";
+    normalized.alt = "ZenshoTech";
+  }
   if (block.type === "video") {
     normalized.videoUrl = block.videoUrl || block.link || fallback.videoUrl;
     normalized.link = block.link || block.videoUrl || fallback.link;

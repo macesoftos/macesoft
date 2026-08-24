@@ -254,7 +254,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
           })}
         </nav>
         <div className="facetrack-module-account"><span>{session.name?.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{session.name}</strong><small>{session.role}</small></div></div>
-        <button className="facetrack-exit" type="button" onClick={onExit}><ArrowLeft size={17} /> Back to ClinicOS</button>
+        <button className="facetrack-exit" type="button" onClick={onExit}><ArrowLeft size={17} /> Back to ZenshoTech</button>
       </aside>
 
       <div className="facetrack-page">

@@ -335,6 +335,11 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function visibleApplicationBrand(value, fallback = "ZenshoTech") {
+  const text = clean(value);
+  return !text || /mace|clinicos/i.test(text) ? fallback : text;
+}
+
 function cleanOptional(value) {
   const next = clean(value);
   return next || null;
@@ -3132,8 +3137,8 @@ function pickTemplate({ campaign, templates, channel }) {
 
   return templates.find((template) => clean(template.category).toLowerCase() === "marketing") ?? templates[0] ?? {
     text: channel === "email"
-      ? "Hi {{client}},\n\nWe would love to see you at MACE. Reply to this email or message us to book your next visit."
-      : "Hi {{client}}, it has been a while. Book your personalized care session with MACE this week.",
+      ? "Hi {{client}},\n\nWe would love to see you at ZenshoTech. Reply to this email or message us to book your next visit."
+      : "Hi {{client}}, it has been a while. Book your personalized care session with ZenshoTech this week.",
   };
 }
 
@@ -3151,8 +3156,8 @@ function marketingMergeValues({ client, campaign, settings }) {
     branch: client.branch,
     segment: campaign.segment,
     campaign: campaign.name,
-    company: settings.company || "MACE",
-    product: settings.productName || "MACE ClinicOS",
+    company: visibleApplicationBrand(settings.company),
+    product: visibleApplicationBrand(settings.productName),
     date: new Date().toLocaleDateString("en-PH"),
     time: "",
     service: campaign.service || campaign.name,
@@ -3945,7 +3950,7 @@ function invitationUrl(token) {
 function invitationEmailContent(invitation, token, inviter) {
   const acceptUrl = invitationUrl(token);
   const branchNames = invitation.branches?.map((assignment) => assignment.branch?.name).filter(Boolean) || [];
-  const organizationName = invitation.organization?.name || "MACE by Dr. Mace";
+  const organizationName = invitation.organization?.name || "ZenshoTech";
   const expires = invitation.expiresAt.toLocaleString("en-PH", { dateStyle: "long", timeStyle: "short" });
   const assignment = branchNames.length ? branchNames.join(", ") : "Organization-wide";
   const text = [
@@ -3961,8 +3966,8 @@ function invitationEmailContent(invitation, token, inviter) {
     `This personal, single-use link expires ${expires}. Do not share it.`,
     "If you do not recognize this invitation, do not open the link and contact the clinic directly.",
   ].filter((line, index, lines) => line || lines[index - 1] !== "").join("\n");
-  const logoUrl = `${acceptUrl.split("/accept-invitation")[0]}/brand/mace-logo.png`;
-  const html = `<!doctype html><html><body style="margin:0;background:#f5f1eb;font-family:Arial,sans-serif;color:#2d2824"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff;border-radius:18px;overflow:hidden"><tr><td style="padding:28px 32px;border-bottom:1px solid #eadfd4"><img src="${escapeHtml(logoUrl)}" width="138" alt="MACE by Dr. Mace"></td></tr><tr><td style="padding:32px"><p style="margin:0 0 12px;color:#8a624c;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em">You’re invited</p><h1 style="margin:0 0 18px;font-size:28px">Join ${escapeHtml(organizationName)}</h1><p>Hello ${escapeHtml(invitation.firstName || invitation.name)},</p><p>${escapeHtml(inviter.name)} invited you to join as <strong>${escapeHtml(invitation.role)}</strong> for <strong>${escapeHtml(assignment)}</strong>.</p>${invitation.message ? `<p style="padding:14px 16px;background:#f8f4ef;border-radius:10px">${escapeHtml(invitation.message)}</p>` : ""}<p style="margin:28px 0"><a href="${escapeHtml(acceptUrl)}" style="display:inline-block;background:#7b4b36;color:#fff;text-decoration:none;padding:13px 22px;border-radius:9px;font-weight:700">Accept invitation</a></p><p style="font-size:13px;color:#6f6761">This personal, single-use link expires ${escapeHtml(expires)}. Do not share it.</p><p style="font-size:13px;color:#6f6761">If you do not recognize this invitation, ignore this email and contact the clinic directly.</p></td></tr></table></td></tr></table></body></html>`;
+  const logoUrl = `${acceptUrl.split("/accept-invitation")[0]}/brand/zenshotech-wordmark.svg`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f5f1eb;font-family:Arial,sans-serif;color:#2d2824"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff;border-radius:18px;overflow:hidden"><tr><td style="padding:28px 32px;border-bottom:1px solid #eadfd4"><img src="${escapeHtml(logoUrl)}" width="138" alt="ZenshoTech"></td></tr><tr><td style="padding:32px"><p style="margin:0 0 12px;color:#8a624c;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em">You’re invited</p><h1 style="margin:0 0 18px;font-size:28px">Join ${escapeHtml(organizationName)}</h1><p>Hello ${escapeHtml(invitation.firstName || invitation.name)},</p><p>${escapeHtml(inviter.name)} invited you to join as <strong>${escapeHtml(invitation.role)}</strong> for <strong>${escapeHtml(assignment)}</strong>.</p>${invitation.message ? `<p style="padding:14px 16px;background:#f8f4ef;border-radius:10px">${escapeHtml(invitation.message)}</p>` : ""}<p style="margin:28px 0"><a href="${escapeHtml(acceptUrl)}" style="display:inline-block;background:#7b4b36;color:#fff;text-decoration:none;padding:13px 22px;border-radius:9px;font-weight:700">Accept invitation</a></p><p style="font-size:13px;color:#6f6761">This personal, single-use link expires ${escapeHtml(expires)}. Do not share it.</p><p style="font-size:13px;color:#6f6761">If you do not recognize this invitation, ignore this email and contact the clinic directly.</p></td></tr></table></td></tr></table></body></html>`;
   return { text, html };
 }
 
@@ -4189,7 +4194,7 @@ app.post("/api/auth/forgot-password", asyncRoute(async (request, response) => {
         await sendSmtpEmail({
           transporter,
           to: account.email,
-          subject: "Reset your MACE ClinicOS password",
+          subject: "Reset your ZenshoTech password",
           text: `Use this single-use link within 30 minutes to reset your password:\n\n${resetUrl}\n\nIf you did not request this, you can ignore this email.`,
         });
       } catch (error) {
@@ -6250,7 +6255,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
   }
 
   response.json({
-    company: settings.company,
+    company: visibleApplicationBrand(settings.company),
     tagline: settings.receiptFooter,
     branches: branchRows.map((branch) => ({ ...branch, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
     services: publicServices,
@@ -6321,7 +6326,7 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
     consent_source: "Public inquiry form",
     consent_timestamp: submittedAt,
     consent_version: "v1",
-    consent_text: "I consent to the collection and use of my information so MACE can respond to this inquiry.",
+    consent_text: "I consent to the collection and use of my information so ZenshoTech can respond to this inquiry.",
     submitted_at: submittedAt,
   };
 
@@ -7277,7 +7282,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     }
 
     const saleCount = await tx.sale.count();
-    const invoicePrefix = testMode ? "TEST" : clean(draft.invoicePrefix) || "MACE";
+    const invoicePrefix = testMode ? "TEST" : clean(draft.invoicePrefix) || "ZENSHO";
     const invoice = `${invoicePrefix}-${saleDate.slice(2).replace(/-/g, "")}-${String(saleCount + 1).padStart(3, "0")}`;
     const sale = await tx.sale.create({
       data: {
@@ -7758,7 +7763,7 @@ async function validatedMarketingSurveyRequest(request, values) {
 app.get("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (request, response) => {
   const survey = await validatedMarketingSurveyRequest(request, request.query);
   const action = `/api/public/marketing/survey/${encodeURIComponent(survey.campaignId)}/${encodeURIComponent(survey.blockId)}`;
-  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm feedback — MACE</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}button{border:0;border-radius:8px;background:#4a2d1c;color:#fff;padding:12px 20px;font:inherit;cursor:pointer}</style></head><body><main class="card"><h1>Confirm your response</h1><p>Submit “${escapeHtml(survey.answer)}” for ${escapeHtml(survey.campaign.name)}?</p><form method="post" action="${action}"><input type="hidden" name="answer" value="${escapeHtml(survey.answer)}"><input type="hidden" name="token" value="${escapeHtml(survey.token)}"><button type="submit">Submit feedback</button></form></main></body></html>`);
+  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm feedback — ZenshoTech</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}button{border:0;border-radius:8px;background:#4a2d1c;color:#fff;padding:12px 20px;font:inherit;cursor:pointer}</style></head><body><main class="card"><h1>Confirm your response</h1><p>Submit “${escapeHtml(survey.answer)}” for ${escapeHtml(survey.campaign.name)}?</p><form method="post" action="${action}"><input type="hidden" name="answer" value="${escapeHtml(survey.answer)}"><input type="hidden" name="token" value="${escapeHtml(survey.token)}"><button type="submit">Submit feedback</button></form></main></body></html>`);
 }));
 
 app.post("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (request, response) => {
@@ -7782,7 +7787,7 @@ app.post("/api/public/marketing/survey/:campaignId/:blockId", asyncRoute(async (
     if (error?.code !== "P2002") throw error;
   }
   const confirmation = clean(survey.block.confirmationMessage) || "Thank you for sharing your feedback.";
-  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Thank you — MACE</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}a{color:#4a2d1c}</style></head><body><main class="card"><h1>Thank you</h1><p>${escapeHtml(confirmation)}</p><p>Your response has been recorded for ${escapeHtml(survey.campaign.name)}.</p><a href="https://macebydrmace.com/">Return to MACE</a></main></body></html>`);
+  response.status(200).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Thank you — ZenshoTech</title><style>body{margin:0;background:#f4f1ed;color:#342319;font-family:Arial,sans-serif}.card{max-width:540px;margin:10vh auto;padding:42px;border:1px solid #ded2c7;border-radius:12px;background:#fff;text-align:center}h1{font-family:Georgia,serif;font-weight:500}a{color:#4a2d1c}</style></head><body><main class="card"><h1>Thank you</h1><p>${escapeHtml(confirmation)}</p><p>Your response has been recorded for ${escapeHtml(survey.campaign.name)}.</p><a href="/">Return to ZenshoTech</a></main></body></html>`);
 }));
 
 app.post("/api/marketing/campaigns/:id/restore", asyncRoute(async (request, response) => {
@@ -7845,7 +7850,7 @@ app.post("/api/marketing/send-test", asyncRoute(async (request, response) => {
   if (addresses.length > 5) throw apiError("Send a test to no more than five email addresses at once.", 413);
   const html = sanitizeMarketingHtml(campaign.html);
   if (!html) throw apiError("Save or finish the email content before sending a test.");
-  const subject = `[TEST] ${clean(campaign.subject) || clean(campaign.name) || "MACE campaign"}`;
+  const subject = `[TEST] ${clean(campaign.subject) || clean(campaign.name) || "ZenshoTech campaign"}`;
   const text = marketingHtmlToText(html);
   const dryRun = envFlag(process.env.MARKETING_DRY_RUN);
   if (!dryRun && !emailReady()) throw apiError("Email is not configured. Add SMTP settings before sending a test.", 503);
@@ -7854,7 +7859,7 @@ app.post("/api/marketing/send-test", asyncRoute(async (request, response) => {
   const failures = [];
   let sent = 0;
   for (const address of addresses) {
-    const client = { fullName: "Alex Test Client", email: address, mobile: "", branch: "MACE Signature Wellness" };
+    const client = { fullName: "Alex Test Client", email: address, mobile: "", branch: "ZenshoTech" };
     const renderedHtml = renderMarketingHtml(html, marketingMergeValues({ client, campaign, settings }));
     try {
       if (dryRun) console.log(`[marketing dry-run] TEST EMAIL to ${address}: ${subject}`);
@@ -7951,7 +7956,7 @@ async function deliverMarketingCampaign({ campaign, clients, members = [], reque
   const template = pickTemplate({ campaign, templates, channel });
   const emailHtml = channel === "email" ? sanitizeMarketingHtml(campaign.html) : "";
   const baseMessage = clean(campaign.message) || marketingHtmlToText(emailHtml) || clean(template.text);
-  const subject = clean(campaign.subject) || clean(campaign.name) || "A note from MACE";
+  const subject = clean(campaign.subject) || clean(campaign.name) || "A note from ZenshoTech";
   const dryRun = envFlag(process.env.MARKETING_DRY_RUN);
 
   if (!clean(campaign.name)) throw apiError("Campaign name is required.");
@@ -8170,7 +8175,7 @@ app.use((error, _request, response, _next) => {
 assertProductionEnvironment();
 
 const server = app.listen(port, "0.0.0.0", () => {
-  console.log(`MACE ClinicOS listening on port ${port}`);
+  console.log(`ZenshoTech listening on port ${port}`);
 });
 
 const marketingSchedulerEnabled = process.env.NODE_ENV !== "test" && process.env.MARKETING_SCHEDULER_ENABLED !== "false";

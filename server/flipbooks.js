@@ -105,7 +105,7 @@ function serializeFlipbook(row, request, uniqueViewers = 0) {
     publicLink: publicLinkFor(request, row.publicToken),
     sourceUrl: `/api/flipbooks/${encodeURIComponent(row.id)}/file`,
     byteSize: row.asset?.byteSize || 0,
-    createdBy: row.createdBy?.name || "MACE user",
+    createdBy: row.createdBy?.name || "ZenshoTech user",
     views: row._count?.views || 0,
     uniqueViewers,
     lastViewed: row.views?.[0]?.viewedAt || null,
@@ -150,11 +150,16 @@ function assertPublicFlipbook(flipbook) {
 }
 
 async function workspaceSettings(prisma) {
-  return prisma.flipbookWorkspaceSetting.upsert({
+  const settings = await prisma.flipbookWorkspaceSetting.upsert({
     where: { id: "workspace" },
     create: { id: "workspace" },
     update: {},
   });
+  return {
+    ...settings,
+    businessName: /mace|clinicos/i.test(String(settings.businessName || "")) ? "ZenshoTech" : settings.businessName,
+    logo: /\/brand\/mace-logo(?:-white)?\.(?:png|svg)$/i.test(String(settings.logo || "")) ? "/brand/zenshotech-wordmark.svg" : settings.logo,
+  };
 }
 
 async function uniqueCountsFor(prisma, ids) {
@@ -323,10 +328,10 @@ export function createFlipbookRouters({
   internal.put("/settings", asyncRoute(async (request, response) => {
     const actor = assertMutationAllowed(request, "flipbooks");
     if (!canManageOrganization(actor.role)) throw httpError("Only an organization administrator can change Flipbook workspace settings.", 403);
-    const businessName = boundedText(request.body?.businessName, "Business name", 120) || "MACE";
+    const businessName = boundedText(request.body?.businessName, "Business name", 120) || "ZenshoTech";
     const logo = clean(request.body?.logo);
     if (logo && !logo.startsWith("/api/uploads/") && !logo.startsWith("/brand/")) {
-      throw httpError("Upload the logo to MACE before saving it.", 400);
+      throw httpError("Upload the logo to ZenshoTech before saving it.", 400);
     }
     const viewerBackground = clean(request.body?.viewerBackground) || "#f4f1ed";
     if (!/^#[0-9a-f]{6}$/i.test(viewerBackground)) throw httpError("Choose a valid viewer background color.", 400);

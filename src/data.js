@@ -1,6 +1,6 @@
 export const assets = {
-  logo: "/brand/mace-logo.png",
-  logoWhite: "/brand/mace-logo-white.svg",
+  logo: "/brand/zenshotech-wordmark.svg",
+  logoWhite: "/brand/zenshotech-wordmark.svg",
   doctor: "/brand/dr-mace.jpg",
   clinic: "/brand/clinic.jpg",
   clinicDavao: "/brand/clinic-davao.jpg",
@@ -236,11 +236,11 @@ export const initialDiscounts = [
 ];
 
 export const initialSmsTemplates = [
-  { id: "sms-confirm", name: "Appointment confirmation", category: "Appointment", text: "Hi {{client}}, your MACE appointment for {{service}} is confirmed on {{date}} at {{time}}. Reply YES to confirm.", active: true },
-  { id: "sms-reminder", name: "Appointment reminder", category: "Appointment", text: "Hi {{client}}, this is your gentle reminder for your MACE visit tomorrow at {{time}}. We love your face.", active: true },
-  { id: "sms-aftercare", name: "Post-treatment follow-up", category: "Aftercare", text: "Hi {{client}}, thank you for visiting MACE. Please follow your aftercare notes and message us for any concerns.", active: true },
-  { id: "sms-birthday", name: "Birthday greeting", category: "Marketing", text: "Happy birthday month, {{client}}. A beautiful month deserves a MACE glow.", active: true },
-  { id: "sms-winback", name: "Win-back campaign", category: "Marketing", text: "Hi {{client}}, it has been a while. Book your personalized care session with MACE this week.", active: true },
+  { id: "sms-confirm", name: "Appointment confirmation", category: "Appointment", text: "Hi {{client}}, your ZenshoTech appointment for {{service}} is confirmed on {{date}} at {{time}}. Reply YES to confirm.", active: true },
+  { id: "sms-reminder", name: "Appointment reminder", category: "Appointment", text: "Hi {{client}}, this is your gentle reminder for your ZenshoTech visit tomorrow at {{time}}. We love your face.", active: true },
+  { id: "sms-aftercare", name: "Post-treatment follow-up", category: "Aftercare", text: "Hi {{client}}, thank you for visiting ZenshoTech. Please follow your aftercare notes and message us for any concerns.", active: true },
+  { id: "sms-birthday", name: "Birthday greeting", category: "Marketing", text: "Happy birthday month, {{client}}. A beautiful month deserves a ZenshoTech glow.", active: true },
+  { id: "sms-winback", name: "Win-back campaign", category: "Marketing", text: "Hi {{client}}, it has been a while. Book your personalized care session with ZenshoTech this week.", active: true },
 ];
 
 export const initialCampaigns = [
@@ -250,8 +250,8 @@ export const initialCampaigns = [
     segment: "Inactive clients",
     channel: "SMS",
     templateId: "sms-winback",
-    subject: "Your MACE glow is waiting",
-    message: "Hi {{client}}, it has been a while. Book your personalized care session with MACE this week.",
+    subject: "Your ZenshoTech glow is waiting",
+    message: "Hi {{client}}, it has been a while. Book your personalized care session with ZenshoTech this week.",
     sent: 180,
     booked: 24,
     credits: 180,
@@ -263,8 +263,8 @@ export const initialCampaigns = [
     segment: "Birthday month",
     channel: "SMS",
     templateId: "sms-birthday",
-    subject: "Birthday month care from MACE",
-    message: "Happy birthday month, {{client}}. A beautiful month deserves a MACE glow.",
+    subject: "Birthday month care from ZenshoTech",
+    message: "Happy birthday month, {{client}}. A beautiful month deserves a ZenshoTech glow.",
     sent: 42,
     booked: 9,
     credits: 42,
@@ -286,18 +286,18 @@ export const initialCampaigns = [
 ];
 
 export const initialSettings = {
-  company: "MACE by Dr. Mace",
-  productName: "MACE ClinicOS",
+  company: "ZenshoTech",
+  productName: "ZenshoTech",
   currency: "PHP",
   taxMode: "VAT exclusive",
   taxRate: 12,
   receiptFooter: "The brand behind beautiful faces.",
-  invoicePrefix: "MACE",
+  invoicePrefix: "ZENSHO",
   smsCredits: 8400,
   managerApproval: true,
-  marketingSenderName: "MACE by Dr. Mace",
+  marketingSenderName: "ZenshoTech",
   marketingReplyTo: "hello@macebydrmace.com",
-  marketingUnsubscribeText: "You are receiving this because you opted in to MACE marketing. Unsubscribe at any time.",
+  marketingUnsubscribeText: "You are receiving this because you opted in to ZenshoTech marketing. Unsubscribe at any time.",
   backup: "Daily backup-ready",
   hiddenSaasPlans: true,
   paymentMethods: ["Cash", "Card", "Bank/Online Transfer", "GCash", "Maya", "Check", "Gift Certificate", "Offset", "Salary Deduction", "Shopee"],

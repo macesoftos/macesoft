@@ -14,7 +14,7 @@ async function tryReconnect() {
       credentials: "same-origin",
     });
     if (!response.ok) throw new Error("Health check failed");
-    statusElement.textContent = "Connection restored. Reopening MaceSoft…";
+    statusElement.textContent = "Connection restored. Reopening ZenshoTech…";
     window.setTimeout(() => window.location.reload(), 300);
   } catch {
     statusElement.textContent = "Still offline. We’ll retry automatically.";

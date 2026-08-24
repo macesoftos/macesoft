@@ -7,9 +7,7 @@ const APP_SHELL_ASSETS = [
   "/offline-reconnect.js",
   "/manifest.webmanifest",
   "/fonts/Inter-Variable.woff2",
-  "/fonts/Inter-Italic-Variable.woff2",
-  "/brand/favicon.png",
-  "/brand/mace-logo.png"
+  "/fonts/Inter-Italic-Variable.woff2"
 ];
 
 self.addEventListener("install", (event) => {

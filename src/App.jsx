@@ -178,6 +178,22 @@ const money = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 0,
 });
 
+function BrandWordmark({ className = "" }) {
+  return <span className={`zenshotech-wordmark ${className}`.trim()} aria-label="ZenshoTech">ZenshoTech</span>;
+}
+
+function stagingBrandSettings(value = {}) {
+  const next = { ...value };
+  if (/mace|clinicos/i.test(String(next.company || ""))) next.company = "ZenshoTech";
+  if (/mace|clinicos/i.test(String(next.productName || ""))) next.productName = "ZenshoTech";
+  if (/mace/i.test(String(next.marketingSenderName || ""))) next.marketingSenderName = "ZenshoTech";
+  if (/\bMACE\b/i.test(String(next.marketingUnsubscribeText || ""))) {
+    next.marketingUnsubscribeText = "You are receiving this because you opted in to ZenshoTech marketing. Unsubscribe at any time.";
+  }
+  if (/^MACE$/i.test(String(next.invoicePrefix || ""))) next.invoicePrefix = "ZENSHO";
+  return next;
+}
+
 function serviceCatalogPrice(service) {
   return Number(service?.serviceType === "Package" && Number(service?.packagePrice) > 0 ? service.packagePrice : service?.price || 0);
 }
@@ -578,7 +594,7 @@ function defaultProductImageFor(item) {
   const name = normalize(item?.item);
   if (name.includes("post-care") || name.includes("cream")) return "/brand/products/post-care-cream.png";
   if (name.includes("cleanser") || name.includes("kit")) return "/brand/products/cleanser-travel-kit.png";
-  return "/brand/mace-logo.png";
+  return "/brand/zenshotech-wordmark.svg";
 }
 
 function productImageFor(item) {
@@ -875,7 +891,7 @@ function App() {
   const [smsTemplates, setSmsTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [branchRecords, setBranchRecords] = useState([]);
-  const [settings, setSettings] = useState(initialSettings);
+  const [settings, setSettings] = useState(() => stagingBrandSettings(initialSettings));
   const [leadIntegrations, setLeadIntegrations] = useState([]);
   const [webhookEvents, setWebhookEvents] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -1332,7 +1348,7 @@ function App() {
         setWebhookEvents(Array.isArray(bootstrap.webhookEvents) ? bootstrap.webhookEvents : []);
         setBranchRecords(Array.isArray(bootstrap.branches) ? bootstrap.branches : []);
         if (bootstrap.settings) {
-          setSettings(bootstrap.settings);
+          setSettings(stagingBrandSettings(bootstrap.settings));
         }
 
         if (apiClients.length) {
@@ -1485,7 +1501,7 @@ function App() {
   useEffect(() => {
     if (typeof document === "undefined" || isPublicFormView || publicFlipbookToken || isFaceTrackKioskView) return;
     const pageLabel = activeRecordTitle || navItems.find((item) => item.id === activeModule)?.label || "Dashboard";
-    document.title = `${pageLabel} — MACE ClinicOS`;
+    document.title = `${pageLabel} — ZenshoTech`;
   }, [activeModule, activeRecordTitle, isFaceTrackKioskView, isPublicFormView, publicFlipbookToken]);
 
   const scopedAppointments = useMemo(
@@ -1869,7 +1885,7 @@ function App() {
       return;
     }
     if (action.handler === "inventory-export") {
-      downloadCsv("mace-inventory.csv", scopedInventory, inventoryCsvExportColumns);
+      downloadCsv("zenshotech-inventory.csv", scopedInventory, inventoryCsvExportColumns);
       return;
     }
     if (action.handler === "client-import") {
@@ -1877,7 +1893,7 @@ function App() {
       return;
     }
     if (action.handler === "client-export") {
-      downloadCsv("mace-clients.csv", scopedClients, [
+      downloadCsv("zenshotech-clients.csv", scopedClients, [
         { key: "id", label: "Client ID" },
         { key: "fullName", label: "Name" },
         { key: "mobile", label: "Mobile", exportValue: (client) => sensitiveAllowed ? client.mobile : maskMobile(client.mobile) },
@@ -2616,7 +2632,7 @@ function App() {
       if (result.channel === "sms") {
         const nextSettings = { ...settings, smsCredits: Math.max(0, Number(settings.smsCredits) - credits) };
         const savedSettings = await saveSettingsRecord(nextSettings);
-        setSettings(savedSettings.settings);
+        setSettings(stagingBrandSettings(savedSettings.settings));
         applyAuditLog(savedSettings.auditLog);
       }
 
@@ -2646,7 +2662,7 @@ function App() {
 
   async function saveSettings(values) {
     const result = await saveSettingsRecord({ ...settings, ...values });
-    setSettings(result.settings);
+    setSettings(stagingBrandSettings(result.settings));
     applyAuditLog(result.auditLog);
     closeModal();
     notify("Settings updated.");
@@ -2965,7 +2981,7 @@ function App() {
                 </button>
               )}
               <PageHeader
-                eyebrow="MACE ClinicOS"
+                eyebrow="ZenshoTech"
                 title={activeLabel}
                 subtitle={
                   activeModule === "leads"
@@ -3477,7 +3493,7 @@ function PrintableReceipt({ receipt, settings, services = [] }) {
       {receipt && (
         <article className="print-receipt" aria-label={`Receipt ${receipt.invoice}`}>
           <header className="print-receipt-header">
-            <img src={assets.logo} alt="" />
+            <BrandWordmark />
             <strong>{settings.company}</strong>
             <span>{settings.productName}</span>
           </header>
@@ -3716,12 +3732,10 @@ function SidebarNavigation({
       <aside
         className={`sidebar ${collapsed ? "is-collapsed" : ""} ${drawerOpen ? "is-open" : ""}`}
         id={id}
-        aria-label="ClinicOS modules"
+        aria-label="ZenshoTech modules"
       >
         <div className="sidebar-header">
-          <div className="brand-mark">
-            <img src={assets.logo} alt="MACE by Dr. Mace" />
-          </div>
+          <div className="brand-mark"><BrandWordmark /></div>
           <button
             className="sidebar-collapse-button"
             type="button"
@@ -3888,7 +3902,7 @@ function MobileMoreMenu({
         <header className="mobile-more-header">
           <div>
             <p className="eyebrow">Menu</p>
-            <h2 id="mobile-more-title">MaceSoft</h2>
+            <h2 id="mobile-more-title">ZenshoTech</h2>
           </div>
           <button className="icon-button" type="button" aria-label="Close menu" onClick={onClose}>
             <X size={19} aria-hidden="true" />
@@ -4172,14 +4186,14 @@ function PublicClientRegistrationPage() {
   return (
     <main className="public-registration-page">
       <section className="public-registration-card">
-        <img src={assets.logo} alt="MACE Medical Aesthetics Clinic & Essentials" />
+        <BrandWordmark className="public-registration-wordmark" />
         {submitted ? (
-          <div className="confirmation-panel"><Check size={30} /><h2>Registration received</h2><p>Thank you. The {branch || "MACE"} team can now review your unified client profile.</p></div>
+          <div className="confirmation-panel"><Check size={30} /><h2>Registration received</h2><p>Thank you. The {branch || "ZenshoTech"} team can now review your unified client profile.</p></div>
         ) : (
           <form onSubmit={submit}>
             <p className="eyebrow">Secure client registration · {branch || "Select clinic"}</p>
             <h1>Tell us about you</h1>
-            <p>Your information creates one MACE profile that can be used across clinic branches.</p>
+            <p>Your information creates one ZenshoTech profile that can be used across clinic branches.</p>
             {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
             <div className="form-grid">
               <label><span>First name *</span><input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
@@ -4197,8 +4211,8 @@ function PublicClientRegistrationPage() {
               <label><span>Occupation</span><input value={form.occupation} onChange={(event) => update("occupation", event.target.value)} /></label>
               <label><span>Emergency contact name</span><input value={form.emergencyName} onChange={(event) => update("emergencyName", event.target.value)} /></label>
               <label><span>Emergency contact number</span><input value={form.emergencyPhone} onChange={(event) => update("emergencyPhone", event.target.value)} /></label>
-              <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => update("marketingOptIn", event.target.checked)} /><span>I would like to receive MACE care reminders and offers.</span></label>
-              <label className="checkbox-field span-2"><input required type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} /><span>I consent to MACE securely collecting this information for my clinic profile. *</span></label>
+              <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => update("marketingOptIn", event.target.checked)} /><span>I would like to receive ZenshoTech care reminders and offers.</span></label>
+              <label className="checkbox-field span-2"><input required type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} /><span>I consent to ZenshoTech securely collecting this information for my clinic profile. *</span></label>
               <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} value={form.clinicWebsite} onChange={(event) => update("clinicWebsite", event.target.value)} /></label>
             </div>
             <button className="primary-button full" disabled={saving || !branch || !form.firstName || !form.lastName || (!form.mobile && !form.email) || !form.privacyConsent} type="submit"><Check size={17} /> {saving ? "Submitting..." : "Submit registration"}</button>
@@ -4212,7 +4226,7 @@ function PublicClientRegistrationPage() {
 function PublicLeadCapturePage({ initialMode = "inquiry" }) {
   const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
   const [formMode, setFormMode] = useState(initialMode);
-  const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
+  const [config, setConfig] = useState({ company: "ZenshoTech", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
   const [form, setForm] = useState({
     fullName: "",
     mobile: "",
@@ -4262,7 +4276,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
         const branches = Array.isArray(result.branches) ? result.branches : [];
         const services = Array.isArray(result.services) ? result.services : [];
         setConfig({
-          company: result.company || "MACE by Dr. Mace",
+          company: /mace|clinicos/i.test(String(result.company || "")) ? "ZenshoTech" : result.company || "ZenshoTech",
           tagline: result.tagline || "The brand behind beautiful faces.",
           branches,
           services,
@@ -4351,7 +4365,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
       <section className="public-lead-shell">
         {!isContactEmbed && (
           <div className="public-lead-brand">
-            <img className="public-lead-logo" src={assets.logo} alt={config.company} />
+            <BrandWordmark className="public-lead-logo" />
             <div>
               <p className="eyebrow">{formMode === "appointment" ? "Online appointment request" : "Private consultation request"}</p>
               <h1>{formMode === "appointment" ? "Choose a visit time that works for you." : "Let’s talk about the care that feels right for you."}</h1>
@@ -4381,7 +4395,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
             <div className="public-lead-success" role="status">
               <span className="public-lead-success-icon"><Check size={28} /></span>
               <p className="eyebrow">Inquiry received</p>
-              <h2>Thank you — the MACE team will be in touch.</h2>
+              <h2>Thank you — the ZenshoTech team will be in touch.</h2>
               <p>Your request is now in the clinic&apos;s Leads inbox for a personal follow-up.</p>
               <button className="secondary-button" type="button" onClick={sendAnother}>Send another inquiry</button>
             </div>
@@ -4407,7 +4421,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
                 <label><span>Preferred contact</span><select value={form.preferredChannel} onChange={(event) => updateField("preferredChannel", event.target.value)}><option>Phone</option><option>SMS</option><option>Messenger</option><option>WhatsApp</option><option>Email</option></select></label>
 
                 <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
-                <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>I consent to the collection and use of my information so MACE can respond to this inquiry. *</span></label>
+                <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>I consent to the collection and use of my information so ZenshoTech can respond to this inquiry. *</span></label>
                 <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} autoComplete="off" value={form.clinicWebsite} onChange={(event) => updateField("clinicWebsite", event.target.value)} /></label>
               </div>
 
@@ -4532,7 +4546,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
         <span className="public-lead-success-icon"><Check size={28} /></span>
         <p className="eyebrow">Appointment requested</p>
         <h2>Thank you — your request is in the clinic schedule.</h2>
-        <p>The appointment is listed as Pending Confirmation. The MACE team will contact you to confirm the final schedule.</p>
+        <p>The appointment is listed as Pending Confirmation. The ZenshoTech team will contact you to confirm the final schedule.</p>
         <div className="public-booking-summary">
           <span><CalendarDays size={16} /><strong>{submitted.appointment?.date}</strong></span>
           <span><Clock size={16} /><strong>{formatScheduleTime(parseTimeToMinutes(submitted.appointment?.time))}</strong></span>
@@ -4575,7 +4589,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
       <button className="primary-button full public-lead-submit" type="submit" disabled={saving || loadingConfig || !form.fullName.trim() || !form.mobile.trim() || !form.branch || !form.serviceId || !form.date || !form.time || !form.privacyConsent}>
         <CalendarDays size={17} /> {saving ? "Requesting appointment..." : "Request appointment"}
       </button>
-      <p className="public-lead-footnote"><ShieldCheck size={14} /> Your request will appear in MACE Appointments as Pending Confirmation.</p>
+      <p className="public-lead-footnote"><ShieldCheck size={14} /> Your request will appear in ZenshoTech Appointments as Pending Confirmation.</p>
     </form>
   );
 }
@@ -4620,7 +4634,7 @@ function LoginScreen({ notice, onLogin, settings }) {
     <main className="login-page">
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
-          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+          <BrandWordmark className="login-logo" />
           <div>
             <p className="eyebrow">Secure role login</p>
             <h2>Sign in to your workspace</h2>
@@ -4674,7 +4688,7 @@ function ResetPasswordScreen({ token }) {
     }
   }
 
-  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />{done ? <><p className="eyebrow">Password updated</p><h2>Your account is secure</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Secure password reset</p><h2>Create a new password</h2><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p><label><span>New password</span><input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label><span>Confirm password</span><input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}<button className="primary-button full" disabled={submitting || !password || !confirmPassword}>{submitting ? "Updating password..." : "Reset password"}</button></>}</form></section></main>;
+  return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={submit}><BrandWordmark className="login-logo" />{done ? <><p className="eyebrow">Password updated</p><h2>Your account is secure</h2><a className="primary-button full" href="/">Continue to sign in</a></> : <><p className="eyebrow">Secure password reset</p><h2>Create a new password</h2><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p><label><span>New password</span><input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label><span>Confirm password</span><input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}<button className="primary-button full" disabled={submitting || !password || !confirmPassword}>{submitting ? "Updating password..." : "Reset password"}</button></>}</form></section></main>;
 }
 
 function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
@@ -4705,7 +4719,7 @@ function ChangePasswordScreen({ account, onChangePassword, onLogout }) {
     <main className="login-page">
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
-          <img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+          <BrandWordmark className="login-logo" />
           <div>
             <p className="eyebrow">First-time security setup</p>
             <h2>Create your private password</h2>
@@ -4777,7 +4791,7 @@ function ApplicationsModule({ session, visibleNav, setActiveModule }) {
               <img src={assets.logo} alt="" />
             </button>
             <div className="applications-heading">
-              <span className="applications-kicker">MACE ClinicOS</span>
+              <span className="applications-kicker">ZenshoTech</span>
               <h2 id="applications-title">All applications</h2>
               <p>{applicationCount} applications available for {session.role}</p>
             </div>
@@ -4842,6 +4856,7 @@ function Dashboard({
   setActiveModule,
   openModal,
 }) {
+  const dashboardBrandLabel = (value) => String(value ?? "").replace(/^MACE(?=[\s-])/i, "ZenshoTech");
   const allowedModules = modulesForSession(session);
   const [period, setPeriod] = useState("7d");
   const periodDays = period === "30d" ? 30 : period === "12m" ? 365 : 7;
@@ -4870,8 +4885,6 @@ function Dashboard({
   });
   const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy").sort((left, right) => Number(left.stock || 0) - Number(right.stock || 0));
   const rangeLabel = `${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(new Date(`${startDate}T12:00:00`))} – ${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${endDate}T12:00:00`))}`;
-  const greetingHour = Number(new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", hourCycle: "h23" }).format(new Date()));
-  const greeting = greetingHour < 12 ? "Good morning" : greetingHour < 18 ? "Good afternoon" : "Good evening";
   const comparison = (current, previous) => {
     if (!previous) return current ? { value: 100, tone: "positive", label: "new in this period" } : { value: 0, tone: "neutral", label: "no change" };
     const value = Math.round(((current - previous) / previous) * 1000) / 10;
@@ -4909,8 +4922,8 @@ function Dashboard({
   const chartAreaPoints = `0,160 ${chartLinePoints} 700,160`;
   const activityDate = (record, preferUpdated = false) => String((preferUpdated ? record?.updatedAt : null) || record?.createdAt || record?.created || record?.date || "").slice(0, 10);
   const activity = [
-    ...(allowedModules.includes("pos") ? periodTransactions.map((transaction) => ({ id: `transaction-${transaction.id}`, icon: ReceiptText, title: "Sale completed", meta: `${transaction.invoice || "Sale"}${transaction.client ? ` · ${transaction.client}` : ""} · ${money.format(collectedTransactionAmount(transaction))}`, date: dashboardRecordDate(transaction), time: transaction.time || "" })) : []),
-    ...(allowedModules.includes("appointments") ? appointments.filter((appointment) => { const date = activityDate(appointment); return date >= startDate && date <= endDate; }).map((appointment) => ({ id: `appointment-${appointment.id}`, icon: CalendarDays, title: "Appointment booked", meta: `${appointment.client} · ${appointment.service}`, date: activityDate(appointment), time: "" })) : []),
+    ...(allowedModules.includes("pos") ? periodTransactions.map((transaction) => ({ id: `transaction-${transaction.id}`, icon: ReceiptText, title: "Sale completed", meta: `${dashboardBrandLabel(transaction.invoice || "Sale")}${transaction.client ? ` · ${transaction.client}` : ""} · ${money.format(collectedTransactionAmount(transaction))}`, date: dashboardRecordDate(transaction), time: transaction.time || "" })) : []),
+    ...(allowedModules.includes("appointments") ? appointments.filter((appointment) => { const date = activityDate(appointment); return date >= startDate && date <= endDate; }).map((appointment) => ({ id: `appointment-${appointment.id}`, icon: CalendarDays, title: "Appointment booked", meta: `${appointment.client} · ${dashboardBrandLabel(appointment.service)}`, date: activityDate(appointment), time: "" })) : []),
     ...(allowedModules.includes("clients") ? newClients.map((client) => ({ id: `client-${client.id}`, icon: Users, title: "New client added", meta: client.fullName || client.name || "Client profile", date: activityDate(client), time: "" })) : []),
     ...(allowedModules.includes("inventory") ? inventoryMovements.filter((movement) => inRange(movement)).map((movement) => ({ id: `inventory-${movement.id}`, icon: Boxes, title: "Inventory received", meta: `${movement.item} · ${Number(movement.qty || 0).toLocaleString("en-PH")} ${movement.unit || "units"}`, date: dashboardRecordDate(movement), time: "" })) : []),
     ...(allowedModules.includes("leads") ? leads.filter((lead) => { const date = activityDate(lead, true); return date >= startDate && date <= endDate; }).map((lead) => ({ id: `lead-${lead.id}`, icon: Inbox, title: "Lead updated", meta: `${lead.name || "Lead"} · ${canonicalLeadStatus(lead.status)}`, date: activityDate(lead, true), time: "" })) : []),
@@ -4936,8 +4949,8 @@ function Dashboard({
     <div className="clinic-dashboard">
       <header className="clinic-dashboard-welcome">
         <div>
-          <p className="eyebrow">MACE CLINICOS</p>
-          <h2>{greeting}, {session.name}.</h2>
+          <p className="eyebrow">ZENSHOTECH</p>
+          <h2>Good morning, {dashboardBrandLabel(session.name)}</h2>
           <p>Here&apos;s what&apos;s happening across your clinics today.</p>
         </div>
         <div className="clinic-dashboard-controls">
@@ -4972,7 +4985,7 @@ function Dashboard({
                 <div className="dashboard-appointment-row" role="row" key={appointment.id}>
                   <time dateTime={`${appointment.date}T${appointment.time}`}>{formatScheduleTime(parseTimeToMinutes(appointment.time))}</time>
                   <span className="dashboard-patient"><i>{initialsFor(appointment.client)}</i><span><strong>{appointment.client}</strong><small>{appointment.id}</small></span></span>
-                  <span><strong>{appointment.service}</strong><small>{appointmentDurationMinutes(appointment, services)} min</small></span>
+                  <span><strong>{dashboardBrandLabel(appointment.service)}</strong><small>{appointmentDurationMinutes(appointment, services)} min</small></span>
                   <span><strong>{appointment.staff || "Unassigned"}</strong><small>{appointment.room || "Room pending"}</small></span>
                   <StatusBadge status={canonicalAppointmentStatus(appointment.status)} />
                 </div>
@@ -5016,7 +5029,7 @@ function Dashboard({
 
         {allowedModules.includes("reports") && <article className="clinic-dashboard-card">
           <DashboardCardHeading title="Branch performance" action={period === "12m" ? "12 months" : period === "30d" ? "30 days" : "7 days"} />
-          {branchPerformance.length ? <div className="dashboard-branch-list">{branchPerformance.map((branch) => <div className="dashboard-branch-item" key={branch.id}><div><strong>{branch.name}</strong><span>{branch.percentage}%</span></div><small>{money.format(branch.revenue)} / {branch.previous ? `${money.format(branch.previous)} previous` : "No previous-period target"}</small><i><span style={{ width: `${Math.min(100, branch.percentage)}%` }} /></i></div>)}</div> : <EmptyState title="No branch performance yet" copy="Revenue appears after completed sales in this date range." />}
+          {branchPerformance.length ? <div className="dashboard-branch-list">{branchPerformance.map((branch) => <div className="dashboard-branch-item" key={branch.id}><div><strong>{dashboardBrandLabel(branch.name)}</strong><span>{branch.percentage}%</span></div><small>{money.format(branch.revenue)} / {branch.previous ? `${money.format(branch.previous)} previous` : "No previous-period target"}</small><i><span style={{ width: `${Math.min(100, branch.percentage)}%` }} /></i></div>)}</div> : <EmptyState title="No branch performance yet" copy="Revenue appears after completed sales in this date range." />}
           <button className="clinic-card-footer-action" type="button" onClick={() => setActiveModule(allowedModules.includes("branches") ? "branches" : "reports")}>{allowedModules.includes("branches") ? "View all branches" : "View reports"} <ChevronRight size={15} aria-hidden="true" /></button>
         </article>}
       </section>
@@ -5464,7 +5477,7 @@ function buildRoleWorkspace({
       tone: "admin",
       eyebrow: "Super admin workspace",
       title: "Access, settings, and system readiness for every branch.",
-      copy: "Manage configuration, branches, audit readiness, and the full ClinicOS module set.",
+      copy: "Manage configuration, branches, audit readiness, and the full ZenshoTech module set.",
       chips: ["Access", "Settings", "Audit", "Branches"],
       metrics: [
         { icon: ShieldCheck, label: "Users", value: users.length, tone: "blue" },
@@ -8086,7 +8099,7 @@ function LegacyAppointmentsModule({
       segment: "Service category",
       channel: "SMS",
       subject: "Appointment reminder",
-      message: `Hi ${appointment.client}, this is your reminder for ${appointment.service} at MACE on ${formatDate(appointment.date)} at ${appointment.time}. Reply YES to confirm.`,
+      message: `Hi ${appointment.client}, this is your reminder for ${appointment.service} at ZenshoTech on ${formatDate(appointment.date)} at ${appointment.time}. Reply YES to confirm.`,
       status: "Draft",
     });
   }
@@ -9038,8 +9051,8 @@ function AppointmentsModule({
       name: `${channel} reminder - ${appointment.client}`,
       segment: "Service category",
       channel,
-      subject: "Your MACE appointment reminder",
-      message: `Hi ${appointment.client}, this is your reminder for ${appointment.service} at MACE on ${formatDate(appointment.date)} at ${formatScheduleTime(parseTimeToMinutes(appointment.time))}. Reply YES to confirm.`,
+      subject: "Your ZenshoTech appointment reminder",
+      message: `Hi ${appointment.client}, this is your reminder for ${appointment.service} at ZenshoTech on ${formatDate(appointment.date)} at ${formatScheduleTime(parseTimeToMinutes(appointment.time))}. Reply YES to confirm.`,
       status: "Draft",
     });
   }
@@ -11166,7 +11179,7 @@ function LeadsModule({
           <button className="secondary-button" type="button" disabled={isImporting} onClick={() => importInputRef.current?.click()}>
             <Upload size={16} aria-hidden="true" /> {isImporting ? "Importing..." : "Import"}
           </button>
-          <button className="secondary-button" type="button" disabled={!filteredLeads.length} onClick={() => downloadCsv("mace-leads.csv", filteredLeads, exportColumns)}>
+          <button className="secondary-button" type="button" disabled={!filteredLeads.length} onClick={() => downloadCsv("zenshotech-leads.csv", filteredLeads, exportColumns)}>
             <Download size={16} aria-hidden="true" /> Export
           </button>
         </div>
@@ -12113,7 +12126,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
   const filterModules = [...new Set(Object.values(capabilities.roleModules || roleAccess).flat())];
 
   if (usersExportRef) {
-    usersExportRef.current = () => downloadCsv("mace-users-and-invitations.csv", [
+    usersExportRef.current = () => downloadCsv("zenshotech-users-and-invitations.csv", [
       ...accounts.map((account) => ({
         recordType: "User",
         name: account.name,
@@ -12144,7 +12157,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
   }
 
   if (profilesExportRef) {
-    profilesExportRef.current = () => downloadCsv("mace-employee-profiles.csv", staff, [
+    profilesExportRef.current = () => downloadCsv("zenshotech-employee-profiles.csv", staff, [
       { key: "id", label: "Employee ID" },
       { key: "name", label: "Name" },
       { key: "role", label: "Role" },
@@ -12418,9 +12431,9 @@ function AcceptInvitationScreen({ token, session, onLogin, onLogout }) {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
   if (invitation?.accountExists && !session) {
-    return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={signIn}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" /><p className="eyebrow">Sign in to continue</p><h2>This invitation is for an existing MACE user</h2><p className="login-helper">Sign in as <strong>{invitation.email}</strong>, then review and accept the invitation.</p><label><span>Email</span><input value={invitation.email} readOnly /></label><label><span>Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button></form></section></main>;
+    return <main className="login-page"><section className="login-panel"><form className="login-card" onSubmit={signIn}><BrandWordmark className="login-logo" /><p className="eyebrow">Sign in to continue</p><h2>This invitation is for an existing ZenshoTech user</h2><p className="login-helper">Sign in as <strong>{invitation.email}</strong>, then review and accept the invitation.</p><label><span>Email</span><input value={invitation.email} readOnly /></label><label><span>Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button></form></section></main>;
   }
-  return <main className="login-page"><section className="login-panel"><form className="login-card invitation-accept-card" onSubmit={submit}><img className="login-logo" src={assets.logo} alt="MACE by Dr. Mace" />
+  return <main className="login-page"><section className="login-panel"><form className="login-card invitation-accept-card" onSubmit={submit}><BrandWordmark className="login-logo" />
     {done ? <><p className="eyebrow">Invitation accepted</p><h2>Your workspace is ready</h2><p className="login-helper">Your approved role, branch access, modules, and permissions are active.</p><a className="primary-button full" href={redirectPath}>Continue to your dashboard</a></> : <><p className="eyebrow">Secure organization invitation</p><h2>{loading && !invitation ? "Checking invitation..." : invitation ? `Welcome, ${invitation.firstName || invitation.name}` : "Invitation unavailable"}</h2>{invitation && <div className="invitation-summary"><div><span>Organization</span><strong>{invitation.organization?.name}</strong></div><div><span>Branch</span><strong>{invitation.branches?.map((branch) => branch.name).join(", ") || "Organization-wide"}</strong></div><div><span>Role</span><strong>{invitation.role}</strong></div><div><span>Expires</span><strong>{new Date(invitation.expiresAt).toLocaleDateString("en-PH")}</strong></div></div>}{invitation && invitation.status !== "Pending" && <div className="inline-state danger"><AlertCircle size={16} />{invitation.status === "Expired" ? "This invitation has expired. Ask an administrator to resend it." : invitation.status === "Revoked" ? "This invitation was cancelled. Contact your administrator." : "This invitation has already been accepted."}</div>}{emailMismatch && <div className="inline-state danger"><AlertCircle size={16} />This invitation belongs to {invitation.email}, but you are signed in as {session.email}.</div>}{emailMismatch && <button className="ghost-button full" type="button" onClick={onLogout}>Sign out and use the invited email</button>}{invitation && !invitation.accountExists && !session && <><label><span>Create password</span><input required type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label><span>Confirm password</span><input required type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label><p className="login-helper">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p></>} {invitation?.status === "Pending" && !emailMismatch && <><label className="confirmation-check"><input required type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I accept the applicable Terms of Service.</span></label><label className="confirmation-check"><input required type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} /><span>I acknowledge the Privacy Policy.</span></label></>}{error && <div className="inline-state danger"><AlertCircle size={16} />{error}</div>}<button className="primary-button full" disabled={loading || !invitation || invitation.status !== "Pending" || emailMismatch}>{loading ? "Joining..." : "Accept invitation"}</button></>}
   </form></section></main>;
 }
@@ -12647,16 +12660,16 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             {branchToEdit && (
               <div className="branch-registration-qr">
                 <img src={`/api/public-registration/qr?branch=${encodeURIComponent(branchToEdit.name)}`} alt={`Client registration QR for ${branchToEdit.name}`} />
-                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified MACE profile.</span><a href={`/register?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
+                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified ZenshoTech profile.</span><a href={`/register?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
               </div>
             )}
             <div className="form-grid">
-              <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. MACE Makati" /></label>
-              <label><span>Unique branch code</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} placeholder="e.g. MACE-MKT" /></label>
+              <label><span>Branch name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. ZenshoTech Makati" /></label>
+              <label><span>Unique branch code</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} placeholder="e.g. ZEN-MKT" /></label>
               <label><span>City</span><input required value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label>
               <label className="full-span"><span>Complete address</span><input required value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Building, street, city" /></label>
               <label><span>Phone</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Branch contact number" /></label>
-              <label><span>Email address</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="branch@macebydrmace.com" /></label>
+              <label><span>Email address</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="branch@example.com" /></label>
               <label><span>Time zone</span><select value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })}><option>Asia/Manila</option><option>Asia/Singapore</option><option>Asia/Tokyo</option><option>UTC</option></select></label>
               <label><span>Number of rooms</span><input min="0" max="50" type="number" value={form.roomCount} onChange={(event) => setForm({ ...form, roomCount: event.target.value })} /></label>
               <label><span>Number of couches</span><input min="0" max="50" type="number" value={form.couches} onChange={(event) => setForm({ ...form, couches: event.target.value })} /></label>
@@ -12980,7 +12993,7 @@ function BookingPortal({ services, staff, onSubmit }) {
   return (
     <section className="booking-page">
       <div className="booking-hero">
-        <img src={assets.clinic} alt="MACE clinic interior" />
+        <img src={assets.clinic} alt="Clinic interior" />
         <div>
           <p className="eyebrow">Book a Consultation</p>
           <h2>The brand behind beautiful faces</h2>
@@ -13213,7 +13226,7 @@ function SettingsModule({ settings, users, auditLogs, discounts, promotions = []
 function SupportModule() {
   const supportChannels = [
     { icon: PhoneCall, title: "Priority support line", copy: "0917 109 8462 / 9:00 AM-8:00 PM daily" },
-    { icon: Mail, title: "Operations inbox", copy: "support@maceclinic.test for account, billing, and access requests" },
+    { icon: Mail, title: "Operations inbox", copy: "Contact your administrator for account, billing, and access requests" },
     { icon: MessageSquareText, title: "Launch group chat", copy: "Front desk, cashier, clinical, inventory, and marketing coordinators" },
   ];
   const onboardingSteps = [
@@ -13881,7 +13894,7 @@ function ModalHost({
     "gift-certificate": {
       title: modal.payload?.id ? "Edit Gift Certificate" : "Issue Gift Certificate",
       initial: {
-        code: `MACE-GC-${Date.now().toString(36).toUpperCase()}`,
+        code: `ZENSHO-GC-${Date.now().toString(36).toUpperCase()}`,
         client: clients[0]?.fullName || "",
         type: "Monetary Value",
         serviceId: "",
@@ -13955,8 +13968,8 @@ function ModalHost({
         segment: "Inactive clients",
         channel: "SMS",
         templateId: defaultMarketingTemplate?.id ?? "",
-        subject: "A note from MACE",
-        message: defaultMarketingTemplate?.text ?? "Hi {{client}}, it has been a while. Book your personalized care session with MACE this week.",
+        subject: "A note from ZenshoTech",
+        message: defaultMarketingTemplate?.text ?? "Hi {{client}}, it has been a while. Book your personalized care session with ZenshoTech this week.",
         sent: 0,
         booked: 0,
         credits: 0,
@@ -15061,7 +15074,7 @@ function SmartTable({
   emptyTitle = "No records found",
   toolbarActions = null,
   showSearch = false,
-  exportFilename = "mace-export.csv",
+  exportFilename = "zenshotech-export.csv",
   exportLabel = "CSV",
   exportColumns = null,
   allowEmptyExport = false,
