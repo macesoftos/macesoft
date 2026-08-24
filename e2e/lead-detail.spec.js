@@ -109,6 +109,25 @@ test("puts the customer inquiry and response actions first", async ({ page }) =>
   await expect(page.getByText("Attribution and related records")).toBeVisible();
 });
 
+test("reveals the navigation when the pointer reaches the left edge", async ({ page }) => {
+  await page.goto("/leads");
+
+  const trigger = page.getByRole("button", { name: "Show navigation menu" });
+  const navigation = page.locator(".edge-sidebar-overlay");
+
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+  await page.mouse.move(1, 320);
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(navigation).toHaveClass(/is-open/);
+  await expect(page.locator("#edge-primary-sidebar")).toBeInViewport();
+
+  await page.mouse.move(400, 320);
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(navigation).not.toHaveClass(/is-open/);
+});
+
 test("reveals focused follow-up and booking forms from the main actions", async ({ page }) => {
   await page.goto(`/leads/${lead.id}`);
 

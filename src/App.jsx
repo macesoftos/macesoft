@@ -841,6 +841,7 @@ function App() {
   );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useStoredState("sidebar-collapsed", false);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
+  const [isEdgeSidebarOpen, setIsEdgeSidebarOpen] = useState(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [modal, setModal] = useState(null);
@@ -1186,6 +1187,7 @@ function App() {
       if (!options.keepDrawerOpen) {
         setIsSidebarDrawerOpen(false);
       }
+      setIsEdgeSidebarOpen(false);
       setIsMobileMoreOpen(false);
     },
     [session, sessionModules, setActiveModuleState],
@@ -1202,6 +1204,7 @@ function App() {
       window.requestAnimationFrame(() => window.scrollTo(0, 0));
     }
     setIsSidebarDrawerOpen(false);
+    setIsEdgeSidebarOpen(false);
     setIsMobileMoreOpen(false);
   }, [setActiveModuleState]);
 
@@ -2804,24 +2807,44 @@ function App() {
   if (!sessionModules.includes(activeModule)) {
     const blockedLabel = navItems.find((item) => item.id === activeModule)?.label || "This module";
     return (
-      <main className="login-page module-unavailable-page">
-        <section className="login-panel">
-          <div className="login-card auth-loading-card">
-            <LockKeyhole size={30} aria-hidden="true" />
-            <p className="eyebrow">{branchScope}</p>
-            <strong>Module not available for this branch</strong>
-            <p className="login-helper">{blockedLabel} is disabled for the active branch or is not included in your role permissions.</p>
-            <button className="primary-button full" type="button" onClick={() => setActiveModule(sessionModules.includes(defaultModuleId) ? defaultModuleId : sessionModules[0], { replace: true })}>Open an available workspace</button>
-            <button className="ghost-button full" type="button" onClick={handleLogout}>Sign out</button>
-          </div>
-        </section>
-      </main>
+      <>
+        <EdgeRevealNavigation
+          activeModule={activeModule}
+          open={isEdgeSidebarOpen}
+          onClose={() => setIsEdgeSidebarOpen(false)}
+          onNavigate={setActiveModule}
+          onOpen={() => setIsEdgeSidebarOpen(true)}
+          sections={visibleNavSections}
+          session={session}
+        />
+        <main className="login-page module-unavailable-page">
+          <section className="login-panel">
+            <div className="login-card auth-loading-card">
+              <LockKeyhole size={30} aria-hidden="true" />
+              <p className="eyebrow">{branchScope}</p>
+              <strong>Module not available for this branch</strong>
+              <p className="login-helper">{blockedLabel} is disabled for the active branch or is not included in your role permissions.</p>
+              <button className="primary-button full" type="button" onClick={() => setActiveModule(sessionModules.includes(defaultModuleId) ? defaultModuleId : sessionModules[0], { replace: true })}>Open an available workspace</button>
+              <button className="ghost-button full" type="button" onClick={handleLogout}>Sign out</button>
+            </div>
+          </section>
+        </main>
+      </>
     );
   }
 
   if (isFlipbooksView) {
     return (
       <>
+        <EdgeRevealNavigation
+          activeModule={activeModule}
+          open={isEdgeSidebarOpen}
+          onClose={() => setIsEdgeSidebarOpen(false)}
+          onNavigate={setActiveModule}
+          onOpen={() => setIsEdgeSidebarOpen(true)}
+          sections={visibleNavSections}
+          session={session}
+        />
         <FlipbooksWorkspace
           notify={notify}
           onExit={() => setActiveModule("overview")}
@@ -2840,6 +2863,7 @@ function App() {
   const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
   const isStandaloneWorkspaceView = !mainSystemModules.has(activeModule);
   const showSidebar = visibleNavSections.length > 0 && !isStandaloneWorkspaceView;
+  const showEdgeSidebar = visibleNavSections.length > 0 && isStandaloneWorkspaceView;
   const showBackButton = activeModule !== "overview" && !showSidebar;
   const canOpenPos = sessionModules.includes("pos");
   const canManageAppointments = sessionModules.includes("appointments");
@@ -2876,6 +2900,18 @@ function App() {
   return (
     <>
       <div className={shellClassName}>
+        {showEdgeSidebar && (
+          <EdgeRevealNavigation
+            activeModule={activeModule}
+            open={isEdgeSidebarOpen}
+            onClose={() => setIsEdgeSidebarOpen(false)}
+            onNavigate={setActiveModule}
+            onOpen={() => setIsEdgeSidebarOpen(true)}
+            sections={visibleNavSections}
+            session={session}
+          />
+        )}
+
         {showSidebar && (
           <SidebarNavigation
             activeModule={activeModule}
@@ -3583,10 +3619,65 @@ function DataTable(props) {
   return <SmartTable {...props} />;
 }
 
+function EdgeRevealNavigation({ activeModule, open, onClose, onNavigate, onOpen, sections, session }) {
+  if (!sections.length) return null;
+
+  return (
+    <>
+      <button
+        className="edge-sidebar-trigger"
+        type="button"
+        aria-label="Show navigation menu"
+        aria-controls="edge-primary-sidebar"
+        aria-expanded={open}
+        onFocus={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+          if (event.key === "Escape") onClose();
+        }}
+        onMouseEnter={onOpen}
+      />
+      <div
+        className={`edge-sidebar-overlay ${open ? "is-open" : ""}`}
+        aria-hidden={!open}
+        inert={open ? undefined : ""}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) onClose();
+        }}
+        onFocusCapture={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          }
+        }}
+        onMouseEnter={onOpen}
+        onMouseLeave={onClose}
+      >
+        <SidebarNavigation
+          activeModule={activeModule}
+          collapsed={false}
+          drawerOpen={false}
+          id="edge-primary-sidebar"
+          onCloseDrawer={onClose}
+          onNavigate={onNavigate}
+          onToggleCollapsed={onClose}
+          sections={sections}
+          session={session}
+        />
+      </div>
+    </>
+  );
+}
+
 function SidebarNavigation({
   activeModule,
   collapsed,
   drawerOpen,
+  id = "primary-sidebar",
   onCloseDrawer,
   onNavigate,
   onToggleCollapsed,
@@ -3610,7 +3701,7 @@ function SidebarNavigation({
     <>
       <aside
         className={`sidebar ${collapsed ? "is-collapsed" : ""} ${drawerOpen ? "is-open" : ""}`}
-        id="primary-sidebar"
+        id={id}
         aria-label="ClinicOS modules"
       >
         <div className="sidebar-header">
