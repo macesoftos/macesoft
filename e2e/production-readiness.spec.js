@@ -70,7 +70,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page).toHaveURL(/\/appointments$/);
   await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
   await expect(page.locator(".sidebar")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Back to dashboard" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to applications" })).toBeVisible();
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Filter schedule", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Filter by appointment status")).toBeVisible();
@@ -361,8 +361,8 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await gotoAuthenticatedWorkspace(page, "/payroll");
-  await page.getByRole("button", { name: "Back to dashboard" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.getByRole("button", { name: "Back to applications" }).click();
+  await expect(page).toHaveURL(/\/applications$/);
 
   await gotoAuthenticatedWorkspace(page, "/#/support");
   await expect(page.getByRole("button", { name: "Create new" })).toHaveCount(0);
