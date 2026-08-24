@@ -3067,6 +3067,7 @@ function App() {
               appointments={scopedAppointments}
               transactions={scopedTransactions}
               inventory={scopedInventory}
+              inventoryMovements={inventoryMovements}
               leads={scopedLeads}
               services={services}
               staff={scopedStaff}
@@ -4825,6 +4826,7 @@ function Dashboard({
   appointments,
   transactions,
   inventory,
+  inventoryMovements = [],
   leads,
   services,
   staff,
@@ -4840,155 +4842,201 @@ function Dashboard({
   setActiveModule,
   openModal,
 }) {
-  const topServices = useMemo(() => tallyItems(transactions, "Service").slice(0, 5), [transactions]);
-  const topProducts = useMemo(() => tallyItems(transactions, "Product").slice(0, 5), [transactions]);
   const allowedModules = modulesForSession(session);
-  const canViewFinancialDashboard = ["pos", "expenses", "reports"].every((module) => allowedModules.includes(module));
-  const appNav = visibleNav.filter((item) => item.id !== "overview");
-  const branchCards = branchRecords
-    .filter((branch) => branchScope === "All branches" || branch.name === branchScope)
-    .map((branch) => {
-      const branchTransactions = transactions.filter((transaction) => transaction.branch === branch.name && transaction.status !== "Void" && !transaction.testMode);
-      const revenue = branchTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
-      return { ...branch, revenue };
-    });
-  const activeBranchCount = branchRecords.filter((branch) => branch.status === "Active").length;
-  const config = buildRoleWorkspace({
-    session,
-    stats,
-    clients,
-    appointments,
-    transactions,
-    inventory,
-    leads,
-    services,
-    staff,
-    expenses,
-    treatments,
-    packages,
-    settings,
-    users,
-    topServices,
-    topProducts,
-    branchCards,
-    activeBranchCount,
-    allowedModules,
-    setActiveModule,
-    openModal,
+  const [period, setPeriod] = useState("7d");
+  const periodDays = period === "30d" ? 30 : period === "12m" ? 365 : 7;
+  const endDate = todayDate();
+  const startDate = isoDate(addDays(new Date(`${endDate}T12:00:00`), -(periodDays - 1)));
+  const previousEndDate = isoDate(addDays(new Date(`${startDate}T12:00:00`), -1));
+  const previousStartDate = isoDate(addDays(new Date(`${previousEndDate}T12:00:00`), -(periodDays - 1)));
+  const inRange = (record, from = startDate, to = endDate) => {
+    const date = dashboardRecordDate(record);
+    return Boolean(date && date >= from && date <= to);
+  };
+  const validTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode && collectedTransactionAmount(transaction) > 0);
+  const periodTransactions = validTransactions.filter((transaction) => inRange(transaction));
+  const previousTransactions = validTransactions.filter((transaction) => inRange(transaction, previousStartDate, previousEndDate));
+  const revenue = periodTransactions.reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0);
+  const previousRevenue = previousTransactions.reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0);
+  const todayAppointments = appointments
+    .filter((appointment) => appointment.date === endDate)
+    .sort((left, right) => parseTimeToMinutes(left.time) - parseTimeToMinutes(right.time));
+  const newClients = clients.filter((client) => inRange(client));
+  const previousClients = clients.filter((client) => inRange(client, previousStartDate, previousEndDate));
+  const openLeads = leads.filter((lead) => !closedLeadStatuses.includes(canonicalLeadStatus(lead.status)));
+  const periodOpenLeads = openLeads.filter((lead) => {
+    const date = String(lead.updatedAt || lead.createdAt || lead.created || "").slice(0, 10);
+    return date >= startDate && date <= endDate;
   });
-  const showHero = session.role !== "Cashier" && !canViewFinancialDashboard;
-  const showActionStrip = session.role === "Cashier";
+  const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy").sort((left, right) => Number(left.stock || 0) - Number(right.stock || 0));
+  const rangeLabel = `${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(new Date(`${startDate}T12:00:00`))} – ${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${endDate}T12:00:00`))}`;
+  const greetingHour = Number(new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", hourCycle: "h23" }).format(new Date()));
+  const greeting = greetingHour < 12 ? "Good morning" : greetingHour < 18 ? "Good afternoon" : "Good evening";
+  const comparison = (current, previous) => {
+    if (!previous) return current ? { value: 100, tone: "positive", label: "new in this period" } : { value: 0, tone: "neutral", label: "no change" };
+    const value = Math.round(((current - previous) / previous) * 1000) / 10;
+    return { value: Math.abs(value), tone: value > 0 ? "positive" : value < 0 ? "negative" : "neutral", label: "vs previous period" };
+  };
+  const yesterdayDate = isoDate(addDays(new Date(`${endDate}T12:00:00`), -1));
+  const appointmentComparison = { ...comparison(todayAppointments.length, appointments.filter((appointment) => appointment.date === yesterdayDate).length), label: "vs yesterday" };
+  const revenueComparison = comparison(revenue, previousRevenue);
+  const clientComparison = comparison(newClients.length, previousClients.length);
+  const leadComparison = { value: periodOpenLeads.length, tone: "neutral", label: "updated in selected period", percent: false };
+  const chartPoints = (() => {
+    const pointCount = period === "12m" ? 12 : 7;
+    return Array.from({ length: pointCount }, (_, index) => {
+      const bucketStart = addDays(new Date(`${startDate}T12:00:00`), Math.floor((index * periodDays) / pointCount));
+      const bucketEnd = addDays(new Date(`${startDate}T12:00:00`), Math.floor(((index + 1) * periodDays) / pointCount) - 1);
+      const from = isoDate(bucketStart);
+      const to = isoDate(bucketEnd);
+      const amount = validTransactions
+        .filter((transaction) => inRange(transaction, from, to))
+        .reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0);
+      return {
+        id: `${from}-${to}`,
+        amount,
+        label: new Intl.DateTimeFormat("en-PH", period === "12m" ? { month: "short" } : { month: "short", day: "numeric" }).format(bucketEnd),
+      };
+    });
+  })();
+  const chartMax = Math.max(1, ...chartPoints.map((point) => point.amount));
+  const chartCoordinates = chartPoints.map((point, index) => {
+    const x = chartPoints.length === 1 ? 350 : (index / (chartPoints.length - 1)) * 700;
+    const y = 155 - (point.amount / chartMax) * 125;
+    return { ...point, x, y };
+  });
+  const chartLinePoints = chartCoordinates.map((point) => `${point.x},${point.y}`).join(" ");
+  const chartAreaPoints = `0,160 ${chartLinePoints} 700,160`;
+  const activityDate = (record, preferUpdated = false) => String((preferUpdated ? record?.updatedAt : null) || record?.createdAt || record?.created || record?.date || "").slice(0, 10);
+  const activity = [
+    ...(allowedModules.includes("pos") ? periodTransactions.map((transaction) => ({ id: `transaction-${transaction.id}`, icon: ReceiptText, title: "Sale completed", meta: `${transaction.invoice || "Sale"}${transaction.client ? ` · ${transaction.client}` : ""} · ${money.format(collectedTransactionAmount(transaction))}`, date: dashboardRecordDate(transaction), time: transaction.time || "" })) : []),
+    ...(allowedModules.includes("appointments") ? appointments.filter((appointment) => { const date = activityDate(appointment); return date >= startDate && date <= endDate; }).map((appointment) => ({ id: `appointment-${appointment.id}`, icon: CalendarDays, title: "Appointment booked", meta: `${appointment.client} · ${appointment.service}`, date: activityDate(appointment), time: "" })) : []),
+    ...(allowedModules.includes("clients") ? newClients.map((client) => ({ id: `client-${client.id}`, icon: Users, title: "New client added", meta: client.fullName || client.name || "Client profile", date: activityDate(client), time: "" })) : []),
+    ...(allowedModules.includes("inventory") ? inventoryMovements.filter((movement) => inRange(movement)).map((movement) => ({ id: `inventory-${movement.id}`, icon: Boxes, title: "Inventory received", meta: `${movement.item} · ${Number(movement.qty || 0).toLocaleString("en-PH")} ${movement.unit || "units"}`, date: dashboardRecordDate(movement), time: "" })) : []),
+    ...(allowedModules.includes("leads") ? leads.filter((lead) => { const date = activityDate(lead, true); return date >= startDate && date <= endDate; }).map((lead) => ({ id: `lead-${lead.id}`, icon: Inbox, title: "Lead updated", meta: `${lead.name || "Lead"} · ${canonicalLeadStatus(lead.status)}`, date: activityDate(lead, true), time: "" })) : []),
+  ].sort((left, right) => `${right.date} ${right.time}`.localeCompare(`${left.date} ${left.time}`)).slice(0, 5);
+  const branchPerformance = branchRecords
+    .filter((branch) => branchScope === "All branches" || branch.name === branchScope)
+    .filter((branch) => branch.status === "Active" || branch.branchStatus === "Active")
+    .map((branch) => {
+      const branchRevenue = periodTransactions.filter((transaction) => transaction.branch === branch.name).reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0);
+      const previous = previousTransactions.filter((transaction) => transaction.branch === branch.name).reduce((sum, transaction) => sum + collectedTransactionAmount(transaction), 0);
+      const percentage = previous ? Math.round((branchRevenue / previous) * 100) : branchRevenue ? 100 : 0;
+      return { ...branch, revenue: branchRevenue, previous, percentage };
+    });
+  const activityModule = allowedModules.includes("appointments") ? "appointments" : allowedModules.includes("clients") ? "clients" : allowedModules.includes("leads") ? "leads" : "overview";
+  const quickActions = [
+    allowedModules.includes("appointments") && { label: "Add appointment", icon: CalendarDays, onClick: () => openModal("appointment", { status: "Draft", date: endDate }) },
+    allowedModules.includes("clients") && { label: "New client", icon: Users, onClick: () => openModal("client") },
+    allowedModules.includes("pos") && { label: "Create sale", icon: ShoppingBag, onClick: () => setActiveModule("pos") },
+    allowedModules.includes("sms") && { label: "Send campaign", icon: Send, onClick: () => openModal("campaign") },
+  ].filter(Boolean);
 
   return (
-    <div className={`overview-dashboard overview-${config.tone}`}>
-      {canViewFinancialDashboard && (
-        <OverallBusinessDashboard
-          allowedModules={allowedModules}
-          appointments={appointments}
-          branchScope={branchScope}
-          clients={clients}
-          expenses={expenses}
-          inventory={inventory}
-          leads={leads}
-          packages={packages}
-          setActiveModule={setActiveModule}
-          transactions={transactions}
-          treatments={treatments}
-        />
-      )}
+    <div className="clinic-dashboard">
+      <header className="clinic-dashboard-welcome">
+        <div>
+          <p className="eyebrow">MACE CLINICOS</p>
+          <h2>{greeting}, {session.name}.</h2>
+          <p>Here&apos;s what&apos;s happening across your clinics today.</p>
+        </div>
+        <div className="clinic-dashboard-controls">
+          <label className="clinic-dashboard-range">
+            <CalendarDays size={17} aria-hidden="true" />
+            <span className="sr-only">Dashboard date range</span>
+            <select value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Dashboard date range">
+              <option value="7d">{period === "7d" ? `${rangeLabel} · 7 days` : "Last 7 days"}</option>
+              <option value="30d">{period === "30d" ? `${rangeLabel} · 30 days` : "Last 30 days"}</option>
+              <option value="12m">{period === "12m" ? `${rangeLabel} · 12 months` : "Last 12 months"}</option>
+            </select>
+            <ChevronDown size={15} aria-hidden="true" />
+          </label>
+          {allowedModules.includes("appointments") && <button className="clinic-dashboard-primary" type="button" onClick={() => openModal("appointment", { status: "Draft", date: endDate })}><Plus size={17} aria-hidden="true" /> New appointment</button>}
+        </div>
+      </header>
 
-      {showHero && (
-        <section className={`surface-panel role-hero ${config.tone}`}>
-          <div>
-            <p className="eyebrow">{config.eyebrow}</p>
-            <h2>{config.title}</h2>
-            <p>{config.copy}</p>
-            <div className="workflow-chips" aria-label={`${session.role} workspace focus`}>
-              {config.chips.map((chip) => <span key={chip}>{chip}</span>)}
+      <section className="clinic-kpi-grid" aria-label="Clinic performance summary">
+        {allowedModules.includes("appointments") && <DashboardKpi icon={CalendarDays} label="Today’s appointments" value={todayAppointments.length.toLocaleString("en-PH")} comparison={appointmentComparison} />}
+        {allowedModules.includes("pos") && <DashboardKpi icon={CircleDollarSign} label="Revenue" value={money.format(revenue)} comparison={revenueComparison} tone="sage" />}
+        {allowedModules.includes("clients") && <DashboardKpi icon={UserCheck} label="New clients" value={newClients.length.toLocaleString("en-PH")} comparison={clientComparison} />}
+        {allowedModules.includes("leads") && <DashboardKpi icon={Users} label="Open leads" value={openLeads.length.toLocaleString("en-PH")} comparison={leadComparison} tone="sage" />}
+      </section>
+
+      <section className="clinic-dashboard-main-grid">
+        {allowedModules.includes("appointments") && <article className="clinic-dashboard-card appointments-card">
+          <DashboardCardHeading title="Appointments today" action="View all" onAction={() => setActiveModule("appointments")} />
+          {todayAppointments.length ? (
+            <div className="dashboard-appointment-table" role="table" aria-label="Today's appointments">
+              <div className="dashboard-appointment-head" role="row"><span>Time</span><span>Patient</span><span>Service</span><span>Practitioner</span><span>Status</span></div>
+              {todayAppointments.slice(0, 5).map((appointment) => (
+                <div className="dashboard-appointment-row" role="row" key={appointment.id}>
+                  <time dateTime={`${appointment.date}T${appointment.time}`}>{formatScheduleTime(parseTimeToMinutes(appointment.time))}</time>
+                  <span className="dashboard-patient"><i>{initialsFor(appointment.client)}</i><span><strong>{appointment.client}</strong><small>{appointment.id}</small></span></span>
+                  <span><strong>{appointment.service}</strong><small>{appointmentDurationMinutes(appointment, services)} min</small></span>
+                  <span><strong>{appointment.staff || "Unassigned"}</strong><small>{appointment.room || "Room pending"}</small></span>
+                  <StatusBadge status={canonicalAppointmentStatus(appointment.status)} />
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState title="No appointments today" copy="New bookings for today will appear here." />}
+          <button className="clinic-card-footer-action" type="button" onClick={() => setActiveModule("appointments")}>View full schedule <ChevronRight size={15} aria-hidden="true" /></button>
+        </article>}
+
+        {allowedModules.includes("pos") && <article className="clinic-dashboard-card revenue-card">
+          <div className="dashboard-card-heading revenue-heading">
+            <div><h3>Revenue overview</h3><strong>{money.format(revenue)}</strong><small>Total revenue</small></div>
+            <div className="revenue-period-tabs" role="group" aria-label="Revenue period">
+              {[{ id: "7d", label: "7 days" }, { id: "30d", label: "30 days" }, { id: "12m", label: "12 months" }].map((option) => <button aria-pressed={period === option.id} className={period === option.id ? "active" : ""} key={option.id} onClick={() => setPeriod(option.id)} type="button">{option.label}</button>)}
             </div>
           </div>
-          <div className="role-hero-actions">
-            {config.actions.slice(0, 4).map((action, index) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  className={index === 0 ? "primary-button" : "secondary-button"}
-                  key={action.title}
-                  type="button"
-                  onClick={action.onClick}
-                >
-                  <Icon size={17} aria-hidden="true" />
-                  {action.title}
-                </button>
-              );
-            })}
+          <div className="dashboard-revenue-comparison"><span className={revenueComparison.tone}>{revenueComparison.tone === "negative" ? "▼" : revenueComparison.tone === "positive" ? "▲" : "•"} {revenueComparison.value}%</span> vs previous period</div>
+          <div className="dashboard-revenue-chart" role="img" aria-label={`Revenue trend totaling ${money.format(revenue)}`}>
+            <svg viewBox="0 0 700 170" preserveAspectRatio="none" aria-hidden="true">
+              <defs><linearGradient id="dashboard-revenue-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#c59751" stopOpacity="0.34" /><stop offset="100%" stopColor="#c59751" stopOpacity="0.03" /></linearGradient></defs>
+              <polygon points={chartAreaPoints} fill="url(#dashboard-revenue-fill)" />
+              <polyline points={chartLinePoints} fill="none" stroke="#b78338" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+              {chartCoordinates.map((point) => <circle key={point.id} cx={point.x} cy={point.y} r="5" fill="#fff" stroke="#b78338" strokeWidth="2.5"><title>{point.label}: {money.format(point.amount)}</title></circle>)}
+            </svg>
+            <div className={`dashboard-revenue-labels ${period === "12m" ? "twelve" : ""}`}>{chartCoordinates.map((point) => <small key={point.id}>{point.label}</small>)}</div>
           </div>
-        </section>
-      )}
-
-      {showActionStrip && (
-        <section className="cashier-action-strip" aria-label="Cashier quick actions">
-          {config.actions.slice(0, 4).map((action, index) => {
-            const Icon = action.icon;
-            return (
-              <button
-                className={index === 0 ? "primary-button" : "secondary-button"}
-                key={action.title}
-                type="button"
-                onClick={action.onClick}
-              >
-                <Icon size={17} aria-hidden="true" />
-                {action.title}
-              </button>
-            );
-          })}
-        </section>
-      )}
-
-      {!canViewFinancialDashboard && (
-        <section className="summary-grid role-summary-grid">
-          {config.metrics.map((metric) => (
-            <Metric key={metric.label} {...metric} />
-          ))}
-        </section>
-      )}
-
-      <section className="role-work-grid">
-        <div className="surface-panel">
-          <SectionHeader icon={LayoutDashboard} title="Apps" action={`${appNav.length} available`} />
-          <div className="role-app-grid">
-            {appNav.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button className="role-app-tile" key={item.id} type="button" onClick={() => setActiveModule(item.id)}>
-                  <Icon size={19} aria-hidden="true" />
-                  <span>
-                    <strong>{item.label}</strong>
-                    <small>{moduleDescriptions[item.id] ?? "Open module"}</small>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="surface-panel">
-          <SectionHeader icon={config.focusIcon} title={config.focusTitle} action={config.focusAction} />
-          <div className="action-list">
-            {config.focusItems.map((item) => (
-              <ActionItem key={item.title} {...item} />
-            ))}
-          </div>
-        </div>
+        </article>}
       </section>
 
-      <section className="dashboard-grid">
-        {config.panels.map((panel) => (
-          <RolePanel key={panel.title} panel={panel} />
-        ))}
+      <section className="clinic-dashboard-secondary-grid">
+        <article className="clinic-dashboard-card">
+          <DashboardCardHeading title="Recent activity" action="View all" onAction={() => setActiveModule(activityModule)} />
+          {activity.length ? <div className="dashboard-activity-list">{activity.map(({ icon: Icon, ...item }) => <div className="dashboard-activity-item" key={item.id}><span><Icon size={16} aria-hidden="true" /></span><div><strong>{item.title}</strong><small>{item.meta}</small></div><time>{item.time ? formatScheduleTime(parseTimeToMinutes(item.time)) : formatDate(item.date)}</time></div>)}</div> : <EmptyState title="No recent activity" copy="Activity in this date range will appear here." />}
+        </article>
+
+        {allowedModules.includes("inventory") && <article className="clinic-dashboard-card">
+          <DashboardCardHeading title="Inventory alerts" action="View all" onAction={() => setActiveModule("inventory")} />
+          {lowStock.length ? <div className="dashboard-inventory-list">{lowStock.slice(0, 4).map((item) => <button type="button" onClick={() => setActiveModule("inventory")} key={item.id}><span className="inventory-alert-icon"><AlertCircle size={16} aria-hidden="true" /></span><span><strong>{item.item}</strong><small>{item.category || item.unit || "Inventory item"}</small></span><span><strong>{Number(item.stock || 0).toLocaleString("en-PH")} {item.unit || "left"}</strong><small>{stockStatus(item) === "Out" ? "Out of stock" : "Reorder soon"}</small></span></button>)}</div> : <EmptyState title="Inventory levels are healthy" copy="Low-stock and reorder items will appear here." />}
+          <button className="clinic-card-footer-action" type="button" onClick={() => setActiveModule("inventory")}>View all inventory <ChevronRight size={15} aria-hidden="true" /></button>
+        </article>}
+
+        {allowedModules.includes("reports") && <article className="clinic-dashboard-card">
+          <DashboardCardHeading title="Branch performance" action={period === "12m" ? "12 months" : period === "30d" ? "30 days" : "7 days"} />
+          {branchPerformance.length ? <div className="dashboard-branch-list">{branchPerformance.map((branch) => <div className="dashboard-branch-item" key={branch.id}><div><strong>{branch.name}</strong><span>{branch.percentage}%</span></div><small>{money.format(branch.revenue)} / {branch.previous ? `${money.format(branch.previous)} previous` : "No previous-period target"}</small><i><span style={{ width: `${Math.min(100, branch.percentage)}%` }} /></i></div>)}</div> : <EmptyState title="No branch performance yet" copy="Revenue appears after completed sales in this date range." />}
+          <button className="clinic-card-footer-action" type="button" onClick={() => setActiveModule(allowedModules.includes("branches") ? "branches" : "reports")}>{allowedModules.includes("branches") ? "View all branches" : "View reports"} <ChevronRight size={15} aria-hidden="true" /></button>
+        </article>}
       </section>
+
+      {quickActions.length > 0 && <section className="clinic-dashboard-quick-actions" aria-label="Quick actions">{quickActions.map(({ icon: Icon, ...action }) => <button type="button" onClick={action.onClick} key={action.label}><Icon size={19} aria-hidden="true" /> {action.label}</button>)}</section>}
     </div>
   );
+}
+
+function DashboardKpi({ icon: Icon, label, value, comparison, tone = "champagne" }) {
+  return (
+    <article className={`clinic-kpi-card ${tone}`}>
+      <span className="clinic-kpi-icon"><Icon size={22} aria-hidden="true" /></span>
+      <div><small>{label}</small><strong>{value}</strong><span className={comparison.tone}>{comparison.tone === "negative" ? "▼" : comparison.tone === "positive" ? "▲" : "•"} {comparison.value}{comparison.percent === false ? "" : "%"} <em>{comparison.label}</em></span></div>
+    </article>
+  );
+}
+
+function DashboardCardHeading({ title, action, onAction }) {
+  return <div className="dashboard-card-heading"><h3>{title}</h3>{action && (onAction ? <button type="button" onClick={onAction}>{action}</button> : <span>{action}</span>)}</div>;
 }
 
 const dashboardPeriods = [
@@ -5033,7 +5081,8 @@ function collectedTransactionAmount(transaction) {
   if (transaction.status === "Void" || transaction.testMode) return 0;
   const payments = Array.isArray(transaction.payments) ? transaction.payments : [];
   const collected = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-  return collected > 0 ? collected : Number(transaction.total || 0);
+  if (collected > 0) return collected;
+  return ["Paid", "Completed"].includes(transaction.status) ? Number(transaction.total || 0) : 0;
 }
 
 function monthKeysEndingAt(monthKey, count = 6) {

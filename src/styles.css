@@ -6763,6 +6763,532 @@ body:has(.public-lead-page-embedded) #root {
   }
 }
 
+/* Dashboard operational overview. Kept fully scoped so the application sidebar is unchanged. */
+.clinic-dashboard {
+  --dashboard-ink: #241f1b;
+  --dashboard-muted: #777069;
+  --dashboard-line: #e8e0d7;
+  --dashboard-gold: #b78945;
+  --dashboard-gold-soft: #f3e6d1;
+  --dashboard-sage: #617b4b;
+  display: grid;
+  gap: 18px;
+  color: var(--dashboard-ink);
+}
+
+.clinic-dashboard-welcome {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 4px 2px 2px;
+}
+
+.clinic-dashboard-welcome .eyebrow {
+  margin: 0 0 7px;
+  color: #7d6550;
+  letter-spacing: 0.08em;
+}
+
+.clinic-dashboard-welcome h2 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3vw, 2.35rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+.clinic-dashboard-welcome > div > p:last-child {
+  margin: 7px 0 0;
+  color: var(--dashboard-muted);
+}
+
+.clinic-dashboard-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.clinic-dashboard-range {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 9px;
+  background: #fff;
+  color: #4b433d;
+}
+
+.clinic-dashboard-range select {
+  min-width: 180px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 750;
+  appearance: none;
+  outline: 0;
+}
+
+.clinic-dashboard-primary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 17px;
+  border: 1px solid #b88a49;
+  border-radius: 9px;
+  background: #b88a49;
+  color: #fff;
+  font-weight: 850;
+  box-shadow: 0 6px 15px rgba(132, 91, 39, 0.15);
+}
+
+.clinic-dashboard-primary:hover {
+  border-color: #9e7136;
+  background: #9e7136;
+}
+
+.clinic-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.clinic-kpi-card,
+.clinic-dashboard-card {
+  border: 1px solid var(--dashboard-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 7px 20px rgba(73, 55, 39, 0.045);
+}
+
+.clinic-kpi-card {
+  min-width: 0;
+  min-height: 112px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 17px;
+}
+
+.clinic-kpi-icon {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--dashboard-gold-soft);
+  color: #604624;
+}
+
+.clinic-kpi-card.sage .clinic-kpi-icon {
+  background: #dce4d4;
+  color: #3c582c;
+}
+
+.clinic-kpi-card > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.clinic-kpi-card small {
+  overflow: hidden;
+  color: #4f4842;
+  font-size: 0.78rem;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clinic-kpi-card strong {
+  font-size: clamp(1.3rem, 2vw, 1.7rem);
+  line-height: 1;
+}
+
+.clinic-kpi-card > div > span,
+.dashboard-revenue-comparison {
+  color: var(--dashboard-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.clinic-kpi-card span.positive,
+.dashboard-revenue-comparison .positive { color: #477332; }
+.clinic-kpi-card span.negative,
+.dashboard-revenue-comparison .negative { color: #b34646; }
+.clinic-kpi-card span.neutral,
+.dashboard-revenue-comparison .neutral { color: var(--dashboard-muted); }
+.clinic-kpi-card em { color: var(--dashboard-muted); font-style: normal; font-weight: 600; }
+
+.clinic-dashboard-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(380px, 0.9fr);
+  gap: 16px;
+}
+
+.clinic-dashboard-main-grid > :only-child { grid-column: 1 / -1; }
+
+.clinic-dashboard-secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.clinic-dashboard-card {
+  min-width: 0;
+  min-height: 250px;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.dashboard-card-heading {
+  min-height: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dashboard-card-heading h3 {
+  margin: 0;
+  font-size: 0.96rem;
+  letter-spacing: -0.01em;
+}
+
+.dashboard-card-heading > button,
+.dashboard-card-heading > span {
+  border: 0;
+  background: transparent;
+  color: #76542b;
+  padding: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.dashboard-appointment-table {
+  display: grid;
+}
+
+.dashboard-appointment-head,
+.dashboard-appointment-row {
+  display: grid;
+  grid-template-columns: 76px 1.25fr 1.15fr 1fr 88px;
+  align-items: center;
+  gap: 10px;
+}
+
+.dashboard-appointment-head {
+  min-height: 34px;
+  padding: 0 5px;
+  color: var(--dashboard-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.dashboard-appointment-row {
+  min-height: 58px;
+  padding: 7px 5px;
+  border-top: 1px solid #eee7df;
+  font-size: 0.73rem;
+}
+
+.dashboard-appointment-row > span:not(.status-badge),
+.dashboard-patient {
+  min-width: 0;
+}
+
+.dashboard-appointment-row strong,
+.dashboard-appointment-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-appointment-row small {
+  margin-top: 3px;
+  color: var(--dashboard-muted);
+  font-size: 0.66rem;
+}
+
+.dashboard-patient {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-patient > i {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #eee4e9;
+  color: #533f49;
+  font-size: 0.67rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.dashboard-appointment-row .status-badge {
+  min-height: 25px;
+  padding: 5px 7px;
+  font-size: 0.65rem;
+}
+
+.clinic-card-footer-action {
+  width: calc(100% + 32px);
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 10px -16px -16px;
+  border: 0;
+  border-top: 1px solid var(--dashboard-line);
+  background: #fcfaf7;
+  color: #6c5540;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.revenue-heading > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.revenue-heading > div:first-child > strong {
+  margin-top: 7px;
+  font-size: 1.4rem;
+}
+
+.revenue-heading > div:first-child > small {
+  color: var(--dashboard-muted);
+  font-size: 0.7rem;
+}
+
+.revenue-period-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.revenue-period-tabs button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dashboard-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.revenue-period-tabs button.active {
+  border-color: var(--dashboard-gold);
+  color: var(--dashboard-ink);
+}
+
+.dashboard-revenue-comparison {
+  margin: -3px 0 8px;
+  text-align: right;
+}
+
+.dashboard-revenue-chart {
+  position: relative;
+  height: 165px;
+  padding: 4px 5px 22px;
+  border-bottom: 1px solid var(--dashboard-line);
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 39px, rgba(226, 218, 207, 0.55) 40px);
+}
+
+.dashboard-revenue-chart svg {
+  width: 100%;
+  height: 134px;
+  overflow: visible;
+}
+
+.dashboard-revenue-labels {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin-top: 1px;
+}
+
+.dashboard-revenue-labels.twelve { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+
+.dashboard-revenue-labels small {
+  color: var(--dashboard-muted);
+  font-size: 0.58rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dashboard-activity-list,
+.dashboard-inventory-list,
+.dashboard-branch-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-activity-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.dashboard-activity-item > span,
+.inventory-alert-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #f5f1eb;
+  color: #6c5135;
+}
+
+.dashboard-activity-item div,
+.dashboard-inventory-list button > span:nth-child(2) { min-width: 0; }
+.dashboard-activity-item strong,
+.dashboard-activity-item small,
+.dashboard-inventory-list strong,
+.dashboard-inventory-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-activity-item strong,
+.dashboard-inventory-list strong { font-size: 0.73rem; }
+.dashboard-activity-item small,
+.dashboard-inventory-list small { margin-top: 2px; color: var(--dashboard-muted); font-size: 0.64rem; }
+.dashboard-activity-item time { color: var(--dashboard-muted); font-size: 0.63rem; }
+
+.dashboard-inventory-list button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid #eee7df;
+  border-radius: 8px;
+  background: #fcfaf7;
+  color: inherit;
+  text-align: left;
+}
+
+.inventory-alert-icon {
+  background: #fff2dc;
+  color: #c77a16;
+}
+
+.dashboard-inventory-list button > span:last-child {
+  text-align: right;
+}
+
+.dashboard-inventory-list button > span:last-child strong { color: #ba6710; }
+
+.dashboard-branch-item {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid #eee7df;
+  border-radius: 8px;
+  background: #fcfaf7;
+}
+
+.dashboard-branch-item > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.74rem;
+}
+
+.dashboard-branch-item > div span {
+  color: #477332;
+  font-weight: 850;
+}
+
+.dashboard-branch-item small {
+  color: var(--dashboard-muted);
+  font-size: 0.65rem;
+}
+
+.dashboard-branch-item > i {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8e5df;
+}
+
+.dashboard-branch-item > i > span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: #bf914e;
+}
+
+.clinic-dashboard-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.clinic-dashboard-quick-actions button {
+  min-height: 49px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 8px;
+  background: #fff;
+  color: #5c4024;
+  font-weight: 800;
+}
+
+@media (max-width: 1180px) {
+  .clinic-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .clinic-dashboard-main-grid { grid-template-columns: 1fr; }
+  .clinic-dashboard-secondary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .clinic-dashboard-secondary-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+@media (max-width: 760px) {
+  .clinic-dashboard { gap: 12px; }
+  .clinic-dashboard-welcome { align-items: stretch; flex-direction: column; gap: 14px; }
+  .clinic-dashboard-controls { justify-content: stretch; flex-wrap: wrap; }
+  .clinic-dashboard-range { flex: 1 1 190px; }
+  .clinic-dashboard-range select { width: 100%; min-width: 0; }
+  .clinic-dashboard-primary { flex: 1 1 170px; }
+  .clinic-kpi-grid,
+  .clinic-dashboard-secondary-grid { grid-template-columns: 1fr; }
+  .clinic-dashboard-secondary-grid > :last-child:nth-child(odd) { grid-column: auto; }
+  .clinic-dashboard-card { min-height: 0; padding: 14px; }
+  .dashboard-appointment-head { display: none; }
+  .dashboard-appointment-row {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+  }
+  .dashboard-appointment-row > span:nth-child(3),
+  .dashboard-appointment-row > span:nth-child(4) { grid-column: 2; }
+  .dashboard-appointment-row > .status-badge { grid-column: 3; grid-row: 1; }
+  .clinic-card-footer-action { width: calc(100% + 28px); margin: 10px -14px -14px; }
+  .revenue-heading { align-items: stretch; flex-direction: column; }
+  .revenue-period-tabs { justify-content: space-between; }
+  .revenue-period-tabs button { flex: 1; }
+  .dashboard-revenue-chart { overflow-x: auto; }
+  .clinic-dashboard-quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 440px) {
   .inventory-kpi-grid {
     grid-template-columns: 1fr;
