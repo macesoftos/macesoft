@@ -1113,6 +1113,11 @@
   font-size: 13px;
 }
 
+.clients-kpi-grid {
+  margin: 0;
+  padding: 16px 22px 18px;
+}
+
 .clients-workspace-actions {
   display: flex;
   flex: 0 0 auto;
@@ -1682,6 +1687,7 @@
   }
 
   .clients-workspace-heading,
+  .clients-kpi-grid,
   .clients-filter-bar,
   .clients-card-grid,
   .clients-directory-footer {

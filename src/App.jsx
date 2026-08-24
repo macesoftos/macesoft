@@ -9515,6 +9515,46 @@ function ClientsModule({
       return String(right.lastVisit || "").localeCompare(String(left.lastVisit || ""));
     });
   }, [activeDirectoryQuery, appointments, clients, directoryBranch, directorySort, packages]);
+  const clientKpis = useMemo(() => {
+    const today = todayDate();
+    const activeClients = clients.filter((client) => normalize(client.retention) !== "at risk");
+    const followUpsDue = clients.filter((client) => {
+      const nextVisit = String(client.nextVisit || "");
+      return /^\d{4}-\d{2}-\d{2}$/.test(nextVisit) && nextVisit <= today;
+    });
+    const atRiskClients = clients.filter((client) => normalize(client.retention) === "at risk");
+
+    return [
+      {
+        label: "Total clients",
+        value: clients.length.toLocaleString("en-PH"),
+        note: "In the current branch scope",
+        icon: Users,
+        tone: "products",
+      },
+      {
+        label: "Active clients",
+        value: activeClients.length.toLocaleString("en-PH"),
+        note: "Currently active relationships",
+        icon: UserCheck,
+        tone: "value",
+      },
+      {
+        label: "Follow-ups due",
+        value: followUpsDue.length.toLocaleString("en-PH"),
+        note: "Scheduled on or before today",
+        icon: CalendarDays,
+        tone: "reorder",
+      },
+      {
+        label: "At risk",
+        value: atRiskClients.length.toLocaleString("en-PH"),
+        note: "Clients needing attention",
+        icon: AlertCircle,
+        tone: "empty",
+      },
+    ];
+  }, [clients]);
   const pageSize = safeDirectoryView === "cards" ? 8 : 10;
   const pageCount = Math.max(1, Math.ceil(filteredClients.length / pageSize));
   const visibleClients = filteredClients.slice((directoryPage - 1) * pageSize, directoryPage * pageSize);
@@ -9661,6 +9701,19 @@ function ClientsModule({
               </button>
             </div>
           </div>
+        </div>
+
+        <div className="inventory-kpi-grid clients-kpi-grid" aria-label="Client key performance indicators">
+          {clientKpis.map(({ label, value, note, icon: Icon, tone }) => (
+            <article className={`inventory-kpi inventory-kpi-${tone}`} key={label}>
+              <span className="inventory-kpi-icon" aria-hidden="true"><Icon size={18} /></span>
+              <div>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                <small>{note}</small>
+              </div>
+            </article>
+          ))}
         </div>
 
         {safeDirectoryView === "list" ? (
