@@ -10329,11 +10329,58 @@ function ServicesModule({ services, openModal, toggleService, globalSearch }) {
 
 function InventoryModule({ inventory, movements, openModal, globalSearch }) {
   const lowStock = inventory.filter((item) => stockStatus(item) !== "Healthy");
+  const outOfStock = inventory.filter((item) => Number(item.stock || 0) <= 0);
+  const inventoryValue = inventory.reduce(
+    (total, item) => total + (Number(item.stock || 0) * Number(item.cost || 0)),
+    0,
+  );
+  const inventoryKpis = [
+    {
+      label: "Products",
+      value: inventory.length.toLocaleString("en-PH"),
+      note: "In the current branch scope",
+      icon: Boxes,
+      tone: "products",
+    },
+    {
+      label: "Inventory value",
+      value: money.format(inventoryValue),
+      note: "Based on recorded unit cost",
+      icon: CircleDollarSign,
+      tone: "value",
+    },
+    {
+      label: "Reorder alerts",
+      value: lowStock.length.toLocaleString("en-PH"),
+      note: "At or below reorder level",
+      icon: AlertCircle,
+      tone: "reorder",
+    },
+    {
+      label: "Out of stock",
+      value: outOfStock.length.toLocaleString("en-PH"),
+      note: "Needs replenishment",
+      icon: Minus,
+      tone: "empty",
+    },
+  ];
 
   return (
     <section className="module-grid two">
       <div className="surface-panel full-span inventory-management-panel">
         <SectionHeader icon={Boxes} title="Inventory Management" action={`${lowStock.length} alerts`} />
+        <div className="inventory-kpi-grid" aria-label="Inventory key performance indicators">
+          {inventoryKpis.map(({ label, value, note, icon: Icon, tone }) => (
+            <article className={`inventory-kpi inventory-kpi-${tone}`} key={label}>
+              <span className="inventory-kpi-icon" aria-hidden="true"><Icon size={18} /></span>
+              <div>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                <small>{note}</small>
+              </div>
+            </article>
+          ))}
+        </div>
         <SmartTable
           rows={inventory}
           globalSearch={globalSearch}
