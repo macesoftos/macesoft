@@ -13,6 +13,8 @@ This checklist records the forms and form-like editors reviewed for the shared c
 - [x] Two-column desktop and one-column mobile form grids
 - [x] Modal close controls, sticky headers/actions, and independently scrolling bodies
 - [x] Dynamic consumable rows and reusable chip/multi-select controls
+- [x] Title-case labels with shared weight/color tokens (legacy uppercase overrides removed)
+- [x] Compact public registration fields within the 42-48px system range
 
 ## Public, authentication, and onboarding
 
@@ -47,6 +49,12 @@ This checklist records the forms and form-like editors reviewed for the shared c
 - [x] Inventory item, stock receiving, and inventory import/upload controls
 - [x] Expense, promotion, campaign, and system settings forms
 - [x] Report filters and toolbar/search fields
+- [x] Discount details, applicability, approval, expiry, and status
+- [x] Promotion details, included services/packages, schedule, branches, and status
+- [x] Gift-certificate details, value, validity, redemption branch, and status
+- [x] Package details, client/session settings, purchase, billing, and installment forms
+- [x] Expense details, payment, approval, receipt, and notes
+- [x] Stock receiving, supplier verification, check number, and receiving notes
 
 ## Dedicated workspaces
 
@@ -54,6 +62,19 @@ This checklist records the forms and form-like editors reviewed for the shared c
 - [x] FaceTrack registration, device, attendance, and kiosk forms
 - [x] Marketing campaign, audience, SMS, settings, builder, style, media, personalization, and HTML editor controls
 - [x] Flipbook upload, metadata, sharing, lock, logo, color, and editor settings forms
+- [x] Dedicated Marketing action-dialog scrolling header/body/footer anatomy
+- [x] Flipbook modal sticky header/footer behavior
+- [x] FaceTrack correction-dialog sticky header/action behavior
+
+## Configuration and administration
+
+- [x] Consent-template identity, related services, content, required fields, and activation
+- [x] Campaign identity, audience/channel, message/template, delivery metrics, and status
+- [x] Business identity, currency, tax, receipts, invoice, SMS, backup, and plan-visibility settings
+- [x] Invitation identity, role, branch, module, permission, confirmation, and message fields
+- [x] User-access status, role, branch, module, and permission forms
+- [x] Branch identity, cover upload, location, contact, operating hours, capacity, managers, modules, and status
+- [x] Account password, first-time password, reset-password, and login-connection forms
 
 ## Responsive and interaction checks
 
@@ -61,10 +82,15 @@ This checklist records the forms and form-like editors reviewed for the shared c
 - [x] Tablet: responsive grids and modal width constrained to viewport
 - [x] Laptop: long treatment form scrolls only in its body
 - [x] Desktop: compact two-column layouts and 44px standard controls
+- [x] Explicit viewport checks at 390x844, 768x1024, 1280x720, 1366x768, 1440x900, and 1920x1080
 - [x] Long labels/values remain inside min-width-constrained grid cells
 - [x] Dropdown and picker controls are not placed inside newly clipped field wrappers
 - [x] Keyboard focus remains visible and labels remain associated with controls
 - [x] Cancel/close and loading/disabled states retain their existing behavior
+- [x] Registration controls remain compact on desktop and collapse to one column on mobile
+- [x] Expense and package create forms expose logical section headings
+- [x] Consumable rows can be added and removed without changing treatment submission behavior
+- [x] Client image upload and removal controls remain reachable and correctly associated
 
 ## Shared tokens and components changed
 
@@ -81,4 +107,5 @@ This checklist records the forms and form-like editors reviewed for the shared c
 - ESLint and TypeScript checks
 - Server unit/integration test suite
 - Playwright form-system checks for compact control dimensions, sectioning, sticky/reachable actions, scrolling, and mobile reflow
+- Playwright form-system checks for dynamic consumables, client image uploads, and six responsive viewport sizes
 

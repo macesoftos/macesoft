@@ -15135,6 +15135,19 @@ function field(name, label, type = "text", options = null, className = "", requi
 }
 
 const entityFormSectionDefinitions = {
+  discount: [
+    { title: "Discount details", fields: ["name", "type", "value", "applicable"] },
+    { title: "Approval and availability", fields: ["permission", "expiry", "active"] },
+  ],
+  "consent-template": [
+    { title: "Template details", fields: ["name", "version", "serviceIds"] },
+    { title: "Consent content", fields: ["content", "requiredFields", "active"] },
+  ],
+  promotion: [
+    { title: "Promotion details", fields: ["name", "discountType", "value", "active"] },
+    { title: "Included services and packages", fields: ["serviceIds", "packageNames"] },
+    { title: "Schedule and branches", fields: ["startDate", "endDate", "branches"] },
+  ],
   client: [
     { title: "Profile", fields: ["photo", "firstName", "middleName", "lastName", "mobile", "email", "gender", "birthday", "civilStatus", "occupation"] },
     { title: "Address and emergency contact", fields: ["street", "barangay", "city", "province", "emergencyName", "emergencyPhone"] },
@@ -15172,6 +15185,36 @@ const entityFormSectionDefinitions = {
   inventory: [
     { title: "Product Details", fields: ["image", "item", "category", "type", "unit", "packQty", "branch", "location"] },
     { title: "Stock and Pricing", fields: ["stock", "reorder", "cost", "price"] },
+  ],
+  "inventory-receive": [
+    { title: "Stock receipt", fields: ["inventoryId", "date", "qty", "unit"] },
+    { title: "Supplier and verification", fields: ["supplier", "receivedBy", "checkNumber", "notes"] },
+  ],
+  expense: [
+    { title: "Expense details", fields: ["date", "name", "category", "branch", "amount", "method"] },
+    { title: "Approval and documentation", fields: ["approver", "status", "receipt", "notes"] },
+  ],
+  "gift-certificate": [
+    { title: "Certificate details", fields: ["code", "client", "type", "serviceId", "balance"] },
+    { title: "Validity and redemption", fields: ["issueDate", "expires", "branch", "status"] },
+  ],
+  package: [
+    { title: "Package and client", fields: ["name", "clientId", "sessions", "used", "transferable", "status"] },
+    { title: "Purchase and billing", fields: ["purchaseDate", "branch", "price", "amountPaid", "nextPayment", "serviceValue"] },
+  ],
+  "package-payment": [
+    { title: "Payment details", fields: ["amount", "date", "method", "nextPayment"] },
+    { title: "Notes", fields: ["notes"] },
+  ],
+  campaign: [
+    { title: "Campaign details", fields: ["name", "branch", "segment", "channel", "status"] },
+    { title: "Message", fields: ["templateId", "subject", "message"] },
+    { title: "Delivery metrics", fields: ["sent", "booked", "credits"] },
+  ],
+  settings: [
+    { title: "Business details", fields: ["company", "productName", "currency"] },
+    { title: "Tax and receipts", fields: ["taxMode", "taxRate", "receiptFooter", "invoicePrefix"] },
+    { title: "System preferences", fields: ["smsCredits", "backup", "hiddenSaasPlans"] },
   ],
 };
 
