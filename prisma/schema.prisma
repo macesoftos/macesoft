@@ -27,6 +27,8 @@ model Subscription {
   organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   planCode                  String?
   requestedPlanCode         String?
+  billingCycle              String       @default("monthly")
+  requestedBillingCycle     String?
   status                    String       @default("pending_plan")
   trialStartAt              DateTime?
   trialEndAt                DateTime?

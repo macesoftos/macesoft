@@ -78,17 +78,17 @@ export function loadSubscription() {
   return requestJson("/api/subscription");
 }
 
-export function startSubscriptionTrial(planCode) {
+export function startSubscriptionTrial(planCode, billingCycle = "monthly") {
   return requestJson("/api/subscription/trial", {
     method: "POST",
-    body: JSON.stringify({ planCode }),
+    body: JSON.stringify({ planCode, billingCycle }),
   });
 }
 
-export function requestSubscriptionActivation(planCode) {
+export function requestSubscriptionActivation(planCode, billingCycle = "monthly") {
   return requestJson("/api/subscription/request-activation", {
     method: "POST",
-    body: JSON.stringify({ planCode }),
+    body: JSON.stringify({ planCode, billingCycle }),
   });
 }
 

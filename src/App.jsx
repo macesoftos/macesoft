@@ -186,6 +186,17 @@ const money = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 0,
 });
 
+const moneyWithCentavos = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function planPrice(value) {
+  return Number.isInteger(Number(value)) ? money.format(value) : moneyWithCentavos.format(value);
+}
+
 function BrandWordmark({ className = "" }) {
   return <img className={`zenshotech-wordmark ${className}`.trim()} src="/brand/zenshotech-logo.svg" alt="ZenshoTech" />;
 }
@@ -4716,7 +4727,12 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
         termsAccepted: true,
         privacyAccepted: true,
       });
-      onRegistered(result);
+      const registrationParams = new URLSearchParams(window.location.search);
+      const selectedPlan = registrationParams.get("plan");
+      const selectedBilling = registrationParams.get("billing") === "annual" ? "annual" : "monthly";
+      const pricingParams = new URLSearchParams({ onboarding: "1", billing: selectedBilling });
+      if (selectedPlan) pricingParams.set("plan", selectedPlan);
+      onRegistered({ ...result, redirectTo: `/pricing?${pricingParams.toString()}` });
     } catch (error) {
       setErrors((current) => ({
         ...current,
@@ -4757,7 +4773,10 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
             {errors.agreements && <small className="field-error">{errors.agreements}</small>}
             <button className="primary-button full" type="submit" disabled={submitting}>{submitting ? "Creating secure workspace..." : "Continue to pricing"}</button>
           </>}
-          {session && <button className="primary-button full" type="button" onClick={() => onNavigate("/pricing?onboarding=1")}>Continue to pricing</button>}
+          {session && <button className="primary-button full" type="button" onClick={() => {
+            const billing = new URLSearchParams(window.location.search).get("billing") === "annual" ? "annual" : "monthly";
+            onNavigate(`/pricing?onboarding=1&billing=${billing}`);
+          }}>Continue to pricing</button>}
           <button className="text-button full" type="button" onClick={() => onNavigate("/")}>Already have an account? Sign in</button>
         </form>
       </section>
@@ -4775,6 +4794,7 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
   const [submittingPlan, setSubmittingPlan] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [billingCycle, setBillingCycle] = useState(() => new URLSearchParams(window.location.search).get("billing") === "annual" ? "annual" : "monthly");
 
   useEffect(() => {
     document.title = "Pricing — ZenshoTech";
@@ -4791,16 +4811,16 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
       return;
     }
     if (!session) {
-      onNavigate(`/register?plan=${encodeURIComponent(plan.code)}`);
+      onNavigate(`/register?plan=${encodeURIComponent(plan.code)}&billing=${encodeURIComponent(billingCycle)}`);
       return;
     }
     setSubmittingPlan(plan.code);
     try {
       if (["pending_plan", "trialing"].includes(session.subscription?.status)) {
-        const result = await startSubscriptionTrial(plan.code);
+        const result = await startSubscriptionTrial(plan.code, billingCycle);
         onSessionUpdate(result);
       } else {
-        const result = await requestSubscriptionActivation(plan.code);
+        const result = await requestSubscriptionActivation(plan.code, billingCycle);
         setMessage(result.message);
       }
     } catch (planError) {
@@ -4819,26 +4839,36 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
         <p className="eyebrow">Simple ZenshoTech pricing</p>
         <h1>Choose the plan that fits your clinic</h1>
         <p>Start with a 7-day free trial. No setup fee. Your subscription also includes a professionally designed responsive website with up to 8 pages.</p>
-        {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="inline-state success"><Check size={18} /><span>Your workspace is ready. Select a monthly plan to begin the trial.</span></div>}
+        <p>Pay one month at a time, or prepay 12 months and save 10%.</p>
+        {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="inline-state success"><Check size={18} /><span>Your workspace is ready. Select a plan and billing period to begin the trial.</span></div>}
         {message && <div className="inline-state success"><Check size={18} /><span>{message}</span></div>}
         {error && <div className="inline-state danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
       </section>
 
       {loading ? <div className="pricing-loading"><RefreshCw className="spin" size={24} /> Loading plans...</div> : <>
-        <section className="pricing-card-grid" aria-label="Monthly subscription plans">
+        <div className="billing-cycle-selector" role="group" aria-label="Billing period">
+          <button className={billingCycle === "monthly" ? "active" : ""} type="button" aria-pressed={billingCycle === "monthly"} onClick={() => setBillingCycle("monthly")}>Pay Monthly</button>
+          <button className={billingCycle === "annual" ? "active" : ""} type="button" aria-pressed={billingCycle === "annual"} onClick={() => setBillingCycle("annual")}>Pay 12 Months <span>Save 10%</span></button>
+        </div>
+        <section className="pricing-card-grid" aria-label="Subscription plans">
           {monthlyPlans.map((plan) => (
             <article className={`pricing-plan-card${plan.recommended ? " recommended" : ""}`} key={plan.code}>
               {plan.recommended && <span className="pricing-recommended">Most Popular</span>}
-              <div><p className="eyebrow">{plan.name}</p><div className="pricing-amount"><strong>{money.format(plan.monthlyPrice)}</strong><span>/month</span></div></div>
+              <div>
+                <p className="eyebrow">{plan.name}</p>
+                <div className="pricing-amount"><strong>{planPrice(billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice)}</strong><span>{billingCycle === "annual" ? "/12 months" : "/month"}</span></div>
+                <p className="pricing-billing-note">{billingCycle === "annual" ? `${planPrice(plan.annualPrice / 12)} per month equivalent · billed once yearly` : "Billed one month at a time"}</p>
+              </div>
               <ul>
                 <li><Check size={16} /> 7-day free trial</li>
                 <li><Check size={16} /> No setup fee</li>
+                <li><Check size={16} /> {billingCycle === "annual" ? "12 months prepaid with 10% discount" : "Flexible monthly payment"}</li>
                 <li><Check size={16} /> {plan.maxUsers === null ? "Unlimited users" : `Up to ${plan.maxUsers} users`}</li>
                 <li><Check size={16} /> {plan.maxBranches === null ? "Unlimited branches" : plan.maxBranches === 1 ? "1 branch" : `Up to ${plan.maxBranches} branches`}</li>
                 <li><Check size={16} /> Free website with up to 8 pages</li>
                 <li><Check size={16} /> Additional website pages quoted separately</li>
               </ul>
-              <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name}` : "Start 7-Day Free Trial"}</button>
+              <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name} · ${billingCycle === "annual" ? "Annual" : "Monthly"}` : "Start 7-Day Free Trial"}</button>
             </article>
           ))}
         </section>
@@ -4889,7 +4919,7 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
   async function requestActivation() {
     setError(""); setMessage("");
     try {
-      const result = await requestSubscriptionActivation(subscription.planCode);
+      const result = await requestSubscriptionActivation(subscription.planCode, subscription.billingCycle || "monthly");
       setSubscription(result.subscription); setMessage(result.message);
     } catch (activationError) { setError(activationError.message); }
   }
@@ -4898,7 +4928,10 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
     setError("");
     try {
       const payload = { action };
-      if (action === "activate") payload.planCode = row.requestedPlanCode || row.planCode || "starter";
+      if (action === "activate") {
+        payload.planCode = row.requestedPlanCode || row.planCode || "starter";
+        payload.billingCycle = row.requestedBillingCycle || row.billingCycle || "monthly";
+      }
       if (action === "extend_trial") payload.hours = 24;
       const result = await updateAdminSubscription(row.organization.id, payload);
       setAdminSubscriptions((current) => current.map((item) => item.organization.id === row.organization.id ? { ...item, ...result.subscription } : item));
@@ -4918,21 +4951,23 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
         {loading && <div className="pricing-loading"><RefreshCw className="spin" size={20} /> Loading subscription...</div>}
         {message && <div className="inline-state success"><Check size={18} /> {message}</div>}
         {error && <div className="inline-state danger"><AlertCircle size={18} /> {error}</div>}
+        {subscription?.requestedPlan && <div className="inline-state warning"><Clock size={18} /><span>Pending activation: {subscription.requestedPlan.name} · {subscription.requestedBillingCycle === "annual" ? `${planPrice(subscription.requestedBilling?.amount)} for 12 months with 10% off` : `${planPrice(subscription.requestedBilling?.amount)} monthly`}.</span></div>}
         <div className="subscription-metrics">
-          <article><span>Current plan</span><strong>{plan?.name || "Not selected"}</strong><small>{plan?.billingInterval === "month" ? `${money.format(plan.monthlyPrice)} monthly` : plan?.billingInterval === "one_time" ? `${money.format(plan.monthlyPrice)} one-time` : "Existing-account access"}</small></article>
+          <article><span>Current plan</span><strong>{plan?.name || "Not selected"}</strong><small>{plan?.billingInterval === "month" ? subscription?.billingCycle === "annual" ? `${planPrice(subscription.billing?.amount)} every 12 months · 10% discount` : `${money.format(plan.monthlyPrice)} monthly` : plan?.billingInterval === "one_time" ? `${money.format(plan.monthlyPrice)} one-time` : "Existing-account access"}</small></article>
           <article><span>Users</span><strong>{subscription?.usage?.users ?? 0}{plan?.maxUsers === null ? " / Unlimited" : ` / ${plan?.maxUsers ?? "—"}`}</strong><small>Active users and valid pending invitations count.</small></article>
           <article><span>Branches</span><strong>{subscription?.usage?.branches ?? 0}{plan?.maxBranches === null ? " / Unlimited" : ` / ${plan?.maxBranches ?? "—"}`}</strong><small>Archived branches do not count.</small></article>
           <article><span>Website package</span><strong>Up to {subscription?.includedWebsitePages || 8} pages</strong><small>Additional pages are quoted separately.</small></article>
         </div>
         {subscription?.trialEndAt && <div className="subscription-date-panel"><Clock size={20} /><div><strong>Trial expiration</strong><span>{formatDateTime(subscription.trialEndAt)}</span></div></div>}
+        {subscription?.renewalAt && <div className="subscription-date-panel"><CalendarDays size={20} /><div><strong>{subscription.billingCycle === "annual" ? "Annual term renewal" : "Next monthly renewal"}</strong><span>{formatDateTime(subscription.renewalAt)}</span></div></div>}
         <div className="subscription-actions"><button className="primary-button" type="button" onClick={() => onNavigate("/pricing")}>View Plans</button>{subscription?.planCode && ["trialing", "expired"].includes(subscription.status) && <button className="ghost-button" type="button" onClick={requestActivation}>Activate Subscription</button>}<button className="text-button" type="button" onClick={() => onNavigate("/dashboard")}>Return to dashboard</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></div>
       </section>
       {session.platformAdmin && <section className="subscription-admin-card">
         <div><p className="eyebrow">ZenshoTech administration</p><h2>Subscription controls</h2><p>Paid and lifetime access require an explicit administrator action. Every action is audited.</p></div>
         <div className="subscription-admin-list">
           {adminSubscriptions.length ? adminSubscriptions.map((row) => <article key={row.organization.id}>
-            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode}` : ""}</small></div>
-            <div><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "activate")}>{adminActionId === `${row.organization.id}:activate` ? "Activating..." : "Activate monthly"}</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "grant_lifetime")}>Grant lifetime</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "extend_trial")}>Extend 24h</button><button className="text-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, row.status === "past_due" ? "reactivate" : "suspend")}>{row.status === "past_due" ? "Reactivate" : "Suspend"}</button></div>
+            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode} (${row.requestedBillingCycle === "annual" ? "12 months, 10% off" : "monthly"})` : row.billingCycle ? ` · ${row.billingCycle === "annual" ? "Annual" : row.billingCycle}` : ""}</small></div>
+            <div><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "activate")}>{adminActionId === `${row.organization.id}:activate` ? "Activating..." : `Activate ${row.requestedBillingCycle === "annual" ? "annual" : "monthly"}`}</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "grant_lifetime")}>Grant lifetime</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "extend_trial")}>Extend 24h</button><button className="text-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, row.status === "past_due" ? "reactivate" : "suspend")}>{row.status === "past_due" ? "Reactivate" : "Suspend"}</button></div>
           </article>) : <p>No managed subscription records yet.</p>}
         </div>
       </section>}

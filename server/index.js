@@ -15,8 +15,10 @@ import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import {
   INCLUDED_WEBSITE_PAGES,
   assertUsageWithinPlan,
+  billingDetails,
   getSubscriptionPlan,
   isMonthlyPlan,
+  normalizeBillingCycle,
   planLimitMessage,
   publicSubscriptionPlans,
   serializeSubscription,
@@ -4581,6 +4583,7 @@ app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
   const account = requireSubscriptionOwner(request);
   const plan = getSubscriptionPlan(request.body?.planCode);
   if (!isMonthlyPlan(plan)) throw apiError("Choose Starter, Growth, or Unlimited to begin a trial.", 400);
+  const billingCycle = normalizeBillingCycle(request.body?.billingCycle, plan);
   const usage = await subscriptionUsage(prisma, account.organizationId);
   const usageCheck = assertUsageWithinPlan(plan, usage);
   if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck, upgradeUrl: "/pricing" });
@@ -4603,6 +4606,7 @@ app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
       create: {
         organizationId: account.organizationId,
         planCode: plan.code,
+        billingCycle,
         status: "trialing",
         trialStartAt: window.start,
         trialEndAt: window.end,
@@ -4611,6 +4615,8 @@ app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
       update: {
         planCode: plan.code,
         requestedPlanCode: null,
+        billingCycle,
+        requestedBillingCycle: null,
         status: "trialing",
         trialStartAt: window.start,
         trialEndAt: window.end,
@@ -4623,10 +4629,10 @@ app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
       subjectType: "Subscription",
       subjectId: subscription.id,
       details: current?.trialStartAt
-        ? `Trial plan changed to ${plan.name}; the original expiration was preserved.`
-        : `${plan.name} trial started for exactly 168 hours. No payment or setup charge was created.`,
-      beforeValues: current ? { planCode: current.planCode, status: current.status, trialEndAt: current.trialEndAt } : null,
-      afterValues: { planCode: plan.code, status: "trialing", trialStartAt: window.start, trialEndAt: window.end },
+        ? `Trial plan changed to ${plan.name} with ${billingCycle} billing selected; the original expiration was preserved.`
+        : `${plan.name} trial started for exactly 168 hours with ${billingCycle} billing selected. No payment or setup charge was created.`,
+      beforeValues: current ? { planCode: current.planCode, billingCycle: current.billingCycle, status: current.status, trialEndAt: current.trialEndAt } : null,
+      afterValues: { planCode: plan.code, billingCycle, status: "trialing", trialStartAt: window.start, trialEndAt: window.end },
     });
     return subscription;
   });
@@ -4642,7 +4648,9 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
   const account = requireSubscriptionOwner(request);
   const current = await prisma.subscription.findUnique({ where: { organizationId: account.organizationId } });
   const plan = getSubscriptionPlan(request.body?.planCode || current?.planCode);
-  if (!isMonthlyPlan(plan)) throw apiError("Monthly activation is available for Starter, Growth, or Unlimited.", 400);
+  if (!isMonthlyPlan(plan)) throw apiError("Subscription activation is available for Starter, Growth, or Unlimited.", 400);
+  const billingCycle = normalizeBillingCycle(request.body?.billingCycle || current?.billingCycle, plan);
+  const billing = billingDetails(plan, billingCycle);
   const usage = await subscriptionUsage(prisma, account.organizationId);
   const usageCheck = assertUsageWithinPlan(plan, usage);
   if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck });
@@ -4653,23 +4661,30 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
         organizationId: account.organizationId,
         planCode: "unlimited",
         requestedPlanCode: plan.code,
+        billingCycle: "monthly",
+        requestedBillingCycle: billingCycle,
         status: "grandfathered",
         activationRequestedAt: new Date(),
         includedWebsitePages: INCLUDED_WEBSITE_PAGES,
       },
-      update: { requestedPlanCode: plan.code, activationRequestedAt: new Date() },
+      update: { requestedPlanCode: plan.code, requestedBillingCycle: billingCycle, activationRequestedAt: new Date() },
     });
     await writeAudit(tx, request, {
       area: "Subscription",
       action: "Activation requested",
       subjectType: "Subscription",
       subjectId: subscription.id,
-      details: `${plan.name} activation was requested. No payment success or charge was created.`,
-      afterValues: { requestedPlanCode: plan.code, monthlyPrice: plan.monthlyPrice },
+      details: `${plan.name} activation with ${billingCycle} billing was requested. No payment success or charge was created.`,
+      afterValues: { requestedPlanCode: plan.code, requestedBillingCycle: billingCycle, amount: billing.amount, discountPercent: billing.discountPercent },
     });
     return subscription;
   });
-  response.json({ subscription: serializeSubscription(saved, usage), message: "Activation request recorded. ZenshoTech will confirm billing and activation." });
+  response.json({
+    subscription: serializeSubscription(saved, usage),
+    message: billingCycle === "annual"
+      ? `Annual activation request recorded for ${billing.amount.toLocaleString("en-PH", { style: "currency", currency: "PHP" })}, covering 12 months with the 10% discount. ZenshoTech will confirm billing and activation.`
+      : `Monthly activation request recorded for ${billing.amount.toLocaleString("en-PH", { style: "currency", currency: "PHP" })}. ZenshoTech will confirm billing and activation.`,
+  });
 }));
 
 app.get("/api/admin/subscriptions", asyncRoute(async (request, response) => {
@@ -4695,14 +4710,15 @@ app.patch("/api/admin/subscriptions/:organizationId", asyncRoute(async (request,
   let data;
   if (action === "activate") {
     const plan = getSubscriptionPlan(request.body?.planCode || current?.requestedPlanCode || current?.planCode);
-    if (!isMonthlyPlan(plan)) throw apiError("Choose a monthly plan to activate.", 400);
+    if (!isMonthlyPlan(plan)) throw apiError("Choose Starter, Growth, or Unlimited to activate.", 400);
+    const billingCycle = normalizeBillingCycle(request.body?.billingCycle || current?.requestedBillingCycle || current?.billingCycle, plan);
     const usageCheck = assertUsageWithinPlan(plan, usage);
     if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck });
     const renewalAt = new Date(now);
-    renewalAt.setUTCMonth(renewalAt.getUTCMonth() + 1);
-    data = { planCode: plan.code, requestedPlanCode: null, status: "active", paidStartAt: current?.paidStartAt || now, renewalAt, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
+    renewalAt.setUTCMonth(renewalAt.getUTCMonth() + (billingCycle === "annual" ? 12 : 1));
+    data = { planCode: plan.code, requestedPlanCode: null, billingCycle, requestedBillingCycle: null, status: "active", paidStartAt: current?.paidStartAt || now, renewalAt, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
   } else if (action === "grant_lifetime") {
-    data = { planCode: "lifetime", requestedPlanCode: null, status: "lifetime", paidStartAt: current?.paidStartAt || now, renewalAt: null, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
+    data = { planCode: "lifetime", requestedPlanCode: null, billingCycle: "one_time", requestedBillingCycle: null, status: "lifetime", paidStartAt: current?.paidStartAt || now, renewalAt: null, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
   } else if (action === "suspend") {
     if (!current) throw apiError("Create or activate a subscription before suspending it.", 409);
     data = { status: "past_due" };

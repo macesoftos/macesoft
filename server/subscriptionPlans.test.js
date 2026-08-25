@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  ANNUAL_BILLING_MONTHS,
+  ANNUAL_DISCOUNT_PERCENT,
   INCLUDED_WEBSITE_PAGES,
   TRIAL_DURATION_HOURS,
   assertUsageWithinPlan,
+  billingDetails,
   effectiveSubscriptionStatus,
   getSubscriptionPlan,
   publicSubscriptionPlans,
@@ -17,6 +20,7 @@ const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8
 const serverSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../prisma/migrations/20260825153000_subscription_trials_no_setup_fee/migration.sql", import.meta.url), "utf8");
+const annualBillingMigration = readFileSync(new URL("../prisma/migrations/20260826013000_annual_billing_cycle/migration.sql", import.meta.url), "utf8");
 
 test("canonical plans use the corrected prices and no setup-fee data", () => {
   const plans = Object.fromEntries(publicSubscriptionPlans().map((plan) => [plan.code, plan]));
@@ -29,6 +33,23 @@ test("canonical plans use the corrected prices and no setup-fee data", () => {
     assert.equal(plan.includedWebsitePages, 8);
     assert.equal(Object.keys(plan).some((key) => /setup.?fee/i.test(key)), false);
   }
+});
+
+test("monthly plans support one-month payment or 12 months prepaid with exactly 10 percent off", () => {
+  assert.equal(ANNUAL_BILLING_MONTHS, 12);
+  assert.equal(ANNUAL_DISCOUNT_PERCENT, 10);
+  const expectedAnnualPrices = { starter: 42120, growth: 63720, unlimited: 86389.2 };
+  for (const [code, annualPrice] of Object.entries(expectedAnnualPrices)) {
+    const plan = getSubscriptionPlan(code);
+    assert.equal(plan.annualPrice, annualPrice);
+    assert.equal(billingDetails(plan, "monthly").amount, plan.monthlyPrice);
+    assert.equal(billingDetails(plan, "monthly").months, 1);
+    assert.equal(billingDetails(plan, "annual").amount, annualPrice);
+    assert.equal(billingDetails(plan, "annual").months, 12);
+    assert.equal(billingDetails(plan, "annual").discountPercent, 10);
+  }
+  assert.equal(getSubscriptionPlan("lifetime").annualPrice, null);
+  assert.equal(billingDetails(getSubscriptionPlan("lifetime"), "annual").cycle, "one_time");
 });
 
 test("all monthly plans receive one exact 168-hour trial", () => {
@@ -97,4 +118,19 @@ test("subscription migration is additive and preserves historical billing data",
   assert.match(migration, /"includedWebsitePages" INTEGER NOT NULL DEFAULT 8/);
   assert.doesNotMatch(migration, /DELETE FROM|DROP TABLE|DROP COLUMN/i);
   assert.doesNotMatch(migration, /setupFeeStatus|setupFeePaid/i);
+  assert.match(schema, /billingCycle\s+String\s+@default\("monthly"\)/);
+  assert.match(schema, /requestedBillingCycle\s+String\?/);
+  assert.match(annualBillingMigration, /ADD COLUMN "billingCycle" TEXT NOT NULL DEFAULT 'monthly'/);
+  assert.match(annualBillingMigration, /ADD COLUMN "requestedBillingCycle" TEXT/);
+  assert.doesNotMatch(annualBillingMigration, /DELETE FROM|DROP TABLE|DROP COLUMN/i);
+});
+
+test("pricing and activation flows carry the selected billing cycle", () => {
+  assert.match(appSource, /Pay one month at a time, or prepay 12 months and save 10%/);
+  assert.match(appSource, /Pay 12 Months/);
+  assert.match(appSource, /startSubscriptionTrial\(plan\.code, billingCycle\)/);
+  assert.match(appSource, /requestSubscriptionActivation\(plan\.code, billingCycle\)/);
+  const activationRoute = serverSource.slice(serverSource.indexOf('app.post("/api/subscription/request-activation"'), serverSource.indexOf('app.get("/api/admin/subscriptions"'));
+  assert.match(activationRoute, /requestedBillingCycle: billingCycle/);
+  assert.match(serverSource, /billingCycle === "annual" \? 12 : 1/);
 });

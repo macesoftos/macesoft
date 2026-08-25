@@ -2,6 +2,8 @@ import { sidebarModules } from "./moduleRegistry.js";
 
 export const TRIAL_DURATION_HOURS = 168;
 export const INCLUDED_WEBSITE_PAGES = 8;
+export const ANNUAL_BILLING_MONTHS = 12;
+export const ANNUAL_DISCOUNT_PERCENT = 10;
 
 const completeModuleEntitlements = Object.freeze([
   "my-workspace",
@@ -15,6 +17,8 @@ const monthlyPlan = ({ code, name, monthlyPrice, maxUsers, maxBranches, recommen
   monthlyPrice,
   currency: "PHP",
   billingInterval: "month",
+  annualPrice: Number((monthlyPrice * ANNUAL_BILLING_MONTHS * (1 - (ANNUAL_DISCOUNT_PERCENT / 100))).toFixed(2)),
+  annualDiscountPercent: ANNUAL_DISCOUNT_PERCENT,
   maxUsers,
   maxBranches,
   moduleEntitlements: completeModuleEntitlements,
@@ -36,6 +40,8 @@ export const subscriptionPlans = Object.freeze([
     monthlyPrice: 120000,
     currency: "PHP",
     billingInterval: "one_time",
+    annualPrice: null,
+    annualDiscountPercent: 0,
     maxUsers: null,
     maxBranches: null,
     moduleEntitlements: completeModuleEntitlements,
@@ -76,6 +82,29 @@ export function isMonthlyPlan(plan) {
   return Boolean(plan?.trialAvailable && plan.billingInterval === "month");
 }
 
+export function normalizeBillingCycle(value, plan) {
+  if (plan?.billingInterval === "one_time") return "one_time";
+  return String(value || "").trim().toLowerCase() === "annual" ? "annual" : "monthly";
+}
+
+export function billingDetails(plan, billingCycle = "monthly") {
+  if (!plan) return null;
+  const cycle = normalizeBillingCycle(billingCycle, plan);
+  if (cycle === "one_time") {
+    return { cycle, amount: plan.monthlyPrice, months: null, discountPercent: 0 };
+  }
+  if (cycle === "annual") {
+    return {
+      cycle,
+      amount: plan.annualPrice,
+      months: ANNUAL_BILLING_MONTHS,
+      discountPercent: ANNUAL_DISCOUNT_PERCENT,
+      monthlyEquivalent: Number((plan.annualPrice / ANNUAL_BILLING_MONTHS).toFixed(2)),
+    };
+  }
+  return { cycle, amount: plan.monthlyPrice, months: 1, discountPercent: 0, monthlyEquivalent: plan.monthlyPrice };
+}
+
 export function planLimitMessage(plan, resource) {
   const singular = resource === "branches" ? "branch" : "user";
   const action = resource === "branches" ? "add another branch" : "add more users";
@@ -108,17 +137,32 @@ export function serializeSubscription(subscription, { users = 0, branches = 0 } 
       status: "grandfathered",
       accessAllowed: true,
       isExistingAccountDefault: true,
+      billingCycle: null,
+      requestedBillingCycle: null,
+      requestedPlan: null,
+      requestedBilling: null,
+      billing: null,
       includedWebsitePages: INCLUDED_WEBSITE_PAGES,
       usage: { users, branches },
     };
   }
   const plan = getSubscriptionPlan(subscription.planCode);
   const status = effectiveSubscriptionStatus(subscription, now);
+  const billingCycle = normalizeBillingCycle(subscription.billingCycle, plan);
+  const requestedPlan = getSubscriptionPlan(subscription.requestedPlanCode);
+  const requestedBillingCycle = subscription.requestedPlanCode
+    ? normalizeBillingCycle(subscription.requestedBillingCycle, requestedPlan)
+    : null;
   return {
     id: subscription.id,
     plan,
     planCode: subscription.planCode,
     requestedPlanCode: subscription.requestedPlanCode,
+    billingCycle,
+    requestedBillingCycle,
+    billing: billingDetails(plan, billingCycle),
+    requestedPlan,
+    requestedBilling: requestedPlan ? billingDetails(requestedPlan, requestedBillingCycle) : null,
     status,
     accessAllowed: subscriptionAllowsOperations(subscription, now),
     isExistingAccountDefault: false,
