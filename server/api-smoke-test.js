@@ -190,7 +190,7 @@ try {
   const unauthenticatedBootstrap = await request("/api/bootstrap");
   assert(unauthenticatedBootstrap.response.status === 401, "unauthenticated bootstrap was not blocked");
 
-  const demoPassword = "PrivateDemo2026!Pass";
+  const demoPassword = "demo1234";
   async function createAndOpenDemo(index) {
     const email = `private-demo-${Date.now()}-${index}@example.test`;
     const registration = await request("/api/auth/demo-register", {

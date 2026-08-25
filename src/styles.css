@@ -5955,6 +5955,46 @@ td .inline-actions { flex-wrap: nowrap; }
   color: var(--ink);
 }
 
+.login-password-field {
+  position: relative;
+}
+
+.login-password-field input {
+  width: 100%;
+  padding-right: 46px;
+}
+
+.login-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+.login-password-toggle:hover,
+.login-password-toggle:focus-visible {
+  background: var(--paper);
+  color: var(--wine);
+}
+
+.login-password-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--wine) 42%, transparent);
+  outline-offset: 1px;
+}
+
+.demo-password-helper {
+  margin-top: -4px;
+}
+
 .role-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

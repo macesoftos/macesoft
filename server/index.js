@@ -10,6 +10,7 @@ import helmet from "helmet";
 import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import { prisma } from "./prisma.js";
+import { demoPasswordMeetsMinimum } from "./demoPasswordPolicy.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
@@ -4201,8 +4202,8 @@ app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
   const password = requireText(request.body?.password, "Password");
   if (name.length < 2) throw apiError("Enter your full name.", 400);
   if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.", 400);
-  if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-    throw apiError("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.", 400);
+  if (!demoPasswordMeetsMinimum(password)) {
+    throw apiError("Use at least 8 characters for your demo password.", 400);
   }
 
   const existingAccount = await prisma.account.findUnique({ where: { email }, select: { id: true } });

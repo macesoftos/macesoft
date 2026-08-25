@@ -23,6 +23,7 @@ import {
   Edit3,
   EllipsisVertical,
   Eye,
+  EyeOff,
   FileText,
   Filter,
   Gift,
@@ -4600,6 +4601,8 @@ function LoginScreen({ notice, onLogin, settings }) {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
@@ -4656,9 +4659,49 @@ function LoginScreen({ notice, onLogin, settings }) {
           </label>
           <label>
             <span>Password</span>
-            <input autoComplete={demoOpen ? "new-password" : "current-password"} type="password" placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <div className="login-password-field">
+              <input
+                autoComplete={demoOpen ? "new-password" : "current-password"}
+                minLength={demoOpen ? 8 : undefined}
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <button
+                className="login-password-toggle"
+                type="button"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+              </button>
+            </div>
           </label>
-          {demoOpen && <label><span>Confirm password</span><input autoComplete="new-password" type="password" placeholder="Confirm your password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>}
+          {demoOpen && <label>
+            <span>Confirm password</span>
+            <div className="login-password-field">
+              <input
+                autoComplete="new-password"
+                minLength={8}
+                type={showConfirmPassword ? "text" : "password"}
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+              <button
+                className="login-password-toggle"
+                type="button"
+                aria-label={showConfirmPassword ? "Hide confirmed password" : "Show confirmed password"}
+                aria-pressed={showConfirmPassword}
+                onClick={() => setShowConfirmPassword((visible) => !visible)}
+              >
+                {showConfirmPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+              </button>
+            </div>
+          </label>}
+          {demoOpen && <p className="login-helper demo-password-helper">Use at least 8 characters. No special character mix is required.</p>}
           {notice && <div className="inline-state warning" role="alert"><AlertCircle size={17} /><span>{notice}</span></div>}
           {error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}
           <button className="primary-button full" type="submit" disabled={submitting || !email || !password || (demoOpen && (!name.trim() || !confirmPassword))}>
@@ -4673,7 +4716,7 @@ function LoginScreen({ notice, onLogin, settings }) {
           )}
           {demoSignupAvailable && <>
             <div className="login-demo-separator"><span>or</span></div>
-            <button className="ghost-button full demo-account-button" type="button" onClick={() => { setDemoOpen((value) => !value); setError(""); setForgotOpen(false); }}>
+            <button className="ghost-button full demo-account-button" type="button" onClick={() => { setDemoOpen((value) => !value); setShowPassword(false); setShowConfirmPassword(false); setError(""); setForgotOpen(false); }}>
               {demoOpen ? "Back to sign in" : "Create a demo account"}
             </button>
           </>}
