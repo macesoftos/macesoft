@@ -30,6 +30,7 @@ function ownerSession() {
     organizationWideAccess: true,
     status: "Active",
     mustChangePassword: false,
+    subscription: { status: "active", accessAllowed: true, planCode: "unlimited", billingCycle: "monthly" },
     createdAt: "2026-08-01T00:00:00.000Z",
     access: {
       active: true,
@@ -54,6 +55,7 @@ function managerSession() {
     organizationWideAccess: false,
     status: "Active",
     mustChangePassword: false,
+    subscription: { status: "active", accessAllowed: true, planCode: "unlimited", billingCycle: "monthly" },
     createdAt: "2026-08-01T00:00:00.000Z",
     access: {
       active: true,

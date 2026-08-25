@@ -27,7 +27,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   test.setTimeout(420_000);
   await page.goto("/");
   await page.getByLabel("Email").fill(ownerEmail);
-  await page.getByLabel("Password").fill(ownerPassword);
+  await page.getByLabel("Password", { exact: true }).fill(ownerPassword);
   const loginResponse = page.waitForResponse((response) => response.url().endsWith("/api/auth/login") && response.request().method() === "POST");
   await page.getByRole("button", { name: /sign in securely/i }).click();
   expect((await loginResponse).status()).toBe(200);
