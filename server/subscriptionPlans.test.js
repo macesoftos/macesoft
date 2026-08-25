@@ -111,9 +111,10 @@ test("pricing and registration state the corrected website scope without a setup
 });
 
 test("registration remains pending and trial activation creates no setup charge", () => {
+  const registrationWorkspace = serverSource.slice(serverSource.indexOf("async function createOwnerWorkspace"), serverSource.indexOf("async function deliverRegistrationConfirmation"));
   const registrationRoute = serverSource.slice(serverSource.indexOf('app.post("/api/auth/register"'), serverSource.indexOf('app.post("/api/auth/demo-register"'));
   const trialRoute = serverSource.slice(serverSource.indexOf('app.post("/api/subscription/trial"'), serverSource.indexOf('app.post("/api/subscription/request-activation"'));
-  assert.match(registrationRoute, /status: "pending_plan"/);
+  assert.match(registrationWorkspace, /status: "pending_plan"/);
   assert.doesNotMatch(registrationRoute, /trialStartAt|trialEndAt/);
   assert.match(trialRoute, /trialWindow\(now\)/);
   assert.match(trialRoute, /No payment or setup charge was created/);

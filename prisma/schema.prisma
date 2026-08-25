@@ -200,7 +200,10 @@ model Account {
   lockedUntil             DateTime?
   lastLoginAt             DateTime?
   notificationsReadAt     DateTime?
+  emailVerifiedAt         DateTime?
+  registrationEmailSentAt DateTime?
   sessions                AuthSession[]
+  identities              AccountIdentity[]
   attendanceEvents        AttendanceEvent[]
   faceTrackEnrollments    FaceTrackProfile[]           @relation("FaceTrackEnrolledBy")
   faceTrackRequests       FaceTrackCorrectionRequest[] @relation("FaceTrackRequestedBy")
@@ -219,6 +222,22 @@ model Account {
   @@index([role])
   @@index([branch])
   @@index([organizationId, status])
+}
+
+model AccountIdentity {
+  id              String   @id @default(cuid())
+  accountId       String
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider        String
+  providerSubject String
+  providerEmail   String   @default("")
+  emailVerified   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([provider, providerSubject])
+  @@unique([accountId, provider])
+  @@index([providerEmail])
 }
 
 model BranchMembership {

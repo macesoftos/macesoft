@@ -25,6 +25,13 @@ import {
   trialWindow,
 } from "./subscriptionPlans.js";
 import { activationRequestEmail, subscriptionSalesRecipient } from "./subscriptionActivationEmail.js";
+import {
+  googleAuthenticationReady,
+  googleClientId,
+  googleIsAuthoritativeForEmail,
+  verifyGoogleCredential,
+} from "./googleAuthentication.js";
+import { registrationConfirmationEmail } from "./registrationConfirmationEmail.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { isDemoSignupHostname } from "../src/config/demoAccess.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
@@ -160,17 +167,19 @@ const inquiryEmbedFrameAncestors = [
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet({
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       baseUri: ["'self'"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "https://accounts.google.com/gsi/"],
       fontSrc: ["'self'", "data:"],
+      frameSrc: ["https://accounts.google.com/gsi/"],
       frameAncestors: ["'none'"],
       imgSrc: ["'self'", "data:", "blob:"],
       objectSrc: ["'none'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "https://accounts.google.com/gsi/client"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com/gsi/style"],
     },
   },
   crossOriginResourcePolicy: { policy: "same-origin" },
@@ -281,6 +290,7 @@ app.use("/api", apiLimiter);
 app.use("/api/auth/login", loginLimiter);
 app.use("/api/auth/demo-register", demoRegistrationLimiter);
 app.use("/api/auth/register", publicWriteLimiter);
+app.use("/api/auth/google", loginLimiter);
 app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
@@ -4304,6 +4314,138 @@ async function expireInvitations() {
   }
 }
 
+function registrationWorkspaceValues(businessName) {
+  const registrationKey = randomBytes(8).toString("hex");
+  const suffix = registrationKey.slice(0, 6).toUpperCase();
+  const organizationSlugBase = businessName.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "clinic";
+  return {
+    organizationSlug: `${organizationSlugBase}-${registrationKey}`,
+    branchName: `${businessName} ${suffix}`,
+    branchCode: `ZEN-${registrationKey.slice(0, 8).toUpperCase()}`,
+  };
+}
+
+async function createOwnerWorkspace(tx, {
+  name,
+  businessName,
+  email,
+  passwordHash,
+  token,
+  expiresAt,
+  googleIdentity = null,
+}) {
+  const values = registrationWorkspaceValues(businessName);
+  const organizationModules = roleAccess.Owner;
+  const organization = await tx.organization.create({
+    data: { name: businessName, slug: values.organizationSlug, status: "Active" },
+  });
+  const branch = await tx.branch.create({
+    data: {
+      organizationId: organization.id,
+      name: values.branchName,
+      code: values.branchCode,
+      status: "Active",
+      modules: { create: organizationModules.map((moduleId) => ({ moduleId, enabled: true })) },
+    },
+  });
+  const account = await tx.account.create({
+    data: {
+      name,
+      email,
+      passwordHash,
+      role: "Owner",
+      branch: branch.name,
+      organizationId: organization.id,
+      organizationWideAccess: true,
+      organizationModules: jsonText(organizationModules, []),
+      lastBranchId: branch.id,
+      status: "Active",
+      mustChangePassword: false,
+      emailVerifiedAt: googleIdentity?.emailVerified ? new Date() : null,
+    },
+  });
+  if (googleIdentity) {
+    await tx.accountIdentity.create({
+      data: {
+        accountId: account.id,
+        provider: "google",
+        providerSubject: googleIdentity.subject,
+        providerEmail: googleIdentity.email,
+        emailVerified: googleIdentity.emailVerified,
+      },
+    });
+  }
+  await tx.branchMembership.create({
+    data: {
+      branchId: branch.id,
+      accountId: account.id,
+      role: "Owner",
+      modules: jsonText(organizationModules, []),
+      permissions: "[]",
+      status: "Active",
+      isPrimary: true,
+    },
+  });
+  await tx.subscription.create({
+    data: {
+      organizationId: organization.id,
+      status: "pending_plan",
+      includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+    },
+  });
+  await tx.authSession.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } });
+  await tx.auditLog.create({ data: {
+    time: new Date().toLocaleString("en-PH"),
+    actor: name,
+    role: "Owner",
+    actorAccountId: account.id,
+    branchId: branch.id,
+    area: "Authentication",
+    action: "Account registered",
+    subjectType: "Account",
+    subjectId: account.id,
+    details: `Owner registration completed with ${googleIdentity ? "Google" : "email and password"}. Subscription remains pending until a plan is selected; no trial or charge was created.`,
+  } });
+  return { accountId: account.id, organizationId: organization.id };
+}
+
+async function deliverRegistrationConfirmation(account, authenticationMethod) {
+  if (!emailReady()) {
+    console.warn(JSON.stringify({ event: "registration_confirmation_skipped", accountId: account.id, reason: "smtp_not_configured" }));
+    return false;
+  }
+  let transporter;
+  try {
+    transporter = await createVerifiedEmailTransport();
+    const content = registrationConfirmationEmail({
+      account,
+      organization: account.organization,
+      appOrigin: process.env.APP_ORIGIN,
+      authenticationMethod,
+    });
+    await sendSmtpEmail({ transporter, ...content });
+    await prisma.account.update({ where: { id: account.id }, data: { registrationEmailSentAt: new Date() } });
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({ event: "registration_confirmation_failed", accountId: account.id, error: clean(error.message) }));
+    return false;
+  } finally {
+    transporter?.close();
+  }
+}
+
+function assertGoogleRequestOrigin(request) {
+  const origin = clean(request.get("origin"));
+  const localOrigin = process.env.NODE_ENV !== "production" && /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(origin);
+  if (!origin || (!allowedOrigins.includes(origin) && !localOrigin)) {
+    throw apiError("Google authentication must be started from an approved ZenshoTech site.", 403);
+  }
+}
+
+app.get("/api/public/auth-config", (_request, response) => {
+  response.json({ googleClientId: googleClientId(process.env) });
+});
+
 app.get("/api/public/plans", (_request, response) => {
   response.json({
     plans: publicSubscriptionPlans(),
@@ -4340,88 +4482,132 @@ app.post("/api/auth/register", asyncRoute(async (request, response) => {
     throw apiError("An account already exists for this email. Sign in instead.", 409);
   }
 
-  const registrationKey = randomBytes(8).toString("hex");
-  const suffix = registrationKey.slice(0, 6).toUpperCase();
-  const organizationSlugBase = businessName.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "clinic";
-  const organizationModules = roleAccess.Owner;
-  const branchName = `${businessName} ${suffix}`;
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + sessionDurationMs);
-  let accountId = "";
+  let registration;
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const organization = await tx.organization.create({
-        data: { name: businessName, slug: `${organizationSlugBase}-${registrationKey}`, status: "Active" },
-      });
-      const branch = await tx.branch.create({
-        data: {
-          organizationId: organization.id,
-          name: branchName,
-          code: `ZEN-${registrationKey.slice(0, 8).toUpperCase()}`,
-          status: "Active",
-          modules: { create: organizationModules.map((moduleId) => ({ moduleId, enabled: true })) },
-        },
-      });
-      const account = await tx.account.create({
-        data: {
-          name,
-          email,
-          passwordHash: hashPassword(password),
-          role: "Owner",
-          branch: branch.name,
-          organizationId: organization.id,
-          organizationWideAccess: true,
-          organizationModules: jsonText(organizationModules, []),
-          lastBranchId: branch.id,
-          status: "Active",
-          mustChangePassword: false,
-        },
-      });
-      accountId = account.id;
-      await tx.branchMembership.create({
-        data: {
-          branchId: branch.id,
-          accountId: account.id,
-          role: "Owner",
-          modules: jsonText(organizationModules, []),
-          permissions: "[]",
-          status: "Active",
-          isPrimary: true,
-        },
-      });
-      await tx.subscription.create({
-        data: {
-          organizationId: organization.id,
-          status: "pending_plan",
-          includedWebsitePages: INCLUDED_WEBSITE_PAGES,
-        },
-      });
-      await tx.authSession.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } });
-      await tx.auditLog.create({ data: {
-        time: new Date().toLocaleString("en-PH"),
-        actor: name,
-        role: "Owner",
-        actorAccountId: account.id,
-        branchId: branch.id,
-        area: "Authentication",
-        action: "Account registered",
-        subjectType: "Account",
-        subjectId: account.id,
-        details: "Owner registration completed. Subscription remains pending until a plan is selected; no trial or charge was created.",
-      } });
-    });
+    registration = await prisma.$transaction((tx) => createOwnerWorkspace(tx, {
+      name,
+      businessName,
+      email,
+      passwordHash: hashPassword(password),
+      token,
+      expiresAt,
+    }));
   } catch (error) {
     if (error?.code === "P2002") throw apiError("An account already exists for this email. Sign in instead.", 409);
     throw error;
   }
 
-  const account = await prisma.account.findUnique({ where: { id: accountId }, include: accountAccessInclude });
+  const account = await prisma.account.findUnique({ where: { id: registration.accountId }, include: accountAccessInclude });
+  const confirmationEmailSent = await deliverRegistrationConfirmation(account, "email and password");
   setSessionCookie(response, token, expiresAt);
   response.status(201).json({
     account: await publicAccountWithSubscription(account),
     expiresAt,
+    confirmationEmailSent,
+    message: confirmationEmailSent
+      ? `Your workspace is ready. A registration confirmation was sent to ${account.email}.`
+      : `Your workspace is ready, but the confirmation email could not be sent. Try again later or contact ${subscriptionSalesRecipient(process.env)}.`,
     redirectTo: "/pricing?onboarding=1",
+  });
+}));
+
+app.post("/api/auth/google", asyncRoute(async (request, response) => {
+  if (!googleAuthenticationReady(process.env)) throw apiError("Google authentication is not configured yet.", 503);
+  assertGoogleRequestOrigin(request);
+  let profile;
+  try {
+    profile = await verifyGoogleCredential(request.body?.credential, { clientId: googleClientId(process.env) });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "google_authentication_rejected", error: clean(error.message) }));
+    throw apiError("Google could not verify this sign-in. Please try again.", 401);
+  }
+
+  const identity = await prisma.accountIdentity.findUnique({
+    where: { provider_providerSubject: { provider: "google", providerSubject: profile.subject } },
+    select: { accountId: true },
+  });
+  let account = identity
+    ? await prisma.account.findUnique({ where: { id: identity.accountId }, include: accountAccessInclude })
+    : await prisma.account.findUnique({ where: { email: profile.email }, include: accountAccessInclude });
+  const now = new Date();
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + sessionDurationMs);
+  let isNewAccount = false;
+
+  if (account) {
+    if (account.status !== "Active" || (account.lockedUntil && account.lockedUntil > now)) {
+      throw apiError("This account is not available for sign-in. Contact an administrator.", 403);
+    }
+    if (!identity) {
+      if (!googleIsAuthoritativeForEmail(profile)) {
+        throw apiError("An account already uses this email. Sign in with your password before connecting Google.", 409, { code: "GOOGLE_ACCOUNT_LINK_REQUIRED" });
+      }
+      try {
+        await prisma.accountIdentity.create({ data: {
+          accountId: account.id,
+          provider: "google",
+          providerSubject: profile.subject,
+          providerEmail: profile.email,
+          emailVerified: true,
+        } });
+      } catch (error) {
+        if (error?.code !== "P2002") throw error;
+        const concurrentIdentity = await prisma.accountIdentity.findUnique({
+          where: { provider_providerSubject: { provider: "google", providerSubject: profile.subject } },
+          select: { accountId: true },
+        });
+        if (concurrentIdentity?.accountId !== account.id) throw apiError("This Google account is already linked elsewhere.", 409);
+      }
+      await prisma.account.update({ where: { id: account.id }, data: { emailVerifiedAt: account.emailVerifiedAt || now } });
+    }
+    if (!hasValidBranchAssignment(account)) throw apiError("This account must be assigned to one clinic branch. Contact an administrator.", 403);
+    await prisma.$transaction([
+      prisma.authSession.deleteMany({ where: { accountId: account.id, expiresAt: { lt: now } } }),
+      prisma.authSession.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } }),
+      prisma.account.update({ where: { id: account.id }, data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now } }),
+    ]);
+  } else {
+    const businessName = clean(request.body?.businessName).replace(/\s+/g, " ").slice(0, 140);
+    if (businessName.length < 2 || request.body?.termsAccepted !== true || request.body?.privacyAccepted !== true) {
+      throw apiError("Complete your clinic name and accept the terms to register with Google.", 422, {
+        code: "GOOGLE_REGISTRATION_REQUIRED",
+        profile: { name: profile.name, email: profile.email },
+      });
+    }
+    try {
+      const registration = await prisma.$transaction((tx) => createOwnerWorkspace(tx, {
+        name: profile.name,
+        businessName,
+        email: profile.email,
+        passwordHash: hashPassword(randomBytes(48).toString("base64url")),
+        token,
+        expiresAt,
+        googleIdentity: profile,
+      }));
+      account = await prisma.account.findUnique({ where: { id: registration.accountId }, include: accountAccessInclude });
+      isNewAccount = true;
+    } catch (error) {
+      if (error?.code === "P2002") throw apiError("An account or Google identity already exists. Try signing in again.", 409);
+      throw error;
+    }
+  }
+
+  const confirmationEmailSent = isNewAccount ? await deliverRegistrationConfirmation(account, "Google") : null;
+  setSessionCookie(response, token, expiresAt);
+  response.status(isNewAccount ? 201 : 200).json({
+    account: await publicAccountWithSubscription(account),
+    expiresAt,
+    isNewAccount,
+    confirmationEmailSent,
+    message: isNewAccount
+      ? (confirmationEmailSent
+        ? `Your workspace is ready. A registration confirmation was sent to ${account.email}.`
+        : `Your workspace is ready, but the confirmation email could not be sent. Contact ${subscriptionSalesRecipient(process.env)} if the address is correct.`)
+      : `Welcome back, ${account.name}.`,
+    redirectTo: isNewAccount ? "/pricing?onboarding=1" : "/dashboard",
   });
 }));
 

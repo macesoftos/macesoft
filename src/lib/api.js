@@ -56,6 +56,17 @@ export function loginAccount(email, password) {
   });
 }
 
+export function loadPublicAuthConfig() {
+  return requestJson("/api/public/auth-config");
+}
+
+export function authenticateWithGoogle(payload) {
+  return requestJson("/api/auth/google", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createDemoAccount(name, email, password) {
   return requestJson("/api/auth/demo-register", {
     method: "POST",

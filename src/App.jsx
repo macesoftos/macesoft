@@ -170,7 +170,9 @@ import {
   voidTransactionRecord,
   apiAuthenticationRequiredEvent,
   apiNotificationCreatedEvent,
+  authenticateWithGoogle,
 } from "./lib/api.js";
+import GoogleIdentityButton from "./components/GoogleIdentityButton.jsx";
 
 const storageKey = (key) => `mace-clinicos-${key}`;
 const retiredSensitiveStorageKeys = [
@@ -1808,7 +1810,21 @@ function App() {
   function handleRegistrationComplete(result) {
     setSessionNotice("");
     setSession(result.account);
+    if (result.message) notify(result.message, result.confirmationEmailSent === false ? "warning" : "success");
     navigateToPath(result.redirectTo || "/pricing?onboarding=1", { replace: true });
+  }
+
+  function handleGoogleAuthentication(result) {
+    const user = result.account;
+    setSessionNotice("");
+    setSession(user);
+    if (result.redirectTo?.startsWith("/pricing")) {
+      navigateToPath(result.redirectTo, { replace: true });
+    } else {
+      setActiveModule(landingModuleForSession(user), { replace: true });
+      if (result.redirectTo && result.redirectTo !== "/dashboard") navigateToPath(result.redirectTo, { replace: true });
+    }
+    notify(result.message || `Welcome, ${user.name}.`, result.confirmationEmailSent === false ? "warning" : "success");
   }
 
   function handleSubscriptionSession(result) {
@@ -2860,7 +2876,7 @@ function App() {
   if (!session) {
     const resetToken = publicParams.get("reset");
     if (resetToken) return <ResetPasswordScreen token={resetToken} />;
-    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} onNavigate={navigateToPath} settings={settings} />;
+    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} onGoogleAuthenticated={handleGoogleAuthentication} onNavigate={navigateToPath} settings={settings} />;
   }
 
   if (isSubscriptionView) {
@@ -4702,6 +4718,8 @@ function PublicSubscriptionHeader({ session, onNavigate }) {
 
 function RegistrationPage({ session, onRegistered, onNavigate }) {
   const [form, setForm] = useState({ name: "", businessName: "", email: "", password: "", confirmPassword: "", agreements: false });
+  const [googleCredential, setGoogleCredential] = useState("");
+  const [googleProfile, setGoogleProfile] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [errors, setErrors] = useState({});
@@ -4716,15 +4734,38 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
     setErrors((current) => ({ ...current, [field]: "", form: "" }));
   }
 
+  async function startGoogleRegistration(credential) {
+    if (!credential || submitting) return;
+    setErrors({});
+    setSubmitting(true);
+    try {
+      const result = await authenticateWithGoogle({ credential });
+      onRegistered(result);
+    } catch (error) {
+      if (error.payload?.code === "GOOGLE_REGISTRATION_REQUIRED") {
+        const profile = error.payload.profile;
+        setGoogleCredential(credential);
+        setGoogleProfile(profile);
+        setForm((current) => ({ ...current, name: profile.name || "", email: profile.email || "" }));
+      } else {
+        setErrors({ form: error.message || "Google registration could not be started." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function submit(event) {
     event.preventDefault();
     if (submitting) return;
     const nextErrors = {};
-    if (form.name.trim().length < 2) nextErrors.name = "Enter your full name.";
     if (form.businessName.trim().length < 2) nextErrors.businessName = "Enter your business or clinic name.";
-    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) nextErrors.email = "Enter a valid email address.";
-    if (form.password.length < 8) nextErrors.password = "Use at least 8 characters.";
-    if (form.password !== form.confirmPassword) nextErrors.confirmPassword = "Passwords do not match.";
+    if (!googleCredential) {
+      if (form.name.trim().length < 2) nextErrors.name = "Enter your full name.";
+      if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) nextErrors.email = "Enter a valid email address.";
+      if (form.password.length < 8) nextErrors.password = "Use at least 8 characters.";
+      if (form.password !== form.confirmPassword) nextErrors.confirmPassword = "Passwords do not match.";
+    }
     if (!form.agreements) nextErrors.agreements = "Accept the Terms of Service and Privacy Policy to continue.";
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
@@ -4732,14 +4773,21 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
     }
     setSubmitting(true);
     try {
-      const result = await registerAccount({
-        name: form.name.trim(),
-        businessName: form.businessName.trim(),
-        email: form.email.trim(),
-        password: form.password,
-        termsAccepted: true,
-        privacyAccepted: true,
-      });
+      const result = googleCredential
+        ? await authenticateWithGoogle({
+          credential: googleCredential,
+          businessName: form.businessName.trim(),
+          termsAccepted: true,
+          privacyAccepted: true,
+        })
+        : await registerAccount({
+          name: form.name.trim(),
+          businessName: form.businessName.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          termsAccepted: true,
+          privacyAccepted: true,
+        });
       const registrationParams = new URLSearchParams(window.location.search);
       const selectedPlan = registrationParams.get("plan");
       const selectedBilling = registrationParams.get("billing") === "annual" ? "annual" : "monthly";
@@ -4751,6 +4799,10 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
         ...current,
         [error.status === 409 ? "email" : "form"]: error.message || "Registration could not be completed. Please try again.",
       }));
+      if (googleCredential && error.status === 401) {
+        setGoogleCredential("");
+        setGoogleProfile(null);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -4777,14 +4829,19 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
             <div className="inline-state warning"><ShieldCheck size={18} /><span>You are already signed in as {session.email}.</span></div>
           ) : <>
             {errors.form && <div className="inline-state danger" role="alert"><AlertCircle size={17} /><span>{errors.form}</span></div>}
-            <label><span>Full name</span><input autoComplete="name" maxLength={100} value={form.name} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
+            <GoogleIdentityButton mode="signup" onCredential={startGoogleRegistration} disabled={submitting} />
+            <div className="login-demo-separator"><span>{googleProfile ? "Google account selected" : "or register with email"}</span></div>
+            {googleProfile && <div className="inline-state success"><Check size={17} /><span>Continue as {googleProfile.name} ({googleProfile.email}). Add your clinic name below.</span></div>}
+            <label><span>Full name</span><input autoComplete="name" maxLength={100} value={form.name} readOnly={Boolean(googleProfile)} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
             <label><span>Business or clinic name</span><input autoComplete="organization" maxLength={140} value={form.businessName} onChange={(event) => update("businessName", event.target.value)} aria-invalid={Boolean(errors.businessName)} />{errors.businessName && <small className="field-error">{errors.businessName}</small>}</label>
-            <label><span>Email address</span><input autoComplete="email" type="email" maxLength={160} value={form.email} onChange={(event) => update("email", event.target.value)} aria-invalid={Boolean(errors.email)} />{errors.email && <small className="field-error">{errors.email}</small>}</label>
-            <label><span>Password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => update("password", event.target.value)} aria-invalid={Boolean(errors.password)} /><button className="login-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.password && <small className="field-error">{errors.password}</small>}</label>
-            <label><span>Confirm password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showConfirmation ? "text" : "password"} value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} aria-invalid={Boolean(errors.confirmPassword)} /><button className="login-password-toggle" type="button" aria-label={showConfirmation ? "Hide confirmed password" : "Show confirmed password"} onClick={() => setShowConfirmation((value) => !value)}>{showConfirmation ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.confirmPassword && <small className="field-error">{errors.confirmPassword}</small>}</label>
+            <label><span>Email address</span><input autoComplete="email" type="email" maxLength={160} value={form.email} readOnly={Boolean(googleProfile)} onChange={(event) => update("email", event.target.value)} aria-invalid={Boolean(errors.email)} />{errors.email && <small className="field-error">{errors.email}</small>}</label>
+            {!googleProfile && <>
+              <label><span>Password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => update("password", event.target.value)} aria-invalid={Boolean(errors.password)} /><button className="login-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.password && <small className="field-error">{errors.password}</small>}</label>
+              <label><span>Confirm password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showConfirmation ? "text" : "password"} value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} aria-invalid={Boolean(errors.confirmPassword)} /><button className="login-password-toggle" type="button" aria-label={showConfirmation ? "Hide confirmed password" : "Show confirmed password"} onClick={() => setShowConfirmation((value) => !value)}>{showConfirmation ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.confirmPassword && <small className="field-error">{errors.confirmPassword}</small>}</label>
+            </>}
             <label className="checkbox-field registration-agreement"><input type="checkbox" checked={form.agreements} onChange={(event) => update("agreements", event.target.checked)} /><span>I agree to the Terms of Service and Privacy Policy.</span></label>
             {errors.agreements && <small className="field-error">{errors.agreements}</small>}
-            <button className="primary-button full" type="submit" disabled={submitting}>{submitting ? "Creating secure workspace..." : "Continue to pricing"}</button>
+            <button className="primary-button full" type="submit" disabled={submitting}>{submitting ? "Creating secure workspace..." : googleProfile ? "Create workspace with Google" : "Continue to pricing"}</button>
           </>}
           {session && <button className="primary-button full" type="button" onClick={() => {
             const billing = new URLSearchParams(window.location.search).get("billing") === "annual" ? "annual" : "monthly";
@@ -5018,7 +5075,7 @@ function TrialBanner({ subscription, onNavigate }) {
   );
 }
 
-function LoginScreen({ notice, onLogin, onNavigate }) {
+function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -5036,6 +5093,24 @@ function LoginScreen({ notice, onLogin, onNavigate }) {
       await onLogin(email, password);
     } catch (loginError) {
       setError(loginError.message || "Unable to sign in.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function signInWithGoogle(credential) {
+    if (!credential || submitting) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const result = await authenticateWithGoogle({ credential });
+      onGoogleAuthenticated(result);
+    } catch (googleError) {
+      if (googleError.payload?.code === "GOOGLE_REGISTRATION_REQUIRED") {
+        setError("No ZenshoTech workspace is linked to this Google account yet. Choose Register, then continue with Google.");
+      } else {
+        setError(googleError.message || "Unable to sign in with Google.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -5065,6 +5140,8 @@ function LoginScreen({ notice, onLogin, onNavigate }) {
             <h2>Sign in to your workspace</h2>
             <p className="login-helper">New to ZenshoTech? Start your 7-day free trial. No commitment.</p>
           </div>
+          <GoogleIdentityButton mode="signin" onCredential={signInWithGoogle} disabled={submitting} />
+          <div className="login-demo-separator"><span>or sign in with email</span></div>
           <label>
             <span>Email</span>
             <input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -5102,7 +5179,7 @@ function LoginScreen({ notice, onLogin, onNavigate }) {
           {forgotOpen && (
             <div className="inline-state warning" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
-          <div className="login-demo-separator"><span>or</span></div>
+          <div className="login-demo-separator"><span>New to ZenshoTech?</span></div>
           <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Register</button>
         </form>
       </section>

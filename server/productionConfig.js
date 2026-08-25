@@ -27,6 +27,10 @@ export function productionConfigErrors(environment = process.env) {
   if (smtpConfigured.some(Boolean) && !smtpConfigured.every(Boolean)) {
     errors.push("SMTP_HOST, SMTP_FROM, SMTP_USER, and SMTP_PASS must be configured together.");
   }
+  const googleClientId = String(environment.GOOGLE_CLIENT_ID || "").trim();
+  if (googleClientId && !/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(googleClientId)) {
+    errors.push("GOOGLE_CLIENT_ID must be a valid Google Web Client ID.");
+  }
 
   const origins = String(environment.APP_ORIGIN || "").split(",").map((value) => value.trim()).filter(Boolean);
   if (origins.some((origin) => !origin.startsWith("https://") || origin.includes("example.com"))) {

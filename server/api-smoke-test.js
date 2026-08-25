@@ -582,6 +582,27 @@ try {
   });
   assert(expirationAudit, "invitation expiration audit record was not created");
 
+  const registeredOwnerEmail = `registered-owner-${suffix}@release-test.invalid`;
+  const ownerRegistration = await request("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://127.0.0.1:5173" },
+    body: JSON.stringify({
+      name: "Registered Owner",
+      businessName: `Registration Smoke ${suffix}`,
+      email: registeredOwnerEmail,
+      password: "RegistrationSmoke2026!",
+      termsAccepted: true,
+      privacyAccepted: true,
+    }),
+  });
+  assert(ownerRegistration.response.status === 201, `owner registration failed (${ownerRegistration.response.status}: ${ownerRegistration.payload?.error || "unknown error"})`);
+  assert(ownerRegistration.payload.confirmationEmailSent === true, "owner registration did not record its confirmation email as sent");
+  assert(ownerRegistration.payload.account.subscription.status === "pending_plan", "owner registration started a subscription trial unexpectedly");
+  assert(ownerRegistration.response.headers.get("set-cookie")?.includes("macesoft_session="), "owner registration did not create a session");
+  const registrationMessage = await waitForSmtpMessage(6);
+  assert(registrationMessage.includes("Welcome to ZenshoTech"), "registration confirmation email had the wrong subject or heading");
+  assert(registrationMessage.includes(registeredOwnerEmail), "registration confirmation email did not identify the registered address");
+
   const createdClient = await jsonRequest("/api/resources/clients", {
     id: clientId,
     fullName: "Automated Smoke Client",

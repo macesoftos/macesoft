@@ -92,3 +92,19 @@ test("production rejects placeholder password-reset senders", () => {
   });
   assert.ok(errors.some((error) => error.includes("real clinic mailbox")));
 });
+
+test("production validates an optional Google Web Client ID", () => {
+  const base = {
+    NODE_ENV: "production",
+    APP_ORIGIN: "https://clinic.example.ph",
+    DATABASE_URL: "postgresql://runtime",
+    DIRECT_URL: "postgresql://direct",
+    FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: "true",
+    STORAGE_BASE_URL: "https://storage.example.ph",
+    STORAGE_BUCKET: "clinical-assets",
+    STORAGE_SERVICE_KEY: "secret",
+  };
+  assert.ok(productionConfigErrors({ ...base, GOOGLE_CLIENT_ID: "not-a-client-id" }).some((error) => error.includes("Google Web Client ID")));
+  assert.deepEqual(productionConfigErrors({ ...base, GOOGLE_CLIENT_ID: "123456789-example.apps.googleusercontent.com" }), []);
+});
