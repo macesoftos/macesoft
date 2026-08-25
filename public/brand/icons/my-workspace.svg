@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-my-workspace"><title id="t-my-workspace">My Workspace</title>
+  <circle cx="29" cy="24" r="8" fill="#93545D"/><path d="M14 51c1-11 6-17 15-17s14 6 15 17H14Z" fill="#93545D"/>
+  <circle cx="45" cy="19" r="11" fill="#D5AEB4"/><path d="m40 19 4 4 7-9" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 14h8v6h-8z" fill="#6F3640"/><path d="M14 44h8v7h-8z" fill="#B97882"/></svg>

@@ -681,6 +681,12 @@ img { max-width: 100%; }
 
 .nav-list { display: grid; gap: 4px; }
 
+.flat-module-icon {
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
 .nav-item {
   position: relative;
   display: flex;
@@ -702,6 +708,10 @@ img { max-width: 100%; }
 
 .nav-item svg {
   flex: 0 0 18px;
+}
+
+.nav-item .flat-module-icon {
+  flex-basis: 18px;
 }
 
 .nav-item span {

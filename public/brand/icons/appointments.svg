@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-appointments"><title id="t-appointments">Appointments</title>
+  <path d="M12 18a6 6 0 0 1 6-6h28a6 6 0 0 1 6 6v32H12V18Z" fill="#93545D"/><path d="M12 18a6 6 0 0 1 6-6h8v13H12v-7Z" fill="#6F3640"/><path d="M26 12h13v13H26z" fill="#D5AEB4"/><path d="M39 12h7a6 6 0 0 1 6 6v7H39V12Z" fill="#B97882"/>
+  <path d="M20 32h6v6h-6zM30 32h6v6h-6zM40 32h6v6h-6zM20 42h6v5h-6zM30 42h6v5h-6z" fill="white"/></svg>

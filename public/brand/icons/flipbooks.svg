@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-flipbooks"><title id="t-flipbooks">Flipbooks</title>
+  <path d="M5 13c11-4 20-2 27 5v38c-7-7-16-9-27-5V13Z" fill="#93545D"/><path d="M59 13c-11-4-20-2-27 5v38c7-7 16-9 27-5V13Z" fill="#B97882"/><path d="M5 13c5-2 9-2 14-1v10H5v-9Z" fill="#6F3640"/><path d="M45 12c5-1 9-1 14 1v9H45V12Z" fill="#D5AEB4"/><path d="M13 29h12M13 37h12M39 29h12M39 37h12" stroke="white" stroke-width="3" stroke-linecap="round"/></svg>

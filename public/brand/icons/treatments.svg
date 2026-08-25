@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-treatments"><title id="t-treatments">Treatments</title>
+  <defs><clipPath id="heart"><path d="M32 54S8 42 8 24c0-12 15-17 24-5 9-12 24-7 24 5 0 18-24 30-24 30Z"/></clipPath></defs>
+  <g clip-path="url(#heart)"><rect x="8" y="8" width="24" height="23" fill="#6F3640"/><rect x="32" y="8" width="24" height="23" fill="#D5AEB4"/><rect x="8" y="31" width="24" height="25" fill="#93545D"/><rect x="32" y="31" width="24" height="25" fill="#B97882"/></g>
+  <path d="M15 32h10l4-8 7 16 4-8h9" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>

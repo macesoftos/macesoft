@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-facetrack-attendance"><title id="t-facetrack-attendance">FaceTrack Attendance</title>
+  <path d="M8 22V8h14" fill="none" stroke="#6F3640" stroke-width="6" stroke-linecap="round"/><path d="M42 8h14v14" fill="none" stroke="#D5AEB4" stroke-width="6" stroke-linecap="round"/><path d="M56 42v14H42" fill="none" stroke="#B97882" stroke-width="6" stroke-linecap="round"/><path d="M22 56H8V42" fill="none" stroke="#93545D" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="32" cy="27" r="9" fill="#93545D"/><path d="M18 50c1-10 6-15 14-15s13 5 14 15H18Z" fill="#93545D"/></svg>

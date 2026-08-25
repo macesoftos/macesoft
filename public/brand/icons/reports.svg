@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-reports"><title id="t-reports">Reports</title>
+  <rect x="8" y="37" width="10" height="19" rx="2" fill="#93545D"/><rect x="21" y="28" width="10" height="28" rx="2" fill="#6F3640"/><rect x="34" y="19" width="10" height="37" rx="2" fill="#D5AEB4"/><rect x="47" y="9" width="10" height="47" rx="2" fill="#B97882"/><path d="m10 29 15-10 11 3L54 7" fill="none" stroke="#4D252B" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>

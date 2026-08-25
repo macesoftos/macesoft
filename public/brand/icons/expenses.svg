@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-expenses"><title id="t-expenses">Expenses</title>
+  <path d="M13 8h38v49l-6-4-6 4-7-4-7 4-6-4-6 4V8Z" fill="#93545D"/><path d="M13 8h13v15H13z" fill="#6F3640"/><path d="M26 8h13v15H26z" fill="#D5AEB4"/><path d="M39 8h12v15H39z" fill="#B97882"/><path d="M22 31h20M22 39h12" stroke="white" stroke-width="4" stroke-linecap="round"/><circle cx="45" cy="47" r="11" fill="#6F3640"/><path d="M45 40v12m0 0-5-5m5 5 5-5" stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>

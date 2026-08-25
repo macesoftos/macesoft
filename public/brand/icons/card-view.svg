@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-card-view"><title id="t-card-view">Card View</title>
+  <rect x="8" y="17" width="30" height="35" rx="5" fill="#6F3640"/><rect x="16" y="12" width="32" height="38" rx="5" fill="#D5AEB4"/><rect x="24" y="8" width="32" height="38" rx="5" fill="#93545D"/><path d="M24 18h32v9H24z" fill="#B97882"/><path d="M31 33h18M31 39h12" stroke="white" stroke-width="3" stroke-linecap="round"/></svg>

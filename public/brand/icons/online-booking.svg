@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-online-booking"><title id="t-online-booking">Online Booking</title>
+  <circle cx="29" cy="31" r="23" fill="#93545D"/><path d="M6 31h46M29 8c8 8 12 15 12 23S37 46 29 54c-8-8-12-15-12-23S21 16 29 8Z" fill="none" stroke="white" stroke-width="3"/>
+  <path d="M29 8a23 23 0 0 1 20 12H29V8Z" fill="#B97882"/><circle cx="48" cy="45" r="12" fill="#D5AEB4"/><path d="m42 45 4 4 7-9" stroke="#6F3640" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>

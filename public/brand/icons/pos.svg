@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t-pos"><title id="t-pos">POS</title>
+  <rect x="12" y="10" width="40" height="42" rx="7" fill="#93545D"/><path d="M12 17a7 7 0 0 1 7-7h10v13H12v-6Z" fill="#6F3640"/><path d="M29 10h13v13H29z" fill="#D5AEB4"/><path d="M42 10h3a7 7 0 0 1 7 7v6H42V10Z" fill="#B97882"/><rect x="20" y="29" width="24" height="8" rx="2" fill="white"/><path d="M21 44h7M33 44h10" stroke="white" stroke-width="4" stroke-linecap="round"/></svg>
