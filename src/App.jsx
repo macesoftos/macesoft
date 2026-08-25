@@ -5035,7 +5035,6 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
               </ul>
               <div className="pricing-card-actions">
                 <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name} · ${billingCycle === "annual" ? "Annual" : "Monthly"}` : "Start free trial"}</button>
-                <button className="text-button full" type="button" onClick={() => requestQuote(plan)}>Request a quote <ChevronRight size={15} /></button>
               </div>
             </article>
           ))}

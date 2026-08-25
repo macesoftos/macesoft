@@ -4921,16 +4921,6 @@ td {
   font-size: 0.86rem;
 }
 
-.pricing-public-page .pricing-card-actions .text-button {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: #332d2a;
-  font-size: 0.8rem;
-}
-
 .pricing-reassurance {
   display: flex;
   align-items: center;
