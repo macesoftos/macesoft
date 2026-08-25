@@ -188,7 +188,10 @@ test("shareable pricing shows prices and trials while the homepage has no pricin
   assert.match(pricingSource, /plan\.annualPrice/);
   assert.match(pricingSource, /planPrice\(lifetimePlan\.monthlyPrice\)/);
   assert.match(pricingSource, /Start free trial/);
-  assert.match(pricingSource, /Request a quote/);
+  const fixedPlanCards = pricingSource.slice(pricingSource.indexOf('aria-label="Subscription plans"'), pricingSource.indexOf('className="pricing-reassurance"'));
+  assert.doesNotMatch(fixedPlanCards, /Request (?:a )?quote/i);
+  assert.match(pricingSource, /Request one-time quote/);
+  assert.match(pricingSource, /Request an additional-page quote/);
   assert.match(pricingSource, /Compare all features/);
   assert.match(pricingSource, /pricing-info-accordion/);
   assert.doesNotMatch(loginSource, /\/pricing|View pricing/i);
