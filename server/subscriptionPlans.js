@@ -37,7 +37,7 @@ export const subscriptionPlans = Object.freeze([
   Object.freeze({
     code: "lifetime",
     name: "One-Time Purchase",
-    monthlyPrice: 120000,
+    monthlyPrice: 280000,
     currency: "PHP",
     billingInterval: "one_time",
     annualPrice: null,

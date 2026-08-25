@@ -27,7 +27,7 @@ test("canonical plans use the corrected prices and no setup-fee data", () => {
   assert.equal(plans.starter.monthlyPrice, 3900);
   assert.equal(plans.growth.monthlyPrice, 5900);
   assert.equal(plans.unlimited.monthlyPrice, 7999);
-  assert.equal(plans.lifetime.monthlyPrice, 120000);
+  assert.equal(plans.lifetime.monthlyPrice, 280000);
   assert.equal(plans.growth.recommended, true);
   for (const plan of Object.values(plans)) {
     assert.equal(plan.includedWebsitePages, 8);
