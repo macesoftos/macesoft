@@ -8,6 +8,7 @@ const session = {
   branch: "All branches",
   status: "Active",
   mustChangePassword: false,
+  subscription: { status: "active", accessAllowed: true, planCode: "unlimited", billingCycle: "monthly" },
   access: { active: true, scope: "all", organizationWide: true, activeBranchId: "all", modules: ["overview", "appointments", "clients", "services", "branches"] },
 };
 
