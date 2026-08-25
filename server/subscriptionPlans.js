@@ -2,6 +2,12 @@ import { sidebarModules } from "./moduleRegistry.js";
 
 export const TRIAL_DURATION_HOURS = 168;
 export const INCLUDED_WEBSITE_PAGES = 8;
+export const PLAN_WEBSITE_PAGE_ALLOWANCES = Object.freeze({
+  starter: 8,
+  growth: 15,
+  unlimited: 20,
+  lifetime: 8,
+});
 export const ANNUAL_BILLING_MONTHS = 12;
 export const ANNUAL_DISCOUNT_PERCENT = 10;
 
@@ -11,7 +17,7 @@ const completeModuleEntitlements = Object.freeze([
   ...sidebarModules.map((module) => module.id),
 ]);
 
-const monthlyPlan = ({ code, name, monthlyPrice, maxUsers, maxBranches, recommended = false, displayOrder }) => Object.freeze({
+const monthlyPlan = ({ code, name, monthlyPrice, maxUsers, maxBranches, includedWebsitePages, recommended = false, displayOrder }) => Object.freeze({
   code,
   name,
   monthlyPrice,
@@ -27,13 +33,13 @@ const monthlyPlan = ({ code, name, monthlyPrice, maxUsers, maxBranches, recommen
   active: true,
   recommended,
   displayOrder,
-  includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+  includedWebsitePages,
 });
 
 export const subscriptionPlans = Object.freeze([
-  monthlyPlan({ code: "starter", name: "Starter", monthlyPrice: 3900, maxUsers: 5, maxBranches: 1, displayOrder: 1 }),
-  monthlyPlan({ code: "growth", name: "Growth", monthlyPrice: 5900, maxUsers: 10, maxBranches: 3, recommended: true, displayOrder: 2 }),
-  monthlyPlan({ code: "unlimited", name: "Unlimited", monthlyPrice: 7999, maxUsers: null, maxBranches: null, displayOrder: 3 }),
+  monthlyPlan({ code: "starter", name: "Starter", monthlyPrice: 3900, maxUsers: 10, maxBranches: 1, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.starter, displayOrder: 1 }),
+  monthlyPlan({ code: "growth", name: "Growth", monthlyPrice: 5900, maxUsers: 15, maxBranches: 3, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.growth, recommended: true, displayOrder: 2 }),
+  monthlyPlan({ code: "unlimited", name: "Unlimited", monthlyPrice: 7999, maxUsers: null, maxBranches: null, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.unlimited, displayOrder: 3 }),
   Object.freeze({
     code: "lifetime",
     name: "One-Time Purchase",
@@ -50,7 +56,7 @@ export const subscriptionPlans = Object.freeze([
     active: true,
     recommended: false,
     displayOrder: 4,
-    includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+    includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.lifetime,
   }),
 ]);
 
@@ -128,6 +134,17 @@ export function assertUsageWithinPlan(plan, { users = 0, branches = 0 } = {}) {
   return { allowed: true };
 }
 
+export function userAdditionWithinPlan(plan, currentUsers = 0, { alreadyCounted = false } = {}) {
+  if (!plan) throw new Error("A valid subscription plan is required.");
+  const nextCount = Math.max(0, Number(currentUsers) || 0) + (alreadyCounted ? 0 : 1);
+  return {
+    allowed: plan.maxUsers === null || nextCount <= plan.maxUsers,
+    current: Math.max(0, Number(currentUsers) || 0),
+    nextCount,
+    limit: plan.maxUsers,
+  };
+}
+
 export function trialWindow(startedAt = new Date()) {
   const start = new Date(startedAt);
   return { start, end: new Date(start.getTime() + (TRIAL_DURATION_HOURS * 60 * 60 * 1000)) };
@@ -155,7 +172,7 @@ export function serializeSubscription(subscription, { users = 0, branches = 0 } 
       requestedPlan: null,
       requestedBilling: null,
       billing: null,
-      includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+      includedWebsitePages: plan.includedWebsitePages,
       usage: { users, branches },
     };
   }
@@ -186,7 +203,7 @@ export function serializeSubscription(subscription, { users = 0, branches = 0 } 
     cancellationAt: subscription.cancellationAt,
     expirationAt: subscription.expiresAt,
     activationRequestedAt: subscription.activationRequestedAt,
-    includedWebsitePages: subscription.includedWebsitePages || INCLUDED_WEBSITE_PAGES,
+    includedWebsitePages: plan?.includedWebsitePages ?? subscription.includedWebsitePages ?? INCLUDED_WEBSITE_PAGES,
     usage: { users, branches },
   };
 }

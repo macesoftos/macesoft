@@ -14,6 +14,7 @@ import { demoPasswordMeetsMinimum } from "./demoPasswordPolicy.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import {
   INCLUDED_WEBSITE_PAGES,
+  PLAN_WEBSITE_PAGE_ALLOWANCES,
   assertUsageWithinPlan,
   billingDetails,
   getSubscriptionPlan,
@@ -23,6 +24,7 @@ import {
   publicSubscriptionPlans,
   serializeSubscription,
   trialWindow,
+  userAdditionWithinPlan,
 } from "./subscriptionPlans.js";
 import { activationRequestEmail, subscriptionSalesRecipient } from "./subscriptionActivationEmail.js";
 import {
@@ -3887,8 +3889,8 @@ async function assertUserPlanLimit(database, organizationId, email = "") {
     where: { organizationId, email: normalizedEmail, status: "Pending", expiresAt: { gt: new Date() } },
     select: { id: true },
   }));
-  const nextCount = usage.users + (alreadyCounted ? 0 : 1);
-  if (nextCount > plan.maxUsers) {
+  const limitCheck = userAdditionWithinPlan(plan, usage.users, { alreadyCounted });
+  if (!limitCheck.allowed) {
     throw apiError(planLimitMessage(plan, "users"), 409, {
       code: "PLAN_LIMIT_REACHED",
       resource: "users",
@@ -4492,17 +4494,17 @@ app.get("/api/public/plans", (_request, response) => {
     plans: publicSubscriptionPlans(),
     websitePackage: {
       title: "Free Website Included",
-      includedPages: INCLUDED_WEBSITE_PAGES,
+      includedPages: PLAN_WEBSITE_PAGE_ALLOWANCES,
       features: [
         "Responsive website design",
-        "Up to 8 website pages",
+        "Plan-specific page allowance",
         "Basic SEO setup",
         "Contact form integration",
         "Online booking integration",
         "Lead capture integration",
         "Mobile-responsive design",
       ],
-      note: "Your plan includes the design and development of a responsive website with up to 8 pages. Additional pages are available for an additional fee and will be quoted separately based on the requirements.",
+      note: "Starter includes up to 8 pages, Growth includes up to 15 pages, and Unlimited includes up to 20 pages. Additional pages are available through a separate quotation based on the requirements.",
     },
   });
 });
@@ -4839,7 +4841,7 @@ app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
         status: "trialing",
         trialStartAt: window.start,
         trialEndAt: window.end,
-        includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+        includedWebsitePages: plan.includedWebsitePages,
       },
       update: {
         planCode: plan.code,
@@ -4849,7 +4851,7 @@ app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
         status: "trialing",
         trialStartAt: window.start,
         trialEndAt: window.end,
-        includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+        includedWebsitePages: plan.includedWebsitePages,
       },
     });
     await writeAudit(tx, request, {
@@ -4896,7 +4898,7 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
         requestedBillingCycle: billingCycle,
         status: "grandfathered",
         activationRequestedAt: requestedAt,
-        includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+        includedWebsitePages: plan.includedWebsitePages,
       },
       update: { requestedPlanCode: plan.code, requestedBillingCycle: billingCycle, activationRequestedAt: requestedAt },
     });
@@ -4976,9 +4978,9 @@ app.patch("/api/admin/subscriptions/:organizationId", asyncRoute(async (request,
     if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck });
     const renewalAt = new Date(now);
     renewalAt.setUTCMonth(renewalAt.getUTCMonth() + (billingCycle === "annual" ? 12 : 1));
-    data = { planCode: plan.code, requestedPlanCode: null, billingCycle, requestedBillingCycle: null, status: "active", paidStartAt: current?.paidStartAt || now, renewalAt, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
+    data = { planCode: plan.code, requestedPlanCode: null, billingCycle, requestedBillingCycle: null, status: "active", paidStartAt: current?.paidStartAt || now, renewalAt, expiresAt: null, activationRequestedAt: null, includedWebsitePages: plan.includedWebsitePages };
   } else if (action === "grant_lifetime") {
-    data = { planCode: "lifetime", requestedPlanCode: null, billingCycle: "one_time", requestedBillingCycle: null, status: "lifetime", paidStartAt: current?.paidStartAt || now, renewalAt: null, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
+    data = { planCode: "lifetime", requestedPlanCode: null, billingCycle: "one_time", requestedBillingCycle: null, status: "lifetime", paidStartAt: current?.paidStartAt || now, renewalAt: null, expiresAt: null, activationRequestedAt: null, includedWebsitePages: getSubscriptionPlan("lifetime").includedWebsitePages };
   } else if (action === "suspend") {
     if (!current) throw apiError("Create or activate a subscription before suspending it.", 409);
     data = { status: "past_due" };
