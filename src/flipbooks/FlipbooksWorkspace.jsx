@@ -1295,8 +1295,8 @@ export function PublicFlipbookViewer({ token }) {
     } catch (unlockError) { setError(unlockError.message); } finally { setUnlocking(false); }
   }
 
-  if (loading) return <main className="public-flipbook-state"><img src="/brand/zenshotech-wordmark.svg" alt="ZenshoTech" /><LoadingState label="Opening flipbook…" /></main>;
-  if (error && !payload?.locked) return <main className="public-flipbook-state"><img src="/brand/zenshotech-wordmark.svg" alt="ZenshoTech" /><div className="public-flipbook-unavailable"><LockKeyhole size={28} /><h1>Flipbook unavailable</h1><p>{error}</p></div></main>;
+  if (loading) return <main className="public-flipbook-state"><img src="/brand/zenshotech-logo.svg" alt="ZenshoTech" /><LoadingState label="Opening flipbook…" /></main>;
+  if (error && !payload?.locked) return <main className="public-flipbook-state"><img src="/brand/zenshotech-logo.svg" alt="ZenshoTech" /><div className="public-flipbook-unavailable"><LockKeyhole size={28} /><h1>Flipbook unavailable</h1><p>{error}</p></div></main>;
   if (payload?.locked) return (
     <main className="public-flipbook-lock" style={{ "--public-background": payload.branding?.viewerBackground || "#f4f1ed" }}>
       <section><div className="public-flipbook-brand">{payload.branding?.logo ? <img src={payload.branding.logo} alt="" /> : <BookOpen size={24} />}<strong>{payload.branding?.businessName || "ZenshoTech"}</strong></div><span className="public-lock-icon"><LockKeyhole size={24} /></span><h1>{payload.flipbook.title}</h1><p>This flipbook is password protected.</p><form onSubmit={unlock}><label><span>Password</span><input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{error && <small role="alert">{error}</small>}<button className="flipbook-primary" type="submit" disabled={unlocking}>{unlocking ? "Opening…" : "Open Flipbook"}</button></form></section>

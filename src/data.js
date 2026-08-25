@@ -1,6 +1,6 @@
 export const assets = {
-  logo: "/brand/zenshotech-wordmark.svg",
-  logoWhite: "/brand/zenshotech-wordmark.svg",
+  logo: "/brand/zenshotech-logo.svg",
+  logoWhite: "/brand/zenshotech-logo.svg",
   doctor: "/brand/dr-mace.jpg",
   clinic: "/brand/clinic.jpg",
   clinicDavao: "/brand/clinic-davao.jpg",

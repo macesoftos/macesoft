@@ -67,7 +67,7 @@ export function createEmailBlock(type, createId, layoutDefinitions = []) {
   const definitions = {
     logo: {
       ...base,
-      src: "/brand/zenshotech-wordmark.svg",
+      src: "/brand/zenshotech-logo.svg",
       alt: "ZenshoTech",
       link: "https://macebydrmace.com/",
       width: 140,
@@ -379,8 +379,8 @@ export function normalizeEmailBlock(block, createId, layoutDefinitions = []) {
   if (["product", "productRecommendation"].includes(block.type)) {
     Object.assign(normalized, legacyProductFields(block, fallback));
   }
-  if (block.type === "logo" && (!block.src || /\/brand\/mace-logo(?:-white)?\.(?:png|svg)$/i.test(block.src))) {
-    normalized.src = "/brand/zenshotech-wordmark.svg";
+  if (block.type === "logo" && (!block.src || /\/brand\/(?:mace-logo(?:-white)?\.(?:png|svg)|zenshotech-wordmark\.svg)$/i.test(block.src))) {
+    normalized.src = "/brand/zenshotech-logo.svg";
     normalized.alt = "ZenshoTech";
   }
   if (block.type === "video") {

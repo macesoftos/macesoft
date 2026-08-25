@@ -186,8 +186,9 @@ img { max-width: 100%; }
 
 .applications-brand img {
   width: 100%;
-  max-height: 68px;
-  object-fit: contain;
+  height: 100%;
+  object-fit: cover;
+  object-position: left center;
   filter: none;
 }
 
@@ -577,20 +578,17 @@ img { max-width: 100%; }
 }
 
 .zenshotech-wordmark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #2d2520;
-  font-size: 25px;
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  white-space: nowrap;
+  display: block;
+  width: 176px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
 }
 
 .brand-mark .zenshotech-wordmark {
   width: 176px;
-  min-height: 48px;
+  height: 48px;
 }
 
 .sidebar-collapse-button,
@@ -757,16 +755,10 @@ img { max-width: 100%; }
 }
 
 .sidebar.is-collapsed .brand-mark .zenshotech-wordmark {
-  position: relative;
   width: 42px;
-  min-height: 42px;
-  overflow: hidden;
-  font-size: 0;
-}
-
-.sidebar.is-collapsed .brand-mark .zenshotech-wordmark::after {
-  content: "Z";
-  font-size: 25px;
+  height: 42px;
+  object-fit: cover;
+  object-position: left center;
 }
 
 .sidebar.is-collapsed .sidebar-collapse-button {
@@ -5901,15 +5893,14 @@ td .inline-actions { flex-wrap: nowrap; }
 }
 
 .login-logo {
-  width: 190px;
-  min-height: 76px;
-  max-height: 76px;
+  width: min(280px, 82%);
+  height: 76px;
   object-fit: contain;
   margin: 0 auto 64px;
 }
 
 .zenshotech-wordmark.login-logo {
-  font-size: 30px;
+  max-width: 82%;
 }
 
 .login-card {
@@ -6078,8 +6069,8 @@ body:has(.public-lead-page-embedded) #root {
 }
 
 .public-lead-logo {
-  width: min(220px, 72%);
-  max-height: 92px;
+  width: min(280px, 80%);
+  height: 92px;
   object-fit: contain;
   object-position: left center;
   filter: brightness(0) invert(1);
@@ -6109,14 +6100,6 @@ body:has(.public-lead-page-embedded) #root {
 .demo-account-button {
   color: var(--wine);
   font-weight: 750;
-}
-
-.zenshotech-wordmark.public-lead-logo {
-  min-height: 92px;
-  justify-content: flex-start;
-  color: #fff;
-  font-size: 32px;
-  filter: none;
 }
 
 .public-lead-brand .eyebrow,
@@ -8423,12 +8406,9 @@ body:has(.public-lead-page-embedded) #root {
   }
   .sidebar.is-collapsed .brand-mark .zenshotech-wordmark {
     width: 176px;
-    min-height: 48px;
-    overflow: visible;
-    font-size: 25px;
-  }
-  .sidebar.is-collapsed .brand-mark .zenshotech-wordmark::after {
-    content: none;
+    height: 48px;
+    object-fit: contain;
+    object-position: center;
   }
   .sidebar.is-collapsed .sidebar-section-label,
   .sidebar.is-collapsed .nav-item span,
@@ -8660,7 +8640,8 @@ body:has(.public-lead-page-embedded) #root {
     border-radius: 10px;
   }
   .login-logo {
-    width: 165px;
+    width: min(240px, 80%);
+    height: 64px;
     margin-bottom: 38px;
   }
   .timeline-item, .appointment-card, .cart-row { grid-template-columns: 1fr; }
@@ -9340,8 +9321,8 @@ td,
 }
 
 .public-registration-wordmark {
-  min-height: 64px;
-  font-size: 30px;
+  height: 64px;
+  object-fit: contain;
 }
 
 .public-registration-card h1 {

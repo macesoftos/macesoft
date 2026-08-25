@@ -210,7 +210,7 @@ function blockEmailHtmlContent(block, origin, theme, draft) {
   const style = `padding:${padding}px 28px;text-align:${align};color:${color};`;
 
   if (block.type === "logo") {
-    const src = safeEmailUrl(block.src || "/brand/zenshotech-wordmark.svg", origin);
+    const src = safeEmailUrl(block.src || "/brand/zenshotech-logo.svg", origin);
     const link = trackedEmailUrl(block, block.link, origin);
     const width = safeNumber(block.width, 40, 420, 140);
     const image = `<img src="${escapeEmailHtml(src)}" alt="${escapeEmailHtml(block.decorative ? "" : block.alt || "ZenshoTech")}" width="${width}" style="display:inline-block;width:${width}px;max-width:100%;height:auto;border:0">`;

@@ -965,7 +965,7 @@ export default function MarketingWorkspace({
           type="button"
           aria-label="Return to ZenshoTech dashboard"
         >
-          <img src="/brand/zenshotech-wordmark.svg" alt="ZenshoTech" />
+          <img src="/brand/zenshotech-logo.svg" alt="ZenshoTech" />
           <span>Dashboard</span>
           <ArrowLeft size={16} aria-hidden="true" />
         </button>
@@ -2877,7 +2877,7 @@ function SocialPlatformIcon({ platform, size }) {
 
 function RenderedBlock({ block, preview, style }) {
   const mobile = preview === "mobile";
-  if (block.type === "logo") return <div className="marketing-email-logo" style={{ ...style, background: block.background, justifyItems: block.align === "left" ? "start" : block.align === "right" ? "end" : "center" }}><a href={block.link || "#logo"} onClick={(event) => event.preventDefault()}><img src={block.src || "/brand/zenshotech-wordmark.svg"} alt={block.decorative ? "" : block.alt || "ZenshoTech"} style={{ maxWidth: "100%", width: mobile ? block.mobileWidth || block.width || 140 : block.width || 140 }} /></a></div>;
+  if (block.type === "logo") return <div className="marketing-email-logo" style={{ ...style, background: block.background, justifyItems: block.align === "left" ? "start" : block.align === "right" ? "end" : "center" }}><a href={block.link || "#logo"} onClick={(event) => event.preventDefault()}><img src={block.src || "/brand/zenshotech-logo.svg"} alt={block.decorative ? "" : block.alt || "ZenshoTech"} style={{ maxWidth: "100%", width: mobile ? block.mobileWidth || block.width || 140 : block.width || 140 }} /></a></div>;
   if (block.type === "image") {
     return <div className="marketing-email-image" style={{ ...style, background: block.background, textAlign: block.align }}><img src={block.src || "/brand/result-1.jpg"} alt={block.decorative ? "" : block.alt || ""} style={{ border: `${block.borderWidth || 0}px solid ${block.borderColor || "transparent"}`, borderRadius: block.borderRadius || 0, height: "auto", marginLeft: block.align === "right" ? "auto" : block.align === "center" ? "auto" : 0, marginRight: block.align === "left" ? "auto" : block.align === "center" ? "auto" : 0, maxWidth: 600, width: "100%" }} />{block.caption && <small>{block.caption}</small>}</div>;
   }

@@ -182,7 +182,7 @@ const money = new Intl.NumberFormat("en-PH", {
 });
 
 function BrandWordmark({ className = "" }) {
-  return <span className={`zenshotech-wordmark ${className}`.trim()} aria-label="ZenshoTech">ZenshoTech</span>;
+  return <img className={`zenshotech-wordmark ${className}`.trim()} src="/brand/zenshotech-logo.svg" alt="ZenshoTech" />;
 }
 
 function stagingBrandSettings(value = {}) {
@@ -597,7 +597,7 @@ function defaultProductImageFor(item) {
   const name = normalize(item?.item);
   if (name.includes("post-care") || name.includes("cream")) return "/brand/products/post-care-cream.png";
   if (name.includes("cleanser") || name.includes("kit")) return "/brand/products/cleanser-travel-kit.png";
-  return "/brand/zenshotech-wordmark.svg";
+  return "/brand/zenshotech-logo.svg";
 }
 
 function productImageFor(item) {
