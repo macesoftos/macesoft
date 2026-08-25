@@ -5893,9 +5893,7 @@ td .inline-actions { flex-wrap: nowrap; }
   display: grid;
   place-items: center;
   padding: 28px 20px;
-  background:
-    linear-gradient(rgba(54, 43, 32, 0.12), rgba(54, 43, 32, 0.12)),
-    url("/brand/applications-background.png") center / cover no-repeat fixed;
+  background: #f8f4f1;
 }
 
 .login-panel {
@@ -8655,7 +8653,6 @@ body:has(.public-lead-page-embedded) #root {
   .login-page {
     place-items: center;
     padding: 18px;
-    background-attachment: scroll;
   }
   .login-card {
     min-height: auto;
