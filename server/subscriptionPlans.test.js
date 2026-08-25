@@ -141,6 +141,9 @@ test("pricing and activation flows carry the selected billing cycle", () => {
   assert.match(appSource, /requestSubscriptionActivation\(plan\.code, billingCycle\)/);
   const activationRoute = serverSource.slice(serverSource.indexOf('app.post("/api/subscription/request-activation"'), serverSource.indexOf('app.get("/api/admin/subscriptions"'));
   assert.match(activationRoute, /requestedBillingCycle: billingCycle/);
+  assert.match(activationRoute, /subscriptionSalesRecipient\(process\.env\)/);
+  assert.match(activationRoute, /sendSmtpEmail\(\{ transporter, \.\.\.email \}\)/);
+  assert.match(activationRoute, /notificationSent: true/);
   assert.match(serverSource, /billingCycle === "annual" \? 12 : 1/);
 });
 

@@ -24,6 +24,7 @@ import {
   serializeSubscription,
   trialWindow,
 } from "./subscriptionPlans.js";
+import { activationRequestEmail, subscriptionSalesRecipient } from "./subscriptionActivationEmail.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { isDemoSignupHostname } from "../src/config/demoAccess.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
@@ -3305,10 +3306,11 @@ async function createVerifiedEmailTransport() {
   }
 }
 
-async function sendSmtpEmail({ transporter, to, subject, text, html = "" }) {
+async function sendSmtpEmail({ transporter, to, replyTo = "", subject, text, html = "" }) {
   const result = await transporter.sendMail({
     from: clean(process.env.SMTP_FROM),
     to,
+    ...(replyTo ? { replyTo } : {}),
     subject,
     text,
     html: html || textToHtml(text),
@@ -4654,6 +4656,8 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
   const usage = await subscriptionUsage(prisma, account.organizationId);
   const usageCheck = assertUsageWithinPlan(plan, usage);
   if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck });
+  const requestedAt = new Date();
+  const salesRecipient = subscriptionSalesRecipient(process.env);
   const saved = await prisma.$transaction(async (tx) => {
     const subscription = await tx.subscription.upsert({
       where: { organizationId: account.organizationId },
@@ -4664,10 +4668,10 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
         billingCycle: "monthly",
         requestedBillingCycle: billingCycle,
         status: "grandfathered",
-        activationRequestedAt: new Date(),
+        activationRequestedAt: requestedAt,
         includedWebsitePages: INCLUDED_WEBSITE_PAGES,
       },
-      update: { requestedPlanCode: plan.code, requestedBillingCycle: billingCycle, activationRequestedAt: new Date() },
+      update: { requestedPlanCode: plan.code, requestedBillingCycle: billingCycle, activationRequestedAt: requestedAt },
     });
     await writeAudit(tx, request, {
       area: "Subscription",
@@ -4679,8 +4683,37 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
     });
     return subscription;
   });
+  let transporter;
+  try {
+    transporter = await createVerifiedEmailTransport();
+    const email = activationRequestEmail({
+      recipient: salesRecipient,
+      account,
+      organization: account.organization,
+      plan,
+      billing,
+      billingCycle,
+      usage,
+      subscription: saved,
+      requestedAt,
+      appOrigin: process.env.APP_ORIGIN,
+    });
+    await sendSmtpEmail({ transporter, ...email });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "subscription_activation_email_failed",
+      organizationId: account.organizationId,
+      subscriptionId: saved.id,
+      recipient: salesRecipient,
+      error: clean(error.message),
+    }));
+    throw apiError(`Your quotation request was recorded, but the notification email could not be delivered. Please try again or contact ${salesRecipient}.`, 502);
+  } finally {
+    transporter?.close();
+  }
   response.json({
     subscription: serializeSubscription(saved, usage),
+    notificationSent: true,
     message: billingCycle === "annual"
       ? "Your annual quotation request is recorded for a 12-month term with the 10% discount. ZenshoTech will contact you to confirm the quote and activation."
       : "Your monthly quotation request is recorded. ZenshoTech will contact you to confirm the quote and activation.",
