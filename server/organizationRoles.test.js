@@ -31,9 +31,9 @@ test("owner aliases retain owner-only delegation rules", () => {
   assert.equal(isBusinessOwner("Admin"), false);
 });
 
-test("the super-admin alias and isolated demo user have organization admin authority", () => {
+test("only the super-admin alias has organization admin authority", () => {
   assert.equal(isAdmin("Admin"), false);
-  assert.equal(isAdmin("Demo User"), true);
+  assert.equal(isAdmin("Demo User"), false);
   assert.equal(isAdmin("Super Admin"), true);
   assert.equal(isAdmin("Owner"), false);
   assert.equal(isAdmin("Business Owner"), false);
