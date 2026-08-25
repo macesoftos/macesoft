@@ -5259,7 +5259,7 @@ function ApplicationsModule({ session, visibleNav, setActiveModule }) {
               const Icon = item.icon;
               return (
                 <button className="desktop-application" key={item.id} type="button" onClick={() => setActiveModule(item.id)}>
-                  <span className="desktop-application-icon"><Icon size={40} strokeWidth={1.7} aria-hidden="true" /></span>
+                  <span className="desktop-application-icon"><Icon size={54} strokeWidth={1.7} aria-hidden="true" /></span>
                   <strong>{item.label}</strong>
                 </button>
               );

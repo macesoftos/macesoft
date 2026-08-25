@@ -250,51 +250,53 @@ img { max-width: 100%; }
 
 .applications-desktop-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   align-content: start;
-  gap: 14px;
+  gap: 8px;
   min-height: 0;
   margin-top: 0;
 }
 
 .desktop-application {
   min-width: 0;
-  min-height: 124px;
+  min-height: 122px;
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 10px;
-  padding: 14px 10px;
-  border: 1px solid #e4ded6;
-  border-radius: 14px;
-  background: #fff;
+  gap: 8px;
+  padding: 12px 8px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: transparent;
   color: var(--ink);
   text-align: center;
   text-shadow: none;
-  box-shadow: 0 1px 2px rgba(41, 38, 33, 0.04);
+  box-shadow: none;
   transition: transform 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .desktop-application:hover {
-  transform: translateY(-2px);
-  border-color: #bda58c;
-  background: #fcfaf7;
-  box-shadow: 0 8px 20px rgba(63, 51, 41, 0.09);
+  transform: translateY(-1px);
+  border-color: rgba(147, 84, 93, 0.08);
+  background: rgba(147, 84, 93, 0.08);
+  box-shadow: 0 8px 22px rgba(89, 58, 64, 0.08);
 }
 
 .desktop-application:focus-visible {
-  outline: 3px solid rgba(165, 125, 72, 0.35);
+  border-color: rgba(147, 84, 93, 0.2);
+  outline: 3px solid rgba(147, 84, 93, 0.22);
   outline-offset: 2px;
+  background: rgba(147, 84, 93, 0.08);
 }
 
 .desktop-application-icon {
-  width: 58px;
-  height: 58px;
+  width: 64px;
+  height: 64px;
   display: grid;
   place-items: center;
-  border: 1px solid #e1d8ce;
-  border-radius: 13px;
-  background: #f5f1ec;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--wine-dark);
   text-shadow: none;
   box-shadow: none;
@@ -303,8 +305,8 @@ img { max-width: 100%; }
 .desktop-application strong {
   width: 100%;
   overflow: hidden;
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: 0.86rem;
+  font-weight: 600;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -458,17 +460,19 @@ img { max-width: 100%; }
   .applications-heading p { font-size: 0.76rem; }
   .applications-search { min-height: 44px; }
   .applications-groups { grid-template-columns: 1fr; }
-  .applications-desktop-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .desktop-application { min-height: 100px; padding: 10px 6px; }
-  .desktop-application-icon { width: 50px; height: 50px; }
+  .applications-desktop-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .desktop-application { min-height: 112px; padding: 10px 4px; border-radius: 16px; }
+  .desktop-application-icon { width: 56px; height: 56px; }
   .applications-group:has(.application-tile:nth-child(4)) { grid-column: auto; }
   .applications-group:has(.application-tile:nth-child(4)) .applications-grid { grid-template-columns: 1fr; }
   .application-tile { min-height: 84px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .desktop-application,
   .application-tile,
   .application-arrow { transition: none; }
+  .desktop-application:hover,
   .application-tile:hover { transform: none; }
 }
 
