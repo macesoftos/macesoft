@@ -2984,7 +2984,6 @@ function App() {
                 </button>
               )}
               <PageHeader
-                eyebrow="ZenshoTech"
                 title={activeLabel}
                 subtitle={
                   activeModule === "leads"
@@ -3582,10 +3581,9 @@ function PrintableReceipt({ receipt, settings, services = [] }) {
   );
 }
 
-function PageHeader({ eyebrow, title, subtitle, leading = null }) {
+function PageHeader({ title, subtitle, leading = null }) {
   return (
     <div className="page-header topbar-title-block">
-      <p className="eyebrow">{eyebrow}</p>
       <div className="topbar-title-row">
         {leading}
         <h1>{title}</h1>
