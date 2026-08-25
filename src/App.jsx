@@ -14463,7 +14463,7 @@ function ModalHost({
 
   const config = configs[modal.type];
   if (!config) return null;
-  return <EntityModal config={config} onClose={closeModal} />;
+  return <EntityModal config={{ ...config, formKind: modal.type }} onClose={closeModal} />;
 }
 
 function clientNameParts(client = {}) {
@@ -14942,6 +14942,66 @@ function field(name, label, type = "text", options = null, className = "", requi
   return { name, label, type, options, className, required };
 }
 
+const entityFormSectionDefinitions = {
+  client: [
+    { title: "Profile", fields: ["photo", "firstName", "middleName", "lastName", "mobile", "email", "gender", "birthday", "civilStatus", "occupation"] },
+    { title: "Address and emergency contact", fields: ["street", "barangay", "city", "province", "emergencyName", "emergencyPhone"] },
+    { title: "Clinic relationship", fields: ["branch", "source", "tag", "allergies", "contraindications", "skinConcerns", "treatmentGoals"] },
+    { title: "Clinical notes and consent", fields: ["medicalNotes", "marketingOptIn"] },
+  ],
+  lead: [
+    { title: "Identity and contact", fields: ["name", "preferredName", "firstName", "middleName", "lastName", "mobile", "alternateMobile", "email", "preferredChannel"] },
+    { title: "Acquisition", fields: ["source", "sourcePlatform", "campaign", "adSet", "adCreative", "landingPage", "referrerUrl", "utmSource", "utmMedium", "utmCampaign", "clickId", "formId", "externalLeadId"] },
+    { title: "Interest and preferences", fields: ["interest", "interestedTreatment", "interestedPackage", "concern", "message", "preferredDate", "preferredTime", "budgetRange", "urgency", "inquiryType"] },
+    { title: "Assignment and status", fields: ["status", "priority", "owner", "branch", "created", "nextAction", "nextFollowUpAt", "lossReason"] },
+    { title: "Consent", fields: ["permissionToContact", "marketingConsent", "privacyConsent", "consentSource", "consentVersion"] },
+    { title: "Follow-up notes", fields: ["nextStep"] },
+  ],
+  treatment: [
+    { title: "Record Details", fields: ["branch", "clientId", "date", "service", "provider", "room"] },
+    { title: "Treatment Timing", fields: ["arrivalTime", "treatmentStartTime", "completedTime", "checkoutTime"] },
+    { title: "Consumables", fields: ["consumables"] },
+    { title: "Device Information", fields: ["deviceSettings", "batch"] },
+    { title: "Consent and Follow-up", fields: ["consent", "followUp", "satisfaction"] },
+    { title: "Clinical Notes", fields: ["preNotes", "postNotes", "aftercare", "outcome"] },
+  ],
+  staff: [
+    { title: "Profile and employment", fields: ["photo", "name", "role", "employmentStatus", "employmentDate", "birthDate"] },
+    { title: "Access and scheduling", fields: ["branch", "branches", "schedule", "status", "attendance"] },
+    { title: "Commission and services", fields: ["commissionType", "commissionRate", "services"] },
+    { title: "Contact and emergency details", fields: ["phone", "address", "emergencyContact", "emergencyPhone"] },
+  ],
+  service: [
+    { title: "Service Details", fields: ["name", "serviceType", "category", "duration", "description"] },
+    { title: "Pricing and Packaging", fields: ["priceModel", "price", "priceUnit", "packageSessions", "packagePrice", "serviceValue", "recommendedIntervalDays"] },
+    { title: "Availability and Resources", fields: ["branches", "staff", "room", "active", "pos"] },
+    { title: "Clinical Guidance", fields: ["consumables", "contraindications", "aftercare"] },
+  ],
+  inventory: [
+    { title: "Product Details", fields: ["image", "item", "category", "type", "unit", "packQty", "branch", "location"] },
+    { title: "Stock and Pricing", fields: ["stock", "reorder", "cost", "price"] },
+  ],
+};
+
+function entityFormSections(config) {
+  const definitions = entityFormSectionDefinitions[config.formKind];
+  if (!definitions) return [{ title: "Record Details", fields: config.fields }];
+
+  const fieldsByName = new Map(config.fields.map((item) => [item.name, item]));
+  const claimed = new Set();
+  const sections = definitions.map((section) => ({
+    ...section,
+    fields: section.fields.map((name) => fieldsByName.get(name)).filter((item) => {
+      if (!item) return false;
+      claimed.add(item.name);
+      return true;
+    }),
+  })).filter((section) => section.fields.length);
+  const remaining = config.fields.filter((item) => !claimed.has(item.name));
+  if (remaining.length) sections.push({ title: "Additional Details", fields: remaining });
+  return sections;
+}
+
 function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit }) {
   const [form, setForm] = useState({
     date: todayDate(),
@@ -15142,6 +15202,7 @@ function EntityModal({ config, onClose }) {
   const [form, setForm] = useState(config.initial);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const sections = entityFormSections(config);
 
   async function submit(event) {
     event.preventDefault();
@@ -15163,45 +15224,56 @@ function EntityModal({ config, onClose }) {
     }
   }
 
+  function renderField(item) {
+    const optionalFieldTypes = ["checkbox", "textarea", "photo", "consumables"];
+    const required = item.required ?? (!optionalFieldTypes.includes(item.type) && item.name !== "id");
+    return (
+      <FormField
+        key={item.name}
+        field={item}
+        form={form}
+        required={required}
+        value={form[item.name]}
+        onChange={(value) =>
+          setForm((current) => {
+            const next = { ...current, [item.name]: value };
+            if (item.name === "templateId" && value && config.templateMessages) {
+              next.message = config.templateMessages[value] ?? current.message;
+            }
+            if (item.name === "service" && config.serviceConsumablesByName) {
+              next.consumables = config.serviceConsumablesByName[value] ?? [];
+            }
+            return next;
+          })
+        }
+      />
+    );
+  }
+
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <form className="modal-card" onSubmit={submit}>
-        <button className="modal-close" type="button" onClick={onClose} aria-label="Close form"><X size={18} /></button>
-        <ModalHeader icon={Edit3} title={config.title} action="Record details" />
-        {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
-        <div className="form-grid">
-          {config.fields.map((item) => {
-            const optionalFieldTypes = ["checkbox", "textarea", "photo", "consumables"];
-            const required = item.required ?? (!optionalFieldTypes.includes(item.type) && item.name !== "id");
-            return (
-              <FormField
-                key={item.name}
-                field={item}
-                form={form}
-                required={required}
-                value={form[item.name]}
-                onChange={(value) =>
-                  setForm((current) => {
-                    const next = { ...current, [item.name]: value };
-                    if (item.name === "templateId" && value && config.templateMessages) {
-                      next.message = config.templateMessages[value] ?? current.message;
-                    }
-                    if (item.name === "service" && config.serviceConsumablesByName) {
-                      next.consumables = config.serviceConsumablesByName[value] ?? [];
-                    }
-                    return next;
-                  })
-                }
-              />
-            );
-          })}
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={config.title}>
+      <form className={`modal-card entity-modal entity-modal-${config.formKind || "record"}`} onSubmit={submit}>
+        <header className="form-modal-header">
+          <ModalHeader icon={Edit3} title={config.title} action={config.formKind === "treatment" ? "Clinical record" : "Record details"} />
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close form"><X size={17} /></button>
+        </header>
+        <div className="form-modal-body">
+          {error && <div className="inline-state error" role="alert"><AlertCircle size={17} /> {error}</div>}
+          <div className="entity-form-sections">
+            {sections.map((section) => (
+              <section className="entity-form-section" key={section.title}>
+                <div className="entity-form-section-heading"><h3>{section.title}</h3></div>
+                <div className="form-grid">{section.fields.map(renderField)}</div>
+              </section>
+            ))}
+          </div>
         </div>
-        <div className="modal-actions">
+        <footer className="modal-actions form-modal-footer">
           <button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
           <button className="primary-button" type="submit" disabled={saving}>
             <Check size={17} /> {saving ? "Saving..." : config.submitLabel}
           </button>
-        </div>
+        </footer>
       </form>
     </div>
   );

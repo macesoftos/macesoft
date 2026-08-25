@@ -1,0 +1,448 @@
+/*
+ * ZenshoTech shared form system
+ * This layer is intentionally imported last. It normalizes fields and modal
+ * anatomy across legacy modules without changing their data or behavior.
+ */
+
+:root {
+  --form-control-height: 44px;
+  --form-control-radius: 7px;
+  --form-control-border: #d9d3ca;
+  --form-control-border-hover: #bcb2a6;
+  --form-control-bg: #fff;
+  --form-control-disabled-bg: #f3f1ed;
+  --form-control-readonly-bg: #faf9f7;
+  --form-label-color: #4f473f;
+  --form-helper-color: #81786f;
+  --form-focus-color: var(--wine, #65402f);
+  --form-focus-ring: 0 0 0 3px rgb(101 64 47 / 12%);
+  --form-error-color: #a13f3f;
+  --form-error-ring: 0 0 0 3px rgb(161 63 63 / 11%);
+  --form-success-color: #39734b;
+  --form-field-gap: 18px;
+  --form-section-gap: 28px;
+}
+
+/* Labels are labels again, rather than bordered cards around a control. */
+:is(.form-grid, .report-filters, .booking-section-content, .public-lead-form-grid, .subscription-form-card, .lead-action-form, .lead-stage-form, .staff-schedule-entry-form, .staff-day-off-swap-form, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .payroll-form, .flipbook-details-form) label:not(.checkbox-field):not(.payroll-switch):not(.marketing-media-select-all),
+.stacked-field,
+.flipbook-field {
+  display: grid;
+  min-width: 0;
+  height: auto;
+  align-content: start;
+  align-items: stretch;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:is(.form-grid, .report-filters, .booking-section-content, .public-lead-form-grid, .subscription-form-card, .lead-action-form, .lead-stage-form, .staff-schedule-entry-form, .staff-day-off-swap-form, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .payroll-form, .flipbook-details-form) label:not(.checkbox-field):focus-within,
+.stacked-field:focus-within,
+.flipbook-field:focus-within {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.form-label,
+:is(.form-grid, .report-filters, .stacked-field, .public-lead-form-grid, .subscription-form-card, .lead-action-form, .lead-stage-form, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .payroll-form, .flipbook-field) label > span:first-child,
+.consumable-usage-field > .form-label,
+.multi-select-field > .form-label {
+  color: var(--form-label-color);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.005em;
+}
+
+.required-mark {
+  margin-left: 2px;
+  color: #a44747;
+  font-size: 0.92em;
+  font-style: normal;
+}
+
+/* Standard interactive controls: 44px, subtle border, and one clear focus ring. */
+form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="color"]):not([type="range"]),
+form select,
+:is(.form-grid, .stacked-field, .report-filters, .appointment-filter-field, .quick-service-grid, .invoice-fields, .manual-discount-fields, .pos-context-fields, .payment-reference-field, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .marketing-style-fields, .marketing-wizard-card, .marketing-toolbar, .payroll-form, .payroll-adjustment-form, .flipbook-field) input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="color"]):not([type="range"]),
+:is(.form-grid, .stacked-field, .report-filters, .appointment-filter-field, .quick-service-grid, .invoice-fields, .manual-discount-fields, .pos-context-fields, .payment-reference-field, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .marketing-style-fields, .marketing-wizard-card, .marketing-toolbar, .payroll-form, .payroll-adjustment-form, .flipbook-field) select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--form-control-height);
+  height: var(--form-control-height);
+  padding: 0 12px;
+  border: 1px solid var(--form-control-border);
+  border-radius: var(--form-control-radius);
+  outline: 0;
+  background-color: var(--form-control-bg);
+  color: var(--ink, #29241f);
+  box-shadow: none;
+  line-height: 1.35;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+form textarea,
+:is(.form-grid, .stacked-field, .report-filters, .quick-service-grid, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .marketing-companion-message, .payroll-form, .flipbook-field) textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 88px;
+  height: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--form-control-border);
+  border-radius: var(--form-control-radius);
+  outline: 0;
+  background: var(--form-control-bg);
+  color: var(--ink, #29241f);
+  box-shadow: none;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+form :is(input, select, textarea):not(:disabled):not([readonly]):hover,
+:is(.form-grid, .stacked-field, .report-filters, .appointment-filter-field, .quick-service-grid, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .payroll-form, .payroll-adjustment-form, .flipbook-field) :is(input, select, textarea):not(:disabled):not([readonly]):hover {
+  border-color: var(--form-control-border-hover);
+}
+
+form :is(input, select, textarea):focus-visible,
+:is(.form-grid, .stacked-field, .report-filters, .appointment-filter-field, .quick-service-grid, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .payroll-form, .payroll-adjustment-form, .flipbook-field) :is(input, select, textarea):focus-visible {
+  border-color: var(--form-focus-color);
+  outline: 0;
+  box-shadow: var(--form-focus-ring);
+}
+
+form :is(input, select, textarea):disabled,
+:is(.form-grid, .stacked-field, .report-filters, .appointment-filter-field, .quick-service-grid, .facetrack-form-grid, .marketing-settings-form, .marketing-settings-fields, .marketing-field-grid, .marketing-sms-form, .payroll-form, .payroll-adjustment-form, .flipbook-field) :is(input, select, textarea):disabled {
+  border-color: #e0dcd5;
+  background: var(--form-control-disabled-bg);
+  color: #8b837a;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+form :is(input, textarea)[readonly] {
+  border-color: #e1ddd7;
+  background: var(--form-control-readonly-bg);
+  color: #665f58;
+}
+
+form :is(input, select, textarea)[aria-invalid="true"],
+form :is(input, select, textarea):user-invalid {
+  border-color: var(--form-error-color);
+  box-shadow: var(--form-error-ring);
+}
+
+form :is(input, select, textarea)[data-state="success"],
+form :is(input, select, textarea)[aria-invalid="false"][data-validated="true"] {
+  border-color: var(--form-success-color);
+}
+
+input::placeholder,
+textarea::placeholder { color: #9a928a; opacity: 1; }
+
+.search-box { min-height: var(--form-control-height); height: var(--form-control-height); }
+.search-box input { min-height: 42px; height: 42px; }
+
+input[type="search"] { appearance: none; }
+input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
+input:is([type="date"], [type="time"], [type="datetime-local"]) { color-scheme: light; }
+
+form input[type="checkbox"],
+form input[type="radio"],
+.checkbox-field input,
+.payroll-switch input {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  accent-color: var(--form-focus-color);
+}
+
+.checkbox-field {
+  display: flex;
+  min-height: 28px;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.checkbox-field .form-label,
+.checkbox-field > span { font-weight: 600; line-height: 1.45; }
+
+form input[type="file"] {
+  width: 100%;
+  min-height: var(--form-control-height);
+  padding: 5px;
+  border: 1px dashed var(--form-control-border);
+  border-radius: var(--form-control-radius);
+  background: #fff;
+  color: var(--form-helper-color);
+}
+
+form input[type="file"]::file-selector-button {
+  min-height: 32px;
+  margin-right: 10px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: #f2ede7;
+  color: var(--form-label-color);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.photo-file-input,
+.branch-photo-button input { position: absolute; width: 1px !important; height: 1px !important; min-height: 1px !important; overflow: hidden; opacity: 0; }
+
+.field-suggestion-hint,
+.form-grid small,
+.stacked-field small,
+.account-password-helper,
+.subscription-form-card small,
+.payroll-form small,
+.flipbook-field small {
+  margin: 0;
+  color: var(--form-helper-color);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.field-error,
+.inline-state.error,
+.inline-state.danger { color: var(--form-error-color); }
+
+/* Layout rhythm. */
+.form-grid,
+.public-lead-form-grid,
+.facetrack-form-grid,
+.marketing-field-grid,
+.marketing-settings-fields,
+.payroll-form {
+  column-gap: 20px;
+  row-gap: var(--form-field-gap);
+}
+
+.form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-grid > .span-2,
+.form-grid > .full-span { grid-column: 1 / -1; }
+
+/* Shared modal anatomy: fixed header/footer and one scrolling body. */
+.modal-backdrop { padding: 20px; }
+
+.modal-card {
+  max-height: min(90dvh, 860px);
+  border-color: #ddd7cf;
+  border-radius: 12px;
+  box-shadow: 0 18px 52px rgb(54 42 33 / 16%);
+}
+
+.modal-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+}
+
+.entity-modal {
+  display: flex;
+  width: min(900px, calc(100vw - 40px));
+  max-height: min(92dvh, 860px);
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.form-modal-header {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding: 18px 56px 16px 22px;
+  border-bottom: 1px solid #e8e3dc;
+  background: rgb(255 255 255 / 98%);
+}
+
+.form-modal-header .section-title { margin: 0; }
+.form-modal-header .modal-close { top: 16px; right: 18px; }
+
+.form-modal-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 20px 22px 30px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.entity-form-sections { display: grid; gap: var(--form-section-gap); }
+.entity-form-section { display: grid; gap: 16px; }
+.entity-form-section + .entity-form-section { padding-top: 26px; border-top: 1px solid #ebe6df; }
+.entity-form-section-heading h3 {
+  margin: 0;
+  color: #352f2a;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.form-modal-footer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 13px 22px;
+  border-top: 1px solid #e8e3dc;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 -8px 20px rgb(54 42 33 / 4%);
+}
+
+/* Older long modals keep their existing DOM while gaining a reachable footer. */
+.modal-card:not(.entity-modal) > .modal-actions {
+  position: sticky;
+  z-index: 4;
+  bottom: -18px;
+  justify-content: flex-end;
+  margin: 22px -18px -18px;
+  padding: 13px 18px;
+  border-top: 1px solid #e8e3dc;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 -8px 20px rgb(54 42 33 / 4%);
+  backdrop-filter: blur(8px);
+}
+
+.branch-create-modal > .section-title {
+  position: sticky;
+  z-index: 3;
+  top: -18px;
+  margin: -18px -18px 18px;
+  padding: 18px 54px 15px 18px;
+  border-bottom: 1px solid #e8e3dc;
+  background: rgb(255 255 255 / 97%);
+  backdrop-filter: blur(8px);
+}
+/* The booking drawer already has the right anatomy; remove the visual steps/cards. */
+.appointment-booking-drawer { max-width: min(720px, 100vw); }
+.appointment-booking-header { min-height: 76px; padding: 16px 22px; }
+.appointment-booking-body { padding: 4px 22px 28px; }
+.booking-form-section {
+  display: block;
+  padding: 24px 0;
+  border-bottom: 1px solid #ebe6df;
+}
+.booking-form-section:last-child { border-bottom: 0; }
+.booking-step { display: none; }
+.booking-section-content { gap: 16px; }
+.booking-section-content > h3 { margin: 0 0 1px; font-size: 14px; }
+.booking-two-column { gap: var(--form-field-gap) 20px; }
+.appointment-booking-actions { padding: 13px 22px; }
+
+/* Repeatable and upload fields are light groups, not nested cards. */
+.photo-field,
+.multi-select-field,
+.consumable-usage-field {
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.consumable-usage-rows { gap: 10px; }
+.consumable-usage-row {
+  padding: 10px 0;
+  border: 0;
+  border-top: 1px solid #eee9e3;
+  border-radius: 0;
+  background: transparent;
+}
+.consumable-usage-row:first-child { border-top: 0; }
+.multi-select-values { gap: 7px; }
+.multi-select-chip { border-color: #ded7cf; background: #f6f2ed; }
+.multi-select-empty { color: var(--form-helper-color); font-size: 11px; }
+
+.branch-hours-fieldset,
+.branch-module-fieldset {
+  margin: 6px 0;
+  padding: 20px 0 0;
+  border: 0;
+  border-top: 1px solid #e9e3dc;
+  border-radius: 0;
+  background: transparent;
+}
+.branch-hours-fieldset legend,
+.branch-module-fieldset legend { padding: 0 10px 0 0; color: #352f2a; font-size: 13px; font-weight: 800; }
+
+/* Dedicated workspaces use the same height and spacing tokens. */
+.payroll-form { gap: var(--form-field-gap) 20px; }
+.payroll-create-disclosure .payroll-form { padding: 18px; }
+.payroll-adjustment-form { gap: 10px; }
+.facetrack-form-dialog { max-height: min(90dvh, 780px); }
+.marketing-settings-form,
+.marketing-settings-fields,
+.marketing-field-grid,
+.marketing-sms-form { gap: var(--form-field-gap) 20px; }
+.marketing-style-fields input,
+.marketing-style-fields select,
+.marketing-builder-branch select,
+.marketing-media-toolbar input,
+.marketing-media-toolbar select,
+.marketing-builder-search input { min-height: 42px; height: 42px; }
+.flipbook-details-form { gap: var(--form-field-gap) 24px; }
+
+@media (max-width: 720px) {
+  :root { --form-control-height: 44px; --form-field-gap: 16px; --form-section-gap: 24px; }
+
+  .modal-backdrop { padding: 0; }
+  .entity-modal {
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .form-modal-header { padding: 15px 50px 14px 16px; }
+  .form-modal-header .modal-close { top: 14px; right: 14px; }
+  .form-modal-body { padding: 18px 16px 28px; scrollbar-gutter: auto; }
+  .form-modal-footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+
+  .form-grid,
+  .public-lead-form-grid,
+  .facetrack-form-grid,
+  .marketing-field-grid,
+  .marketing-settings-fields,
+  .payroll-form { grid-template-columns: 1fr; }
+  .form-grid > .span-2,
+  .form-grid > .full-span { grid-column: 1; }
+
+  .entity-form-section + .entity-form-section { padding-top: 22px; }
+  .appointment-booking-header,
+  .appointment-booking-body,
+  .appointment-booking-actions { padding-left: 16px; padding-right: 16px; }
+  .booking-two-column,
+  .booking-service-grid { grid-template-columns: 1fr; }
+
+  .modal-card:not(.entity-modal) > .modal-actions {
+    bottom: 0;
+    margin-right: -16px;
+    margin-bottom: -16px;
+    margin-left: -16px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1100px) {
+  .entity-modal { width: min(860px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  form :is(input, select, textarea) { transition: none; }
+}
