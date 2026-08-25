@@ -226,14 +226,14 @@ try {
 
   const startedOnboarding = await request("/api/onboarding", {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", Cookie: firstDemo.cookie },
+    headers: { "Content-Type": "application/json", "X-Mace-Request": "app", Cookie: firstDemo.cookie },
     body: JSON.stringify({ action: "start" }),
   });
   assert(startedOnboarding.response.ok && startedOnboarding.payload.state.startedAt, "onboarding tour did not persist its start state");
 
   const progressedOnboarding = await request("/api/onboarding", {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", Cookie: firstDemo.cookie },
+    headers: { "Content-Type": "application/json", "X-Mace-Request": "app", Cookie: firstDemo.cookie },
     body: JSON.stringify({ action: "progress", currentStep: 3 }),
   });
   assert(progressedOnboarding.response.ok && progressedOnboarding.payload.state.currentStep === 3, "onboarding step did not persist");
