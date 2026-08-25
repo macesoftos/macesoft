@@ -252,7 +252,7 @@ img { max-width: 100%; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   align-content: start;
-  gap: 8px;
+  gap: 10px;
   min-height: 0;
   margin-top: 0;
 }
@@ -265,9 +265,9 @@ img { max-width: 100%; }
   align-content: center;
   gap: 8px;
   padding: 12px 8px;
-  border: 1px solid transparent;
-  border-radius: 18px;
-  background: transparent;
+  border: 1px solid rgba(105, 77, 57, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
   color: var(--ink);
   text-align: center;
   text-shadow: none;
@@ -277,7 +277,7 @@ img { max-width: 100%; }
 
 .desktop-application:hover {
   transform: translateY(-1px);
-  border-color: rgba(147, 84, 93, 0.08);
+  border-color: rgba(147, 84, 93, 0.32);
   background: rgba(147, 84, 93, 0.08);
   box-shadow: 0 8px 22px rgba(89, 58, 64, 0.08);
 }
@@ -460,8 +460,8 @@ img { max-width: 100%; }
   .applications-heading p { font-size: 0.76rem; }
   .applications-search { min-height: 44px; }
   .applications-groups { grid-template-columns: 1fr; }
-  .applications-desktop-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-  .desktop-application { min-height: 112px; padding: 10px 4px; border-radius: 16px; }
+  .applications-desktop-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .desktop-application { min-height: 112px; padding: 10px 4px; border-radius: 12px; }
   .desktop-application-icon { width: 56px; height: 56px; }
   .applications-group:has(.application-tile:nth-child(4)) { grid-column: auto; }
   .applications-group:has(.application-tile:nth-child(4)) .applications-grid { grid-template-columns: 1fr; }
