@@ -4244,6 +4244,8 @@ app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
           role: "Demo User",
           branch: branch.name,
           organizationId: organization.id,
+          organizationWideAccess: true,
+          organizationModules: jsonText(demoModules, []),
           lastBranchId: branch.id,
           status: "Active",
           mustChangePassword: false,

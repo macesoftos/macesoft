@@ -1,12 +1,12 @@
 export const ORGANIZATION_MANAGER_ROLES = Object.freeze([
+  "Demo User",
   "Owner",
   "Business Owner",
   "Super Admin",
-  "Demo User",
 ]);
 
-export const BUSINESS_OWNER_ROLES = Object.freeze(["Owner", "Business Owner"]);
-export const ADMIN_ROLES = Object.freeze(["Super Admin"]);
+export const BUSINESS_OWNER_ROLES = Object.freeze(["Demo User", "Owner", "Business Owner"]);
+export const ADMIN_ROLES = Object.freeze(["Demo User", "Super Admin"]);
 
 export function canManageOrganization(role) {
   return ORGANIZATION_MANAGER_ROLES.includes(String(role || ""));
