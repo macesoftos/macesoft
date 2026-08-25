@@ -4716,6 +4716,36 @@ function PublicSubscriptionHeader({ session, onNavigate }) {
   );
 }
 
+function RegistrationHeader({ session, onNavigate }) {
+  return (
+    <header className="registration-page-header">
+      <button className="registration-brand-button" type="button" onClick={() => onNavigate(session ? "/dashboard" : "/")} aria-label="Open ZenshoTech home">
+        <BrandWordmark />
+      </button>
+      <div className="registration-sign-in">
+        <span>{session ? "Your workspace is ready" : "Already have an account?"}</span>
+        <button type="button" onClick={() => onNavigate(session ? "/pricing?onboarding=1" : "/")}>{session ? "Continue" : "Sign in"}</button>
+      </div>
+    </header>
+  );
+}
+
+function RegistrationProductPreview() {
+  return (
+    <div className="registration-product-preview" aria-hidden="true">
+      <div className="registration-preview-bar"><BrandWordmark /><span /><span /></div>
+      <div className="registration-preview-body">
+        <div className="registration-preview-nav"><b /><i /><i /><i /><i /><i /></div>
+        <div className="registration-preview-content">
+          <strong>Overview</strong>
+          <div className="registration-preview-metrics"><span><small>Appointments</small><b>28</b></span><span><small>New clients</small><b>16</b></span><span><small>Revenue</small><b>₱12.6k</b></span></div>
+          <div className="registration-preview-panels"><span /><span /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RegistrationPage({ session, onRegistered, onNavigate }) {
   const [form, setForm] = useState({ name: "", businessName: "", email: "", password: "", confirmPassword: "", agreements: false });
   const [googleCredential, setGoogleCredential] = useState("");
@@ -4809,46 +4839,74 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
   }
 
   return (
-    <main className="subscription-public-page registration-public-page">
-      <PublicSubscriptionHeader session={session} onNavigate={onNavigate} />
+    <main className="registration-public-page">
+      <RegistrationHeader session={session} onNavigate={onNavigate} />
       <section className="registration-layout">
         <div className="registration-intro">
-          <p className="eyebrow">Start with confidence</p>
-          <h1>Start your 7-day free trial</h1>
-          <p>Create your secure workspace, compare plans, then choose when to begin the trial. Registration alone does not start the trial.</p>
-          <ul>
-            <li><Check size={17} /> All core ZenshoTech modules included</li>
-            <li><Check size={17} /> No payment details required to register</li>
-            <li><Check size={17} /> Free responsive website with up to 8 pages</li>
-          </ul>
+          <div className="registration-intro-copy">
+            <p className="eyebrow">Start with confidence</p>
+            <h1>Start your 7-day<br />free trial</h1>
+            <p>Create your secure workspace, compare plans,<br className="registration-copy-break" /> then choose when to begin the trial.</p>
+            <ul>
+              <li><span><Check size={14} /></span> All core ZenshoTech modules included</li>
+              <li><span><Check size={14} /></span> No payment details required to register</li>
+              <li><span><Check size={14} /></span> Free responsive website with up to 8 pages</li>
+            </ul>
+          </div>
+          <RegistrationProductPreview />
         </div>
-        <form className="subscription-form-card" onSubmit={submit} noValidate>
-          <BrandWordmark className="registration-logo" />
-          <div><p className="eyebrow">Create your account</p><h2>Business owner registration</h2></div>
-          {session ? (
-            <div className="inline-state warning"><ShieldCheck size={18} /><span>You are already signed in as {session.email}.</span></div>
-          ) : <>
-            {errors.form && <div className="inline-state danger" role="alert"><AlertCircle size={17} /><span>{errors.form}</span></div>}
-            <GoogleIdentityButton mode="signup" onCredential={startGoogleRegistration} disabled={submitting} />
-            <div className="login-demo-separator"><span>{googleProfile ? "Google account selected" : "or register with email"}</span></div>
-            {googleProfile && <div className="inline-state success"><Check size={17} /><span>Continue as {googleProfile.name} ({googleProfile.email}). Add your clinic name below.</span></div>}
-            <label><span>Full name</span><input autoComplete="name" maxLength={100} value={form.name} readOnly={Boolean(googleProfile)} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
-            <label><span>Business or clinic name</span><input autoComplete="organization" maxLength={140} value={form.businessName} onChange={(event) => update("businessName", event.target.value)} aria-invalid={Boolean(errors.businessName)} />{errors.businessName && <small className="field-error">{errors.businessName}</small>}</label>
-            <label><span>Email address</span><input autoComplete="email" type="email" maxLength={160} value={form.email} readOnly={Boolean(googleProfile)} onChange={(event) => update("email", event.target.value)} aria-invalid={Boolean(errors.email)} />{errors.email && <small className="field-error">{errors.email}</small>}</label>
-            {!googleProfile && <>
-              <label><span>Password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => update("password", event.target.value)} aria-invalid={Boolean(errors.password)} /><button className="login-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.password && <small className="field-error">{errors.password}</small>}</label>
-              <label><span>Confirm password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showConfirmation ? "text" : "password"} value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} aria-invalid={Boolean(errors.confirmPassword)} /><button className="login-password-toggle" type="button" aria-label={showConfirmation ? "Hide confirmed password" : "Show confirmed password"} onClick={() => setShowConfirmation((value) => !value)}>{showConfirmation ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.confirmPassword && <small className="field-error">{errors.confirmPassword}</small>}</label>
+        <div className="registration-form-shell">
+          <form className="registration-form" onSubmit={submit} noValidate>
+            <div className="registration-form-heading"><h2>Create your account</h2><p>Set up your business workspace in just a minute.</p></div>
+            {session ? (
+              <div className="inline-state warning"><ShieldCheck size={18} /><span>You are already signed in as {session.email}.</span></div>
+            ) : <>
+              {errors.form && <div className="inline-state danger" role="alert"><AlertCircle size={17} /><span>{errors.form}</span></div>}
+              <div className="registration-google-auth">
+                <GoogleIdentityButton mode="signup" onCredential={startGoogleRegistration} disabled={submitting} hideWhenUnavailable />
+                <div className="login-demo-separator"><span>{googleProfile ? "Google account selected" : "or register with email"}</span></div>
+              </div>
+              {googleProfile && <div className="inline-state success"><Check size={17} /><span>Continue as {googleProfile.name} ({googleProfile.email}). Add your clinic name below.</span></div>}
+              <div className="registration-fields">
+                <label>
+                  <span>Full name</span>
+                  <input autoComplete="name" maxLength={100} placeholder="Enter your full name" value={form.name} readOnly={Boolean(googleProfile)} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? "registration-name-error" : undefined} />
+                  {errors.name && <small className="field-error" id="registration-name-error">{errors.name}</small>}
+                </label>
+                <label>
+                  <span>Business or clinic name</span>
+                  <input autoComplete="organization" maxLength={140} placeholder="Enter your business or clinic name" value={form.businessName} onChange={(event) => update("businessName", event.target.value)} aria-invalid={Boolean(errors.businessName)} aria-describedby={errors.businessName ? "registration-business-error" : undefined} />
+                  {errors.businessName && <small className="field-error" id="registration-business-error">{errors.businessName}</small>}
+                </label>
+                <label className="registration-field-full">
+                  <span>Email address</span>
+                  <input autoComplete="email" type="email" maxLength={160} placeholder="Enter your email address" value={form.email} readOnly={Boolean(googleProfile)} onChange={(event) => update("email", event.target.value)} aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? "registration-email-error" : undefined} />
+                  {errors.email && <small className="field-error" id="registration-email-error">{errors.email}</small>}
+                </label>
+                {!googleProfile && <>
+                  <label>
+                    <span>Password</span>
+                    <div className="login-password-field"><input autoComplete="new-password" minLength={8} placeholder="Enter your password" type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => update("password", event.target.value)} aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? "registration-password-error" : undefined} /><button className="login-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+                    {errors.password && <small className="field-error" id="registration-password-error">{errors.password}</small>}
+                  </label>
+                  <label>
+                    <span>Confirm password</span>
+                    <div className="login-password-field"><input autoComplete="new-password" minLength={8} placeholder="Confirm your password" type={showConfirmation ? "text" : "password"} value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} aria-invalid={Boolean(errors.confirmPassword)} aria-describedby={errors.confirmPassword ? "registration-confirm-error" : undefined} /><button className="login-password-toggle" type="button" aria-label={showConfirmation ? "Hide confirmed password" : "Show confirmed password"} onClick={() => setShowConfirmation((value) => !value)}>{showConfirmation ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+                    {errors.confirmPassword && <small className="field-error" id="registration-confirm-error">{errors.confirmPassword}</small>}
+                  </label>
+                </>}
+              </div>
+              <label className="checkbox-field registration-agreement"><input type="checkbox" checked={form.agreements} onChange={(event) => update("agreements", event.target.checked)} aria-describedby={errors.agreements ? "registration-agreement-error" : undefined} /><span>I agree to the <a href="mailto:sales@zenshotech.com?subject=ZenshoTech%20Terms%20of%20Service">Terms of Service</a> and <a href="mailto:sales@zenshotech.com?subject=ZenshoTech%20Privacy%20Policy">Privacy Policy</a>.</span></label>
+              {errors.agreements && <small className="field-error registration-agreement-error" id="registration-agreement-error">{errors.agreements}</small>}
+              <button className="primary-button full registration-submit" type="submit" disabled={submitting}>{submitting ? "Creating secure workspace..." : googleProfile ? "Create workspace with Google" : "Continue to pricing"}</button>
+              <p className="registration-reassurance">No payment details required <span aria-hidden="true">•</span> Registration does not start your trial</p>
             </>}
-            <label className="checkbox-field registration-agreement"><input type="checkbox" checked={form.agreements} onChange={(event) => update("agreements", event.target.checked)} /><span>I agree to the Terms of Service and Privacy Policy.</span></label>
-            {errors.agreements && <small className="field-error">{errors.agreements}</small>}
-            <button className="primary-button full" type="submit" disabled={submitting}>{submitting ? "Creating secure workspace..." : googleProfile ? "Create workspace with Google" : "Continue to pricing"}</button>
-          </>}
-          {session && <button className="primary-button full" type="button" onClick={() => {
-            const billing = new URLSearchParams(window.location.search).get("billing") === "annual" ? "annual" : "monthly";
-            onNavigate(`/pricing?onboarding=1&billing=${billing}`);
-          }}>Continue to pricing</button>}
-          <button className="text-button full" type="button" onClick={() => onNavigate("/")}>Already have an account? Sign in</button>
-        </form>
+            {session && <button className="primary-button full" type="button" onClick={() => {
+              const billing = new URLSearchParams(window.location.search).get("billing") === "annual" ? "annual" : "monthly";
+              onNavigate(`/pricing?onboarding=1&billing=${billing}`);
+            }}>Continue to pricing</button>}
+          </form>
+        </div>
       </section>
     </main>
   );

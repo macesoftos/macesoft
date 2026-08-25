@@ -23,7 +23,7 @@ function loadGoogleLibrary() {
   return googleLibraryPromise;
 }
 
-export default function GoogleIdentityButton({ mode = "signin", onCredential, disabled = false }) {
+export default function GoogleIdentityButton({ mode = "signin", onCredential, disabled = false, hideWhenUnavailable = false }) {
   const containerRef = useRef(null);
   const handlerRef = useRef(onCredential);
   const [unavailable, setUnavailable] = useState(false);
@@ -70,6 +70,6 @@ export default function GoogleIdentityButton({ mode = "signin", onCredential, di
     };
   }, [disabled, mode]);
 
-  if (unavailable) return <p className="google-auth-unavailable">Google sign-in is temporarily unavailable. Continue with email instead.</p>;
+  if (unavailable) return hideWhenUnavailable ? null : <p className="google-auth-unavailable">Google sign-in is temporarily unavailable. Continue with email instead.</p>;
   return <div className="google-auth-button" ref={containerRef} aria-label={mode === "signup" ? "Sign up with Google" : "Sign in with Google"} />;
 }

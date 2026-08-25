@@ -439,6 +439,38 @@ form input[type="file"]::file-selector-button {
   }
 }
 
+/* The public registration composition owns its track layout and control sizing. */
+#root .registration-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#root .registration-form .registration-agreement {
+  grid-column: 1;
+}
+
+#root .registration-form .registration-fields input:not([type="checkbox"]) {
+  height: 52px;
+  padding: 0 15px;
+  border-color: #d5ccc7;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+#root .registration-form .registration-submit {
+  height: auto;
+  min-height: 54px;
+}
+
+@media (min-width: 901px) and (max-height: 760px) {
+  #root .registration-form .registration-fields input:not([type="checkbox"]) {
+    height: 48px;
+  }
+
+  #root .registration-form .registration-submit {
+    min-height: 49px;
+  }
+}
+
 @media (min-width: 721px) and (max-width: 1100px) {
   .entity-modal { width: min(860px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
 }
