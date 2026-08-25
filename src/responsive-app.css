@@ -2611,7 +2611,7 @@ button:active {
   .workspace-full,
   .pos-workspace {
     --workspace-top-pad: 0px;
-    --workspace-inline-pad: 12px;
+    --workspace-inline-pad: 16px;
     min-height: 100dvh;
     padding: 0 var(--workspace-inline-pad) calc(var(--mobile-bottom-nav-height) + 18px + env(safe-area-inset-bottom));
   }
@@ -3331,7 +3331,7 @@ button:active {
   .workspace,
   .workspace-full,
   .pos-workspace {
-    --workspace-inline-pad: 10px;
+    --workspace-inline-pad: 12px;
   }
 
   .topbar-actions {
@@ -3687,5 +3687,34 @@ button:active {
 
   .appointment-booking-drawer {
     width: 100vw;
+  }
+}
+
+/* Final phone containment for record pages embedded inside the padded shell. */
+@media (max-width: 599px) {
+  .appointment-details-drawer.is-standalone,
+  .modal-card.client-profile-modal.is-standalone,
+  .record-detail-page,
+  .treatment-record-page,
+  .staff-record-page {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .record-detail-page-header > button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .clients-view-toggle {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .clients-view-toggle button {
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 6px;
   }
 }

@@ -1,9 +1,17 @@
 const apiBase = "";
 export const apiAuthenticationRequiredEvent = "macesoft:authentication-required";
 export const apiNotificationCreatedEvent = "macesoft:notification-created";
+export const apiWorkspaceMutatedEvent = "macesoft:workspace-mutated";
 
 let apiSessionActive = false;
 let apiBranchId = "";
+
+function emitWorkspaceMutation(path, options) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (method !== "GET" && !path.startsWith("/api/onboarding") && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(apiWorkspaceMutatedEvent, { detail: { method, path } }));
+  }
+}
 
 export function setApiSessionContext(session) {
   apiSessionActive = Boolean(session);
@@ -24,6 +32,7 @@ async function requestJson(path, options = {}) {
   });
 
   if (response.status === 204) {
+    emitWorkspaceMutation(path, options);
     return null;
   }
 
@@ -45,6 +54,8 @@ async function requestJson(path, options = {}) {
   if (payload?.notification && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(apiNotificationCreatedEvent, { detail: payload.notification }));
   }
+
+  emitWorkspaceMutation(path, options);
 
   return payload;
 }
@@ -124,6 +135,17 @@ export function resetAccountPassword(token, newPassword) {
 
 export function restoreAccountSession() {
   return requestJson("/api/auth/session");
+}
+
+export function loadOnboarding() {
+  return requestJson("/api/onboarding");
+}
+
+export function updateOnboarding(payload) {
+  return requestJson("/api/onboarding", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function logoutAccount() {

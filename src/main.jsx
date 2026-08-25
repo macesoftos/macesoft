@@ -9,6 +9,8 @@ import "./responsive-app.css";
 import "./vercel-typography.css";
 import "./marketing/marketing.css";
 import "./form-system.css";
+import "./mobile-workspaces.css";
+import "./onboarding/onboarding.css";
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {

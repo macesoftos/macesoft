@@ -99,6 +99,12 @@ import {
 import { normalizePublicBookingRequest } from "./publicBooking.js";
 import { createFlipbookRouters } from "./flipbooks.js";
 import {
+  ONBOARDING_TOUR_VERSION,
+  buildOnboardingChecklist,
+  onboardingRoleKind,
+  safeOnboardingStep,
+} from "./onboarding.js";
+import {
   marketingHtmlToText,
   normalizeMarketingDesign,
   renderMarketingHtml,
@@ -3485,6 +3491,141 @@ async function buildBootstrapPayload(actor) {
   };
 }
 
+function organizationAuditWhere(organizationId) {
+  return {
+    OR: [
+      { actorAccount: { is: { organizationId } } },
+      { branch: { is: { organizationId } } },
+    ],
+  };
+}
+
+function hasConfiguredOperatingHours(branch) {
+  if (clean(branch?.hours)) return true;
+  const operatingHours = parseJsonObject(branch?.operatingHours, {});
+  return Object.values(operatingHours).some((day) => day && day.closed !== true && clean(day.open) && clean(day.close));
+}
+
+async function buildOnboardingChecklistForAccount(actor) {
+  const modules = actor.access?.modules || roleAccess[actor.role] || [];
+  const auditWhere = organizationAuditWhere(actor.organizationId);
+  const [
+    organization,
+    branches,
+    services,
+    staff,
+    accounts,
+    pendingInvitations,
+    clients,
+    appointments,
+    inventory,
+    storedSettings,
+    settingsAudit,
+    campaignTestAudit,
+    permissionsAudit,
+  ] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: actor.organizationId }, select: { name: true } }),
+    prisma.branch.findMany({
+      where: { organizationId: actor.organizationId, status: "Active" },
+      include: { rooms: { where: { status: { not: ARCHIVED_ROOM_STATUS } } } },
+    }),
+    listResource("services", actor),
+    listResource("staff", actor),
+    prisma.account.count({ where: { organizationId: actor.organizationId, status: "Active" } }),
+    prisma.userInvitation.count({ where: { organizationId: actor.organizationId, status: "Pending", expiresAt: { gt: new Date() } } }),
+    listResource("clients", actor),
+    listResource("appointments", actor),
+    listResource("inventory", actor),
+    prisma.systemSetting.findUnique({ where: { key: "app" } }),
+    prisma.auditLog.findFirst({ where: { AND: [auditWhere, { action: "Settings updated" }] }, select: { id: true } }),
+    prisma.auditLog.findFirst({ where: { AND: [auditWhere, { action: "Test email sent" }] }, select: { id: true } }),
+    prisma.auditLog.findFirst({
+      where: {
+        AND: [
+          auditWhere,
+          { OR: [
+            { action: { contains: "permission", mode: "insensitive" } },
+            { action: { contains: "role changed", mode: "insensitive" } },
+          ] },
+        ],
+      },
+      select: { id: true },
+    }),
+  ]);
+
+  const contactBranch = branches.find((branch) => (
+    clean(branch.address)
+    && clean(branch.phone)
+    && clean(branch.email)
+    && clean(branch.timezone)
+  ));
+  const hasBusinessHours = branches.some(hasConfiguredOperatingHours);
+  const hasStaffSchedule = staff.some((member) => clean(member.schedule));
+  const paymentMethods = storedSettings
+    ? parseJsonObject(storedSettings.value, {}).paymentMethods
+    : [];
+  const hasPaymentMethods = Array.isArray(paymentMethods)
+    && paymentMethods.some((method) => typeof method === "string" ? clean(method) : method?.active !== false && clean(method?.name));
+
+  return buildOnboardingChecklist({
+    modules,
+    signals: {
+      businessProfile: Boolean(clean(organization?.name) && contactBranch && storedSettings),
+      businessProfileInProgress: Boolean(clean(organization?.name) || branches.length),
+      branch: branches.length > 0,
+      services: services.length > 0,
+      rooms: branches.some((branch) => branch.rooms.length > 0),
+      schedules: hasBusinessHours && hasStaffSchedule,
+      schedulesInProgress: hasBusinessHours || hasStaffSchedule,
+      team: accounts > 1,
+      teamInProgress: pendingInvitations > 0,
+      client: clients.length > 0,
+      appointment: appointments.length > 0,
+      appointmentInProgress: clients.length > 0 && services.length > 0,
+      inventory: inventory.length > 0,
+      posSettings: Boolean(settingsAudit && hasPaymentMethods),
+      posSettingsInProgress: Boolean(storedSettings && hasPaymentMethods),
+      testCampaign: Boolean(campaignTestAudit),
+      permissions: Boolean(permissionsAudit),
+      permissionsInProgress: accounts > 1 || pendingInvitations > 0,
+    },
+  });
+}
+
+function serializeOnboardingProgress(progress, checklist, actor) {
+  return {
+    state: {
+      tourVersion: progress.tourVersion,
+      currentStep: progress.currentStep,
+      startedAt: progress.startedAt,
+      completedAt: progress.completedAt,
+      dismissedAt: progress.dismissedAt,
+      checklistMinimized: progress.checklistMinimized,
+      checklistHiddenAt: progress.checklistHiddenAt,
+      lastChecklistInteraction: progress.lastChecklistInteraction,
+    },
+    checklist,
+    roleKind: onboardingRoleKind(actor.role),
+    modules: actor.access?.modules || roleAccess[actor.role] || [],
+  };
+}
+
+async function loadOnboardingProgress(actor) {
+  const checklist = await buildOnboardingChecklistForAccount(actor);
+  const progress = await prisma.onboardingProgress.upsert({
+    where: { accountId: actor.id },
+    create: {
+      accountId: actor.id,
+      tourVersion: ONBOARDING_TOUR_VERSION,
+      checklistProgress: checklist,
+    },
+    update: {
+      checklistProgress: checklist,
+    },
+  });
+  return serializeOnboardingProgress(progress, checklist, actor);
+}
+
 async function buildSaleDraftItems(cart, branch) {
   if (!Array.isArray(cart) || !cart.length) {
     throw apiError("Cart must contain at least one item.");
@@ -6596,6 +6737,53 @@ app.get("/api/bootstrap", asyncRoute(async (request, response) => {
   response.json(await buildBootstrapPayload(requireAuthenticatedAccount(request)));
 }));
 
+app.get("/api/onboarding", asyncRoute(async (request, response) => {
+  response.json(await loadOnboardingProgress(requireAuthenticatedAccount(request)));
+}));
+
+app.patch("/api/onboarding", asyncRoute(async (request, response) => {
+  const actor = requireAuthenticatedAccount(request);
+  const action = clean(request.body?.action);
+  const now = new Date();
+  const currentStep = safeOnboardingStep(request.body?.currentStep);
+  let data;
+
+  if (action === "start" || action === "restart") {
+    data = {
+      tourVersion: ONBOARDING_TOUR_VERSION,
+      currentStep: 0,
+      startedAt: now,
+      completedAt: null,
+      dismissedAt: null,
+    };
+  } else if (action === "progress") {
+    data = { currentStep };
+  } else if (action === "complete") {
+    data = { currentStep, completedAt: now, dismissedAt: null };
+  } else if (action === "dismiss") {
+    data = { currentStep, dismissedAt: now };
+  } else if (["minimize-checklist", "open-checklist", "hide-checklist"].includes(action)) {
+    data = {
+      checklistMinimized: action === "minimize-checklist",
+      checklistHiddenAt: action === "hide-checklist" ? now : action === "open-checklist" ? null : undefined,
+      lastChecklistInteraction: now,
+    };
+  } else {
+    throw apiError("Unsupported onboarding action.", 400);
+  }
+
+  await prisma.onboardingProgress.upsert({
+    where: { accountId: actor.id },
+    create: {
+      accountId: actor.id,
+      tourVersion: ONBOARDING_TOUR_VERSION,
+      ...data,
+    },
+    update: data,
+  });
+  response.json(await loadOnboardingProgress(actor));
+}));
+
 app.get("/api/notifications", asyncRoute(async (request, response) => {
   const account = requireAuthenticatedAccount(request);
   response.json(await loadNotificationFeed(account, request.query.limit));
@@ -9093,24 +9281,28 @@ app.use((error, _request, response, _next) => {
 
 assertProductionEnvironment();
 
-const server = app.listen(port, "0.0.0.0", () => {
-  console.log(`ZenshoTech listening on port ${port}`);
-});
-
-const marketingSchedulerEnabled = process.env.NODE_ENV !== "test" && process.env.MARKETING_SCHEDULER_ENABLED !== "false";
-const marketingSchedulerInterval = marketingSchedulerEnabled
-  ? setInterval(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, Math.max(5_000, Number(process.env.MARKETING_SCHEDULER_INTERVAL_MS) || 30_000))
-  : null;
-marketingSchedulerInterval?.unref();
-if (marketingSchedulerEnabled) setTimeout(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, 2_000).unref();
-
-function shutdown() {
-  if (marketingSchedulerInterval) clearInterval(marketingSchedulerInterval);
-  server.close(async () => {
-    await prisma.$disconnect();
-    process.exit(0);
+if (!process.env.VERCEL) {
+  const server = app.listen(port, "0.0.0.0", () => {
+    console.log(`ZenshoTech listening on port ${port}`);
   });
+
+  const marketingSchedulerEnabled = process.env.NODE_ENV !== "test" && process.env.MARKETING_SCHEDULER_ENABLED !== "false";
+  const marketingSchedulerInterval = marketingSchedulerEnabled
+    ? setInterval(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, Math.max(5_000, Number(process.env.MARKETING_SCHEDULER_INTERVAL_MS) || 30_000))
+    : null;
+  marketingSchedulerInterval?.unref();
+  if (marketingSchedulerEnabled) setTimeout(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, 2_000).unref();
+
+  function shutdown() {
+    if (marketingSchedulerInterval) clearInterval(marketingSchedulerInterval);
+    server.close(async () => {
+      await prisma.$disconnect();
+      process.exit(0);
+    });
+  }
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+export default app;

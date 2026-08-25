@@ -17,6 +17,7 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   Clock,
+  Compass,
   CreditCard,
   Database,
   Download,
@@ -173,6 +174,12 @@ import {
   authenticateWithGoogle,
 } from "./lib/api.js";
 import GoogleIdentityButton from "./components/GoogleIdentityButton.jsx";
+import {
+  GettingStartedChecklist,
+  OnboardingExperience,
+  OnboardingHelpControls,
+  useOnboardingController,
+} from "./onboarding/OnboardingExperience.jsx";
 
 const storageKey = (key) => `mace-clinicos-${key}`;
 const retiredSensitiveStorageKeys = [
@@ -894,6 +901,7 @@ function App() {
   const staffUsersExportRef = useRef(null);
   const staffProfilesExportRef = useRef(null);
   const [isBooting, setIsBooting] = useState(true);
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [clients, setClients] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [services, setServices] = useState([]);
@@ -999,6 +1007,7 @@ function App() {
     setReceiptToPrint(null);
     setModal(null);
     setConfirm(null);
+    setWorkspaceHydrated(false);
   }, []);
 
   const refreshNotifications = useCallback(async ({ silent = true } = {}) => {
@@ -1343,6 +1352,7 @@ function App() {
   useEffect(() => {
     if (!session) return undefined;
     let cancelled = false;
+    setWorkspaceHydrated(false);
 
     async function hydrateFromApi() {
       try {
@@ -1407,6 +1417,8 @@ function App() {
         } catch {
           // The dedicated client fallback is best-effort; retain the full offline state below.
         }
+      } finally {
+        if (!cancelled) setWorkspaceHydrated(true);
       }
     }
 
@@ -1502,6 +1514,22 @@ function App() {
       }))
       .filter((section) => section.items.length > 0);
   }, [mobilePrimaryNav, visibleNavSections]);
+
+  const revealOnboardingModule = useCallback((moduleId) => {
+    if (!moduleId || typeof window === "undefined") return;
+    const isMobile = window.matchMedia("(max-width: 820px)").matches;
+    const isPrimary = mobilePrimaryNavConfig.some((item) => item.id === moduleId);
+    setIsMobileMoreOpen(isMobile && !isPrimary);
+  }, []);
+
+  const onboardingController = useOnboardingController({
+    activeModule,
+    blocked: Boolean(modal || confirm),
+    isReady: Boolean(session && !isBooting && workspaceHydrated),
+    onNavigate: setActiveModule,
+    onRevealModule: revealOnboardingModule,
+    session,
+  });
 
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === selectedClientId) ?? clients[0],
@@ -2958,6 +2986,27 @@ function App() {
           onExit={() => setActiveModule("overview")}
           session={session}
         />
+        <MobileBottomNavigation
+          activeModule={activeModule}
+          moreOpen={isMobileMoreOpen}
+          moreSections={mobileMoreSections}
+          onNavigate={setActiveModule}
+          onOpenMore={() => setIsMobileMoreOpen(true)}
+          primaryItems={mobilePrimaryNav}
+        />
+        <MobileMoreMenu
+          activeModule={activeModule}
+          onClose={() => setIsMobileMoreOpen(false)}
+          onLogout={handleLogout}
+          onNavigate={setActiveModule}
+          onOpenChecklist={() => void onboardingController.openChecklist()}
+          onRestartTour={() => void onboardingController.startTour({ restart: true })}
+          open={isMobileMoreOpen}
+          primaryItems={mobilePrimaryNav}
+          sections={mobileMoreSections}
+          session={session}
+        />
+        <OnboardingExperience controller={onboardingController} />
         {toast && <Toast toast={toast} />}
       </>
     );
@@ -2989,7 +3038,7 @@ function App() {
     isMarketingView ? "marketing-page-shell" : "",
     isStandaloneWorkspaceView ? "standalone-module-shell" : "",
     isPosView && isPosChromeRevealed ? "pos-chrome-revealed" : "",
-    !isStandaloneWorkspaceView ? "has-mobile-navigation" : "",
+    "has-mobile-navigation",
     isMarketingView ? "marketing-standalone-shell" : "",
   ].filter(Boolean).join(" ");
   const posChromeHandlers = isPosView
@@ -3060,7 +3109,7 @@ function App() {
           >
             <header className="topbar" id={isPosView ? "pos-system-chrome" : undefined}>
             <div className="topbar-heading">
-              {showSidebar && (
+              {visibleNavSections.length > 0 && (
                 <button
                   className="sidebar-mobile-button"
                   type="button"
@@ -3156,6 +3205,8 @@ function App() {
                 onLogout={handleLogout}
                 onNavigate={setActiveModule}
                 onOpenAccount={() => openModal("account")}
+                onOpenChecklist={() => void onboardingController.openChecklist()}
+                onRestartTour={() => void onboardingController.startTour({ restart: true })}
               />
             </div>
             </header>
@@ -3169,6 +3220,7 @@ function App() {
           {activeModule === "payroll" && <PayrollWorkspace notify={notify} onAudit={applyAuditLog} onExit={() => setActiveModule("overview")} />}
           {activeModule === "overview" && (
             <Dashboard
+              onboardingController={onboardingController}
               session={session}
               stats={stats}
               branchScope={branchScope}
@@ -3485,33 +3537,31 @@ function App() {
               consentTemplates={consentTemplates}
             />
           )}
-          {activeModule === "support" && <SupportModule />}
+          {activeModule === "support" && <SupportModule onboardingController={onboardingController} />}
         </section>
       </main>
 
-      {!isStandaloneWorkspaceView && (
-        <>
-          <MobileBottomNavigation
-            activeModule={activeModule}
-            moreOpen={isMobileMoreOpen}
-            moreSections={mobileMoreSections}
-            onNavigate={setActiveModule}
-            onOpenMore={() => setIsMobileMoreOpen(true)}
-            primaryItems={mobilePrimaryNav}
-          />
+      <MobileBottomNavigation
+        activeModule={activeModule}
+        moreOpen={isMobileMoreOpen}
+        moreSections={mobileMoreSections}
+        onNavigate={setActiveModule}
+        onOpenMore={() => setIsMobileMoreOpen(true)}
+        primaryItems={mobilePrimaryNav}
+      />
 
-          <MobileMoreMenu
-            activeModule={activeModule}
-            onClose={() => setIsMobileMoreOpen(false)}
-            onLogout={handleLogout}
-            onNavigate={setActiveModule}
-            open={isMobileMoreOpen}
-            primaryItems={mobilePrimaryNav}
-            sections={mobileMoreSections}
-            session={session}
-          />
-        </>
-      )}
+      <MobileMoreMenu
+        activeModule={activeModule}
+        onClose={() => setIsMobileMoreOpen(false)}
+        onLogout={handleLogout}
+        onNavigate={setActiveModule}
+        onOpenChecklist={() => void onboardingController.openChecklist()}
+        onRestartTour={() => void onboardingController.startTour({ restart: true })}
+        open={isMobileMoreOpen}
+        primaryItems={mobilePrimaryNav}
+        sections={mobileMoreSections}
+        session={session}
+      />
 
       <ModalHost
         session={session}
@@ -3553,6 +3603,7 @@ function App() {
       />
 
       {confirm && <ConfirmDialog confirm={confirm} onCancel={() => { confirm.onCancel?.(); setConfirm(null); }} onConfirmComplete={() => setConfirm(null)} />}
+      <OnboardingExperience controller={onboardingController} />
       {toast && <Toast toast={toast} />}
       </div>
       <PrintableReceipt receipt={receiptToPrint} settings={settings} services={services} />
@@ -3825,6 +3876,7 @@ function SidebarNavigation({
         className={`sidebar ${collapsed ? "is-collapsed" : ""} ${drawerOpen ? "is-open" : ""}`}
         id={id}
         aria-label="ZenshoTech modules"
+        data-tour="main-navigation"
       >
         <div className="sidebar-header">
           <div className="brand-mark"><BrandWordmark /></div>
@@ -3911,6 +3963,7 @@ function SidebarItem({ active, collapsed, item, onNavigate }) {
   return (
     <button
       className={`nav-item ${active ? "active" : ""}`}
+      data-tour={`nav-${item.id}`}
       type="button"
       title={collapsed ? item.label : undefined}
       aria-label={collapsed ? item.label : undefined}
@@ -3936,13 +3989,14 @@ function MobileBottomNavigation({
   const hasMoreItems = moreSections.some((section) => section.items.length > 0);
 
   return (
-    <nav className="mobile-bottom-navigation" aria-label="Mobile primary navigation">
+    <nav className="mobile-bottom-navigation" aria-label="Mobile primary navigation" data-tour="main-navigation">
       {primaryItems.slice(0, 4).map((item) => {
         const Icon = item.icon;
         const active = activeModule === item.id;
         return (
           <button
             className={active ? "active" : ""}
+            data-tour={`nav-${item.id}`}
             type="button"
             key={item.id}
             onClick={() => onNavigate(item.id)}
@@ -3973,12 +4027,15 @@ function MobileMoreMenu({
   onClose,
   onLogout,
   onNavigate,
+  onOpenChecklist,
+  onRestartTour,
   open,
   primaryItems,
   sections,
   session,
 }) {
   const hasSecondaryItems = sections.some((section) => section.items.length > 0);
+  const canOpenSupport = sections.some((section) => section.items.some((item) => item.id === "support"));
 
   return (
     <div
@@ -4016,6 +4073,7 @@ function MobileMoreMenu({
             return (
               <button
                 className={active ? "active" : ""}
+                data-tour={`nav-${item.id}`}
                 key={item.id}
                 type="button"
                 onClick={() => onNavigate(item.id)}
@@ -4040,6 +4098,7 @@ function MobileMoreMenu({
                     return (
                       <button
                         className={active ? "active" : ""}
+                        data-tour={`nav-${item.id}`}
                         key={item.id}
                         type="button"
                         onClick={() => onNavigate(item.id)}
@@ -4062,10 +4121,18 @@ function MobileMoreMenu({
         </div>
 
         <footer className="mobile-more-footer">
-          <button className="secondary-button" type="button" onClick={() => onNavigate("support")}>
+          <button className="secondary-button" type="button" onClick={() => { onClose(); onOpenChecklist(); }}>
+            <ClipboardCheck size={17} aria-hidden="true" />
+            Getting Started
+          </button>
+          <button className="secondary-button" type="button" onClick={() => { onClose(); onRestartTour(); }}>
+            <RefreshCw size={17} aria-hidden="true" />
+            Restart tour
+          </button>
+          {canOpenSupport && <button className="secondary-button" type="button" onClick={() => onNavigate("support")}>
             <ShieldCheck size={17} aria-hidden="true" />
             Support
-          </button>
+          </button>}
           <button className="ghost-button" type="button" onClick={onLogout}>
             <LogOut size={17} aria-hidden="true" />
             Logout
@@ -4111,7 +4178,7 @@ function NotificationCenter({ loading, notifications, onMarkAllRead, onNavigate,
   }
 
   return (
-    <div className="notification-center" ref={rootRef}>
+    <div className="notification-center" data-tour="notifications" ref={rootRef}>
       <button
         className={`icon-button notification-trigger ${unreadCount ? "has-unread" : ""}`}
         type="button"
@@ -4183,7 +4250,7 @@ function NotificationCenter({ loading, notifications, onMarkAllRead, onNavigate,
   );
 }
 
-function AccountMenu({ session, sessionModules = [], onLogout, onNavigate, onOpenAccount }) {
+function AccountMenu({ session, sessionModules = [], onLogout, onNavigate, onOpenAccount, onOpenChecklist, onRestartTour }) {
   const initials = initialsFor(session.name);
   const detailsRef = useRef(null);
   const canManageUsers = sessionModules.includes("staff");
@@ -4226,6 +4293,16 @@ function AccountMenu({ session, sessionModules = [], onLogout, onNavigate, onOpe
           <button type="button" role="menuitem" onClick={() => runAction(onOpenAccount)}>
             <LockKeyhole size={16} aria-hidden="true" />
             <span><strong>Account security</strong><small>Change your password</small></span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+          <button type="button" role="menuitem" onClick={() => runAction(onOpenChecklist)}>
+            <ClipboardCheck size={16} aria-hidden="true" />
+            <span><strong>Getting Started</strong><small>Continue your workspace setup</small></span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+          <button type="button" role="menuitem" onClick={() => runAction(onRestartTour)}>
+            <RefreshCw size={16} aria-hidden="true" />
+            <span><strong>Restart dashboard tour</strong><small>Review the workspace controls</small></span>
             <ChevronRight size={15} aria-hidden="true" />
           </button>
         </div>
@@ -5469,6 +5546,7 @@ function ApplicationsModule({ session, visibleNav, setActiveModule }) {
 }
 
 function Dashboard({
+  onboardingController,
   session,
   stats,
   branchScope,
@@ -5582,7 +5660,8 @@ function Dashboard({
   ].filter(Boolean);
 
   return (
-    <div className="clinic-dashboard">
+    <div className="clinic-dashboard" data-tour="dashboard">
+      <GettingStartedChecklist controller={onboardingController} />
       <header className="clinic-dashboard-welcome">
         <div>
           <p className="eyebrow">ZENSHOTECH</p>
@@ -5670,7 +5749,7 @@ function Dashboard({
         </article>}
       </section>
 
-      {quickActions.length > 0 && <section className="clinic-dashboard-quick-actions" aria-label="Quick actions">{quickActions.map(({ icon: Icon, ...action }) => <button type="button" onClick={action.onClick} key={action.label}><Icon size={19} aria-hidden="true" /> {action.label}</button>)}</section>}
+      {quickActions.length > 0 && <section className="clinic-dashboard-quick-actions" aria-label="Quick actions" data-tour="quick-actions">{quickActions.map(({ icon: Icon, ...action }) => <button type="button" onClick={action.onClick} key={action.label}><Icon size={19} aria-hidden="true" /> {action.label}</button>)}</section>}
     </div>
   );
 }
@@ -13862,17 +13941,11 @@ function SettingsModule({ settings, users, auditLogs, discounts, promotions = []
   );
 }
 
-function SupportModule() {
+function SupportModule({ onboardingController }) {
   const supportChannels = [
     { icon: PhoneCall, title: "Priority support line", copy: "0917 109 8462 / 9:00 AM-8:00 PM daily" },
     { icon: Mail, title: "Operations inbox", copy: "Contact your administrator for account, billing, and access requests" },
     { icon: MessageSquareText, title: "Launch group chat", copy: "Front desk, cashier, clinical, inventory, and marketing coordinators" },
-  ];
-  const onboardingSteps = [
-    "Branch profile and receipt settings confirmed",
-    "Services, packages, and product catalog reviewed",
-    "Role access, audit log, and sensitive records checked",
-    "Front desk, POS, and treatment workflows rehearsed",
   ];
   const resources = [
     { icon: FileText, title: "User manual", copy: "Step-by-step workflows for bookings, POS, client records, treatment notes, inventory, and reports." },
@@ -13911,8 +13984,8 @@ function SupportModule() {
       </div>
 
       <div className="surface-panel">
-        <SectionHeader icon={ClipboardCheck} title="Onboarding Progress" action="Go-live" />
-        <Checklist items={onboardingSteps} />
+        <SectionHeader icon={Compass} title="Guided Help" action="Available anytime" />
+        <OnboardingHelpControls controller={onboardingController} />
       </div>
 
       <div className="surface-panel full-span">
@@ -14311,7 +14384,7 @@ function ModalHost({
         item: "",
         sku: "",
         brand: "",
-        category: settings.productCategories[0],
+        category: settings.productCategories?.[0] || "General",
         type: "Consumable",
         unit: "piece",
         packQty: 1,
@@ -14481,7 +14554,7 @@ function ModalHost({
     },
     expense: {
       title: modal.payload?.id ? "Edit Expense" : "Record Expense",
-      initial: { date: todayDate(), name: "", category: settings.expenseCategories[0], branch: defaultRecordBranch, amount: 0, method: "Cash", approver: "Owner", status: "For approval", notes: "", receipt: "Pending", ...modal.payload },
+      initial: { date: todayDate(), name: "", category: settings.expenseCategories?.[0] || "General", branch: defaultRecordBranch, amount: 0, method: "Cash", approver: "Owner", status: "For approval", notes: "", receipt: "Pending", ...modal.payload },
       submitLabel: "Save expense",
       onSubmit: saveExpense,
       fields: [
@@ -16138,19 +16211,6 @@ function SupportItem({ icon: Icon, title, copy }) {
         <span>{copy}</span>
       </div>
     </article>
-  );
-}
-
-function Checklist({ items }) {
-  return (
-    <ul className="checklist">
-      {items.map((item) => (
-        <li key={item}>
-          <Check size={16} aria-hidden="true" />
-          <span>{item}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 

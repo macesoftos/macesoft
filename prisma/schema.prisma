@@ -215,6 +215,7 @@ model Account {
   passwordResetTokens     PasswordResetToken[]
   flipbooks               Flipbook[]
   branchMemberships       BranchMembership[]
+  onboarding              OnboardingProgress?
   branchAuditEntries      AuditLog[]                   @relation("AuditActor")
   createdAt               DateTime                     @default(now())
   updatedAt               DateTime                     @updatedAt
@@ -222,6 +223,25 @@ model Account {
   @@index([role])
   @@index([branch])
   @@index([organizationId, status])
+}
+
+model OnboardingProgress {
+  id                       String   @id @default(cuid())
+  accountId                String   @unique
+  account                  Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tourVersion              Int      @default(1)
+  currentStep              Int      @default(0)
+  startedAt                DateTime?
+  completedAt              DateTime?
+  dismissedAt              DateTime?
+  checklistProgress        Json?
+  checklistMinimized       Boolean  @default(false)
+  checklistHiddenAt        DateTime?
+  lastChecklistInteraction DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([tourVersion, completedAt])
 }
 
 model AccountIdentity {

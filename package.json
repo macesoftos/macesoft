@@ -5,7 +5,7 @@
   "type": "module",
   "main": "server.js",
   "engines": {
-    "node": ">=22 <25"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "concurrently -k -n API,VITE -c blue,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
