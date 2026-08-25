@@ -4399,6 +4399,28 @@ td {
   line-height: 1.45;
 }
 
+.pricing-quote {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.pricing-quote strong {
+  font-size: clamp(1.65rem, 3vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.pricing-quote span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.pricing-card-actions {
+  display: grid;
+  gap: 8px;
+}
+
 .pricing-plan-card ul {
   flex: 1;
   margin: 0;

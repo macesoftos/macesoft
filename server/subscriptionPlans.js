@@ -56,6 +56,12 @@ export const subscriptionPlans = Object.freeze([
 
 const planByCode = new Map(subscriptionPlans.map((plan) => [plan.code, plan]));
 
+function planWithoutPricing(plan) {
+  if (!plan) return null;
+  const { monthlyPrice: _monthlyPrice, annualPrice: _annualPrice, currency: _currency, ...visiblePlan } = plan;
+  return { ...visiblePlan, moduleEntitlements: [...plan.moduleEntitlements] };
+}
+
 export function getSubscriptionPlan(code) {
   return planByCode.get(String(code || "").trim().toLowerCase()) || null;
 }
@@ -64,7 +70,7 @@ export function publicSubscriptionPlans() {
   return subscriptionPlans
     .filter((plan) => plan.active)
     .sort((left, right) => left.displayOrder - right.displayOrder)
-    .map((plan) => ({ ...plan, moduleEntitlements: [...plan.moduleEntitlements] }));
+    .map(planWithoutPricing);
 }
 
 export function effectiveSubscriptionStatus(subscription, now = new Date()) {
@@ -127,12 +133,19 @@ export function trialWindow(startedAt = new Date()) {
   return { start, end: new Date(start.getTime() + (TRIAL_DURATION_HOURS * 60 * 60 * 1000)) };
 }
 
-export function serializeSubscription(subscription, { users = 0, branches = 0 } = {}, now = new Date()) {
+function visibleBillingDetails(plan, billingCycle, includePricing) {
+  const details = billingDetails(plan, billingCycle);
+  if (!details || includePricing) return details;
+  const { amount: _amount, monthlyEquivalent: _monthlyEquivalent, ...visibleDetails } = details;
+  return visibleDetails;
+}
+
+export function serializeSubscription(subscription, { users = 0, branches = 0 } = {}, now = new Date(), { includePricing = false } = {}) {
   if (!subscription) {
     const plan = getSubscriptionPlan("unlimited");
     return {
       id: null,
-      plan,
+      plan: includePricing ? plan : planWithoutPricing(plan),
       planCode: "unlimited",
       status: "grandfathered",
       accessAllowed: true,
@@ -155,14 +168,14 @@ export function serializeSubscription(subscription, { users = 0, branches = 0 } 
     : null;
   return {
     id: subscription.id,
-    plan,
+    plan: includePricing ? plan : planWithoutPricing(plan),
     planCode: subscription.planCode,
     requestedPlanCode: subscription.requestedPlanCode,
     billingCycle,
     requestedBillingCycle,
-    billing: billingDetails(plan, billingCycle),
-    requestedPlan,
-    requestedBilling: requestedPlan ? billingDetails(requestedPlan, requestedBillingCycle) : null,
+    billing: visibleBillingDetails(plan, billingCycle, includePricing),
+    requestedPlan: includePricing ? requestedPlan : planWithoutPricing(requestedPlan),
+    requestedBilling: requestedPlan ? visibleBillingDetails(requestedPlan, requestedBillingCycle, includePricing) : null,
     status,
     accessAllowed: subscriptionAllowsOperations(subscription, now),
     isExistingAccountDefault: false,

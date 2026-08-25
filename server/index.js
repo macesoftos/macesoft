@@ -4682,8 +4682,8 @@ app.post("/api/subscription/request-activation", asyncRoute(async (request, resp
   response.json({
     subscription: serializeSubscription(saved, usage),
     message: billingCycle === "annual"
-      ? `Annual activation request recorded for ${billing.amount.toLocaleString("en-PH", { style: "currency", currency: "PHP" })}, covering 12 months with the 10% discount. ZenshoTech will confirm billing and activation.`
-      : `Monthly activation request recorded for ${billing.amount.toLocaleString("en-PH", { style: "currency", currency: "PHP" })}. ZenshoTech will confirm billing and activation.`,
+      ? "Your annual quotation request is recorded for a 12-month term with the 10% discount. ZenshoTech will contact you to confirm the quote and activation."
+      : "Your monthly quotation request is recorded. ZenshoTech will contact you to confirm the quote and activation.",
   });
 }));
 
@@ -4691,7 +4691,7 @@ app.get("/api/admin/subscriptions", asyncRoute(async (request, response) => {
   requirePlatformAdministrator(request);
   const organizations = await prisma.organization.findMany({ include: { subscription: true }, orderBy: { updatedAt: "desc" } });
   const subscriptions = await Promise.all(organizations.map(async (organization) => ({
-    ...serializeSubscription(organization.subscription, await subscriptionUsage(prisma, organization.id)),
+    ...serializeSubscription(organization.subscription, await subscriptionUsage(prisma, organization.id), new Date(), { includePricing: true }),
     organization: { id: organization.id, name: organization.name },
   })));
   response.json({ subscriptions });
@@ -4752,7 +4752,7 @@ app.patch("/api/admin/subscriptions/:organizationId", asyncRoute(async (request,
     });
     return subscription;
   });
-  response.json({ subscription: serializeSubscription(saved, usage) });
+  response.json({ subscription: serializeSubscription(saved, usage, new Date(), { includePricing: true }) });
 }));
 
 const flipbookRouters = createFlipbookRouters({

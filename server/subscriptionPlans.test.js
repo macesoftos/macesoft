@@ -22,8 +22,9 @@ const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url),
 const migration = readFileSync(new URL("../prisma/migrations/20260825153000_subscription_trials_no_setup_fee/migration.sql", import.meta.url), "utf8");
 const annualBillingMigration = readFileSync(new URL("../prisma/migrations/20260826013000_annual_billing_cycle/migration.sql", import.meta.url), "utf8");
 
-test("canonical plans use the corrected prices and no setup-fee data", () => {
-  const plans = Object.fromEntries(publicSubscriptionPlans().map((plan) => [plan.code, plan]));
+test("canonical plans retain internal prices without exposing them in the public catalog", () => {
+  const plans = Object.fromEntries(["starter", "growth", "unlimited", "lifetime"].map((code) => [code, getSubscriptionPlan(code)]));
+  const publicPlans = Object.fromEntries(publicSubscriptionPlans().map((plan) => [plan.code, plan]));
   assert.equal(plans.starter.monthlyPrice, 3900);
   assert.equal(plans.growth.monthlyPrice, 5900);
   assert.equal(plans.unlimited.monthlyPrice, 7999);
@@ -32,6 +33,11 @@ test("canonical plans use the corrected prices and no setup-fee data", () => {
   for (const plan of Object.values(plans)) {
     assert.equal(plan.includedWebsitePages, 8);
     assert.equal(Object.keys(plan).some((key) => /setup.?fee/i.test(key)), false);
+  }
+  for (const plan of Object.values(publicPlans)) {
+    assert.equal("monthlyPrice" in plan, false);
+    assert.equal("annualPrice" in plan, false);
+    assert.equal("currency" in plan, false);
   }
 });
 
@@ -126,11 +132,28 @@ test("subscription migration is additive and preserves historical billing data",
 });
 
 test("pricing and activation flows carry the selected billing cycle", () => {
-  assert.match(appSource, /Pay one month at a time, or prepay 12 months and save 10%/);
+  assert.match(appSource, /Choose monthly billing or a 12-month term with 10% savings/);
   assert.match(appSource, /Pay 12 Months/);
   assert.match(appSource, /startSubscriptionTrial\(plan\.code, billingCycle\)/);
   assert.match(appSource, /requestSubscriptionActivation\(plan\.code, billingCycle\)/);
   const activationRoute = serverSource.slice(serverSource.indexOf('app.post("/api/subscription/request-activation"'), serverSource.indexOf('app.get("/api/admin/subscriptions"'));
   assert.match(activationRoute, /requestedBillingCycle: billingCycle/);
   assert.match(serverSource, /billingCycle === "annual" \? 12 : 1/);
+});
+
+test("quote-based pricing preserves the free trial while hiding amounts from customers", () => {
+  const pricingSource = appSource.slice(appSource.indexOf("function PricingPage"), appSource.indexOf("function SubscriptionPage"));
+  assert.match(pricingSource, /Personalized Quote/);
+  assert.match(pricingSource, /Start 7-Day Free Trial/);
+  assert.match(pricingSource, /Request a Quote/);
+  assert.match(pricingSource, /Custom One-Time Quote/);
+  assert.doesNotMatch(pricingSource, /monthlyPrice|annualPrice|planPrice\(/);
+  const subscription = { id: "sub-quote", planCode: "growth", requestedPlanCode: "growth", status: "trialing", billingCycle: "annual", requestedBillingCycle: "annual", trialEndAt: new Date("2026-09-01T00:00:00.000Z") };
+  const customerView = serializeSubscription(subscription, {}, new Date("2026-08-26T00:00:00.000Z"));
+  assert.equal("monthlyPrice" in customerView.plan, false);
+  assert.equal("amount" in customerView.billing, false);
+  assert.equal("amount" in customerView.requestedBilling, false);
+  const adminView = serializeSubscription(subscription, {}, new Date("2026-08-26T00:00:00.000Z"), { includePricing: true });
+  assert.equal(adminView.plan.monthlyPrice, 5900);
+  assert.equal(adminView.billing.amount, 63720);
 });

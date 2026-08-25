@@ -4300,17 +4300,23 @@ function PublicClientRegistrationPage() {
 }
 
 function PublicLeadCapturePage({ initialMode = "inquiry" }) {
-  const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
+  const inquiryParams = new URLSearchParams(window.location.search);
+  const isContactEmbed = inquiryParams.get("embed") === "contact";
+  const isSalesQuote = inquiryParams.get("interest") === "zenshotech-pricing";
+  const quotePlanCode = ["starter", "growth", "unlimited", "lifetime"].includes(inquiryParams.get("plan")) ? inquiryParams.get("plan") : "starter";
+  const quotePlanName = ({ starter: "Starter", growth: "Growth", unlimited: "Unlimited", lifetime: "One-Time Purchase" })[quotePlanCode];
+  const quoteBilling = inquiryParams.get("billing") === "annual" ? "12-month term with 10% savings" : inquiryParams.get("billing") === "one_time" ? "one-time purchase" : "monthly billing";
   const [formMode, setFormMode] = useState(initialMode);
   const [config, setConfig] = useState({ company: "ZenshoTech", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
   const [form, setForm] = useState({
     fullName: "",
+    businessName: "",
     mobile: "",
     email: "",
     serviceId: "",
     branch: "",
     preferredChannel: "Phone",
-    concern: "",
+    concern: isSalesQuote ? `I would like a quotation for the ${quotePlanName} plan with ${quoteBilling}.` : "",
     marketingConsent: false,
     privacyConsent: false,
     clinicWebsite: "",
@@ -4345,6 +4351,10 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
   }, [isContactEmbed]);
 
   useEffect(() => {
+    if (isSalesQuote) {
+      setLoadingConfig(false);
+      return undefined;
+    }
     let cancelled = false;
     loadPublicLeadConfig()
       .then((result) => {
@@ -4377,7 +4387,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isSalesQuote]);
 
   const availableServices = useMemo(() => config.services.filter((service) => {
     const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
@@ -4402,13 +4412,14 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!form.fullName.trim() || (!form.mobile.trim() && !form.email.trim()) || !form.privacyConsent) return;
+    if (!form.fullName.trim() || (isSalesQuote && !form.businessName.trim()) || (!form.mobile.trim() && !form.email.trim()) || !form.privacyConsent) return;
     setSaving(true);
     setError("");
     try {
       const submissionId = globalThis.crypto?.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const result = await submitPublicLead({
         ...form,
+        concern: isSalesQuote ? `[ZenshoTech sales quote] Business: ${form.businessName || "Not provided"}. ${form.concern}` : form.concern,
         ...publicLeadAttribution(),
         submissionId,
       });
@@ -4427,6 +4438,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
     setForm((current) => ({
       ...current,
       fullName: "",
+      businessName: "",
       mobile: "",
       email: "",
       concern: "",
@@ -4443,27 +4455,27 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
           <div className="public-lead-brand">
             <BrandWordmark className="public-lead-logo" />
             <div>
-              <p className="eyebrow">{formMode === "appointment" ? "Online appointment request" : "Private consultation request"}</p>
-              <h1>{formMode === "appointment" ? "Choose a visit time that works for you." : "Let’s talk about the care that feels right for you."}</h1>
-              <p>{formMode === "appointment" ? "Request your preferred branch, service, date, and time. The clinic team will confirm the final schedule with you." : `${config.tagline} Share what you’re interested in and the clinic team will personally follow up.`}</p>
+              <p className="eyebrow">{isSalesQuote ? "ZenshoTech plan quotation" : formMode === "appointment" ? "Online appointment request" : "Private consultation request"}</p>
+              <h1>{isSalesQuote ? `Let’s prepare your ${quotePlanName} quote.` : formMode === "appointment" ? "Choose a visit time that works for you." : "Let’s talk about the care that feels right for you."}</h1>
+              <p>{isSalesQuote ? `Tell us about your clinic and our team will contact you about ${quoteBilling}. Your 7-day trial remains free and does not require payment details.` : formMode === "appointment" ? "Request your preferred branch, service, date, and time. The clinic team will confirm the final schedule with you." : `${config.tagline} Share what you’re interested in and the clinic team will personally follow up.`}</p>
             </div>
             <div className="public-lead-promises" aria-label="What happens next">
-              <span><ShieldCheck size={18} /> Your details stay with the clinic</span>
-              <span>{formMode === "appointment" ? <CalendarDays size={18} /> : <PhoneCall size={18} />} {formMode === "appointment" ? "Your request goes into Appointments" : "Choose how you prefer to be contacted"}</span>
-              <span><Sparkles size={18} /> {formMode === "appointment" ? "The clinic confirms availability" : "No treatment commitment required"}</span>
+              <span><ShieldCheck size={18} /> {isSalesQuote ? "No payment required to request a quote" : "Your details stay with the clinic"}</span>
+              <span>{formMode === "appointment" && !isSalesQuote ? <CalendarDays size={18} /> : <PhoneCall size={18} />} {formMode === "appointment" && !isSalesQuote ? "Your request goes into Appointments" : "Choose how you prefer to be contacted"}</span>
+              <span><Sparkles size={18} /> {isSalesQuote ? "Personalized for your clinic" : formMode === "appointment" ? "The clinic confirms availability" : "No treatment commitment required"}</span>
             </div>
           </div>
         )}
 
         <div className="public-lead-card">
-          <div className="public-form-mode-switch" aria-label="Choose contact form">
+          {!isSalesQuote && <div className="public-form-mode-switch" aria-label="Choose contact form">
             <button className={formMode === "inquiry" ? "active" : ""} type="button" aria-pressed={formMode === "inquiry"} onClick={() => setFormMode("inquiry")}>
               <MessageSquareText size={16} /> Inquire
             </button>
             <button className={formMode === "appointment" ? "active" : ""} type="button" aria-pressed={formMode === "appointment"} onClick={() => setFormMode("appointment")}>
               <CalendarDays size={16} /> Book an appointment
             </button>
-          </div>
+          </div>}
 
           {formMode === "appointment" ? (
             <PublicAppointmentBookingForm config={config} loadingConfig={loadingConfig} />
@@ -4471,15 +4483,15 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
             <div className="public-lead-success" role="status">
               <span className="public-lead-success-icon"><Check size={28} /></span>
               <p className="eyebrow">Inquiry received</p>
-              <h2>Thank you — the ZenshoTech team will be in touch.</h2>
-              <p>Your request is now in the clinic&apos;s Leads inbox for a personal follow-up.</p>
+              <h2>{isSalesQuote ? "Thank you — our sales team will prepare your quote." : "Thank you — the ZenshoTech team will be in touch."}</h2>
+              <p>{isSalesQuote ? "Your request is recorded for personal follow-up. You can still start the free trial at any time." : "Your request is now in the clinic's Leads inbox for a personal follow-up."}</p>
               <button className="secondary-button" type="button" onClick={sendAnother}>Send another inquiry</button>
             </div>
           ) : (
             <form onSubmit={submit}>
               <div className="public-lead-card-heading">
-                <p className="eyebrow">Start your inquiry</p>
-                <h2>How can we help?</h2>
+                <p className="eyebrow">{isSalesQuote ? "Request a personalized quote" : "Start your inquiry"}</p>
+                <h2>{isSalesQuote ? `${quotePlanName} · ${quoteBilling}` : "How can we help?"}</h2>
                 <p>Fields marked with * are required.</p>
               </div>
 
@@ -4487,22 +4499,23 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
 
               <div className="public-lead-form-grid">
                 <label className="span-2"><span>Full name *</span><input autoComplete="name" value={form.fullName} onChange={(event) => updateField("fullName", event.target.value)} required /></label>
+                {isSalesQuote && <label className="span-2"><span>Business or clinic name *</span><input autoComplete="organization" value={form.businessName} onChange={(event) => updateField("businessName", event.target.value)} required /></label>}
                 <label><span>Mobile number</span><input autoComplete="tel" inputMode="tel" value={form.mobile} onChange={(event) => updateField("mobile", event.target.value)} placeholder="09XX XXX XXXX" /></label>
                 <label><span>Email</span><input autoComplete="email" type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} /></label>
                 <small className="span-2 public-lead-contact-help">Please provide at least a mobile number or email.</small>
 
-                <label><span>Preferred branch</span><select disabled={loadingConfig || !config.branches.length} value={form.branch} onChange={(event) => chooseBranch(event.target.value)}>{config.branches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label>
-                <label><span>Interested service</span><select disabled={loadingConfig} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)}><option value="">General consultation</option>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
-                <label className="span-2"><span>What would you like help with?</span><textarea rows={5} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder="Tell us about your concern, goal, or question." /></label>
+                {!isSalesQuote && <><label><span>Preferred branch</span><select disabled={loadingConfig || !config.branches.length} value={form.branch} onChange={(event) => chooseBranch(event.target.value)}>{config.branches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label>
+                <label><span>Interested service</span><select disabled={loadingConfig} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)}><option value="">General consultation</option>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label></>}
+                <label className="span-2"><span>{isSalesQuote ? "Tell us about your clinic or requirements" : "What would you like help with?"}</span><textarea rows={5} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder={isSalesQuote ? "Number of staff, branches, desired launch date, or special requirements." : "Tell us about your concern, goal, or question."} /></label>
                 <label><span>Preferred contact</span><select value={form.preferredChannel} onChange={(event) => updateField("preferredChannel", event.target.value)}><option>Phone</option><option>SMS</option><option>Messenger</option><option>WhatsApp</option><option>Email</option></select></label>
 
-                <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
+                <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>{isSalesQuote ? "I’d also like to receive occasional ZenshoTech product updates." : "I'd also like to receive occasional clinic care updates and offers."}</span></label>
                 <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>I consent to the collection and use of my information so ZenshoTech can respond to this inquiry. *</span></label>
                 <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} autoComplete="off" value={form.clinicWebsite} onChange={(event) => updateField("clinicWebsite", event.target.value)} /></label>
               </div>
 
-              <button className="primary-button full public-lead-submit" type="submit" disabled={saving || !form.fullName.trim() || (!form.mobile.trim() && !form.email.trim()) || !form.privacyConsent}>
-                <Send size={17} /> {saving ? "Sending inquiry..." : "Send inquiry"}
+              <button className="primary-button full public-lead-submit" type="submit" disabled={saving || !form.fullName.trim() || (isSalesQuote && !form.businessName.trim()) || (!form.mobile.trim() && !form.email.trim()) || !form.privacyConsent}>
+                <Send size={17} /> {saving ? "Sending request..." : isSalesQuote ? "Request My Quote" : "Send inquiry"}
               </button>
               <p className="public-lead-footnote"><ShieldCheck size={14} /> Your information is used only for this inquiry unless you opt in to updates.</p>
             </form>
@@ -4807,7 +4820,7 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
     setError("");
     setMessage("");
     if (plan.billingInterval === "one_time") {
-      onNavigate("/inquire?interest=one-time-purchase");
+      requestQuote(plan);
       return;
     }
     if (!session) {
@@ -4830,6 +4843,11 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
     }
   }
 
+  function requestQuote(plan) {
+    const quoteBilling = plan.billingInterval === "one_time" ? "one_time" : billingCycle;
+    onNavigate(`/inquire?interest=zenshotech-pricing&plan=${encodeURIComponent(plan.code)}&billing=${encodeURIComponent(quoteBilling)}`);
+  }
+
   const monthlyPlans = catalog.plans.filter((plan) => plan.billingInterval === "month");
   const lifetimePlan = catalog.plans.find((plan) => plan.billingInterval === "one_time");
   return (
@@ -4838,8 +4856,8 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
       <section className="pricing-hero">
         <p className="eyebrow">Simple ZenshoTech pricing</p>
         <h1>Choose the plan that fits your clinic</h1>
-        <p>Start with a 7-day free trial. No setup fee. Your subscription also includes a professionally designed responsive website with up to 8 pages.</p>
-        <p>Pay one month at a time, or prepay 12 months and save 10%.</p>
+        <p>Start with a 7-day free trial—no payment details required. Every subscription also includes a professionally designed responsive website with up to 8 pages.</p>
+        <p>Choose monthly billing or a 12-month term with 10% savings, then request a personalized quote when you are ready to activate.</p>
         {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="inline-state success"><Check size={18} /><span>Your workspace is ready. Select a plan and billing period to begin the trial.</span></div>}
         {message && <div className="inline-state success"><Check size={18} /><span>{message}</span></div>}
         {error && <div className="inline-state danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
@@ -4856,8 +4874,7 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
               {plan.recommended && <span className="pricing-recommended">Most Popular</span>}
               <div>
                 <p className="eyebrow">{plan.name}</p>
-                <div className="pricing-amount"><strong>{planPrice(billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice)}</strong><span>{billingCycle === "annual" ? "/12 months" : "/month"}</span></div>
-                <p className="pricing-billing-note">{billingCycle === "annual" ? `${planPrice(plan.annualPrice / 12)} per month equivalent · billed once yearly` : "Billed one month at a time"}</p>
+                <div className="pricing-quote"><strong>Personalized Quote</strong><span>{billingCycle === "annual" ? "12-month term · Save 10%" : "Flexible monthly billing"}</span></div>
               </div>
               <ul>
                 <li><Check size={16} /> 7-day free trial</li>
@@ -4868,15 +4885,18 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
                 <li><Check size={16} /> Free website with up to 8 pages</li>
                 <li><Check size={16} /> Additional website pages quoted separately</li>
               </ul>
-              <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name} · ${billingCycle === "annual" ? "Annual" : "Monthly"}` : "Start 7-Day Free Trial"}</button>
+              <div className="pricing-card-actions">
+                <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name} · ${billingCycle === "annual" ? "Annual" : "Monthly"}` : "Start 7-Day Free Trial"}</button>
+                <button className="text-button full" type="button" onClick={() => requestQuote(plan)}>Request a Quote</button>
+              </div>
             </article>
           ))}
         </section>
 
         {lifetimePlan && <section className="lifetime-plan-card">
-          <div><p className="eyebrow">One-Time Purchase</p><h2>{money.format(lifetimePlan.monthlyPrice)}</h2><p>Complete agreed system package, initial configuration, and onboarding. Activation requires ZenshoTech approval.</p></div>
+          <div><p className="eyebrow">One-Time Purchase</p><h2>Custom One-Time Quote</h2><p>Complete agreed system package, initial configuration, and onboarding. Final scope and activation are confirmed by ZenshoTech.</p></div>
           <ul><li><Check size={16} /> No monthly software subscription</li><li><Check size={16} /> Free website with up to 8 pages</li><li><Check size={16} /> Additional pages and future custom development quoted separately</li></ul>
-          <button className="primary-button" type="button" onClick={() => choosePlan(lifetimePlan)}>Contact Sales</button>
+          <button className="primary-button" type="button" onClick={() => requestQuote(lifetimePlan)}>Request One-Time Quote</button>
         </section>}
 
         <section className="website-inclusion-card">
@@ -4951,22 +4971,22 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
         {loading && <div className="pricing-loading"><RefreshCw className="spin" size={20} /> Loading subscription...</div>}
         {message && <div className="inline-state success"><Check size={18} /> {message}</div>}
         {error && <div className="inline-state danger"><AlertCircle size={18} /> {error}</div>}
-        {subscription?.requestedPlan && <div className="inline-state warning"><Clock size={18} /><span>Pending activation: {subscription.requestedPlan.name} · {subscription.requestedBillingCycle === "annual" ? `${planPrice(subscription.requestedBilling?.amount)} for 12 months with 10% off` : `${planPrice(subscription.requestedBilling?.amount)} monthly`}.</span></div>}
+        {subscription?.requestedPlan && <div className="inline-state warning"><Clock size={18} /><span>Pending quotation and activation: {subscription.requestedPlan.name} · {subscription.requestedBillingCycle === "annual" ? "12-month term with 10% savings" : "monthly billing"}.</span></div>}
         <div className="subscription-metrics">
-          <article><span>Current plan</span><strong>{plan?.name || "Not selected"}</strong><small>{plan?.billingInterval === "month" ? subscription?.billingCycle === "annual" ? `${planPrice(subscription.billing?.amount)} every 12 months · 10% discount` : `${money.format(plan.monthlyPrice)} monthly` : plan?.billingInterval === "one_time" ? `${money.format(plan.monthlyPrice)} one-time` : "Existing-account access"}</small></article>
+          <article><span>Current plan</span><strong>{plan?.name || "Not selected"}</strong><small>{plan?.billingInterval === "month" ? subscription?.billingCycle === "annual" ? "12-month billing · 10% savings" : "Monthly billing" : plan?.billingInterval === "one_time" ? "One-time access" : "Existing-account access"}</small></article>
           <article><span>Users</span><strong>{subscription?.usage?.users ?? 0}{plan?.maxUsers === null ? " / Unlimited" : ` / ${plan?.maxUsers ?? "—"}`}</strong><small>Active users and valid pending invitations count.</small></article>
           <article><span>Branches</span><strong>{subscription?.usage?.branches ?? 0}{plan?.maxBranches === null ? " / Unlimited" : ` / ${plan?.maxBranches ?? "—"}`}</strong><small>Archived branches do not count.</small></article>
           <article><span>Website package</span><strong>Up to {subscription?.includedWebsitePages || 8} pages</strong><small>Additional pages are quoted separately.</small></article>
         </div>
         {subscription?.trialEndAt && <div className="subscription-date-panel"><Clock size={20} /><div><strong>Trial expiration</strong><span>{formatDateTime(subscription.trialEndAt)}</span></div></div>}
         {subscription?.renewalAt && <div className="subscription-date-panel"><CalendarDays size={20} /><div><strong>{subscription.billingCycle === "annual" ? "Annual term renewal" : "Next monthly renewal"}</strong><span>{formatDateTime(subscription.renewalAt)}</span></div></div>}
-        <div className="subscription-actions"><button className="primary-button" type="button" onClick={() => onNavigate("/pricing")}>View Plans</button>{subscription?.planCode && ["trialing", "expired"].includes(subscription.status) && <button className="ghost-button" type="button" onClick={requestActivation}>Activate Subscription</button>}<button className="text-button" type="button" onClick={() => onNavigate("/dashboard")}>Return to dashboard</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></div>
+        <div className="subscription-actions"><button className="primary-button" type="button" onClick={() => onNavigate("/pricing")}>View Plans</button>{subscription?.planCode && ["trialing", "expired"].includes(subscription.status) && <button className="ghost-button" type="button" onClick={requestActivation}>Request Quote &amp; Activation</button>}<button className="text-button" type="button" onClick={() => onNavigate("/dashboard")}>Return to dashboard</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></div>
       </section>
       {session.platformAdmin && <section className="subscription-admin-card">
         <div><p className="eyebrow">ZenshoTech administration</p><h2>Subscription controls</h2><p>Paid and lifetime access require an explicit administrator action. Every action is audited.</p></div>
         <div className="subscription-admin-list">
           {adminSubscriptions.length ? adminSubscriptions.map((row) => <article key={row.organization.id}>
-            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode} (${row.requestedBillingCycle === "annual" ? "12 months, 10% off" : "monthly"})` : row.billingCycle ? ` · ${row.billingCycle === "annual" ? "Annual" : row.billingCycle}` : ""}</small></div>
+            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode} (${row.requestedBillingCycle === "annual" ? "12 months, 10% off" : "monthly"})${row.requestedBilling?.amount ? ` · Internal baseline ${planPrice(row.requestedBilling.amount)}` : ""}` : row.billingCycle ? ` · ${row.billingCycle === "annual" ? "Annual" : row.billingCycle}` : ""}</small></div>
             <div><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "activate")}>{adminActionId === `${row.organization.id}:activate` ? "Activating..." : `Activate ${row.requestedBillingCycle === "annual" ? "annual" : "monthly"}`}</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "grant_lifetime")}>Grant lifetime</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "extend_trial")}>Extend 24h</button><button className="text-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, row.status === "past_due" ? "reactivate" : "suspend")}>{row.status === "past_due" ? "Reactivate" : "Suspend"}</button></div>
           </article>) : <p>No managed subscription records yet.</p>}
         </div>
