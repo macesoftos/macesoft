@@ -13,6 +13,7 @@ import { prisma } from "./prisma.js";
 import { demoPasswordMeetsMinimum } from "./demoPasswordPolicy.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
 import { initialSettings, roleAccess } from "../src/data.js";
+import { isDemoSignupHostname } from "../src/config/demoAccess.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
 import { nextRoomNames, renameBranchReferences } from "./organizationBranches.js";
 import {
@@ -3771,11 +3772,8 @@ function clearSessionCookie(response) {
 }
 
 function demoRegistrationAllowed(request) {
-  const hostname = clean(request.hostname).toLowerCase();
   return envFlag(process.env.DEMO_SIGNUP_ENABLED)
-    || hostname === "localhost"
-    || hostname === "127.0.0.1"
-    || hostname === "lightcoral-crab-954053.hostingersite.com";
+    || isDemoSignupHostname(request.hostname);
 }
 
 function demoDate(offsetDays = 0) {

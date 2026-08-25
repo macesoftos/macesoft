@@ -76,6 +76,7 @@ import {
 } from "./data";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
+import { isDemoSignupHostname } from "./config/demoAccess.js";
 import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import GlobalModuleSearch from "./components/GlobalModuleSearch.jsx";
@@ -4609,7 +4610,7 @@ function LoginScreen({ notice, onLogin, settings }) {
   const [submitting, setSubmitting] = useState(false);
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
-  const demoSignupAvailable = typeof window !== "undefined" && ["localhost", "127.0.0.1", "lightcoral-crab-954053.hostingersite.com"].includes(window.location.hostname.toLowerCase());
+  const demoSignupAvailable = typeof window !== "undefined" && isDemoSignupHostname(window.location.hostname);
 
   async function submit(event) {
     event.preventDefault();
