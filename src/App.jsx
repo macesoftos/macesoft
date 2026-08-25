@@ -4857,7 +4857,7 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
         <p className="eyebrow">Simple ZenshoTech pricing</p>
         <h1>Choose the plan that fits your clinic</h1>
         <p>Start with a 7-day free trial—no payment details required. Every subscription also includes a professionally designed responsive website with up to 8 pages.</p>
-        <p>Choose monthly billing or a 12-month term with 10% savings, then request a personalized quote when you are ready to activate.</p>
+        <p>Pay one month at a time or prepay 12 months and save 10%. You can also request a tailored quote before you activate.</p>
         {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="inline-state success"><Check size={18} /><span>Your workspace is ready. Select a plan and billing period to begin the trial.</span></div>}
         {message && <div className="inline-state success"><Check size={18} /><span>{message}</span></div>}
         {error && <div className="inline-state danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
@@ -4874,7 +4874,8 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
               {plan.recommended && <span className="pricing-recommended">Most Popular</span>}
               <div>
                 <p className="eyebrow">{plan.name}</p>
-                <div className="pricing-quote"><strong>Personalized Quote</strong><span>{billingCycle === "annual" ? "12-month term · Save 10%" : "Flexible monthly billing"}</span></div>
+                <div className="pricing-amount"><strong>{planPrice(billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice)}</strong><span>{billingCycle === "annual" ? "/12 months" : "/month"}</span></div>
+                <p className="pricing-billing-note">{billingCycle === "annual" ? `${planPrice(plan.annualPrice / 12)} per month equivalent · billed once yearly` : "Billed one month at a time"}</p>
               </div>
               <ul>
                 <li><Check size={16} /> 7-day free trial</li>
@@ -4894,7 +4895,7 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
         </section>
 
         {lifetimePlan && <section className="lifetime-plan-card">
-          <div><p className="eyebrow">One-Time Purchase</p><h2>Custom One-Time Quote</h2><p>Complete agreed system package, initial configuration, and onboarding. Final scope and activation are confirmed by ZenshoTech.</p></div>
+          <div><p className="eyebrow">One-Time Purchase</p><h2>{planPrice(lifetimePlan.monthlyPrice)}</h2><p>Complete agreed system package, initial configuration, and onboarding. Final scope and activation are confirmed by ZenshoTech.</p></div>
           <ul><li><Check size={16} /> No monthly software subscription</li><li><Check size={16} /> Free website with up to 8 pages</li><li><Check size={16} /> Additional pages and future custom development quoted separately</li></ul>
           <button className="primary-button" type="button" onClick={() => requestQuote(lifetimePlan)}>Request One-Time Quote</button>
         </section>}
@@ -5103,7 +5104,6 @@ function LoginScreen({ notice, onLogin, onNavigate }) {
           )}
           <div className="login-demo-separator"><span>or</span></div>
           <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Register</button>
-          <button className="text-button full" type="button" onClick={() => onNavigate("/pricing")}>View pricing</button>
         </form>
       </section>
     </main>

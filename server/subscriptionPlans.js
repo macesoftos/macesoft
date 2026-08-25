@@ -70,7 +70,7 @@ export function publicSubscriptionPlans() {
   return subscriptionPlans
     .filter((plan) => plan.active)
     .sort((left, right) => left.displayOrder - right.displayOrder)
-    .map(planWithoutPricing);
+    .map((plan) => ({ ...plan, moduleEntitlements: [...plan.moduleEntitlements] }));
 }
 
 export function effectiveSubscriptionStatus(subscription, now = new Date()) {
