@@ -34,6 +34,42 @@ test("owner can select All Branches or any active organization branch", () => {
   assert.deepEqual(branchWhere({ role: "Owner", access: selected }), { branch: "Mace Makati" });
 });
 
+test("existing demo users receive the complete owner module catalog", () => {
+  const legacyDemoModules = ["overview", "applications", "pos", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "reports", "booking", "support"];
+  const demoBranch = {
+    id: "branch-demo",
+    name: "Prospect Demo Clinic",
+    code: "DEMO",
+    status: "Active",
+    modules: legacyDemoModules.map((moduleId) => ({ moduleId, enabled: true })),
+  };
+  const account = {
+    id: "demo-user",
+    role: "Demo User",
+    status: "Active",
+    organizationId: "org-demo",
+    lastBranchId: demoBranch.id,
+    organization: organization([demoBranch]),
+    branchMemberships: [{
+      branch: demoBranch,
+      branchId: demoBranch.id,
+      role: "Demo User",
+      status: "Active",
+      isPrimary: true,
+      permissions: "[]",
+      modules: JSON.stringify(legacyDemoModules),
+    }],
+  };
+
+  const access = resolveAccountBranchAccess(account, "", roleAccess);
+  assert.equal(access.organizationWide, true);
+  assert.deepEqual(access.modules, roleAccess.Owner);
+  assert.equal(moduleAllowed({ ...account, access }, "staff", roleAccess), true);
+  assert.equal(moduleAllowed({ ...account, access }, "branches", roleAccess), true);
+  assert.equal(moduleAllowed({ ...account, access }, "payroll", roleAccess), true);
+  assert.equal(moduleAllowed({ ...account, access }, "settings", roleAccess), true);
+});
+
 test("branch manager receives only active memberships and enabled branch modules", () => {
   const account = {
     id: "manager",

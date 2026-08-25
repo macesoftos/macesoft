@@ -20,12 +20,14 @@ export const serviceCategories = [
   "Retail Add-ons",
 ];
 
+const completeWorkspaceAccess = ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"];
+
 export const roleAccess = {
-  "Demo User": ["overview", "applications", "pos", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "reports", "booking", "support"],
-  "Super Admin": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
+  "Demo User": completeWorkspaceAccess,
+  "Super Admin": completeWorkspaceAccess,
   Admin: ["pos", "staff", "facetrack-attendance"],
-  Owner: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
-  "Business Owner": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
+  Owner: completeWorkspaceAccess,
+  "Business Owner": completeWorkspaceAccess,
   "Branch Manager": ["pos", "staff", "facetrack-attendance"],
   Receptionist: ["pos"],
   Cashier: ["pos"],

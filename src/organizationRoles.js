@@ -2,6 +2,7 @@ export const ORGANIZATION_MANAGER_ROLES = Object.freeze([
   "Owner",
   "Business Owner",
   "Super Admin",
+  "Demo User",
 ]);
 
 export const BUSINESS_OWNER_ROLES = Object.freeze(["Owner", "Business Owner"]);
