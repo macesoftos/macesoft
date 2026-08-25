@@ -16,8 +16,32 @@ model Organization {
   invitations     UserInvitation[]
   payrollRuns     PayrollRun[]
   commissionRules CommissionRule[]
+  subscription    Subscription?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+}
+
+model Subscription {
+  id                       String       @id @default(cuid())
+  organizationId           String       @unique
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  planCode                  String?
+  requestedPlanCode         String?
+  status                    String       @default("pending_plan")
+  trialStartAt              DateTime?
+  trialEndAt                DateTime?
+  paidStartAt               DateTime?
+  renewalAt                 DateTime?
+  cancellationAt            DateTime?
+  expiresAt                 DateTime?
+  activationRequestedAt     DateTime?
+  paymentProviderReference  String       @default("")
+  includedWebsitePages      Int          @default(8)
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+
+  @@index([status, trialEndAt])
+  @@index([planCode, status])
 }
 
 model Client {

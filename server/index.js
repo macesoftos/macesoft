@@ -12,6 +12,16 @@ import QRCode from "qrcode";
 import { prisma } from "./prisma.js";
 import { demoPasswordMeetsMinimum } from "./demoPasswordPolicy.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
+import {
+  INCLUDED_WEBSITE_PAGES,
+  assertUsageWithinPlan,
+  getSubscriptionPlan,
+  isMonthlyPlan,
+  planLimitMessage,
+  publicSubscriptionPlans,
+  serializeSubscription,
+  trialWindow,
+} from "./subscriptionPlans.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { isDemoSignupHostname } from "../src/config/demoAccess.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
@@ -267,6 +277,7 @@ const invitationSendLimiter = rateLimit({
 app.use("/api", apiLimiter);
 app.use("/api/auth/login", loginLimiter);
 app.use("/api/auth/demo-register", demoRegistrationLimiter);
+app.use("/api/auth/register", publicWriteLimiter);
 app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
@@ -433,8 +444,8 @@ async function storeImageObject(dataUrl, category) {
   return { id, objectPath, category, mimeType, byteSize: buffer.length };
 }
 
-function apiError(message, status = 400) {
-  return Object.assign(new Error(message), { status });
+function apiError(message, status = 400, payload = undefined) {
+  return Object.assign(new Error(message), { status, payload });
 }
 
 function requireText(value, label) {
@@ -3755,6 +3766,102 @@ function publicAccount(account, requestedBranchId = "") {
   };
 }
 
+function platformAdminEmails() {
+  return new Set(clean(process.env.ZENSHOTECH_ADMIN_EMAILS).split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
+}
+
+function isPlatformAdmin(account) {
+  return Boolean(account?.email && platformAdminEmails().has(clean(account.email).toLowerCase()));
+}
+
+async function subscriptionUsage(database, organizationId) {
+  const [accounts, invitations, branches] = await Promise.all([
+    database.account.findMany({ where: { organizationId, status: "Active" }, select: { email: true } }),
+    database.userInvitation.findMany({ where: { organizationId, status: "Pending", expiresAt: { gt: new Date() } }, select: { email: true } }),
+    database.branch.count({ where: { organizationId, status: "Active" } }),
+  ]);
+  const userEmails = new Set([...accounts, ...invitations].map((record) => clean(record.email).toLowerCase()).filter(Boolean));
+  return { users: userEmails.size, branches };
+}
+
+async function subscriptionContext(database, organizationId, now = new Date()) {
+  let subscription = await database.subscription.findUnique({ where: { organizationId } });
+  if (subscription?.status === "trialing" && subscription.trialEndAt && subscription.trialEndAt <= now) {
+    subscription = await database.subscription.update({
+      where: { organizationId },
+      data: { status: "expired", expiresAt: subscription.trialEndAt },
+    });
+  }
+  const usage = await subscriptionUsage(database, organizationId);
+  return serializeSubscription(subscription, usage, now);
+}
+
+async function publicAccountWithSubscription(account, requestedBranchId = "") {
+  const publicValue = publicAccount(account, requestedBranchId);
+  const subscription = await subscriptionContext(prisma, account.organizationId);
+  const planModules = new Set(subscription.plan?.moduleEntitlements || []);
+  return {
+    ...publicValue,
+    platformAdmin: isPlatformAdmin(account),
+    subscription,
+    access: {
+      ...publicValue.access,
+      modules: subscription.accessAllowed
+        ? (publicValue.access?.modules || []).filter((moduleId) => planModules.has(moduleId))
+        : [],
+      subscriptionActive: subscription.accessAllowed,
+    },
+  };
+}
+
+async function planForOrganization(database, organizationId) {
+  const subscription = await database.subscription.findUnique({ where: { organizationId } });
+  if (!subscription) return getSubscriptionPlan("unlimited");
+  return getSubscriptionPlan(subscription.planCode);
+}
+
+async function assertUserPlanLimit(database, organizationId, email = "") {
+  const plan = await planForOrganization(database, organizationId);
+  if (!plan || plan.maxUsers === null) return;
+  const usage = await subscriptionUsage(database, organizationId);
+  const normalizedEmail = clean(email).toLowerCase();
+  const alreadyCounted = normalizedEmail && Boolean(await database.account.findFirst({
+    where: { organizationId, email: normalizedEmail, status: "Active" },
+    select: { id: true },
+  }) || await database.userInvitation.findFirst({
+    where: { organizationId, email: normalizedEmail, status: "Pending", expiresAt: { gt: new Date() } },
+    select: { id: true },
+  }));
+  const nextCount = usage.users + (alreadyCounted ? 0 : 1);
+  if (nextCount > plan.maxUsers) {
+    throw apiError(planLimitMessage(plan, "users"), 409, {
+      code: "PLAN_LIMIT_REACHED",
+      resource: "users",
+      planCode: plan.code,
+      limit: plan.maxUsers,
+      current: usage.users,
+      upgradeUrl: "/pricing",
+    });
+  }
+}
+
+async function assertBranchPlanLimit(database, organizationId, { adding = true } = {}) {
+  const plan = await planForOrganization(database, organizationId);
+  if (!plan || plan.maxBranches === null) return;
+  const usage = await subscriptionUsage(database, organizationId);
+  const nextCount = usage.branches + (adding ? 1 : 0);
+  if (nextCount > plan.maxBranches) {
+    throw apiError(planLimitMessage(plan, "branches"), 409, {
+      code: "PLAN_LIMIT_REACHED",
+      resource: "branches",
+      planCode: plan.code,
+      limit: plan.maxBranches,
+      current: usage.branches,
+      upgradeUrl: "/pricing",
+    });
+  }
+}
+
 function setSessionCookie(response, token, expiresAt) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   response.setHeader(
@@ -3885,7 +3992,7 @@ async function accountFromSession(request) {
   const account = session.account.staffId && !accountMatchesStaffIdentity(session.account, session.account.staff)
     ? { ...session.account, staffId: null }
     : session.account;
-  const actor = publicAccount(account, request.get("x-mace-branch-id"));
+  const actor = await publicAccountWithSubscription(account, request.get("x-mace-branch-id"));
   return {
     token,
     session,
@@ -3895,6 +4002,7 @@ async function accountFromSession(request) {
       role: actor.role,
       branch: actor.branch,
       organizationWideAccess: actor.organizationWideAccess,
+      subscription: actor.subscription,
       access: actor.access,
     },
     actor,
@@ -4192,6 +4300,127 @@ async function expireInvitations() {
   }
 }
 
+app.get("/api/public/plans", (_request, response) => {
+  response.json({
+    plans: publicSubscriptionPlans(),
+    websitePackage: {
+      title: "Free Website Included",
+      includedPages: INCLUDED_WEBSITE_PAGES,
+      features: [
+        "Responsive website design",
+        "Up to 8 website pages",
+        "Basic SEO setup",
+        "Contact form integration",
+        "Online booking integration",
+        "Lead capture integration",
+        "Mobile-responsive design",
+      ],
+      note: "Your plan includes the design and development of a responsive website with up to 8 pages. Additional pages are available for an additional fee and will be quoted separately based on the requirements.",
+    },
+  });
+});
+
+app.post("/api/auth/register", asyncRoute(async (request, response) => {
+  const name = requireText(request.body?.name, "Full name").replace(/\s+/g, " ").slice(0, 100);
+  const businessName = requireText(request.body?.businessName, "Business or clinic name").replace(/\s+/g, " ").slice(0, 140);
+  const email = requireText(request.body?.email, "Email").toLowerCase().slice(0, 160);
+  const password = requireText(request.body?.password, "Password");
+  if (request.body?.termsAccepted !== true || request.body?.privacyAccepted !== true) {
+    throw apiError("Accept the Terms of Service and Privacy Policy to continue.", 400);
+  }
+  if (name.length < 2) throw apiError("Enter your full name.", 400);
+  if (businessName.length < 2) throw apiError("Enter your business or clinic name.", 400);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.", 400);
+  if (!demoPasswordMeetsMinimum(password)) throw apiError("Use at least 8 characters for your password.", 400);
+  if (await prisma.account.findUnique({ where: { email }, select: { id: true } })) {
+    throw apiError("An account already exists for this email. Sign in instead.", 409);
+  }
+
+  const registrationKey = randomBytes(8).toString("hex");
+  const suffix = registrationKey.slice(0, 6).toUpperCase();
+  const organizationSlugBase = businessName.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "clinic";
+  const organizationModules = roleAccess.Owner;
+  const branchName = `${businessName} ${suffix}`;
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + sessionDurationMs);
+  let accountId = "";
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.create({
+        data: { name: businessName, slug: `${organizationSlugBase}-${registrationKey}`, status: "Active" },
+      });
+      const branch = await tx.branch.create({
+        data: {
+          organizationId: organization.id,
+          name: branchName,
+          code: `ZEN-${registrationKey.slice(0, 8).toUpperCase()}`,
+          status: "Active",
+          modules: { create: organizationModules.map((moduleId) => ({ moduleId, enabled: true })) },
+        },
+      });
+      const account = await tx.account.create({
+        data: {
+          name,
+          email,
+          passwordHash: hashPassword(password),
+          role: "Owner",
+          branch: branch.name,
+          organizationId: organization.id,
+          organizationWideAccess: true,
+          organizationModules: jsonText(organizationModules, []),
+          lastBranchId: branch.id,
+          status: "Active",
+          mustChangePassword: false,
+        },
+      });
+      accountId = account.id;
+      await tx.branchMembership.create({
+        data: {
+          branchId: branch.id,
+          accountId: account.id,
+          role: "Owner",
+          modules: jsonText(organizationModules, []),
+          permissions: "[]",
+          status: "Active",
+          isPrimary: true,
+        },
+      });
+      await tx.subscription.create({
+        data: {
+          organizationId: organization.id,
+          status: "pending_plan",
+          includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+        },
+      });
+      await tx.authSession.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } });
+      await tx.auditLog.create({ data: {
+        time: new Date().toLocaleString("en-PH"),
+        actor: name,
+        role: "Owner",
+        actorAccountId: account.id,
+        branchId: branch.id,
+        area: "Authentication",
+        action: "Account registered",
+        subjectType: "Account",
+        subjectId: account.id,
+        details: "Owner registration completed. Subscription remains pending until a plan is selected; no trial or charge was created.",
+      } });
+    });
+  } catch (error) {
+    if (error?.code === "P2002") throw apiError("An account already exists for this email. Sign in instead.", 409);
+    throw error;
+  }
+
+  const account = await prisma.account.findUnique({ where: { id: accountId }, include: accountAccessInclude });
+  setSessionCookie(response, token, expiresAt);
+  response.status(201).json({
+    account: await publicAccountWithSubscription(account),
+    expiresAt,
+    redirectTo: "/pricing?onboarding=1",
+  });
+}));
+
 app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
   if (!demoRegistrationAllowed(request)) throw apiError("Demo account creation is available on the staging site only.", 404);
 
@@ -4289,6 +4518,7 @@ app.use("/api", asyncRoute(async (request, _response, next) => {
     request.authSession = authenticated.session;
     request.authAccount = authenticated.account;
     request.authActor = authenticated.actor;
+    request.authSubscription = authenticated.actor.subscription;
   }
   next();
 }));
@@ -4309,6 +4539,17 @@ app.use("/api", (request, response, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.get("x-mace-request") !== "app") {
     return next(apiError("This request did not pass the CSRF check.", 403));
   }
+  const subscriptionSafePath = /^\/api\/(?:auth\/(?:session|logout|change-password)|subscription(?:\/|$)|admin\/subscriptions(?:\/|$))/.test(request.originalUrl.split("?")[0]);
+  if (!subscriptionSafePath && request.authSubscription && !request.authSubscription.accessAllowed) {
+    const expired = request.authSubscription.status === "expired";
+    return next(apiError(
+      expired
+        ? "Your 7-day free trial has ended. Choose a plan to continue using ZenshoTech."
+        : "Choose a plan and start your 7-day free trial to use ZenshoTech modules.",
+      402,
+      { code: expired ? "SUBSCRIPTION_EXPIRED" : "PLAN_REQUIRED", redirectTo: expired ? "/subscription/expired" : "/pricing?onboarding=1" },
+    ));
+  }
   const requiredModule = requiredModuleForApiRequest(request.originalUrl);
   const organizationModuleGrant = requiredModule === "branches" && hasOrganizationPermission(request.authActor, "branches.manage");
   if (requiredModule && !organizationModuleGrant && !moduleAllowed(request.authActor, requiredModule, roleAccess)) {
@@ -4316,6 +4557,187 @@ app.use("/api", (request, response, next) => {
   }
   return next();
 });
+
+function requireSubscriptionOwner(request) {
+  const account = requireAuthenticatedAccount(request);
+  if (!canManageOrganization(request.authActor?.role)) {
+    throw apiError("Only a workspace owner can manage the subscription.", 403);
+  }
+  return account;
+}
+
+function requirePlatformAdministrator(request) {
+  const account = requireAuthenticatedAccount(request);
+  if (!isPlatformAdmin(account)) throw apiError("ZenshoTech administrator access is required.", 403);
+  return account;
+}
+
+app.get("/api/subscription", asyncRoute(async (request, response) => {
+  const account = requireAuthenticatedAccount(request);
+  response.json({ subscription: await subscriptionContext(prisma, account.organizationId), platformAdmin: isPlatformAdmin(account) });
+}));
+
+app.post("/api/subscription/trial", asyncRoute(async (request, response) => {
+  const account = requireSubscriptionOwner(request);
+  const plan = getSubscriptionPlan(request.body?.planCode);
+  if (!isMonthlyPlan(plan)) throw apiError("Choose Starter, Growth, or Unlimited to begin a trial.", 400);
+  const usage = await subscriptionUsage(prisma, account.organizationId);
+  const usageCheck = assertUsageWithinPlan(plan, usage);
+  if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck, upgradeUrl: "/pricing" });
+
+  const current = await prisma.subscription.findUnique({ where: { organizationId: account.organizationId } });
+  if (current && ["expired", "canceled"].includes(current.status)) {
+    throw apiError("This workspace has already used its free trial. Request subscription activation to continue.", 409, { code: "TRIAL_ALREADY_USED" });
+  }
+  if (current && ["active", "lifetime", "past_due", "pending_activation"].includes(current.status)) {
+    throw apiError("This workspace already has subscription history. Use the plan-change or activation request instead.", 409);
+  }
+
+  const now = new Date();
+  const window = current?.trialStartAt && current?.trialEndAt
+    ? { start: current.trialStartAt, end: current.trialEndAt }
+    : trialWindow(now);
+  const saved = await prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.upsert({
+      where: { organizationId: account.organizationId },
+      create: {
+        organizationId: account.organizationId,
+        planCode: plan.code,
+        status: "trialing",
+        trialStartAt: window.start,
+        trialEndAt: window.end,
+        includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+      },
+      update: {
+        planCode: plan.code,
+        requestedPlanCode: null,
+        status: "trialing",
+        trialStartAt: window.start,
+        trialEndAt: window.end,
+        includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+      },
+    });
+    await writeAudit(tx, request, {
+      area: "Subscription",
+      action: current?.trialStartAt ? "Trial plan changed" : "Trial started",
+      subjectType: "Subscription",
+      subjectId: subscription.id,
+      details: current?.trialStartAt
+        ? `Trial plan changed to ${plan.name}; the original expiration was preserved.`
+        : `${plan.name} trial started for exactly 168 hours. No payment or setup charge was created.`,
+      beforeValues: current ? { planCode: current.planCode, status: current.status, trialEndAt: current.trialEndAt } : null,
+      afterValues: { planCode: plan.code, status: "trialing", trialStartAt: window.start, trialEndAt: window.end },
+    });
+    return subscription;
+  });
+  const reloaded = await prisma.account.findUnique({ where: { id: account.id }, include: accountAccessInclude });
+  response.status(current ? 200 : 201).json({
+    subscription: serializeSubscription(saved, usage),
+    account: await publicAccountWithSubscription(reloaded),
+    redirectTo: "/dashboard",
+  });
+}));
+
+app.post("/api/subscription/request-activation", asyncRoute(async (request, response) => {
+  const account = requireSubscriptionOwner(request);
+  const current = await prisma.subscription.findUnique({ where: { organizationId: account.organizationId } });
+  const plan = getSubscriptionPlan(request.body?.planCode || current?.planCode);
+  if (!isMonthlyPlan(plan)) throw apiError("Monthly activation is available for Starter, Growth, or Unlimited.", 400);
+  const usage = await subscriptionUsage(prisma, account.organizationId);
+  const usageCheck = assertUsageWithinPlan(plan, usage);
+  if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck });
+  const saved = await prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.upsert({
+      where: { organizationId: account.organizationId },
+      create: {
+        organizationId: account.organizationId,
+        planCode: "unlimited",
+        requestedPlanCode: plan.code,
+        status: "grandfathered",
+        activationRequestedAt: new Date(),
+        includedWebsitePages: INCLUDED_WEBSITE_PAGES,
+      },
+      update: { requestedPlanCode: plan.code, activationRequestedAt: new Date() },
+    });
+    await writeAudit(tx, request, {
+      area: "Subscription",
+      action: "Activation requested",
+      subjectType: "Subscription",
+      subjectId: subscription.id,
+      details: `${plan.name} activation was requested. No payment success or charge was created.`,
+      afterValues: { requestedPlanCode: plan.code, monthlyPrice: plan.monthlyPrice },
+    });
+    return subscription;
+  });
+  response.json({ subscription: serializeSubscription(saved, usage), message: "Activation request recorded. ZenshoTech will confirm billing and activation." });
+}));
+
+app.get("/api/admin/subscriptions", asyncRoute(async (request, response) => {
+  requirePlatformAdministrator(request);
+  const organizations = await prisma.organization.findMany({ include: { subscription: true }, orderBy: { updatedAt: "desc" } });
+  const subscriptions = await Promise.all(organizations.map(async (organization) => ({
+    ...serializeSubscription(organization.subscription, await subscriptionUsage(prisma, organization.id)),
+    organization: { id: organization.id, name: organization.name },
+  })));
+  response.json({ subscriptions });
+}));
+
+app.patch("/api/admin/subscriptions/:organizationId", asyncRoute(async (request, response) => {
+  requirePlatformAdministrator(request);
+  const organizationId = requireText(request.params.organizationId, "Organization");
+  const action = requireText(request.body?.action, "Action");
+  if (!await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true } })) {
+    throw apiError("Organization not found.", 404);
+  }
+  const current = await prisma.subscription.findUnique({ where: { organizationId } });
+  const usage = await subscriptionUsage(prisma, organizationId);
+  const now = new Date();
+  let data;
+  if (action === "activate") {
+    const plan = getSubscriptionPlan(request.body?.planCode || current?.requestedPlanCode || current?.planCode);
+    if (!isMonthlyPlan(plan)) throw apiError("Choose a monthly plan to activate.", 400);
+    const usageCheck = assertUsageWithinPlan(plan, usage);
+    if (!usageCheck.allowed) throw apiError(usageCheck.message, 409, { code: "PLAN_LIMIT_REACHED", ...usageCheck });
+    const renewalAt = new Date(now);
+    renewalAt.setUTCMonth(renewalAt.getUTCMonth() + 1);
+    data = { planCode: plan.code, requestedPlanCode: null, status: "active", paidStartAt: current?.paidStartAt || now, renewalAt, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
+  } else if (action === "grant_lifetime") {
+    data = { planCode: "lifetime", requestedPlanCode: null, status: "lifetime", paidStartAt: current?.paidStartAt || now, renewalAt: null, expiresAt: null, activationRequestedAt: null, includedWebsitePages: INCLUDED_WEBSITE_PAGES };
+  } else if (action === "suspend") {
+    if (!current) throw apiError("Create or activate a subscription before suspending it.", 409);
+    data = { status: "past_due" };
+  } else if (action === "reactivate") {
+    if (!current) throw apiError("Create or activate a subscription before reactivating it.", 409);
+    const plan = getSubscriptionPlan(current.planCode);
+    if (!plan) throw apiError("Choose a valid plan before reactivating this subscription.", 409);
+    data = { status: plan.billingInterval === "one_time" ? "lifetime" : "active", expiresAt: null };
+  } else if (action === "extend_trial") {
+    if (!current) throw apiError("This organization has no trial to extend.", 409);
+    const hours = Math.min(168, Math.max(1, Number(request.body?.hours) || 24));
+    const base = current.trialEndAt && current.trialEndAt > now ? current.trialEndAt : now;
+    data = { status: "trialing", trialStartAt: current.trialStartAt || now, trialEndAt: new Date(base.getTime() + (hours * 60 * 60 * 1000)), expiresAt: null };
+  } else {
+    throw apiError("Unsupported subscription administration action.", 400);
+  }
+  const saved = await prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.upsert({
+      where: { organizationId },
+      create: { organizationId, ...data },
+      update: data,
+    });
+    await writeAudit(tx, request, {
+      area: "Subscription",
+      action: `Subscription ${action.replace(/_/g, " ")}`,
+      subjectType: "Subscription",
+      subjectId: subscription.id,
+      details: `ZenshoTech administrator applied ${action.replace(/_/g, " ")} to organization ${organizationId}.`,
+      beforeValues: current,
+      afterValues: subscription,
+    });
+    return subscription;
+  });
+  response.json({ subscription: serializeSubscription(saved, usage) });
+}));
 
 const flipbookRouters = createFlipbookRouters({
   prisma,
@@ -4366,7 +4788,7 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
     prisma.account.update({ where: { id: account.id }, data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now } }),
   ]);
   setSessionCookie(response, token, expiresAt);
-  response.json({ account: publicAccount(account), expiresAt });
+  response.json({ account: await publicAccountWithSubscription(account), expiresAt });
 }));
 
 app.post("/api/auth/forgot-password", asyncRoute(async (request, response) => {
@@ -4436,8 +4858,7 @@ app.post("/api/auth/reset-password", asyncRoute(async (request, response) => {
 }));
 
 app.get("/api/auth/session", asyncRoute(async (request, response) => {
-  requireAuthenticatedAccount(request);
-  response.json({ account: request.authActor, expiresAt: request.authSession.expiresAt });
+  response.json({ account: request.authActor || null, expiresAt: request.authSession?.expiresAt || null });
 }));
 
 app.post("/api/auth/logout", asyncRoute(async (request, response) => {
@@ -4516,6 +4937,7 @@ app.post("/api/invitations", invitationSendLimiter, asyncRoute(async (request, r
   if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.");
   const input = await normalizeInvitationInput(actor, request.body);
   await expireInvitations();
+  await assertUserPlanLimit(prisma, actor.organizationId, email);
   const account = await prisma.account.findUnique({
     where: { email },
     select: {
@@ -4753,6 +5175,10 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
     await expireInvitations();
     throw apiError("This invitation has expired.", 410);
   }
+  const workspaceSubscription = await subscriptionContext(prisma, invitation.organizationId);
+  if (!workspaceSubscription.accessAllowed) {
+    throw apiError("This workspace subscription must be activated before invitations can be accepted.", 402, { code: "SUBSCRIPTION_REQUIRED" });
+  }
   const existingAccount = await prisma.account.findUnique({ where: { email: invitation.email } });
   if (existingAccount && existingAccount.organizationId !== invitation.organizationId) {
     throw apiError("This invitation cannot be accepted with the available account.", 409);
@@ -4780,6 +5206,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
   );
   const invitationPermissions = assertRequestedPermissions({ role: "Owner" }, parseJsonList(invitation.permissions));
   const result = await prisma.$transaction(async (tx) => {
+    await assertUserPlanLimit(tx, invitation.organizationId, invitation.email);
     if (existingAccount) {
       const existingAssignment = await tx.branchMembership.findFirst({
         where: {
@@ -5005,6 +5432,9 @@ app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
   const primaryBranch = branches[0] || null;
 
   const result = await prisma.$transaction(async (tx) => {
+    if (target.status !== "Active" && nextStatus === "Active") {
+      await assertUserPlanLimit(tx, actor.organizationId, target.email);
+    }
     if (canManageOrganization(nextRole)) {
       await tx.branchMembership.updateMany({ where: { accountId: target.id }, data: { status: "Inactive", isPrimary: false } });
     } else {
@@ -5227,7 +5657,7 @@ app.post("/api/me/active-branch", asyncRoute(async (request, response) => {
     data: { lastBranchId: requestedBranchId === ALL_BRANCHES_ID ? null : requestedBranchId },
   });
   const reloaded = await prisma.account.findUnique({ where: { id: account.id }, include: accountAccessInclude });
-  response.json({ account: publicAccount(reloaded, requestedBranchId) });
+  response.json({ account: await publicAccountWithSubscription(reloaded, requestedBranchId) });
 }));
 
 app.post("/api/me/attendance", asyncRoute(async (request, response) => {
@@ -5470,6 +5900,7 @@ app.post("/api/branches", asyncRoute(async (request, response) => {
   });
   if (duplicate) throw apiError(duplicate.code === data.code ? `Branch code ${data.code} is already in use.` : `A branch named ${data.name} already exists.`, 409);
   const result = await prisma.$transaction(async (tx) => {
+    await assertBranchPlanLimit(tx, actor.organizationId);
     const branch = await tx.branch.create({
       data: {
         ...data,
@@ -5519,6 +5950,9 @@ app.put("/api/branches/:id", asyncRoute(async (request, response) => {
     }
   }
   const result = await prisma.$transaction(async (tx) => {
+    if (existing.status !== "Active" && data.status === "Active") {
+      await assertBranchPlanLimit(tx, actor.organizationId);
+    }
     await renameBranchReferences(tx, existing.name, data.name);
     if (roomCount > activeRooms.length) {
       const names = nextRoomNames(existing.rooms, roomCount - activeRooms.length);
@@ -5564,6 +5998,9 @@ async function setBranchLifecycle(request, status) {
     if (activeCount <= 1) throw apiError("The organization must keep at least one active branch.", 409);
   }
   const result = await prisma.$transaction(async (tx) => {
+    if (existing.status !== "Active" && status === "Active") {
+      await assertBranchPlanLimit(tx, actor.organizationId);
+    }
     const branch = await tx.branch.update({
       where: { id },
       data: { status, archivedAt: status === "Archived" ? new Date() : null },
@@ -6553,7 +6990,7 @@ app.get("/api/public-registration/qr", asyncRoute(async (request, response) => {
   if (!branch) throw apiError("Registration branch is unavailable.", 404);
   const configuredOrigin = clean(process.env.APP_ORIGIN).split(",")[0];
   const origin = configuredOrigin || `${request.protocol}://${request.get("host")}`.replace(/:3001$/, ":5173");
-  const url = `${origin.replace(/\/$/, "")}/register?branch=${encodeURIComponent(branch.name)}`;
+  const url = `${origin.replace(/\/$/, "")}/client-register?branch=${encodeURIComponent(branch.name)}`;
   const svg = await QRCode.toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#1f2937", light: "#ffffff" } });
   response.type("image/svg+xml").set("Cache-Control", "public, max-age=300").send(svg);
 }));
@@ -8370,7 +8807,7 @@ app.use((error, _request, response, _next) => {
   if (status === 500 || databaseUnavailable) {
     console.error(error);
   }
-  response.status(status).json({ error: message });
+  response.status(status).json({ error: message, ...(error.payload || {}) });
 });
 
 assertProductionEnvironment();

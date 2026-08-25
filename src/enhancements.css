@@ -4034,3 +4034,585 @@ td {
   font-size: 0.85rem;
   opacity: 0.75;
 }
+/* Subscription onboarding, pricing, and trial state */
+.subscription-public-page {
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(122, 73, 81, 0.08), transparent 30%),
+    linear-gradient(180deg, #fffdfa 0%, #f7f3ed 100%);
+}
+
+.subscription-public-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 76px;
+  padding: 14px clamp(20px, 5vw, 72px);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 253, 250, 0.94);
+  backdrop-filter: blur(16px);
+}
+
+.subscription-public-header nav,
+.subscription-actions,
+.subscription-expired-card > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.subscription-brand-button {
+  width: 176px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.subscription-brand-button .zenshotech-wordmark {
+  display: block;
+  width: 100%;
+  max-height: 48px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.registration-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(420px, 0.72fr);
+  gap: clamp(36px, 7vw, 110px);
+  align-items: center;
+  width: min(1120px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(48px, 8vw, 96px) 0;
+}
+
+.registration-intro h1,
+.pricing-hero h1,
+.subscription-account-heading h1,
+.subscription-expired-card h1 {
+  margin: 8px 0 16px;
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+.registration-intro > p:not(.eyebrow),
+.pricing-hero > p,
+.subscription-expired-card > p {
+  color: var(--muted);
+  font-size: 1.06rem;
+  line-height: 1.7;
+}
+
+.registration-intro ul,
+.pricing-plan-card ul,
+.lifetime-plan-card ul,
+.website-inclusion-card ul {
+  display: grid;
+  gap: 11px;
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.registration-intro li,
+.pricing-plan-card li,
+.lifetime-plan-card li,
+.website-inclusion-card li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  line-height: 1.45;
+}
+
+.registration-intro li svg,
+.pricing-plan-card li svg,
+.lifetime-plan-card li svg,
+.website-inclusion-card li svg,
+.feature-comparison-grid svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--wine);
+}
+
+.subscription-form-card,
+.subscription-account-card,
+.subscription-expired-card,
+.subscription-admin-card {
+  display: grid;
+  gap: 18px;
+  padding: clamp(24px, 4vw, 38px);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 24px 70px rgba(71, 50, 39, 0.12);
+}
+
+.subscription-form-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.subscription-form-card > * {
+  min-width: 0;
+}
+
+.subscription-form-card .checkbox-field,
+.subscription-form-card .full {
+  grid-column: 1;
+}
+
+.subscription-admin-card {
+  width: min(1180px, calc(100% - 40px));
+  margin: 24px auto 0;
+  padding: clamp(24px, 4vw, 38px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.subscription-admin-card h2 {
+  margin: 4px 0 8px;
+}
+
+.subscription-admin-card > div > p:last-child {
+  color: var(--muted);
+}
+
+.subscription-admin-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.subscription-admin-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.subscription-admin-list article > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.subscription-admin-list article > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.subscription-admin-list span,
+.subscription-admin-list small {
+  color: var(--muted);
+}
+
+.subscription-form-card h2,
+.website-inclusion-card h2,
+.feature-comparison-card h2,
+.lifetime-plan-card h2 {
+  margin: 4px 0 0;
+}
+
+.registration-logo {
+  width: 150px;
+  max-height: 62px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.subscription-form-card label:not(.checkbox-field) {
+  display: grid;
+  gap: 7px;
+  font-weight: 650;
+}
+
+.subscription-form-card input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.subscription-form-card input[aria-invalid="true"] {
+  border-color: #b42318;
+  box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.1);
+}
+
+.field-error {
+  color: #a3261b;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.registration-agreement {
+  align-items: flex-start;
+}
+
+.pricing-hero {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: min(900px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(52px, 8vw, 92px) 0 40px;
+  text-align: center;
+}
+
+.pricing-hero h1 {
+  max-width: 780px;
+}
+
+.pricing-hero > p {
+  max-width: 760px;
+  margin: 0;
+}
+
+.pricing-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 180px;
+  color: var(--muted);
+}
+
+.pricing-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.pricing-plan-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 510px;
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 40px rgba(71, 50, 39, 0.075);
+}
+
+.pricing-plan-card.recommended {
+  border: 2px solid var(--wine);
+  box-shadow: 0 22px 56px rgba(99, 57, 63, 0.17);
+}
+
+.pricing-recommended {
+  position: absolute;
+  top: -14px;
+  right: 24px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--wine);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pricing-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.pricing-amount strong {
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+.pricing-amount span {
+  color: var(--muted);
+}
+
+.pricing-plan-card ul {
+  flex: 1;
+  margin: 0;
+}
+
+.lifetime-plan-card,
+.website-inclusion-card,
+.feature-comparison-card {
+  width: min(1180px, calc(100% - 40px));
+  margin: 22px auto 0;
+  padding: clamp(26px, 4vw, 42px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.lifetime-plan-card {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr auto;
+  align-items: center;
+  gap: 28px;
+}
+
+.lifetime-plan-card ul {
+  margin: 0;
+}
+
+.website-inclusion-card {
+  display: grid;
+  grid-template-columns: 0.7fr 1fr;
+  gap: 22px 54px;
+}
+
+.website-inclusion-card > p,
+.website-page-definition {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.website-page-definition {
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--rose-soft);
+}
+
+.website-page-definition strong {
+  color: var(--ink);
+}
+
+.website-page-definition p:last-child {
+  margin-bottom: 0;
+}
+
+.feature-comparison-card {
+  margin-bottom: 70px;
+}
+
+.feature-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.feature-comparison-grid > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 58px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  line-height: 1.35;
+}
+
+.subscription-account-page,
+.subscription-expired-page {
+  padding-bottom: 80px;
+}
+
+.subscription-account-card,
+.subscription-expired-card {
+  width: min(980px, calc(100% - 40px));
+  margin: clamp(50px, 8vw, 90px) auto 0;
+}
+
+.subscription-account-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.subscription-account-heading h1 {
+  font-size: clamp(2rem, 4vw, 3.2rem);
+}
+
+.subscription-status {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--rose-soft);
+  color: var(--wine);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.subscription-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.subscription-metrics article {
+  display: grid;
+  gap: 6px;
+  min-height: 128px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.subscription-metrics span,
+.subscription-metrics small {
+  color: var(--muted);
+}
+
+.subscription-metrics strong {
+  font-size: 1.08rem;
+}
+
+.subscription-date-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--rose-soft);
+}
+
+.subscription-date-panel div {
+  display: grid;
+  gap: 3px;
+}
+
+.subscription-expired-card {
+  justify-items: center;
+  max-width: 720px;
+  text-align: center;
+}
+
+.subscription-expired-card > svg {
+  color: #a3261b;
+}
+
+.trial-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border: 1px solid rgba(108, 73, 42, 0.2);
+  border-radius: 10px;
+  background: #fff8e8;
+  color: #5f412a;
+}
+
+.trial-banner.urgent {
+  border-color: rgba(163, 38, 27, 0.3);
+  background: #fff0ee;
+  color: #81231b;
+}
+
+.trial-banner > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.trial-banner small {
+  color: inherit;
+  opacity: 0.74;
+}
+
+@media (max-width: 980px) {
+  .registration-layout,
+  .lifetime-plan-card,
+  .website-inclusion-card {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pricing-plan-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .lifetime-plan-card .primary-button {
+    justify-self: start;
+  }
+
+  .feature-comparison-grid,
+  .subscription-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .subscription-public-header {
+    align-items: flex-start;
+    padding: 12px 16px;
+  }
+
+  .subscription-public-header nav .text-button:first-child {
+    display: none;
+  }
+
+  .subscription-brand-button {
+    width: 126px;
+  }
+
+  .registration-layout,
+  .pricing-card-grid,
+  .lifetime-plan-card,
+  .website-inclusion-card,
+  .feature-comparison-card,
+  .subscription-account-card,
+  .subscription-expired-card,
+  .pricing-hero {
+    width: min(100% - 24px, 1180px);
+  }
+
+  .registration-layout {
+    grid-template-columns: 1fr;
+    gap: 30px;
+    padding-top: 36px;
+  }
+
+  .pricing-card-grid,
+  .feature-comparison-grid,
+  .subscription-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-plan-card,
+  .pricing-plan-card:last-child {
+    grid-column: auto;
+    min-height: 0;
+  }
+
+  .website-inclusion-card {
+    gap: 20px;
+  }
+
+  .subscription-account-heading,
+  .trial-banner,
+  .subscription-admin-list article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

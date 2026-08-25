@@ -76,7 +76,6 @@ import {
 } from "./data";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
-import { isDemoSignupHostname } from "./config/demoAccess.js";
 import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
 import GlobalModuleSearch from "./components/GlobalModuleSearch.jsx";
@@ -96,7 +95,6 @@ import {
 import {
   checkApiHealth,
   changeAccountPassword,
-  createDemoAccount,
   acceptInvitation,
   createInvitation,
   editInvitation,
@@ -127,6 +125,9 @@ import {
   loadOrganizationAccounts,
   linkStaffAccount,
   loginAccount,
+  loadPublicPlans,
+  loadAdminSubscriptions,
+  loadSubscription,
   logoutAccount,
   mergeLeadDuplicate,
   markNotificationsRead,
@@ -135,9 +136,12 @@ import {
   recordPackageInstallment,
   recordAttendance,
   requestPasswordReset,
+  requestSubscriptionActivation,
+  registerAccount,
   resetAccountPassword,
   resendInvitation,
   restoreAccountSession,
+  startSubscriptionTrial,
   restoreMarketingCampaign,
   revokeInvitation,
   inspectInvitation,
@@ -158,6 +162,7 @@ import {
   updateLeadStage,
   updatePosCart,
   updateAccountAccess,
+  updateAdminSubscription,
   uploadTreatmentPhoto,
   moveMarketingCampaignToDeleted,
   deleteTreatmentPhoto,
@@ -919,9 +924,20 @@ function App() {
     || window.location.hash.toLowerCase() === "#/book"
     || new URLSearchParams(window.location.search).get("form") === "appointment"
   ) ? "appointment" : "inquiry";
-  const isClientRegistrationView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/register";
+  const currentPublicPath = typeof window === "undefined" ? "/" : normalizedPathname(window.location.pathname);
+  const currentPublicParams = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+  const isClientRegistrationView = typeof window !== "undefined" && (
+    currentPublicPath === "/client-register"
+    || (currentPublicPath === "/register" && currentPublicParams.has("branch"))
+  );
+  const isAccountRegistrationView = currentPublicPath === "/register" && !currentPublicParams.has("branch");
+  const isPricingView = currentPublicPath === "/pricing";
+  const isSubscriptionView = currentPublicPath === "/subscription";
+  const isSubscriptionExpiredView = currentPublicPath === "/subscription/expired";
+  const isSubscriptionRouteView = isAccountRegistrationView || isPricingView || isSubscriptionView || isSubscriptionExpiredView;
   const isPublicFormView = typeof window !== "undefined" && (
-    ["/inquire", "/book", "/register"].includes(normalizedPathname(window.location.pathname))
+    ["/inquire", "/book", "/client-register"].includes(currentPublicPath)
+    || isClientRegistrationView
     || ["#/inquire", "#/book"].includes(window.location.hash.toLowerCase())
   );
   const posTouchStartRef = useRef(null);
@@ -1279,6 +1295,7 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isPublicFormView) return;
+    if (isSubscriptionRouteView) return;
     if (publicFlipbookToken) return;
     const publicQuery = new URLSearchParams(window.location.search);
     if (normalizedPathname(window.location.pathname) === "/accept-invitation" || publicQuery.has("invitation") || publicQuery.has("token")) return;
@@ -1286,7 +1303,7 @@ function App() {
     if (!moduleFromHash(window.location.hash)) {
       setActiveModule(activeModule, { replace: true, keepDrawerOpen: true });
     }
-  }, [activeModule, isPublicFormView, publicFlipbookToken, setActiveModule]);
+  }, [activeModule, isPublicFormView, isSubscriptionRouteView, publicFlipbookToken, setActiveModule]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsBooting(false), 350);
@@ -1502,10 +1519,10 @@ function App() {
             : "";
 
   useEffect(() => {
-    if (typeof document === "undefined" || isPublicFormView || publicFlipbookToken || isFaceTrackKioskView) return;
+    if (typeof document === "undefined" || isPublicFormView || isSubscriptionRouteView || publicFlipbookToken || isFaceTrackKioskView) return;
     const pageLabel = activeRecordTitle || navItems.find((item) => item.id === activeModule)?.label || "Dashboard";
     document.title = `${pageLabel} — ZenshoTech`;
-  }, [activeModule, activeRecordTitle, isFaceTrackKioskView, isPublicFormView, publicFlipbookToken]);
+  }, [activeModule, activeRecordTitle, isFaceTrackKioskView, isPublicFormView, isSubscriptionRouteView, publicFlipbookToken]);
 
   const scopedAppointments = useMemo(
     () => appointments.filter((item) => branchScope === "All branches" || item.branch === branchScope),
@@ -1766,6 +1783,29 @@ function App() {
     setActiveModule(landingModuleForSession(user), { replace: true });
     addAudit("Signed in", `${user.name} opened ${settings.productName} as ${user.role}.`, "Authentication", user);
     notify(`Welcome, ${user.name}.`);
+  }
+
+  function navigateToPath(path, { replace = false } = {}) {
+    if (typeof window === "undefined") return;
+    if (replace) window.history.replaceState(null, "", path);
+    else window.history.pushState(null, "", path);
+    setCurrentPath(normalizedPathname(new URL(path, window.location.origin).pathname));
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    window.scrollTo(0, 0);
+  }
+
+  function handleRegistrationComplete(result) {
+    setSessionNotice("");
+    setSession(result.account);
+    navigateToPath(result.redirectTo || "/pricing?onboarding=1", { replace: true });
+  }
+
+  function handleSubscriptionSession(result) {
+    if (result.account) setSession(result.account);
+    if (result.redirectTo) {
+      setActiveModuleState("overview");
+      navigateToPath(result.redirectTo, { replace: true });
+    }
   }
 
   async function handleLogout() {
@@ -2773,6 +2813,14 @@ function App() {
     return isClientRegistrationView ? <PublicClientRegistrationPage /> : <PublicLeadCapturePage initialMode={publicFormMode} />;
   }
 
+  if (isAccountRegistrationView) {
+    return <RegistrationPage session={session} onRegistered={handleRegistrationComplete} onNavigate={navigateToPath} />;
+  }
+
+  if (isPricingView) {
+    return <PricingPage session={session} onNavigate={navigateToPath} onSessionUpdate={handleSubscriptionSession} />;
+  }
+
   if (publicFlipbookToken) {
     return <PublicFlipbookViewer token={publicFlipbookToken} />;
   }
@@ -2801,11 +2849,25 @@ function App() {
   if (!session) {
     const resetToken = publicParams.get("reset");
     if (resetToken) return <ResetPasswordScreen token={resetToken} />;
-    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} settings={settings} />;
+    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} onNavigate={navigateToPath} settings={settings} />;
+  }
+
+  if (isSubscriptionView) {
+    return <SubscriptionPage session={session} onLogout={handleLogout} onNavigate={navigateToPath} onSessionUpdate={handleSubscriptionSession} />;
+  }
+
+  if (isSubscriptionExpiredView) {
+    return <SubscriptionExpiredPage session={session} onLogout={handleLogout} onNavigate={navigateToPath} />;
   }
 
   if (session.mustChangePassword) {
     return <ChangePasswordScreen account={session} onChangePassword={handlePasswordChange} onLogout={handleLogout} />;
+  }
+
+  if (!session.subscription?.accessAllowed) {
+    return session.subscription?.status === "expired"
+      ? <SubscriptionExpiredPage session={session} onLogout={handleLogout} onNavigate={navigateToPath} />
+      : <PricingPage session={session} onNavigate={navigateToPath} onSessionUpdate={handleSubscriptionSession} onboarding />;
   }
 
   if (!session.access?.active || !sessionModules.length) {
@@ -3071,6 +3133,8 @@ function App() {
             </div>
             </header>
           </div>
+
+          <TrialBanner subscription={session.subscription} onNavigate={navigateToPath} />
 
         <section className={`content-area ${isMarketingView ? "marketing-content-area" : ""} ${isFlipbooksView ? "flipbooks-content-area" : ""}`}>
           {activeModule === "my-workspace" && <MyWorkspaceModule session={session} notify={notify} />}
@@ -4595,30 +4659,324 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
   );
 }
 
-function LoginScreen({ notice, onLogin, settings }) {
+function PublicSubscriptionHeader({ session, onNavigate }) {
+  return (
+    <header className="subscription-public-header">
+      <button className="subscription-brand-button" type="button" onClick={() => onNavigate(session ? "/dashboard" : "/")} aria-label="Open ZenshoTech home">
+        <BrandWordmark />
+      </button>
+      <nav aria-label="Account navigation">
+        <button className="text-button" type="button" onClick={() => onNavigate("/pricing")}>Pricing</button>
+        {session
+          ? <button className="ghost-button" type="button" onClick={() => onNavigate("/subscription")}>Subscription</button>
+          : <button className="ghost-button" type="button" onClick={() => onNavigate("/")}>Sign In</button>}
+        {!session && <button className="primary-button" type="button" onClick={() => onNavigate("/register")}>Register</button>}
+      </nav>
+    </header>
+  );
+}
+
+function RegistrationPage({ session, onRegistered, onNavigate }) {
+  const [form, setForm] = useState({ name: "", businessName: "", email: "", password: "", confirmPassword: "", agreements: false });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    document.title = "Register — ZenshoTech";
+  }, []);
+
+  function update(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setErrors((current) => ({ ...current, [field]: "", form: "" }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (submitting) return;
+    const nextErrors = {};
+    if (form.name.trim().length < 2) nextErrors.name = "Enter your full name.";
+    if (form.businessName.trim().length < 2) nextErrors.businessName = "Enter your business or clinic name.";
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) nextErrors.email = "Enter a valid email address.";
+    if (form.password.length < 8) nextErrors.password = "Use at least 8 characters.";
+    if (form.password !== form.confirmPassword) nextErrors.confirmPassword = "Passwords do not match.";
+    if (!form.agreements) nextErrors.agreements = "Accept the Terms of Service and Privacy Policy to continue.";
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await registerAccount({
+        name: form.name.trim(),
+        businessName: form.businessName.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        termsAccepted: true,
+        privacyAccepted: true,
+      });
+      onRegistered(result);
+    } catch (error) {
+      setErrors((current) => ({
+        ...current,
+        [error.status === 409 ? "email" : "form"]: error.message || "Registration could not be completed. Please try again.",
+      }));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="subscription-public-page registration-public-page">
+      <PublicSubscriptionHeader session={session} onNavigate={onNavigate} />
+      <section className="registration-layout">
+        <div className="registration-intro">
+          <p className="eyebrow">Start with confidence</p>
+          <h1>Start your 7-day free trial</h1>
+          <p>Create your secure workspace, compare plans, then choose when to begin the trial. Registration alone does not start the trial.</p>
+          <ul>
+            <li><Check size={17} /> All core ZenshoTech modules included</li>
+            <li><Check size={17} /> No payment details required to register</li>
+            <li><Check size={17} /> Free responsive website with up to 8 pages</li>
+          </ul>
+        </div>
+        <form className="subscription-form-card" onSubmit={submit} noValidate>
+          <BrandWordmark className="registration-logo" />
+          <div><p className="eyebrow">Create your account</p><h2>Business owner registration</h2></div>
+          {session ? (
+            <div className="inline-state warning"><ShieldCheck size={18} /><span>You are already signed in as {session.email}.</span></div>
+          ) : <>
+            {errors.form && <div className="inline-state danger" role="alert"><AlertCircle size={17} /><span>{errors.form}</span></div>}
+            <label><span>Full name</span><input autoComplete="name" maxLength={100} value={form.name} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
+            <label><span>Business or clinic name</span><input autoComplete="organization" maxLength={140} value={form.businessName} onChange={(event) => update("businessName", event.target.value)} aria-invalid={Boolean(errors.businessName)} />{errors.businessName && <small className="field-error">{errors.businessName}</small>}</label>
+            <label><span>Email address</span><input autoComplete="email" type="email" maxLength={160} value={form.email} onChange={(event) => update("email", event.target.value)} aria-invalid={Boolean(errors.email)} />{errors.email && <small className="field-error">{errors.email}</small>}</label>
+            <label><span>Password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => update("password", event.target.value)} aria-invalid={Boolean(errors.password)} /><button className="login-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.password && <small className="field-error">{errors.password}</small>}</label>
+            <label><span>Confirm password</span><div className="login-password-field"><input autoComplete="new-password" minLength={8} type={showConfirmation ? "text" : "password"} value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} aria-invalid={Boolean(errors.confirmPassword)} /><button className="login-password-toggle" type="button" aria-label={showConfirmation ? "Hide confirmed password" : "Show confirmed password"} onClick={() => setShowConfirmation((value) => !value)}>{showConfirmation ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.confirmPassword && <small className="field-error">{errors.confirmPassword}</small>}</label>
+            <label className="checkbox-field registration-agreement"><input type="checkbox" checked={form.agreements} onChange={(event) => update("agreements", event.target.checked)} /><span>I agree to the Terms of Service and Privacy Policy.</span></label>
+            {errors.agreements && <small className="field-error">{errors.agreements}</small>}
+            <button className="primary-button full" type="submit" disabled={submitting}>{submitting ? "Creating secure workspace..." : "Continue to pricing"}</button>
+          </>}
+          {session && <button className="primary-button full" type="button" onClick={() => onNavigate("/pricing?onboarding=1")}>Continue to pricing</button>}
+          <button className="text-button full" type="button" onClick={() => onNavigate("/")}>Already have an account? Sign in</button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+const proposalModuleLabels = [
+  "POS", "Appointments", "Online Booking", "Client Database", "Leads Management", "Email Marketing", "SMS Marketing", "Staff Management", "Staff Scheduling", "Face Tracking Attendance", "Inventory Management", "Expenses", "Reports and Analytics", "Multiple Branch Management", "PDF Flipbook Viewer", "Website and Social Media Integration",
+];
+
+function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false }) {
+  const [catalog, setCatalog] = useState({ plans: [], websitePackage: null });
+  const [loading, setLoading] = useState(true);
+  const [submittingPlan, setSubmittingPlan] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    document.title = "Pricing — ZenshoTech";
+    let cancelled = false;
+    loadPublicPlans().then((result) => { if (!cancelled) setCatalog(result); }).catch((loadError) => { if (!cancelled) setError(loadError.message); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function choosePlan(plan) {
+    setError("");
+    setMessage("");
+    if (plan.billingInterval === "one_time") {
+      onNavigate("/inquire?interest=one-time-purchase");
+      return;
+    }
+    if (!session) {
+      onNavigate(`/register?plan=${encodeURIComponent(plan.code)}`);
+      return;
+    }
+    setSubmittingPlan(plan.code);
+    try {
+      if (["pending_plan", "trialing"].includes(session.subscription?.status)) {
+        const result = await startSubscriptionTrial(plan.code);
+        onSessionUpdate(result);
+      } else {
+        const result = await requestSubscriptionActivation(plan.code);
+        setMessage(result.message);
+      }
+    } catch (planError) {
+      setError(planError.message || "The plan request could not be completed.");
+    } finally {
+      setSubmittingPlan("");
+    }
+  }
+
+  const monthlyPlans = catalog.plans.filter((plan) => plan.billingInterval === "month");
+  const lifetimePlan = catalog.plans.find((plan) => plan.billingInterval === "one_time");
+  return (
+    <main className="subscription-public-page pricing-public-page">
+      <PublicSubscriptionHeader session={session} onNavigate={onNavigate} />
+      <section className="pricing-hero">
+        <p className="eyebrow">Simple ZenshoTech pricing</p>
+        <h1>Choose the plan that fits your clinic</h1>
+        <p>Start with a 7-day free trial. No setup fee. Your subscription also includes a professionally designed responsive website with up to 8 pages.</p>
+        {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="inline-state success"><Check size={18} /><span>Your workspace is ready. Select a monthly plan to begin the trial.</span></div>}
+        {message && <div className="inline-state success"><Check size={18} /><span>{message}</span></div>}
+        {error && <div className="inline-state danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
+      </section>
+
+      {loading ? <div className="pricing-loading"><RefreshCw className="spin" size={24} /> Loading plans...</div> : <>
+        <section className="pricing-card-grid" aria-label="Monthly subscription plans">
+          {monthlyPlans.map((plan) => (
+            <article className={`pricing-plan-card${plan.recommended ? " recommended" : ""}`} key={plan.code}>
+              {plan.recommended && <span className="pricing-recommended">Most Popular</span>}
+              <div><p className="eyebrow">{plan.name}</p><div className="pricing-amount"><strong>{money.format(plan.monthlyPrice)}</strong><span>/month</span></div></div>
+              <ul>
+                <li><Check size={16} /> 7-day free trial</li>
+                <li><Check size={16} /> No setup fee</li>
+                <li><Check size={16} /> {plan.maxUsers === null ? "Unlimited users" : `Up to ${plan.maxUsers} users`}</li>
+                <li><Check size={16} /> {plan.maxBranches === null ? "Unlimited branches" : plan.maxBranches === 1 ? "1 branch" : `Up to ${plan.maxBranches} branches`}</li>
+                <li><Check size={16} /> Free website with up to 8 pages</li>
+                <li><Check size={16} /> Additional website pages quoted separately</li>
+              </ul>
+              <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name}` : "Start 7-Day Free Trial"}</button>
+            </article>
+          ))}
+        </section>
+
+        {lifetimePlan && <section className="lifetime-plan-card">
+          <div><p className="eyebrow">One-Time Purchase</p><h2>{money.format(lifetimePlan.monthlyPrice)}</h2><p>Complete agreed system package, initial configuration, and onboarding. Activation requires ZenshoTech approval.</p></div>
+          <ul><li><Check size={16} /> No monthly software subscription</li><li><Check size={16} /> Free website with up to 8 pages</li><li><Check size={16} /> Additional pages and future custom development quoted separately</li></ul>
+          <button className="primary-button" type="button" onClick={() => choosePlan(lifetimePlan)}>Contact Sales</button>
+        </section>}
+
+        <section className="website-inclusion-card">
+          <div><p className="eyebrow">Included with every plan</p><h2>{catalog.websitePackage?.title || "Free Website Included"}</h2></div>
+          <ul>{(catalog.websitePackage?.features || []).map((feature) => <li key={feature}><Check size={17} /> {feature}</li>)}</ul>
+          <p>{catalog.websitePackage?.note}</p>
+          <div className="website-page-definition"><strong>What counts as one website page?</strong><p>One unique public-facing route—such as Home, About, Services, an individual service page, Treatments, Booking, Gallery, or Contact. Repeated sections on the same route do not count as separate pages.</p><p>The 8-page allowance applies only to the website-development service. It never limits ZenshoTech modules, users within the selected plan, customer records, appointments, products, treatments, campaigns, or operational data.</p></div>
+        </section>
+
+        <section className="feature-comparison-card">
+          <div><p className="eyebrow">Complete system access</p><h2>All listed modules are included in every monthly plan</h2></div>
+          <div className="feature-comparison-grid">{proposalModuleLabels.map((label) => <div key={label}><Check size={16} /><span>{label}</span></div>)}</div>
+        </section>
+      </>}
+    </main>
+  );
+}
+
+function SubscriptionPage({ session, onLogout, onNavigate }) {
+  const [subscription, setSubscription] = useState(session.subscription);
+  const [adminSubscriptions, setAdminSubscriptions] = useState([]);
+  const [adminActionId, setAdminActionId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    document.title = "Subscription — ZenshoTech";
+    let cancelled = false;
+    Promise.all([
+      loadSubscription(),
+      session.platformAdmin ? loadAdminSubscriptions() : Promise.resolve({ subscriptions: [] }),
+    ]).then(([result, adminResult]) => {
+      if (!cancelled) {
+        setSubscription(result.subscription);
+        setAdminSubscriptions(adminResult.subscriptions || []);
+      }
+    }).catch((loadError) => { if (!cancelled) setError(loadError.message); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [session.platformAdmin]);
+  async function requestActivation() {
+    setError(""); setMessage("");
+    try {
+      const result = await requestSubscriptionActivation(subscription.planCode);
+      setSubscription(result.subscription); setMessage(result.message);
+    } catch (activationError) { setError(activationError.message); }
+  }
+  async function applyAdminAction(row, action) {
+    setAdminActionId(`${row.organization.id}:${action}`);
+    setError("");
+    try {
+      const payload = { action };
+      if (action === "activate") payload.planCode = row.requestedPlanCode || row.planCode || "starter";
+      if (action === "extend_trial") payload.hours = 24;
+      const result = await updateAdminSubscription(row.organization.id, payload);
+      setAdminSubscriptions((current) => current.map((item) => item.organization.id === row.organization.id ? { ...item, ...result.subscription } : item));
+      setMessage(`${row.organization.name} subscription updated.`);
+    } catch (adminError) {
+      setError(adminError.message || "Subscription administration failed.");
+    } finally {
+      setAdminActionId("");
+    }
+  }
+  const plan = subscription?.plan;
+  return (
+    <main className="subscription-public-page subscription-account-page">
+      <PublicSubscriptionHeader session={session} onNavigate={onNavigate} />
+      <section className="subscription-account-card">
+        <div className="subscription-account-heading"><div><p className="eyebrow">Workspace subscription</p><h1>{plan?.name || "Choose a plan"}</h1></div><span className={`subscription-status status-${subscription?.status}`}>{String(subscription?.status || "pending_plan").replace(/_/g, " ")}</span></div>
+        {loading && <div className="pricing-loading"><RefreshCw className="spin" size={20} /> Loading subscription...</div>}
+        {message && <div className="inline-state success"><Check size={18} /> {message}</div>}
+        {error && <div className="inline-state danger"><AlertCircle size={18} /> {error}</div>}
+        <div className="subscription-metrics">
+          <article><span>Current plan</span><strong>{plan?.name || "Not selected"}</strong><small>{plan?.billingInterval === "month" ? `${money.format(plan.monthlyPrice)} monthly` : plan?.billingInterval === "one_time" ? `${money.format(plan.monthlyPrice)} one-time` : "Existing-account access"}</small></article>
+          <article><span>Users</span><strong>{subscription?.usage?.users ?? 0}{plan?.maxUsers === null ? " / Unlimited" : ` / ${plan?.maxUsers ?? "—"}`}</strong><small>Active users and valid pending invitations count.</small></article>
+          <article><span>Branches</span><strong>{subscription?.usage?.branches ?? 0}{plan?.maxBranches === null ? " / Unlimited" : ` / ${plan?.maxBranches ?? "—"}`}</strong><small>Archived branches do not count.</small></article>
+          <article><span>Website package</span><strong>Up to {subscription?.includedWebsitePages || 8} pages</strong><small>Additional pages are quoted separately.</small></article>
+        </div>
+        {subscription?.trialEndAt && <div className="subscription-date-panel"><Clock size={20} /><div><strong>Trial expiration</strong><span>{formatDateTime(subscription.trialEndAt)}</span></div></div>}
+        <div className="subscription-actions"><button className="primary-button" type="button" onClick={() => onNavigate("/pricing")}>View Plans</button>{subscription?.planCode && ["trialing", "expired"].includes(subscription.status) && <button className="ghost-button" type="button" onClick={requestActivation}>Activate Subscription</button>}<button className="text-button" type="button" onClick={() => onNavigate("/dashboard")}>Return to dashboard</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></div>
+      </section>
+      {session.platformAdmin && <section className="subscription-admin-card">
+        <div><p className="eyebrow">ZenshoTech administration</p><h2>Subscription controls</h2><p>Paid and lifetime access require an explicit administrator action. Every action is audited.</p></div>
+        <div className="subscription-admin-list">
+          {adminSubscriptions.length ? adminSubscriptions.map((row) => <article key={row.organization.id}>
+            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode}` : ""}</small></div>
+            <div><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "activate")}>{adminActionId === `${row.organization.id}:activate` ? "Activating..." : "Activate monthly"}</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "grant_lifetime")}>Grant lifetime</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "extend_trial")}>Extend 24h</button><button className="text-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, row.status === "past_due" ? "reactivate" : "suspend")}>{row.status === "past_due" ? "Reactivate" : "Suspend"}</button></div>
+          </article>) : <p>No managed subscription records yet.</p>}
+        </div>
+      </section>}
+    </main>
+  );
+}
+
+function SubscriptionExpiredPage({ session, onLogout, onNavigate }) {
+  useEffect(() => { document.title = "Trial ended — ZenshoTech"; }, []);
+  return (
+    <main className="subscription-public-page subscription-expired-page">
+      <PublicSubscriptionHeader session={session} onNavigate={onNavigate} />
+      <section className="subscription-expired-card"><AlertCircle size={36} /><p className="eyebrow">Trial ended</p><h1>Your 7-day free trial has ended.</h1><p>Choose a plan to continue using ZenshoTech. Your workspace and business data are preserved.</p><div><button className="primary-button" type="button" onClick={() => onNavigate("/pricing")}>Choose a plan</button><button className="ghost-button" type="button" onClick={() => onNavigate("/subscription")}>View subscription</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></div></section>
+    </main>
+  );
+}
+
+function TrialBanner({ subscription, onNavigate }) {
+  if (subscription?.status !== "trialing" || !subscription.trialEndAt) return null;
+  const remainingMs = new Date(subscription.trialEndAt).getTime() - Date.now();
+  const remainingDays = Math.max(0, Math.ceil(remainingMs / 86_400_000));
+  return (
+    <aside className={`trial-banner${remainingMs <= 86_400_000 ? " urgent" : ""}`} role="status">
+      <div><Clock size={19} /><span>Your <strong>{subscription.plan?.name}</strong> trial ends in {remainingDays} day{remainingDays === 1 ? "" : "s"}.</span><small>{formatDateTime(subscription.trialEndAt)}</small></div>
+      <div><button className="text-button" type="button" onClick={() => onNavigate("/pricing")}>View Plans</button><button className="ghost-button small" type="button" onClick={() => onNavigate("/subscription")}>Activate Subscription</button></div>
+    </aside>
+  );
+}
+
+function LoginScreen({ notice, onLogin, onNavigate }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [demoOpen, setDemoOpen] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
-  const demoSignupAvailable = typeof window !== "undefined" && isDemoSignupHostname(window.location.hostname);
 
   async function submit(event) {
     event.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      if (demoOpen) {
-        if (password !== confirmPassword) throw new Error("Passwords do not match.");
-        await createDemoAccount(name, email, password);
-      }
       await onLogin(email, password);
     } catch (loginError) {
       setError(loginError.message || "Unable to sign in.");
@@ -4644,14 +5002,13 @@ function LoginScreen({ notice, onLogin, settings }) {
   return (
     <main className="login-page">
       <section className="login-panel">
-        <form className={`login-card${demoOpen ? " is-demo-signup" : ""}`} onSubmit={submit}>
+        <form className="login-card" onSubmit={submit}>
           <BrandWordmark className="login-logo" />
           <div>
-            <p className="eyebrow">{demoOpen ? "Staging demo" : "Secure role login"}</p>
-            <h2>{demoOpen ? "Create your demo account" : "Sign in to your workspace"}</h2>
-            {demoOpen && <p className="login-helper">Get a private sandbox with sample data created only for your account.</p>}
+            <p className="eyebrow">Secure role login</p>
+            <h2>Sign in to your workspace</h2>
+            <p className="login-helper">New to ZenshoTech? Start your 7-day free trial. No commitment.</p>
           </div>
-          {demoOpen && <label><span>Full name</span><input autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></label>}
           <label>
             <span>Email</span>
             <input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -4660,8 +5017,7 @@ function LoginScreen({ notice, onLogin, settings }) {
             <span>Password</span>
             <div className="login-password-field">
               <input
-                autoComplete={demoOpen ? "new-password" : "current-password"}
-                minLength={demoOpen ? 8 : undefined}
+                autoComplete="current-password"
                 type={showPassword ? "text" : "password"}
                 placeholder="Enter your password"
                 value={password}
@@ -4678,47 +5034,21 @@ function LoginScreen({ notice, onLogin, settings }) {
               </button>
             </div>
           </label>
-          {demoOpen && <label>
-            <span>Confirm password</span>
-            <div className="login-password-field">
-              <input
-                autoComplete="new-password"
-                minLength={8}
-                type={showConfirmPassword ? "text" : "password"}
-                placeholder="Confirm your password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-              />
-              <button
-                className="login-password-toggle"
-                type="button"
-                aria-label={showConfirmPassword ? "Hide confirmed password" : "Show confirmed password"}
-                aria-pressed={showConfirmPassword}
-                onClick={() => setShowConfirmPassword((visible) => !visible)}
-              >
-                {showConfirmPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
-            </div>
-          </label>}
-          {demoOpen && <p className="login-helper demo-password-helper">Use at least 8 characters. No special character mix is required.</p>}
           {notice && <div className="inline-state warning" role="alert"><AlertCircle size={17} /><span>{notice}</span></div>}
           {error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}
-          <button className="primary-button full" type="submit" disabled={submitting || !email || !password || (demoOpen && (!name.trim() || !confirmPassword))}>
-            {demoOpen ? <UserCheck size={17} aria-hidden="true" /> : <LockKeyhole size={17} aria-hidden="true" />}
-            {submitting ? (demoOpen ? "Creating account..." : "Signing in...") : (demoOpen ? "Create account and enter demo" : "Sign in securely")}
+          <button className="primary-button full" type="submit" disabled={submitting || !email || !password}>
+            <LockKeyhole size={17} aria-hidden="true" />
+            {submitting ? "Signing in..." : "Sign in securely"}
           </button>
-          {!demoOpen && <button className="ghost-button full" type="button" onClick={() => setForgotOpen((value) => !value)}>
+          <button className="ghost-button full" type="button" onClick={() => setForgotOpen((value) => !value)}>
             Forgot password
-          </button>}
-          {!demoOpen && forgotOpen && (
+          </button>
+          {forgotOpen && (
             <div className="inline-state warning" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
-          {demoSignupAvailable && <>
-            <div className="login-demo-separator"><span>or</span></div>
-            <button className="ghost-button full demo-account-button" type="button" onClick={() => { setDemoOpen((value) => !value); setShowPassword(false); setShowConfirmPassword(false); setError(""); setForgotOpen(false); }}>
-              {demoOpen ? "Back to sign in" : "Create a demo account"}
-            </button>
-          </>}
+          <div className="login-demo-separator"><span>or</span></div>
+          <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Register</button>
+          <button className="text-button full" type="button" onClick={() => onNavigate("/pricing")}>View pricing</button>
         </form>
       </section>
     </main>
@@ -12723,7 +13053,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             {branchToEdit && (
               <div className="branch-registration-qr">
                 <img src={`/api/public-registration/qr?branch=${encodeURIComponent(branchToEdit.name)}`} alt={`Client registration QR for ${branchToEdit.name}`} />
-                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified ZenshoTech profile.</span><a href={`/register?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
+                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified ZenshoTech profile.</span><a href={`/client-register?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
               </div>
             )}
             <div className="form-grid">

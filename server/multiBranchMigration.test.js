@@ -29,7 +29,7 @@ test("branch archival replaces permanent deletion and keeps historical records",
 });
 
 test("server resolves the requested branch before protected module authorization", () => {
-  const resolveIndex = server.indexOf("const actor = publicAccount(account, request.get(\"x-mace-branch-id\"))");
+  const resolveIndex = server.indexOf("const actor = await publicAccountWithSubscription(account, request.get(\"x-mace-branch-id\"))");
   const moduleIndex = server.indexOf("const requiredModule = requiredModuleForApiRequest");
   assert.ok(resolveIndex > 0);
   assert.ok(moduleIndex > resolveIndex);

@@ -63,6 +63,46 @@ export function createDemoAccount(name, email, password) {
   });
 }
 
+export function registerAccount(payload) {
+  return requestJson("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function loadPublicPlans() {
+  return requestJson("/api/public/plans");
+}
+
+export function loadSubscription() {
+  return requestJson("/api/subscription");
+}
+
+export function startSubscriptionTrial(planCode) {
+  return requestJson("/api/subscription/trial", {
+    method: "POST",
+    body: JSON.stringify({ planCode }),
+  });
+}
+
+export function requestSubscriptionActivation(planCode) {
+  return requestJson("/api/subscription/request-activation", {
+    method: "POST",
+    body: JSON.stringify({ planCode }),
+  });
+}
+
+export function loadAdminSubscriptions() {
+  return requestJson("/api/admin/subscriptions");
+}
+
+export function updateAdminSubscription(organizationId, payload) {
+  return requestJson(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function requestPasswordReset(email) {
   return requestJson("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
 }
