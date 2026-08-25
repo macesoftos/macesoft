@@ -8794,7 +8794,10 @@ function AppointmentMonthView({ appointments, selectedDate, selectedId, onSelect
                 {day.appointments.slice(0, 3).map((appointment) => (
                   <button className={`appointment-month-entry ${statusClass(appointment.status)} ${selectedId === appointment.id ? "selected" : ""}`.trim()} type="button" key={appointment.id} onClick={() => onSelect(appointment.id)} title={`${appointment.time} · ${appointment.client} · ${appointment.service}`}>
                     <time>{formatScheduleTime(parseTimeToMinutes(appointment.time))}</time>
-                    <strong>{appointment.client}</strong>
+                    <span className="appointment-month-entry-copy">
+                      <strong>{appointment.client}</strong>
+                      <small>{appointment.service}</small>
+                    </span>
                   </button>
                 ))}
                 {day.appointments.length > 3 && <button className="appointment-month-more" type="button" onClick={() => onOpenDay(day.value)}>+{day.appointments.length - 3} more</button>}

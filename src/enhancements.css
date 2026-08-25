@@ -2704,13 +2704,13 @@ td {
 }
 
 .appointment-month-overview {
-  min-width: 840px;
+  min-width: 1050px;
 }
 
 .appointment-month-weekdays,
 .appointment-month-days {
   display: grid;
-  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  grid-template-columns: repeat(7, minmax(150px, 1fr));
 }
 
 .appointment-month-weekdays {
@@ -2728,13 +2728,13 @@ td {
   place-items: center;
   border-right: 1px solid var(--line);
   color: var(--muted);
-  font-size: 0.63rem;
+  font-size: 0.7rem;
   font-weight: 750;
   text-transform: uppercase;
 }
 
 .appointment-month-days > section {
-  min-height: 142px;
+  min-height: 184px;
   padding: 7px;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -2772,7 +2772,7 @@ td {
   width: 25px;
   height: 25px;
   border-radius: 50%;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
 }
 
 .appointment-month-days > section.today .appointment-month-day-heading strong {
@@ -2783,52 +2783,71 @@ td {
 .appointment-month-day-heading span {
   display: grid;
   place-items: center;
-  min-width: 20px;
-  height: 20px;
-  border-radius: 10px;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 12px;
   background: var(--rose-soft);
   color: var(--wine);
-  font-size: 0.58rem;
+  font-size: 0.65rem;
   font-weight: 750;
 }
 
 .appointment-month-entries {
   display: grid;
-  gap: 4px;
-  margin-top: 5px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .appointment-month-entry {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
-  min-height: 24px;
-  padding: 3px 5px;
-  border: 0;
-  border-radius: 5px;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--entry-accent) 30%, var(--line));
+  border-left: 3px solid var(--entry-accent);
+  border-radius: 7px;
+  line-height: 1.2;
 }
 
 .appointment-month-entry time {
   color: var(--entry-accent);
-  font-size: 0.52rem;
-  font-weight: 750;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
-.appointment-month-entry strong {
+.appointment-month-entry-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.appointment-month-entry strong,
+.appointment-month-entry small {
   overflow: hidden;
-  font-size: 0.58rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.appointment-month-entry strong {
+  font-size: 0.72rem;
+}
+
+.appointment-month-entry small {
+  color: var(--muted);
+  font-size: 0.6rem;
+}
+
 .appointment-month-more {
-  min-height: 22px;
-  padding: 0 5px;
+  min-height: 26px;
+  padding: 0 8px;
   border: 0;
   background: transparent;
   color: var(--wine);
-  font-size: 0.58rem;
+  font-size: 0.65rem;
   font-weight: 700;
   text-align: left;
 }
