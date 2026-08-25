@@ -4730,6 +4730,20 @@ function RegistrationHeader({ session, onNavigate }) {
   );
 }
 
+function PricingHeader({ session, onNavigate }) {
+  return (
+    <header className="pricing-page-header">
+      <button className="pricing-brand-button" type="button" onClick={() => onNavigate(session ? "/dashboard" : "/")} aria-label="Open ZenshoTech home">
+        <BrandWordmark />
+      </button>
+      <div className="pricing-header-actions">
+        <a href="mailto:sales@zenshotech.com?subject=ZenshoTech%20pricing%20help">Need help?</a>
+        <button type="button" onClick={() => onNavigate(session ? "/subscription" : "/")}>{session ? "My subscription" : "Sign in"}</button>
+      </div>
+    </header>
+  );
+}
+
 function RegistrationProductPreview() {
   return (
     <div className="registration-product-preview" aria-hidden="true">
@@ -4850,7 +4864,7 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
             <ul>
               <li><span><Check size={14} /></span> All core ZenshoTech modules included</li>
               <li><span><Check size={14} /></span> No payment details required to register</li>
-              <li><span><Check size={14} /></span> Free responsive website with up to 8 pages</li>
+              <li><span><Check size={14} /></span> Free responsive website with 8–20 pages depending on plan</li>
             </ul>
           </div>
           <RegistrationProductPreview />
@@ -4916,12 +4930,23 @@ const proposalModuleLabels = [
   "POS", "Appointments", "Online Booking", "Client Database", "Leads Management", "Email Marketing", "SMS Marketing", "Staff Management", "Staff Scheduling", "Face Tracking Attendance", "Inventory Management", "Expenses", "Reports and Analytics", "Multiple Branch Management", "PDF Flipbook Viewer", "Website and Social Media Integration",
 ];
 
+const pricingComparisonRows = [
+  { label: "Users", value: (plan) => plan.maxUsers === null ? "Unlimited" : `Up to ${plan.maxUsers}` },
+  { label: "Branches", value: (plan) => plan.maxBranches === null ? "Unlimited" : plan.maxBranches === 1 ? "1 branch" : `Up to ${plan.maxBranches}` },
+  { label: "Responsive website", value: (plan) => `Up to ${plan.includedWebsitePages} pages` },
+  { label: "Free trial", value: () => "7 days" },
+  { label: "Setup fee", value: () => "None" },
+  { label: "Annual billing", value: () => "10% savings" },
+  { label: "ZenshoTech modules", value: () => "All included" },
+];
+
 function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false }) {
   const [catalog, setCatalog] = useState({ plans: [], websitePackage: null });
   const [loading, setLoading] = useState(true);
   const [submittingPlan, setSubmittingPlan] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [billingCycle, setBillingCycle] = useState(() => new URLSearchParams(window.location.search).get("billing") === "annual" ? "annual" : "monthly");
 
   useEffect(() => {
@@ -4930,6 +4955,15 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
     loadPublicPlans().then((result) => { if (!cancelled) setCatalog(result); }).catch((loadError) => { if (!cancelled) setError(loadError.message); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!comparisonOpen) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setComparisonOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [comparisonOpen]);
 
   async function choosePlan(plan) {
     setError("");
@@ -4967,21 +5001,22 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
   const lifetimePlan = catalog.plans.find((plan) => plan.billingInterval === "one_time");
   return (
     <main className="subscription-public-page pricing-public-page">
-      <PublicSubscriptionHeader session={session} onNavigate={onNavigate} />
+      <PricingHeader session={session} onNavigate={onNavigate} />
+      <div className="pricing-page-content">
       <section className="pricing-hero">
         <p className="eyebrow">Simple ZenshoTech pricing</p>
         <h1>Choose the plan that fits your clinic</h1>
-        <p>Start with a 7-day free trial—no payment details required. Every subscription also includes a professionally designed responsive website with up to 8 pages.</p>
-        <p>Pay one month at a time or prepay 12 months and save 10%. You can also request a tailored quote before you activate.</p>
-        {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="inline-state success"><Check size={18} /><span>Your workspace is ready. Select a plan and billing period to begin the trial.</span></div>}
-        {message && <div className="inline-state success"><Check size={18} /><span>{message}</span></div>}
-        {error && <div className="inline-state danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
+        <p>Start with a 7-day free trial. No setup fee, no payment details required.</p>
+        {(onboarding || new URLSearchParams(window.location.search).get("onboarding") === "1") && <div className="pricing-workspace-ready"><Check size={16} /><span>Your workspace is ready</span></div>}
       </section>
+
+      {message && <div className="pricing-page-message inline-state success"><Check size={18} /><span>{message}</span></div>}
+      {error && <div className="pricing-page-message inline-state danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
 
       {loading ? <div className="pricing-loading"><RefreshCw className="spin" size={24} /> Loading plans...</div> : <>
         <div className="billing-cycle-selector" role="group" aria-label="Billing period">
-          <button className={billingCycle === "monthly" ? "active" : ""} type="button" aria-pressed={billingCycle === "monthly"} onClick={() => setBillingCycle("monthly")}>Pay Monthly</button>
-          <button className={billingCycle === "annual" ? "active" : ""} type="button" aria-pressed={billingCycle === "annual"} onClick={() => setBillingCycle("annual")}>Pay 12 Months <span>Save 10%</span></button>
+          <button className={billingCycle === "monthly" ? "active" : ""} type="button" aria-pressed={billingCycle === "monthly"} onClick={() => setBillingCycle("monthly")}>Pay monthly</button>
+          <button className={billingCycle === "annual" ? "active" : ""} type="button" aria-pressed={billingCycle === "annual"} onClick={() => setBillingCycle("annual")}>Pay annually <span>Save 10%</span></button>
         </div>
         <section className="pricing-card-grid" aria-label="Subscription plans">
           {monthlyPlans.map((plan) => (
@@ -4990,43 +5025,65 @@ function PricingPage({ session, onNavigate, onSessionUpdate, onboarding = false 
               <div>
                 <p className="eyebrow">{plan.name}</p>
                 <div className="pricing-amount"><strong>{planPrice(billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice)}</strong><span>{billingCycle === "annual" ? "/12 months" : "/month"}</span></div>
-                <p className="pricing-billing-note">{billingCycle === "annual" ? `${planPrice(plan.annualPrice / 12)} per month equivalent · billed once yearly` : "Billed one month at a time"}</p>
+                <p className="pricing-billing-note">{billingCycle === "annual" ? `${planPrice(plan.annualPrice / 12)} monthly equivalent · billed yearly` : "Billed monthly"}</p>
               </div>
               <ul>
-                <li><Check size={16} /> 7-day free trial</li>
-                <li><Check size={16} /> No setup fee</li>
-                <li><Check size={16} /> {billingCycle === "annual" ? "12 months prepaid with 10% discount" : "Flexible monthly payment"}</li>
                 <li><Check size={16} /> {plan.maxUsers === null ? "Unlimited users" : `Up to ${plan.maxUsers} users`}</li>
                 <li><Check size={16} /> {plan.maxBranches === null ? "Unlimited branches" : plan.maxBranches === 1 ? "1 branch" : `Up to ${plan.maxBranches} branches`}</li>
-                <li><Check size={16} /> Free website with up to 8 pages</li>
-                <li><Check size={16} /> Additional website pages quoted separately</li>
+                <li><Check size={16} /> 7-day free trial</li>
+                <li><Check size={16} /> Free website up to {plan.includedWebsitePages} pages</li>
               </ul>
               <div className="pricing-card-actions">
-                <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name} · ${billingCycle === "annual" ? "Annual" : "Monthly"}` : "Start 7-Day Free Trial"}</button>
-                <button className="text-button full" type="button" onClick={() => requestQuote(plan)}>Request a Quote</button>
+                <button className={plan.recommended ? "primary-button full" : "ghost-button full"} type="button" disabled={Boolean(submittingPlan)} onClick={() => choosePlan(plan)}>{submittingPlan === plan.code ? "Starting trial..." : session?.subscription?.status === "trialing" ? `Switch to ${plan.name} · ${billingCycle === "annual" ? "Annual" : "Monthly"}` : "Start free trial"}</button>
+                <button className="text-button full" type="button" onClick={() => requestQuote(plan)}>Request a quote <ChevronRight size={15} /></button>
               </div>
             </article>
           ))}
         </section>
 
-        {lifetimePlan && <section className="lifetime-plan-card">
-          <div><p className="eyebrow">One-Time Purchase</p><h2>{planPrice(lifetimePlan.monthlyPrice)}</h2><p>Complete agreed system package, initial configuration, and onboarding. Final scope and activation are confirmed by ZenshoTech.</p></div>
-          <ul><li><Check size={16} /> No monthly software subscription</li><li><Check size={16} /> Free website with up to 8 pages</li><li><Check size={16} /> Additional pages and future custom development quoted separately</li></ul>
-          <button className="primary-button" type="button" onClick={() => requestQuote(lifetimePlan)}>Request One-Time Quote</button>
-        </section>}
+        <p className="pricing-reassurance"><ShieldCheck size={16} /> No payment today <span aria-hidden="true">•</span> No setup fee <span aria-hidden="true">•</span> Cancel before activation</p>
 
-        <section className="website-inclusion-card">
-          <div><p className="eyebrow">Included with every plan</p><h2>{catalog.websitePackage?.title || "Free Website Included"}</h2></div>
-          <ul>{(catalog.websitePackage?.features || []).map((feature) => <li key={feature}><Check size={17} /> {feature}</li>)}</ul>
-          <p>{catalog.websitePackage?.note}</p>
-          <div className="website-page-definition"><strong>What counts as one website page?</strong><p>One unique public-facing route—such as Home, About, Services, an individual service page, Treatments, Booking, Gallery, or Contact. Repeated sections on the same route do not count as separate pages.</p><p>The 8-page allowance applies only to the website-development service. It never limits ZenshoTech modules, users within the selected plan, customer records, appointments, products, treatments, campaigns, or operational data.</p></div>
+        <div className="pricing-compact-row">
+          <section className="pricing-compare-summary">
+            <span className="pricing-summary-icon"><Check size={18} /></span>
+            <p>All plans include every ZenshoTech module and a responsive website.</p>
+            <button type="button" onClick={() => setComparisonOpen(true)}><BarChart3 size={16} /> Compare all features</button>
+          </section>
+          {lifetimePlan && <section className="lifetime-plan-card">
+            <div><p className="eyebrow">One-Time Purchase</p><h2>{planPrice(lifetimePlan.monthlyPrice)}</h2></div>
+            <p>Complete system package, initial configuration, and onboarding.</p>
+            <button className="primary-button" type="button" onClick={() => requestQuote(lifetimePlan)}>Request one-time quote</button>
+          </section>}
+        </div>
+
+        <section className="pricing-accordions" aria-label="More pricing information">
+          <details className="pricing-info-accordion">
+            <summary><span><Globe2 size={19} /> What&apos;s included in the free website?</span><ChevronDown size={19} /></summary>
+            <div className="pricing-accordion-content">
+              <p><strong>Starter includes 8 pages, Growth includes 15, and Unlimited includes 20.</strong> Each package includes responsive design, basic SEO, contact forms, online booking, lead capture, and mobile optimization.</p>
+              <p>One page means one public route, such as Home, About, Services, Treatments, Booking, Gallery, or Contact. Repeated sections on the same route do not count as separate pages.</p>
+              <p>Additional website pages are quoted separately and never affect your ZenshoTech modules or operational data.</p>
+              <button className="text-button" type="button" onClick={() => onNavigate("/inquire?interest=additional-website-pages")}>Request an additional-page quote <ChevronRight size={15} /></button>
+            </div>
+          </details>
+          <details className="pricing-info-accordion">
+            <summary><span><Boxes size={19} /> View all included modules</span><ChevronDown size={19} /></summary>
+            <div className="pricing-module-list">{proposalModuleLabels.map((label) => <span key={label}><Check size={15} />{label}</span>)}</div>
+          </details>
         </section>
 
-        <section className="feature-comparison-card">
-          <div><p className="eyebrow">Complete system access</p><h2>All listed modules are included in every monthly plan</h2></div>
-          <div className="feature-comparison-grid">{proposalModuleLabels.map((label) => <div key={label}><Check size={16} /><span>{label}</span></div>)}</div>
-        </section>
+        {comparisonOpen && <div className="pricing-comparison-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setComparisonOpen(false); }}>
+          <section className="pricing-comparison-modal" role="dialog" aria-modal="true" aria-labelledby="pricing-comparison-title">
+            <header><div><p className="eyebrow">Plan comparison</p><h2 id="pricing-comparison-title">Compare all features</h2><p>Every plan includes the full ZenshoTech module suite. Only capacity and website allowances differ.</p></div><button type="button" aria-label="Close plan comparison" onClick={() => setComparisonOpen(false)}><X size={21} /></button></header>
+            <div className="pricing-comparison-table" role="table" aria-label="Plan feature comparison">
+              <div className="pricing-comparison-heading" role="row"><strong role="columnheader">Feature</strong>{monthlyPlans.map((plan) => <strong role="columnheader" key={plan.code}>{plan.name}</strong>)}</div>
+              {pricingComparisonRows.map((row) => <div role="row" key={row.label}><span role="rowheader">{row.label}</span>{monthlyPlans.map((plan) => <span role="cell" key={plan.code}>{row.value(plan)}</span>)}</div>)}
+            </div>
+            <p className="pricing-comparison-note">Additional website pages are quoted separately. Prices shown on the cards update with the selected billing cycle.</p>
+          </section>
+        </div>}
       </>}
+      </div>
     </main>
   );
 }
@@ -5092,7 +5149,7 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
           <article><span>Current plan</span><strong>{plan?.name || "Not selected"}</strong><small>{plan?.billingInterval === "month" ? subscription?.billingCycle === "annual" ? "12-month billing · 10% savings" : "Monthly billing" : plan?.billingInterval === "one_time" ? "One-time access" : "Existing-account access"}</small></article>
           <article><span>Users</span><strong>{subscription?.usage?.users ?? 0}{plan?.maxUsers === null ? " / Unlimited" : ` / ${plan?.maxUsers ?? "—"}`}</strong><small>Active users and valid pending invitations count.</small></article>
           <article><span>Branches</span><strong>{subscription?.usage?.branches ?? 0}{plan?.maxBranches === null ? " / Unlimited" : ` / ${plan?.maxBranches ?? "—"}`}</strong><small>Archived branches do not count.</small></article>
-          <article><span>Website package</span><strong>Up to {subscription?.includedWebsitePages || 8} pages</strong><small>Additional pages are quoted separately.</small></article>
+          <article><span>Website package</span><strong>Up to {subscription?.includedWebsitePages ?? plan?.includedWebsitePages ?? 8} pages</strong><small>Additional pages are quoted separately.</small></article>
         </div>
         {subscription?.trialEndAt && <div className="subscription-date-panel"><Clock size={20} /><div><strong>Trial expiration</strong><span>{formatDateTime(subscription.trialEndAt)}</span></div></div>}
         {subscription?.renewalAt && <div className="subscription-date-panel"><CalendarDays size={20} /><div><strong>{subscription.billingCycle === "annual" ? "Annual term renewal" : "Next monthly renewal"}</strong><span>{formatDateTime(subscription.renewalAt)}</span></div></div>}
@@ -5102,7 +5159,7 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
         <div><p className="eyebrow">ZenshoTech administration</p><h2>Subscription controls</h2><p>Paid and lifetime access require an explicit administrator action. Every action is audited.</p></div>
         <div className="subscription-admin-list">
           {adminSubscriptions.length ? adminSubscriptions.map((row) => <article key={row.organization.id}>
-            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode} (${row.requestedBillingCycle === "annual" ? "12 months, 10% off" : "monthly"})${row.requestedBilling?.amount ? ` · Internal baseline ${planPrice(row.requestedBilling.amount)}` : ""}` : row.billingCycle ? ` · ${row.billingCycle === "annual" ? "Annual" : row.billingCycle}` : ""}</small></div>
+            <div><strong>{row.organization.name}</strong><span>{row.plan?.name || "No plan"} · {String(row.status).replace(/_/g, " ")}</span><small>{row.usage.users} users · {row.usage.branches} branches · {row.plan?.maxUsers === null ? "Unlimited user capacity" : `${row.plan?.maxUsers ?? "—"} user limit`} · Up to {row.includedWebsitePages ?? row.plan?.includedWebsitePages ?? 8} website pages{row.requestedPlanCode ? ` · Requested ${row.requestedPlanCode} (${row.requestedBillingCycle === "annual" ? "12 months, 10% off" : "monthly"})${row.requestedBilling?.amount ? ` · Internal baseline ${planPrice(row.requestedBilling.amount)}` : ""}` : row.billingCycle ? ` · ${row.billingCycle === "annual" ? "Annual" : row.billingCycle}` : ""}</small></div>
             <div><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "activate")}>{adminActionId === `${row.organization.id}:activate` ? "Activating..." : `Activate ${row.requestedBillingCycle === "annual" ? "annual" : "monthly"}`}</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "grant_lifetime")}>Grant lifetime</button><button className="ghost-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, "extend_trial")}>Extend 24h</button><button className="text-button small" type="button" disabled={Boolean(adminActionId)} onClick={() => applyAdminAction(row, row.status === "past_due" ? "reactivate" : "suspend")}>{row.status === "past_due" ? "Reactivate" : "Suspend"}</button></div>
           </article>) : <p>No managed subscription records yet.</p>}
         </div>

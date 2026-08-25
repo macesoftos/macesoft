@@ -9,7 +9,7 @@ import {
 const requestDetails = {
   account: { name: "Jamie Owner", email: "owner@example.com", organizationId: "org-123" },
   organization: { id: "org-123", name: "Glow & Go <Clinic>" },
-  plan: { name: "Growth", currency: "PHP", maxUsers: 10, maxBranches: 3, includedWebsitePages: 8 },
+  plan: { name: "Growth", currency: "PHP", maxUsers: 15, maxBranches: 3, includedWebsitePages: 15 },
   billing: { amount: 5900, discountPercent: 0 },
   billingCycle: "monthly",
   usage: { users: 2, branches: 1 },
@@ -31,7 +31,7 @@ test("monthly activation email contains the actionable request details and reply
   assert.equal(email.replyTo, "owner@example.com");
   assert.match(email.subject, /Growth monthly quote request/);
   assert.match(email.text, /Quoted catalog amount: ₱5,900\.00/);
-  assert.match(email.text, /Current users: 2 \/ 10/);
+  assert.match(email.text, /Current users: 2 \/ 15/);
   assert.match(email.text, /Review in ZenshoTech: https:\/\/staging\.zenshotech\.com\/subscription/);
   assert.match(email.html, /Glow &amp; Go &lt;Clinic&gt;/);
   assert.doesNotMatch(email.html, /Glow & Go <Clinic>/);

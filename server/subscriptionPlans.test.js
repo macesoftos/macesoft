@@ -5,6 +5,7 @@ import {
   ANNUAL_BILLING_MONTHS,
   ANNUAL_DISCOUNT_PERCENT,
   INCLUDED_WEBSITE_PAGES,
+  PLAN_WEBSITE_PAGE_ALLOWANCES,
   TRIAL_DURATION_HOURS,
   assertUsageWithinPlan,
   billingDetails,
@@ -14,6 +15,7 @@ import {
   serializeSubscription,
   subscriptionAllowsOperations,
   trialWindow,
+  userAdditionWithinPlan,
 } from "./subscriptionPlans.js";
 
 const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
@@ -21,6 +23,7 @@ const serverSource = readFileSync(new URL("./index.js", import.meta.url), "utf8"
 const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../prisma/migrations/20260825153000_subscription_trials_no_setup_fee/migration.sql", import.meta.url), "utf8");
 const annualBillingMigration = readFileSync(new URL("../prisma/migrations/20260826013000_annual_billing_cycle/migration.sql", import.meta.url), "utf8");
+const entitlementMigration = readFileSync(new URL("../prisma/migrations/20260826060000_update_plan_entitlements/migration.sql", import.meta.url), "utf8");
 
 test("canonical plans and the dedicated pricing catalog expose the approved prices", () => {
   const plans = Object.fromEntries(["starter", "growth", "unlimited", "lifetime"].map((code) => [code, getSubscriptionPlan(code)]));
@@ -31,9 +34,18 @@ test("canonical plans and the dedicated pricing catalog expose the approved pric
   assert.equal(plans.lifetime.monthlyPrice, 280000);
   assert.equal(plans.growth.recommended, true);
   for (const plan of Object.values(plans)) {
-    assert.equal(plan.includedWebsitePages, 8);
     assert.equal(Object.keys(plan).some((key) => /setup.?fee/i.test(key)), false);
   }
+  assert.deepEqual(PLAN_WEBSITE_PAGE_ALLOWANCES, { starter: 8, growth: 15, unlimited: 20, lifetime: 8 });
+  assert.equal(plans.starter.maxUsers, 10);
+  assert.equal(plans.growth.maxUsers, 15);
+  assert.equal(plans.unlimited.maxUsers, null);
+  assert.equal(plans.starter.maxBranches, 1);
+  assert.equal(plans.growth.maxBranches, 3);
+  assert.equal(plans.unlimited.maxBranches, null);
+  assert.equal(plans.starter.includedWebsitePages, 8);
+  assert.equal(plans.growth.includedWebsitePages, 15);
+  assert.equal(plans.unlimited.includedWebsitePages, 20);
   assert.equal(publicPlans.starter.monthlyPrice, 3900);
   assert.equal(publicPlans.growth.monthlyPrice, 5900);
   assert.equal(publicPlans.unlimited.monthlyPrice, 7999);
@@ -88,10 +100,11 @@ test("user and branch limits differ without limiting modules or operational data
   const starter = getSubscriptionPlan("starter");
   const growth = getSubscriptionPlan("growth");
   const unlimited = getSubscriptionPlan("unlimited");
-  assert.equal(assertUsageWithinPlan(starter, { users: 5, branches: 1 }).allowed, true);
-  assert.equal(assertUsageWithinPlan(starter, { users: 6, branches: 1 }).resource, "users");
-  assert.equal(assertUsageWithinPlan(growth, { users: 10, branches: 3 }).allowed, true);
-  assert.equal(assertUsageWithinPlan(growth, { users: 10, branches: 4 }).resource, "branches");
+  assert.equal(assertUsageWithinPlan(starter, { users: 10, branches: 1 }).allowed, true);
+  assert.equal(assertUsageWithinPlan(starter, { users: 11, branches: 1 }).resource, "users");
+  assert.equal(assertUsageWithinPlan(growth, { users: 15, branches: 3 }).allowed, true);
+  assert.equal(assertUsageWithinPlan(growth, { users: 16, branches: 3 }).resource, "users");
+  assert.equal(assertUsageWithinPlan(growth, { users: 15, branches: 4 }).resource, "branches");
   assert.equal(assertUsageWithinPlan(unlimited, { users: 10000, branches: 1000 }).allowed, true);
   assert.deepEqual(starter.moduleEntitlements, growth.moduleEntitlements);
   assert.deepEqual(growth.moduleEntitlements, unlimited.moduleEntitlements);
@@ -99,13 +112,29 @@ test("user and branch limits differ without limiting modules or operational data
   assert.ok(starter.moduleEntitlements.includes("sms"));
 });
 
+test("user invitations allow the final plan seat and block only the next seat", () => {
+  const starter = getSubscriptionPlan("starter");
+  const growth = getSubscriptionPlan("growth");
+  const unlimited = getSubscriptionPlan("unlimited");
+  assert.deepEqual(userAdditionWithinPlan(starter, 9), { allowed: true, current: 9, nextCount: 10, limit: 10 });
+  assert.deepEqual(userAdditionWithinPlan(starter, 10), { allowed: false, current: 10, nextCount: 11, limit: 10 });
+  assert.deepEqual(userAdditionWithinPlan(growth, 14), { allowed: true, current: 14, nextCount: 15, limit: 15 });
+  assert.deepEqual(userAdditionWithinPlan(growth, 15), { allowed: false, current: 15, nextCount: 16, limit: 15 });
+  assert.equal(userAdditionWithinPlan(unlimited, 1000).allowed, true);
+  assert.equal(userAdditionWithinPlan(starter, 10, { alreadyCounted: true }).allowed, true);
+  const invitationLimiter = serverSource.slice(serverSource.indexOf("async function assertUserPlanLimit"), serverSource.indexOf("async function assertBranchPlanLimit"));
+  assert.match(invitationLimiter, /userAdditionWithinPlan\(plan, usage\.users, \{ alreadyCounted \}\)/);
+  assert.match(invitationLimiter, /if \(!limitCheck\.allowed\)/);
+});
+
 test("pricing and registration state the corrected website scope without a setup charge", () => {
   assert.equal(INCLUDED_WEBSITE_PAGES, 8);
-  assert.match(appSource, /Free Website Included/);
-  assert.match(appSource, /Free website with up to 8 pages/);
-  assert.match(appSource, /Additional website pages quoted separately/);
+  assert.match(appSource, /Free responsive website with 8–20 pages depending on plan/);
+  assert.match(appSource, /Free website up to \{plan\.includedWebsitePages\} pages/);
+  assert.match(appSource, /Starter includes 8 pages, Growth includes 15, and Unlimited includes 20/);
+  assert.match(appSource, /Additional website pages are quoted separately/);
   assert.match(appSource, /Repeated sections on the same route do not count as separate pages/);
-  assert.match(appSource, /never limits ZenshoTech modules/);
+  assert.match(appSource, /never affect your ZenshoTech modules or operational data/);
   assert.doesNotMatch(appSource, /₱\s*20,?000|One-time setup fee/i);
   assert.doesNotMatch(serverSource, /₱\s*20,?000|setupFeeStatus|setupFeePaid/i);
 });
@@ -133,11 +162,15 @@ test("subscription migration is additive and preserves historical billing data",
   assert.match(annualBillingMigration, /ADD COLUMN "billingCycle" TEXT NOT NULL DEFAULT 'monthly'/);
   assert.match(annualBillingMigration, /ADD COLUMN "requestedBillingCycle" TEXT/);
   assert.doesNotMatch(annualBillingMigration, /DELETE FROM|DROP TABLE|DROP COLUMN/i);
+  assert.match(entitlementMigration, /WHEN 'growth' THEN 15/);
+  assert.match(entitlementMigration, /WHEN 'unlimited' THEN 20/);
+  assert.doesNotMatch(entitlementMigration, /DELETE FROM|DROP TABLE|DROP COLUMN/i);
 });
 
 test("pricing and activation flows carry the selected billing cycle", () => {
-  assert.match(appSource, /Pay one month at a time or prepay 12 months and save 10%/);
-  assert.match(appSource, /Pay 12 Months/);
+  assert.match(appSource, /Pay monthly/);
+  assert.match(appSource, /Pay annually/);
+  assert.match(appSource, /Save 10%/);
   assert.match(appSource, /startSubscriptionTrial\(plan\.code, billingCycle\)/);
   assert.match(appSource, /requestSubscriptionActivation\(plan\.code, billingCycle\)/);
   const activationRoute = serverSource.slice(serverSource.indexOf('app.post("/api/subscription/request-activation"'), serverSource.indexOf('app.get("/api/admin/subscriptions"'));
@@ -154,11 +187,14 @@ test("shareable pricing shows prices and trials while the homepage has no pricin
   assert.match(pricingSource, /plan\.monthlyPrice/);
   assert.match(pricingSource, /plan\.annualPrice/);
   assert.match(pricingSource, /planPrice\(lifetimePlan\.monthlyPrice\)/);
-  assert.match(pricingSource, /Start 7-Day Free Trial/);
-  assert.match(pricingSource, /Request a Quote/);
+  assert.match(pricingSource, /Start free trial/);
+  assert.match(pricingSource, /Request a quote/);
+  assert.match(pricingSource, /Compare all features/);
+  assert.match(pricingSource, /pricing-info-accordion/);
   assert.doesNotMatch(loginSource, /\/pricing|View pricing/i);
   const subscription = { id: "sub-quote", planCode: "growth", requestedPlanCode: "growth", status: "trialing", billingCycle: "annual", requestedBillingCycle: "annual", trialEndAt: new Date("2026-09-01T00:00:00.000Z") };
   const customerView = serializeSubscription(subscription, {}, new Date("2026-08-26T00:00:00.000Z"));
+  assert.equal(customerView.includedWebsitePages, 15);
   assert.equal("monthlyPrice" in customerView.plan, false);
   assert.equal("amount" in customerView.billing, false);
   assert.equal("amount" in customerView.requestedBilling, false);
