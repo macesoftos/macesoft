@@ -1500,18 +1500,19 @@ model SystemSetting {
 }
 
 model UploadAsset {
-  id             String          @id
-  objectPath     String          @unique
-  category       String
-  branch         String
-  originalName   String          @default("")
-  mimeType       String
-  byteSize       Int
-  uploadedById   String
-  createdAt      DateTime        @default(now())
-  deletedAt      DateTime?
-  treatmentPhoto TreatmentPhoto?
-  flipbook       Flipbook?
+  id              String          @id
+  objectPath      String          @unique
+  storageProvider String          @default("supabase")
+  category        String
+  branch          String
+  originalName    String          @default("")
+  mimeType        String
+  byteSize        Int
+  uploadedById    String
+  createdAt       DateTime        @default(now())
+  deletedAt       DateTime?
+  treatmentPhoto  TreatmentPhoto?
+  flipbook        Flipbook?
 
   @@index([branch])
   @@index([category])

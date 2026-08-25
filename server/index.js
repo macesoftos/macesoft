@@ -32,6 +32,12 @@ import {
   verifyGoogleCredential,
 } from "./googleAuthentication.js";
 import { registrationConfirmationEmail } from "./registrationConfirmationEmail.js";
+import {
+  clientImageStorageProvider,
+  deleteCloudinaryImage,
+  fetchCloudinaryImage,
+  uploadCloudinaryImage,
+} from "./cloudinaryStorage.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { isDemoSignupHostname } from "../src/config/demoAccess.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
@@ -447,6 +453,15 @@ async function storageRequest(objectPath, options = {}) {
 async function storeImageObject(dataUrl, category) {
   const { buffer, mimeType, extension } = decodeImageDataUrl(dataUrl);
   const id = randomBytes(18).toString("base64url");
+  if (clientImageStorageProvider(category) === "cloudinary") {
+    try {
+      const cloudinaryAsset = await uploadCloudinaryImage({ buffer, mimeType, category, id });
+      return { id, category, mimeType, ...cloudinaryAsset };
+    } catch (error) {
+      console.error(JSON.stringify({ event: "cloudinary_upload_failed", category, error: clean(error.message) }));
+      throw apiError("Private client image storage could not accept the upload.", 502);
+    }
+  }
   const objectPath = `${category}/${id}.${extension}`;
   const uploaded = await storageRequest(objectPath, {
     method: "POST",
@@ -454,7 +469,33 @@ async function storeImageObject(dataUrl, category) {
     body: buffer,
   });
   if (!uploaded.ok) throw apiError("Object storage rejected the upload.", 502);
-  return { id, objectPath, category, mimeType, byteSize: buffer.length };
+  return { id, objectPath, storageProvider: "supabase", category, mimeType, byteSize: buffer.length };
+}
+
+async function storedAssetRequest(asset) {
+  if (clean(asset?.storageProvider).toLowerCase() === "cloudinary") {
+    try {
+      return await fetchCloudinaryImage(asset);
+    } catch (error) {
+      console.error(JSON.stringify({ event: "cloudinary_download_failed", assetId: asset?.id, error: clean(error.message) }));
+      throw apiError("Private client image storage is unavailable.", 502);
+    }
+  }
+  return storageRequest(asset.objectPath);
+}
+
+async function deleteStoredAsset(asset) {
+  if (clean(asset?.storageProvider).toLowerCase() === "cloudinary") {
+    try {
+      const result = await deleteCloudinaryImage(asset.objectPath);
+      return result === "ok" || result === "not found";
+    } catch (error) {
+      console.error(JSON.stringify({ event: "cloudinary_delete_failed", assetId: asset?.id, error: clean(error.message) }));
+      return false;
+    }
+  }
+  const deleted = await storageRequest(asset.objectPath, { method: "DELETE" });
+  return deleted.ok || deleted.status === 404;
 }
 
 function apiError(message, status = 400, payload = undefined) {
@@ -6365,7 +6406,7 @@ app.post("/api/uploads", asyncRoute(async (request, response) => {
     });
     response.status(201).json({ asset: { ...asset, url: `/api/uploads/${asset.id}` } });
   } catch (error) {
-    await storageRequest(stored.objectPath, { method: "DELETE" }).catch(() => {});
+    await deleteStoredAsset(stored).catch(() => {});
     throw error;
   }
 }));
@@ -6403,7 +6444,7 @@ app.post("/api/treatments/:id/photos", asyncRoute(async (request, response) => {
       });
     });
   } catch (error) {
-    await storageRequest(stored.objectPath, { method: "DELETE" }).catch(() => {});
+    await deleteStoredAsset(stored).catch(() => {});
     throw error;
   }
 
@@ -6427,8 +6468,8 @@ app.delete("/api/treatments/:id/photos/:photoId", asyncRoute(async (request, res
     throw apiError("Only the uploader or an organization administrator can remove this photo.", 403);
   }
 
-  const deleted = await storageRequest(photo.asset.objectPath, { method: "DELETE" });
-  if (!deleted.ok && deleted.status !== 404) throw apiError("Object storage could not remove the photo.", 502);
+  const deleted = await deleteStoredAsset(photo.asset);
+  if (!deleted) throw apiError("Object storage could not remove the photo.", 502);
 
   const auditLog = await prisma.$transaction(async (tx) => {
     await tx.treatmentPhoto.delete({ where: { id: photo.id } });
@@ -6457,11 +6498,14 @@ app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
       : requireAuthenticatedAccount(request);
     if (!canAccessBranch(actor, asset.branch)) throw apiError("You do not have access to this uploaded asset.", 403);
   }
-  const stored = await storageRequest(asset.objectPath);
+  const stored = await storedAssetRequest(asset);
   if (!stored.ok) throw apiError("Uploaded asset is unavailable.", stored.status === 404 ? 404 : 502);
   const buffer = Buffer.from(await stored.arrayBuffer());
+  const privateClientImage = ["client-photo", "treatment-photo"].includes(asset.category);
   response.set({
-    "Cache-Control": categoryAccess.public ? "public, max-age=31536000, immutable" : "private, max-age=300",
+    "Cache-Control": categoryAccess.public
+      ? "public, max-age=31536000, immutable"
+      : privateClientImage ? "private, no-store" : "private, max-age=300",
     "Content-Disposition": "inline",
     "Content-Length": String(buffer.length),
     "Content-Type": asset.mimeType,
@@ -6510,8 +6554,8 @@ app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
     response.status(204).end();
     return;
   }
-  const deleted = await storageRequest(asset.objectPath, { method: "DELETE" });
-  if (!deleted.ok && deleted.status !== 404) throw apiError("Object storage could not remove the asset.", 502);
+  const deleted = await deleteStoredAsset(asset);
+  if (!deleted) throw apiError("Object storage could not remove the asset.", 502);
   await prisma.uploadAsset.delete({ where: { id: asset.id } });
   response.status(204).end();
 }));

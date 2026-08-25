@@ -31,6 +31,16 @@ export function productionConfigErrors(environment = process.env) {
   if (googleClientId && !/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(googleClientId)) {
     errors.push("GOOGLE_CLIENT_ID must be a valid Google Web Client ID.");
   }
+  const clientImageStorageProvider = String(environment.CLIENT_IMAGE_STORAGE_PROVIDER || "supabase").trim().toLowerCase();
+  if (!["supabase", "cloudinary"].includes(clientImageStorageProvider)) {
+    errors.push("CLIENT_IMAGE_STORAGE_PROVIDER must be supabase or cloudinary.");
+  }
+  const cloudinaryNames = ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"];
+  const cloudinaryConfigured = cloudinaryNames.map((name) => Boolean(String(environment[name] || "").trim()));
+  if (cloudinaryConfigured.some(Boolean) && !cloudinaryConfigured.every(Boolean)) {
+    errors.push("CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must be configured together.");
+  }
+  if (clientImageStorageProvider === "cloudinary") present(environment, cloudinaryNames, errors);
 
   const origins = String(environment.APP_ORIGIN || "").split(",").map((value) => value.trim()).filter(Boolean);
   if (origins.some((origin) => !origin.startsWith("https://") || origin.includes("example.com"))) {

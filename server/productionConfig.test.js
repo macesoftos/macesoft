@@ -108,3 +108,31 @@ test("production validates an optional Google Web Client ID", () => {
   assert.ok(productionConfigErrors({ ...base, GOOGLE_CLIENT_ID: "not-a-client-id" }).some((error) => error.includes("Google Web Client ID")));
   assert.deepEqual(productionConfigErrors({ ...base, GOOGLE_CLIENT_ID: "123456789-example.apps.googleusercontent.com" }), []);
 });
+
+test("Cloudinary client-image storage requires one complete server-side credential set", () => {
+  const base = {
+    NODE_ENV: "production",
+    APP_ORIGIN: "https://clinic.example.ph",
+    DATABASE_URL: "postgresql://runtime",
+    DIRECT_URL: "postgresql://direct",
+    FACETRACK_ENCRYPTION_KEY: "a".repeat(32),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: "true",
+    STORAGE_BASE_URL: "https://storage.example.ph",
+    STORAGE_BUCKET: "clinical-assets",
+    STORAGE_SERVICE_KEY: "secret",
+  };
+  const incomplete = productionConfigErrors({
+    ...base,
+    CLIENT_IMAGE_STORAGE_PROVIDER: "cloudinary",
+    CLOUDINARY_CLOUD_NAME: "clinic-cloud",
+  });
+  assert.ok(incomplete.some((error) => error.includes("must be configured together")));
+  assert.ok(incomplete.some((error) => error.includes("CLOUDINARY_API_KEY is required")));
+  assert.deepEqual(productionConfigErrors({
+    ...base,
+    CLIENT_IMAGE_STORAGE_PROVIDER: "cloudinary",
+    CLOUDINARY_CLOUD_NAME: "clinic-cloud",
+    CLOUDINARY_API_KEY: "123456",
+    CLOUDINARY_API_SECRET: "server-secret",
+  }), []);
+});
