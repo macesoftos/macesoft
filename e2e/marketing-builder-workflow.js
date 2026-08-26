@@ -336,6 +336,13 @@ export async function verifyMarketingBuilder(page, expect) {
   await page.getByRole("button", { name: "Show Marketing menu" }).click();
   await page.getByRole("button", { name: "Return to ZenshoTech dashboard" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
+  const onboardingWelcome = page.getByTestId("onboarding-welcome");
+  if (await onboardingWelcome.isVisible()) {
+    const onboardingResponse = page.waitForResponse((response) => response.url().endsWith("/api/onboarding") && response.request().method() === "PATCH");
+    await onboardingWelcome.getByRole("button", { name: "Explore on my own" }).click();
+    expect((await onboardingResponse).status()).toBe(200);
+    await expect(onboardingWelcome).toBeHidden();
+  }
   await page.getByRole("button", { name: "My Workspace", exact: true }).click();
   await expect(page.getByLabel(/open account menu for/i)).toBeVisible();
 

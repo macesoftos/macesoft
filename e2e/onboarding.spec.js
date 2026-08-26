@@ -99,6 +99,51 @@ test("a new account can follow a deep link before onboarding begins on the dashb
   await expect(page.getByTestId("onboarding-welcome")).toBeVisible();
 });
 
+test("a stale onboarding refresh cannot reopen a welcome that was dismissed", async ({ page }) => {
+  let onboarding = newOnboarding();
+  let delayNextRead = false;
+  let releaseDelayedRead;
+  const delayedReadStarted = new Promise((resolve) => {
+    releaseDelayedRead = resolve;
+  });
+
+  await mockResponsiveApi(page, { onboarding });
+  await page.route("**/api/onboarding", async (route) => {
+    const request = route.request();
+    if (request.method() === "PATCH") {
+      const update = request.postDataJSON();
+      if (update.action === "dismiss") {
+        onboarding = {
+          ...onboarding,
+          state: { ...onboarding.state, dismissedAt: "2026-08-26T01:00:00.000Z" },
+        };
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(onboarding) });
+      return;
+    }
+
+    const responsePayload = structuredClone(onboarding);
+    if (delayNextRead) {
+      delayNextRead = false;
+      releaseDelayedRead();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(responsePayload) });
+  });
+
+  await page.goto("/dashboard");
+  const welcome = page.getByTestId("onboarding-welcome");
+  await expect(welcome).toBeVisible();
+
+  delayNextRead = true;
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("macesoft:workspace-mutated")));
+  await delayedReadStarted;
+  await welcome.getByRole("button", { name: "Explore on my own" }).click();
+  await expect(welcome).toBeHidden();
+  await page.waitForTimeout(800);
+  await expect(welcome).toBeHidden();
+});
+
 test("role tours contain only modules granted by the server", async ({ page }) => {
   const cases = [
     {

@@ -112,17 +112,21 @@ export function useOnboardingController({
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [tourActive, setTourActive] = useState(false);
   const refreshTimerRef = useRef(0);
+  const mutationVersionRef = useRef(0);
 
   const steps = useMemo(() => tourStepsFor({ roleKind: payload?.roleKind, modules: payload?.modules || [] }), [payload?.modules, payload?.roleKind]);
   const currentStep = Math.min(Number(payload?.state?.currentStep || 0), Math.max(0, steps.length - 1));
 
   const refresh = useCallback(async ({ quiet = false } = {}) => {
     if (!session?.id) return null;
+    const mutationVersion = mutationVersionRef.current;
     if (!quiet) setLoading(true);
     try {
       const next = await loadOnboarding();
-      setPayload(next);
-      setError("");
+      if (mutationVersion === mutationVersionRef.current) {
+        setPayload(next);
+        setError("");
+      }
       return next;
     } catch (refreshError) {
       setError(refreshError.message || "Getting Started is temporarily unavailable.");
@@ -174,6 +178,7 @@ export function useOnboardingController({
   }, [refresh, session?.id]);
 
   const persist = useCallback(async (update) => {
+    mutationVersionRef.current += 1;
     try {
       const next = await updateOnboarding(update);
       setPayload(next);
