@@ -3907,6 +3907,7 @@ function normalizeFollowUpPayload(payload, lead) {
 
 const authCookieName = "macesoft_session";
 const sessionDurationMs = 12 * 60 * 60 * 1000;
+const rememberedSessionDurationMs = 30 * 24 * 60 * 60 * 1000;
 
 function parseCookies(request) {
   return Object.fromEntries(
@@ -5179,6 +5180,7 @@ app.use("/api/payroll", createPayrollRouter(prisma, { apiError, asyncRoute, writ
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();
   const password = requireText(request.body?.password, "Password");
+  const remember = request.body?.remember === true;
   const account = await prisma.account.findUnique({ where: { email }, include: accountAccessInclude });
   const now = new Date();
 
@@ -5200,7 +5202,7 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
     throw apiError("This account must be assigned to one clinic branch. Contact an administrator.", 403);
   }
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + sessionDurationMs);
+  const expiresAt = new Date(Date.now() + (remember ? rememberedSessionDurationMs : sessionDurationMs));
   await prisma.$transaction([
     prisma.authSession.deleteMany({ where: { accountId: account.id, expiresAt: { lt: now } } }),
     prisma.authSession.create({ data: { tokenHash: sessionTokenHash(token), accountId: account.id, expiresAt } }),

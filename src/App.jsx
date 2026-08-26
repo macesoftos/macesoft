@@ -1816,8 +1816,8 @@ function App() {
     ].slice(0, 150));
   }
 
-  async function handleLogin(email, password) {
-    const result = await loginAccount(email, password);
+  async function handleLogin(email, password, remember = false) {
+    const result = await loginAccount(email, password, remember);
     const user = result.account;
     setSessionNotice("");
     setSession(user);
@@ -5270,6 +5270,7 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -5281,7 +5282,7 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
     setError("");
     setSubmitting(true);
     try {
-      await onLogin(email, password);
+      await onLogin(email, password, remember);
     } catch (loginError) {
       setError(loginError.message || "Unable to sign in.");
     } finally {
@@ -5322,56 +5323,87 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-panel">
-        <form className="login-card" onSubmit={submit}>
-          <BrandWordmark className="login-logo" />
-          <div>
-            <p className="eyebrow">Secure role login</p>
-            <h2>Sign in to your workspace</h2>
-            <p className="login-helper">New to ZenshoTech? Start your 7-day free trial. No commitment.</p>
-          </div>
-          <GoogleIdentityButton mode="signin" onCredential={signInWithGoogle} disabled={submitting} />
-          <div className="login-demo-separator"><span>or sign in with email</span></div>
-          <label>
-            <span>Email</span>
-            <input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-          </label>
-          <label>
-            <span>Password</span>
-            <div className="login-password-field">
-              <input
-                autoComplete="current-password"
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
+    <main className="login-page zensho-login-page">
+      <div className="zensho-login-orb zensho-login-orb-top" aria-hidden="true" />
+      <div className="zensho-login-orb zensho-login-orb-bottom" aria-hidden="true" />
+      <section className="login-panel zensho-login-panel">
+        <form className="login-card zensho-login-card" onSubmit={submit}>
+          <header className="zensho-login-header">
+            <BrandWordmark className="login-logo zensho-login-logo" />
+            <p className="zensho-login-eyebrow">Secure workspace access</p>
+            <h1>Welcome back</h1>
+            <p>Sign in to manage your ZenshoTech workspace.</p>
+          </header>
+
+          <div className="zensho-login-fields">
+            <div className="zensho-login-field">
+              <label htmlFor="zensho-login-email">Email address</label>
+              <div className="zensho-login-input-shell">
+                <Mail size={21} aria-hidden="true" />
+                <input id="zensho-login-email" autoComplete="username" placeholder="name@company.com" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+              </div>
+            </div>
+            <div className="zensho-login-field">
+              <div className="zensho-login-label-row">
+                <label htmlFor="zensho-login-password">Password</label>
+                <button className="zensho-forgot-link" type="button" onClick={() => setForgotOpen((value) => !value)}>Forgot password?</button>
+              </div>
+              <div className="login-password-field zensho-login-input-shell">
+                <LockKeyhole size={22} aria-hidden="true" />
+                <input
+                  id="zensho-login-password"
+                  autoComplete="current-password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
               <button
                 className="login-password-toggle"
                 type="button"
                 aria-label={showPassword ? "Hide password" : "Show password"}
                 aria-pressed={showPassword}
-                onClick={() => setShowPassword((visible) => !visible)}
-              >
-                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
+                  onClick={() => setShowPassword((visible) => !visible)}
+                >
+                  {showPassword ? <EyeOff size={22} aria-hidden="true" /> : <Eye size={22} aria-hidden="true" />}
+                </button>
+              </div>
             </div>
-          </label>
+            <label className="zensho-remember-option">
+              <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+              <span>Keep me signed in on this device</span>
+            </label>
+          </div>
+
           {notice && <div className="inline-state warning" role="alert"><AlertCircle size={17} /><span>{notice}</span></div>}
           {error && <div className="inline-state danger"><AlertCircle size={17} /><span>{error}</span></div>}
-          <button className="primary-button full" type="submit" disabled={submitting || !email || !password}>
-            <LockKeyhole size={17} aria-hidden="true" />
+          <button className="primary-button full zensho-login-submit" type="submit" disabled={submitting || !email || !password}>
+            <LockKeyhole size={20} aria-hidden="true" />
             {submitting ? "Signing in..." : "Sign in securely"}
           </button>
-          <button className="ghost-button full" type="button" onClick={() => setForgotOpen((value) => !value)}>
-            Forgot password
-          </button>
           {forgotOpen && (
-            <div className="inline-state warning" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
+            <div className="inline-state warning zensho-reset-panel" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
+
+          <div className="login-demo-separator zensho-login-divider"><span>or continue with Google</span></div>
+          <GoogleIdentityButton mode="signin" onCredential={signInWithGoogle} disabled={submitting} />
+
           <div className="login-demo-separator"><span>New to ZenshoTech?</span></div>
-          <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Register</button>
+          <section className="zensho-create-workspace" aria-labelledby="zensho-create-workspace-title">
+            <div className="zensho-create-workspace-heading">
+              <span className="zensho-create-icon"><Plus size={28} aria-hidden="true" /></span>
+              <div>
+                <h2 id="zensho-create-workspace-title">Create your workspace</h2>
+                <p>Start your 7-day free trial. No commitment.</p>
+              </div>
+            </div>
+            <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Create a free account</button>
+          </section>
+
+          <footer className="zensho-login-trust" aria-label="Login security">
+            <span><Plus size={14} aria-hidden="true" />Encrypted login</span>
+            <span><Check size={14} aria-hidden="true" />Secure access</span>
+          </footer>
         </form>
       </section>
     </main>

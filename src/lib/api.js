@@ -60,10 +60,10 @@ async function requestJson(path, options = {}) {
   return payload;
 }
 
-export function loginAccount(email, password) {
+export function loginAccount(email, password, remember = false) {
   return requestJson("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, remember }),
   });
 }
 

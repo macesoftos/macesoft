@@ -202,9 +202,12 @@ try {
     const login = await request("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: demoPassword }),
+      body: JSON.stringify({ email, password: demoPassword, remember: index === 1 }),
     });
     assert(login.response.ok && login.payload.account.role === "Demo User", `demo login ${index} failed`);
+    if (index === 1) {
+      assert(new Date(login.payload.expiresAt).getTime() - Date.now() > 29 * 86_400_000, "remembered login did not receive an extended session");
+    }
     const cookie = login.response.headers.get("set-cookie")?.split(";")[0];
     assert(cookie, `demo login ${index} did not issue a session cookie`);
     const workspace = await request("/api/bootstrap", { headers: { Cookie: cookie } });
