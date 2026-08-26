@@ -34,7 +34,7 @@ import {
   verifyGoogleCredential,
 } from "./googleAuthentication.js";
 import { registrationConfirmationEmail } from "./registrationConfirmationEmail.js";
-import { providerRegistrationEmail } from "./providerRegistrationEmail.js";
+import { providerRegistrationEmail, providerRegistrationRecipient } from "./providerRegistrationEmail.js";
 import {
   clientImageStorageProvider,
   deleteCloudinaryImage,
@@ -4689,7 +4689,7 @@ async function deliverProviderRegistrationNotification(account, authenticationMe
     console.warn(JSON.stringify({ event: "provider_registration_notification_skipped", accountId: account.id, reason: "smtp_not_configured" }));
     return false;
   }
-  const recipient = subscriptionSalesRecipient(process.env);
+  const recipient = providerRegistrationRecipient(process.env);
   let transporter;
   try {
     transporter = await createVerifiedEmailTransport();

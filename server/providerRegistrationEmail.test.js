@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { providerRegistrationEmail } from "./providerRegistrationEmail.js";
+import {
+  DEFAULT_PROVIDER_REGISTRATION_EMAIL,
+  providerRegistrationEmail,
+  providerRegistrationRecipient,
+} from "./providerRegistrationEmail.js";
+
+test("provider signup alerts default to the system owner's admin mailbox", () => {
+  assert.equal(DEFAULT_PROVIDER_REGISTRATION_EMAIL, "admin@zenshotech.com");
+  assert.equal(providerRegistrationRecipient({}), "admin@zenshotech.com");
+  assert.equal(providerRegistrationRecipient({ PROVIDER_REGISTRATION_EMAIL: " Owner@ZenshoTech.com " }), "owner@zenshotech.com");
+  assert.equal(providerRegistrationRecipient({ PROVIDER_REGISTRATION_EMAIL: "not-an-email" }), "admin@zenshotech.com");
+});
 
 test("provider registration alert identifies the registrant and links to the secured workspace", () => {
   const email = providerRegistrationEmail({

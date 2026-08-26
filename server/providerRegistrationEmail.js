@@ -19,6 +19,13 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
+export const DEFAULT_PROVIDER_REGISTRATION_EMAIL = "admin@zenshotech.com";
+
+export function providerRegistrationRecipient(env = process.env) {
+  const configured = clean(env.PROVIDER_REGISTRATION_EMAIL).toLowerCase();
+  return /^\S+@\S+\.\S+$/.test(configured) ? configured : DEFAULT_PROVIDER_REGISTRATION_EMAIL;
+}
+
 export function providerRegistrationEmail({
   recipient,
   account,
