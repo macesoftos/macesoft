@@ -140,8 +140,8 @@ export function useOnboardingController({
   }, [refresh, session?.id]);
 
   useEffect(() => {
-    if (!payload || !isReady || blocked) return;
-    const state = payload.state || {};
+    if (!payload?.state || !isReady || blocked) return;
+    const state = payload.state;
     if (!state.startedAt && !state.completedAt && !state.dismissedAt) {
       setWelcomeOpen(true);
       return;
