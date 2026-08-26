@@ -308,6 +308,7 @@ app.use("/api/auth/register", publicWriteLimiter);
 app.use("/api/auth/google", loginLimiter);
 app.use("/api/auth/forgot-password", loginLimiter);
 app.use("/api/auth/provider-setup", loginLimiter);
+app.use("/api/auth/provider-bootstrap", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
 app.use("/api/public-bookings", publicWriteLimiter);
@@ -5553,6 +5554,34 @@ app.post("/api/auth/provider-setup", asyncRoute(async (request, response) => {
   } finally {
     transporter.close();
   }
+}));
+
+// Temporary, staging-only owner bootstrap. Remove immediately after the activation email is sent.
+app.post("/api/auth/provider-bootstrap", asyncRoute(async (request, response) => {
+  const expectedHash = "892849b4d22c8a459ebd49da3ab628233f9e03d5f68bd86ae7f8187d276cbfdc";
+  const suppliedHash = sessionTokenHash(clean(request.get("x-provider-bootstrap")));
+  const actual = Buffer.from(suppliedHash, "hex");
+  const expected = Buffer.from(expectedHash, "hex");
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw apiError("Not found.", 404);
+  }
+  const email = "admin@zenshotech.com";
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = sessionTokenHash(token);
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  const account = await prisma.$transaction(async (tx) => {
+    const saved = await ensureProviderSetupAccount(tx, email);
+    await tx.passwordResetToken.deleteMany({ where: { accountId: saved.id, usedAt: null } });
+    await tx.passwordResetToken.create({ data: { tokenHash, accountId: saved.id, expiresAt } });
+    return saved;
+  });
+  const origin = clean(process.env.APP_ORIGIN).split(",")[0] || "https://zenshotech.com";
+  response.status(201).json({
+    accountId: account.id,
+    email,
+    setupUrl: `${origin.replace(/\/$/, "")}/provider?reset=${encodeURIComponent(token)}`,
+    expiresAt,
+  });
 }));
 
 app.post("/api/auth/forgot-password", asyncRoute(async (request, response) => {
