@@ -138,6 +138,7 @@ import {
   recordPackageInstallment,
   recordAttendance,
   requestPasswordReset,
+  requestProviderSetup,
   requestSubscriptionActivation,
   registerAccount,
   resetAccountPassword,
@@ -5497,6 +5498,8 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate, provi
   const [submitting, setSubmitting] = useState(false);
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
+  const [providerSetupSubmitting, setProviderSetupSubmitting] = useState(false);
+  const [providerSetupMessage, setProviderSetupMessage] = useState("");
 
   async function submit(event) {
     event.preventDefault();
@@ -5540,6 +5543,20 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate, provi
       setError(resetError.message || "Unable to request a password reset.");
     } finally {
       setResetSubmitting(false);
+    }
+  }
+
+  async function sendProviderSetup() {
+    setError("");
+    setProviderSetupMessage("");
+    setProviderSetupSubmitting(true);
+    try {
+      const result = await requestProviderSetup(email);
+      setProviderSetupMessage(result.message);
+    } catch (setupError) {
+      setError(setupError.message || "Unable to send provider setup instructions.");
+    } finally {
+      setProviderSetupSubmitting(false);
     }
   }
 
@@ -5605,6 +5622,12 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate, provi
           {forgotOpen && (
             <div className="inline-state warning zensho-reset-panel" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
+
+          {providerMode && <section className="provider-login-setup" aria-label="System Provider account setup">
+            <div><ShieldCheck size={19} aria-hidden="true" /><span><strong>First-time provider access</strong><small>Enter your approved administrator email above and receive a secure password-setup link.</small></span></div>
+            {providerSetupMessage && <p role="status">{providerSetupMessage}</p>}
+            <button className="ghost-button full" type="button" disabled={!email || providerSetupSubmitting} onClick={sendProviderSetup}>{providerSetupSubmitting ? "Sending secure link..." : "Send provider setup link"}</button>
+          </section>}
 
           {!providerMode && <>
             <div className="login-demo-separator zensho-login-divider"><span>or continue with Google</span></div>

@@ -33,6 +33,20 @@ test("provider route is gated in the application before loading overview data", 
   assert.match(workspace, /updateProviderUser\(user\.id, action\)/);
 });
 
+test("provider setup requires an approved mailbox and a single-use password token", () => {
+  assert.equal(isPublicApiRequest("POST", "/api/auth/provider-setup"), true);
+  const route = serverSource.slice(
+    serverSource.indexOf('app.post("/api/auth/provider-setup"'),
+    serverSource.indexOf('app.post("/api/auth/forgot-password"'),
+  );
+  assert.match(route, /platformAdminEmails\(\)\.has\(email\)/);
+  assert.match(route, /passwordResetToken\.create/);
+  assert.match(route, /single-use link within 30 minutes/);
+  assert.doesNotMatch(route, /passwordHash:\s*hashPassword\(request\.body/);
+  assert.match(appSource, /Send provider setup link/);
+  assert.match(serverSource, /emailVerifiedAt: new Date\(\)/);
+});
+
 test("system-provider user mutations are protected, scoped to safe actions, and audited", () => {
   assert.equal(isPublicApiRequest("PATCH", "/api/admin/users/account-1"), false);
   const route = serverSource.slice(

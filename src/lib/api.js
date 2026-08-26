@@ -140,6 +140,10 @@ export function requestPasswordReset(email) {
   return requestJson("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
 }
 
+export function requestProviderSetup(email) {
+  return requestJson("/api/auth/provider-setup", { method: "POST", body: JSON.stringify({ email }) });
+}
+
 export function resetAccountPassword(token, newPassword) {
   return requestJson("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ token, newPassword }) });
 }

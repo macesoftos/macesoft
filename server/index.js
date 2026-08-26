@@ -307,6 +307,7 @@ app.use("/api/auth/demo-register", demoRegistrationLimiter);
 app.use("/api/auth/register", publicWriteLimiter);
 app.use("/api/auth/google", loginLimiter);
 app.use("/api/auth/forgot-password", loginLimiter);
+app.use("/api/auth/provider-setup", loginLimiter);
 app.use("/api/auth/reset-password", loginLimiter);
 app.use("/api/public-leads", publicWriteLimiter);
 app.use("/api/public-bookings", publicWriteLimiter);
@@ -3970,6 +3971,7 @@ function platformAdminEmails() {
   return new Set([
     ...clean(process.env.ZENSHOTECH_ADMIN_EMAILS).split(","),
     subscriptionSalesRecipient(process.env),
+    "admin@zenshotech.com",
   ].map((email) => email.trim().toLowerCase()).filter(Boolean));
 }
 
@@ -5417,6 +5419,70 @@ app.use("/api/public/flipbooks", flipbookRouters.public);
 app.use("/api/facetrack-attendance", createFaceTrackAttendanceRouter(prisma));
 app.use("/api/payroll", createPayrollRouter(prisma, { apiError, asyncRoute, writeAudit }));
 
+async function ensureProviderSetupAccount(tx, email) {
+  const existing = await tx.account.findUnique({ where: { email } });
+  const modules = roleAccess["Super Admin"];
+  if (existing) {
+    return tx.account.update({
+      where: { id: existing.id },
+      data: {
+        role: "Super Admin",
+        organizationWideAccess: true,
+        organizationModules: jsonText(modules, []),
+        status: "Active",
+        mustChangePassword: true,
+        failedLoginCount: 0,
+        lockedUntil: null,
+      },
+    });
+  }
+  const organization = await tx.organization.upsert({
+    where: { slug: "zenshotech-provider" },
+    create: { name: "ZenshoTech Provider", slug: "zenshotech-provider", status: "Internal" },
+    update: { name: "ZenshoTech Provider", status: "Internal" },
+  });
+  const branch = await tx.branch.upsert({
+    where: { name: "ZenshoTech Provider Operations" },
+    create: {
+      organizationId: organization.id,
+      name: "ZenshoTech Provider Operations",
+      code: "ZEN-PROVIDER",
+      city: "Manila",
+      status: "Active",
+      modules: { create: modules.map((moduleId) => ({ moduleId, enabled: true })) },
+    },
+    update: { organizationId: organization.id, code: "ZEN-PROVIDER", status: "Active" },
+  });
+  const account = await tx.account.create({ data: {
+    name: "ZenshoTech System Provider",
+    email,
+    passwordHash: hashPassword(randomBytes(48).toString("base64url")),
+    role: "Super Admin",
+    branch: branch.name,
+    organizationId: organization.id,
+    organizationWideAccess: true,
+    organizationModules: jsonText(modules, []),
+    lastBranchId: branch.id,
+    status: "Active",
+    mustChangePassword: true,
+  } });
+  await tx.branchMembership.create({ data: {
+    branchId: branch.id,
+    accountId: account.id,
+    role: "Super Admin",
+    permissions: "[]",
+    modules: jsonText(modules, []),
+    status: "Active",
+    isPrimary: true,
+  } });
+  await tx.subscription.upsert({
+    where: { organizationId: organization.id },
+    create: { organizationId: organization.id, planCode: "lifetime", billingCycle: "one_time", status: "lifetime", paidStartAt: new Date(), includedWebsitePages: 20 },
+    update: { planCode: "lifetime", billingCycle: "one_time", status: "lifetime", expiresAt: null },
+  });
+  return account;
+}
+
 app.post("/api/auth/login", asyncRoute(async (request, response) => {
   const email = requireText(request.body?.email, "Email").toLowerCase();
   const password = requireText(request.body?.password, "Password");
@@ -5450,6 +5516,43 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
   ]);
   setSessionCookie(response, token, expiresAt);
   response.json({ account: await publicAccountWithSubscription(account), expiresAt });
+}));
+
+app.post("/api/auth/provider-setup", asyncRoute(async (request, response) => {
+  const email = requireText(request.body?.email, "Email").toLowerCase().slice(0, 160);
+  if (!platformAdminEmails().has(email)) {
+    return response.status(202).json({ message: "If this email is approved for provider access, setup instructions have been sent." });
+  }
+  const transporter = await createVerifiedEmailTransport();
+  let account;
+  let tokenHash;
+  try {
+    const token = randomBytes(32).toString("base64url");
+    tokenHash = sessionTokenHash(token);
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    account = await prisma.$transaction(async (tx) => {
+      const saved = await ensureProviderSetupAccount(tx, email);
+      if (saved.status !== "Active") throw apiError("This provider account is inactive. Contact the system owner.", 409);
+      await tx.passwordResetToken.deleteMany({ where: { accountId: saved.id, usedAt: null } });
+      await tx.passwordResetToken.create({ data: { tokenHash, accountId: saved.id, expiresAt } });
+      return saved;
+    });
+    const origin = clean(process.env.APP_ORIGIN).split(",")[0] || "https://zenshotech.com";
+    const setupUrl = `${origin.replace(/\/$/, "")}/provider?reset=${encodeURIComponent(token)}`;
+    await sendSmtpEmail({
+      transporter,
+      to: email,
+      subject: "Activate your ZenshoTech System Provider account",
+      text: `Use this single-use link within 30 minutes to verify your email and set your System Provider password:\n\n${setupUrl}\n\nIf you did not request this account, contact ZenshoTech support.`,
+    });
+    response.status(202).json({ message: `A secure setup link was sent to ${email}. It expires in 30 minutes.` });
+  } catch (error) {
+    if (tokenHash) await prisma.passwordResetToken.deleteMany({ where: { tokenHash } }).catch(() => {});
+    console.error(JSON.stringify({ event: "provider_setup_failed", accountId: account?.id, email, error: clean(error.message) }));
+    throw error;
+  } finally {
+    transporter.close();
+  }
 }));
 
 app.post("/api/auth/forgot-password", asyncRoute(async (request, response) => {
@@ -5511,7 +5614,7 @@ app.post("/api/auth/reset-password", asyncRoute(async (request, response) => {
     if (consumed.count !== 1) throw apiError("This password-reset link has already been used.", 409);
     await tx.account.update({
       where: { id: reset.accountId },
-      data: { passwordHash: hashPassword(newPassword), mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+      data: { passwordHash: hashPassword(newPassword), mustChangePassword: false, failedLoginCount: 0, lockedUntil: null, emailVerifiedAt: new Date() },
     });
     await tx.authSession.deleteMany({ where: { accountId: reset.accountId } });
   });

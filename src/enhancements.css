@@ -391,6 +391,42 @@
   margin: 0;
 }
 
+.provider-login-setup {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(157, 86, 96, 0.2);
+  border-radius: 13px;
+  background: #fcf6f7;
+}
+
+.provider-login-setup > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.provider-login-setup svg {
+  flex: 0 0 auto;
+  color: #9d5660;
+}
+
+.provider-login-setup span {
+  display: grid;
+  gap: 2px;
+}
+
+.provider-login-setup small,
+.provider-login-setup p {
+  color: #76696a;
+  line-height: 1.35;
+}
+
+.provider-login-setup p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
 .provider-status.status-trialing {
   background: #e8eef7;
   color: #365a83;
