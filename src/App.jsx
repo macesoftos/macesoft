@@ -5301,13 +5301,15 @@ function providerStatusLabel(status) {
 }
 
 function ProviderWorkspace({ session, onLogout, onNavigate }) {
-  const [overview, setOverview] = useState({ metrics: {}, registrations: [], users: [], generatedAt: null });
+  const [overview, setOverview] = useState({ metrics: {}, registrations: [], users: [], notifications: [], generatedAt: null });
   const [loading, setLoading] = useState(Boolean(session.platformAdmin));
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [userQuery, setUserQuery] = useState("");
   const [userStatus, setUserStatus] = useState("all");
+  const [notificationQuery, setNotificationQuery] = useState("");
+  const [notificationModule, setNotificationModule] = useState("all");
   const [userActionId, setUserActionId] = useState("");
   const [workspaceType, setWorkspaceType] = useState("all");
   const [subscriptionStatus, setSubscriptionStatus] = useState("all");
@@ -5352,6 +5354,24 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
         .some((value) => String(value || "").toLowerCase().includes(searchTerm));
     });
   }, [overview.users, userQuery, userStatus]);
+  const notificationModuleOptions = useMemo(() => (
+    [...new Set((overview.notifications || []).map((notification) => notification.module).filter(Boolean))].sort()
+  ), [overview.notifications]);
+  const filteredNotifications = useMemo(() => {
+    const searchTerm = notificationQuery.trim().toLowerCase();
+    return (overview.notifications || []).filter((notification) => {
+      if (notificationModule !== "all" && notification.module !== notificationModule) return false;
+      if (!searchTerm) return true;
+      return [
+        notification.organization?.name,
+        notification.title,
+        notification.message,
+        notification.actor,
+        ...(notification.branches || []),
+        ...(notification.recipients || []).flatMap((recipient) => [recipient.name, recipient.email]),
+      ].some((value) => String(value || "").toLowerCase().includes(searchTerm));
+    });
+  }, [notificationModule, notificationQuery, overview.notifications]);
 
   async function applyUserAction(user, action) {
     setUserActionId(`${user.id}:${action}`);
@@ -5430,7 +5450,7 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
 
         <section className="provider-system-strip" aria-label="Tracking status">
           <div><Database size={18} aria-hidden="true" /><span><strong>Live registration tracking</strong><small>Supabase/PostgreSQL is the source of truth for accounts and workspaces.</small></span></div>
-          <div><Mail size={18} aria-hidden="true" /><span><strong>Owner email alerts</strong><small>New registrations notify the configured ZenshoTech sales inbox when SMTP is enabled.</small></span></div>
+          <div><Mail size={18} aria-hidden="true" /><span><strong>Owner email alerts</strong><small>New registrations notify the configured ZenshoTech provider inbox when SMTP is enabled.</small></span></div>
           <div><Activity size={18} aria-hidden="true" /><span><strong>{metrics.activeUsers ?? 0} active users</strong><small>Across {metrics.activeBranches ?? 0} active clinic branches.</small></span></div>
         </section>
 
@@ -5458,6 +5478,27 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
               <td data-label="Subscription"><span className={`provider-status status-${item.subscription?.status || "pending_plan"}`}>{providerStatusLabel(item.subscription?.status)}</span><strong>{item.subscription?.plan?.name || (item.workspaceType === "demo" ? "Demo access" : "No plan selected")}</strong><small>{item.subscription?.paymentProviderConnected ? "Payment provider linked" : "No payment provider reference"}</small></td>
               <td data-label="Usage"><strong>{item.usage.users} user{item.usage.users === 1 ? "" : "s"}</strong><small>{item.usage.branches} branch{item.usage.branches === 1 ? "" : "es"}</small></td>
               <td data-label="Last activity"><strong>{providerDateTime(item.owner?.lastLoginAt, "Never signed in")}</strong><small>{item.owner?.status || item.organization.status}</small></td>
+            </tr>)}</tbody>
+          </table></div>}
+        </section>
+
+        <section className="provider-directory-card provider-notifications-card">
+          <header>
+            <div><p className="eyebrow">Provider notification audit</p><h2>User notifications</h2><span>{filteredNotifications.length} of {overview.notifications?.length || 0} recent notifications shown</span></div>
+            <div className="provider-filters">
+              <label className="provider-search"><Search size={17} aria-hidden="true" /><input aria-label="Search user notifications" value={notificationQuery} onChange={(event) => setNotificationQuery(event.target.value)} placeholder="Search workspace, user, or message" /></label>
+              <label><span className="sr-only">Notification module</span><select value={notificationModule} onChange={(event) => setNotificationModule(event.target.value)}><option value="all">All modules</option>{notificationModuleOptions.map((module) => <option key={module} value={module}>{module}</option>)}</select></label>
+            </div>
+          </header>
+          {!loading && !error && !filteredNotifications.length && <div className="provider-empty"><Bell size={30} /><strong>No matching notifications</strong><span>User notifications will appear here as customer workspaces create them.</span></div>}
+          {filteredNotifications.length > 0 && <div className="provider-table-wrap"><table className="provider-table provider-notifications-table">
+            <thead><tr><th>Workspace</th><th>Notification</th><th>Recipients</th><th>Branch &amp; module</th><th>Created</th></tr></thead>
+            <tbody>{filteredNotifications.map((notification) => <tr key={notification.id}>
+              <td data-label="Workspace"><strong>{notification.organization?.name || "Unknown workspace"}</strong><small>{notification.actor || "System"}</small></td>
+              <td data-label="Notification"><strong>{notification.title}</strong><small>{notification.message}</small></td>
+              <td data-label="Recipients"><strong>{notification.recipientCount} recipient{notification.recipientCount === 1 ? "" : "s"}</strong>{notification.recipients?.length ? <small>{notification.recipients.map((recipient) => `${recipient.name} (${recipient.email})`).join(", ")}</small> : <small>Recipient account is no longer available</small>}<small>{notification.readCount} of {notification.recipientCount} marked read</small></td>
+              <td data-label="Branch & module"><span className="provider-status">{notification.module}</span><small>{notification.branches?.join(", ") || "All branches"}</small></td>
+              <td data-label="Created"><strong>{providerDateTime(notification.createdAt)}</strong>{notification.recordId && <small>Record {notification.recordId}</small>}</td>
             </tr>)}</tbody>
           </table></div>}
         </section>

@@ -5250,7 +5250,7 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
   const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-  const [organizations, allAccounts, activeAccountCount, activeBranchCount] = await Promise.all([
+  const [organizations, allAccounts, providerNotifications, activeAccountCount, activeBranchCount] = await Promise.all([
     prisma.organization.findMany({
       where: { slug: { not: "zenshotech-provider" } },
       select: {
@@ -5284,6 +5284,7 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
         status: true,
         createdAt: true,
         lastLoginAt: true,
+        notificationsReadAt: true,
         emailVerifiedAt: true,
         registrationEmailSentAt: true,
         mustChangePassword: true,
@@ -5294,6 +5295,24 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
         organization: { select: { id: true, name: true, slug: true, status: true } },
       },
       orderBy: { createdAt: "desc" },
+    }),
+    prisma.appNotification.findMany({
+      where: { organizationId: { not: null }, organization: { slug: { not: "zenshotech-provider" } } },
+      select: {
+        id: true,
+        organizationId: true,
+        module: true,
+        title: true,
+        message: true,
+        recordId: true,
+        branches: true,
+        recipientAccountIds: true,
+        actor: true,
+        createdAt: true,
+        organization: { select: { id: true, name: true, slug: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 250,
     }),
     prisma.account.count({ where: { status: "Active", organization: { slug: { not: "zenshotech-provider" } } } }),
     prisma.branch.count({ where: { status: "Active", organization: { slug: { not: "zenshotech-provider" } } } }),
@@ -5349,6 +5368,32 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
   const customerRegistrations = registrations.filter((item) => item.workspaceType === "customer");
   const subscriptionStatuses = customerRegistrations.map((item) => item.subscription.status);
   const users = allAccounts.map(publicProviderUser);
+  const accountsById = new Map(allAccounts.map((account) => [account.id, account]));
+  const notifications = providerNotifications.map((notification) => {
+    const recipients = notification.recipientAccountIds
+      .map((accountId) => accountsById.get(accountId))
+      .filter(Boolean)
+      .map((account) => ({
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        read: Boolean(account.notificationsReadAt && account.notificationsReadAt >= notification.createdAt),
+      }));
+    return {
+      id: notification.id,
+      organization: notification.organization,
+      module: notification.module,
+      title: notification.title,
+      message: notification.message,
+      recordId: notification.recordId,
+      branches: notification.branches,
+      actor: notification.actor,
+      createdAt: notification.createdAt,
+      recipients,
+      recipientCount: notification.recipientAccountIds.length,
+      readCount: recipients.filter((recipient) => recipient.read).length,
+    };
+  });
   response.json({
     generatedAt: now,
     metrics: {
@@ -5367,6 +5412,7 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
     },
     registrations,
     users,
+    notifications,
   });
 }));
 

@@ -387,6 +387,20 @@
   min-width: 1180px;
 }
 
+.provider-notifications-table {
+  min-width: 1120px;
+}
+
+.provider-notifications-table td:nth-child(2) {
+  max-width: 360px;
+}
+
+.provider-notifications-table td:nth-child(2) small,
+.provider-notifications-table td:nth-child(3) small {
+  line-height: 1.45;
+  white-space: normal;
+}
+
 .provider-global-message {
   margin: 0;
 }

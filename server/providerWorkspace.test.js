@@ -16,6 +16,8 @@ test("provider overview stays authenticated and platform-admin protected", () =>
   assert.match(route, /requirePlatformAdministrator\(request\)/);
   assert.match(route, /prisma\.organization\.findMany/);
   assert.match(route, /prisma\.account\.findMany/);
+  assert.match(route, /prisma\.appNotification\.findMany/);
+  assert.match(route, /recipientAccountIds/);
   assert.doesNotMatch(route, /passwordHash|providerSubject/);
   assert.match(serverSource, /account\?\.emailVerifiedAt/);
   assert.match(route, /registrationSource: true/);
@@ -32,6 +34,8 @@ test("provider route is gated in the application before loading overview data", 
   assert.match(workspace, /if \(!session\.platformAdmin\)/);
   assert.match(workspace, /loadProviderOverview\(\)/);
   assert.match(workspace, /All product users/);
+  assert.match(workspace, /Provider notification audit/);
+  assert.match(workspace, /User notifications/);
   assert.match(workspace, /updateProviderUser\(user\.id, action\)/);
 });
 
