@@ -966,6 +966,7 @@ const notificationTitles = {
 async function createAppNotification(tx, {
   actor = "System",
   branches = ["All branches"],
+  organizationId,
   recipientAccountIds = [],
   message,
   module,
@@ -976,6 +977,7 @@ async function createAppNotification(tx, {
     data: {
       actor: clean(actor) || "System",
       branches: normalizeNotificationBranches(branches),
+      organizationId: requireText(organizationId, "Notification organization"),
       recipientAccountIds: uniqueStrings(recipientAccountIds),
       message: requireText(message, "Notification message"),
       module: requireText(module, "Notification module"),
@@ -983,6 +985,31 @@ async function createAppNotification(tx, {
       title: requireText(title, "Notification title"),
     },
   });
+}
+
+async function notificationRecipientsForOrganization(tx, {
+  branches = ["All branches"],
+  module,
+  organizationId,
+}) {
+  const normalizedBranches = normalizeNotificationBranches(branches);
+  const allBranches = normalizedBranches.includes("All branches");
+  const branchNames = new Set(normalizedBranches);
+  const accounts = await tx.account.findMany({
+    where: { organizationId, status: "Active" },
+    include: accountAccessInclude,
+  });
+  return accounts.filter((account) => {
+    if (hasOrganizationWideAccess(account)) {
+      return moduleAllowed(publicAccount(account, ALL_BRANCHES_ID), module, roleAccess);
+    }
+    return account.branchMemberships.some((membership) => (
+      membership.status === "Active"
+      && membership.branch?.status === "Active"
+      && (allBranches || branchNames.has(membership.branch.name))
+      && moduleAllowed(publicAccount(account, membership.branchId), module, roleAccess)
+    ));
+  }).map((account) => account.id);
 }
 
 async function notificationBranchesForResource(tx, config, record) {
@@ -1000,6 +1027,8 @@ async function writeResourceNotification(tx, request, config, record) {
   return createAppNotification(tx, {
     actor: actor.name,
     branches: await notificationBranchesForResource(tx, config, record),
+    organizationId: actor.organizationId,
+    recipientAccountIds: actor.id ? [actor.id] : [],
     message: `${config.label(record)} was created by ${actor.name || "System"}.`,
     module: config.module,
     recordId: record.id,
@@ -1009,7 +1038,7 @@ async function writeResourceNotification(tx, request, config, record) {
 
 async function loadNotificationFeed(account, limit = 30) {
   const actor = publicAccount(account);
-  const where = notificationWhereForActor(actor, roleAccess[actor.role] || []);
+  const where = notificationWhereForActor(actor, actor.access?.modules || roleAccess[actor.role] || []);
   const readAt = account.notificationsReadAt || null;
   const take = Math.min(50, Math.max(1, Number(limit) || 30));
   const [notifications, unreadCount] = await prisma.$transaction([
@@ -2835,14 +2864,24 @@ async function processLeadWebhook(provider, request, options = {}) {
 
       const lead = await tx.lead.create({ data: stripMeta(leadData) });
       await writeLeadSideRecords(tx, null, lead, leadData, null);
-      await createAppNotification(tx, {
-        actor: "Lead Ingestion",
-        branches: [lead.branch],
-        message: `${lead.name} submitted an inquiry via ${integration.label || provider}.`,
-        module: "leads",
-        recordId: lead.id,
-        title: "New lead",
-      });
+      const notificationBranch = await tx.branch.findUnique({ where: { name: lead.branch }, select: { organizationId: true } });
+      if (notificationBranch) {
+        const notificationRecipients = await notificationRecipientsForOrganization(tx, {
+          branches: [lead.branch],
+          module: "leads",
+          organizationId: notificationBranch.organizationId,
+        });
+        await createAppNotification(tx, {
+          actor: "Lead Ingestion",
+          branches: [lead.branch],
+          organizationId: notificationBranch.organizationId,
+          recipientAccountIds: notificationRecipients,
+          message: `${lead.name} submitted an inquiry via ${integration.label || provider}.`,
+          module: "leads",
+          recordId: lead.id,
+          title: "New lead",
+        });
+      }
       if (clean(leadData.externalLeadId)) {
         await tx.externalLeadIdentity.create({
           data: {
@@ -4499,6 +4538,7 @@ async function expireInvitations() {
         if (owners.length) {
           await createAppNotification(tx, {
             module: "staff",
+            organizationId: invitation.organizationId,
             title: "Privileged invitation expired",
             message: `The ${invitation.role} invitation for ${invitation.email} expired.`,
             recipientAccountIds: owners.map((owner) => owner.id),
@@ -5895,6 +5935,7 @@ async function cancelInvitation(request, response) {
         await createAppNotification(tx, {
           actor: actor.name,
           module: "staff",
+          organizationId: invitation.organizationId,
           title: "Privileged invitation cancelled",
           message: `The ${invitation.role} invitation for ${invitation.email} was cancelled.`,
           recipientAccountIds: owners.map((owner) => owner.id),
@@ -6088,6 +6129,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
       await createAppNotification(tx, {
         actor: account.name,
         branches: branchRecords.map((branch) => branch.name),
+        organizationId: invitation.organizationId,
         recipientAccountIds,
         module: "staff",
         recordId: account.id,
@@ -6293,6 +6335,7 @@ app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
         await createAppNotification(tx, {
           actor: actor.name,
           module: "staff",
+          organizationId: actor.organizationId,
           title: "Organization-wide role granted",
           message: `${saved.name} was granted ${nextRole} access.`,
           recipientAccountIds: owners.map((owner) => owner.id),
@@ -7845,7 +7888,8 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
       ? await tx.client.update({ where: { id: existing.id }, data })
       : await tx.client.create({ data });
     const auditLog = await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: "Client QR Registration", role: "Public", area: "Client Records", action: existing ? "Client QR profile updated" : "Client QR profile created", details: `${client.fullName} submitted registration for ${branch.name}.` } });
-    await createAppNotification(tx, { actor: "Client QR Registration", branches: [branch.name], message: `${client.fullName} submitted a ${existing ? "profile update" : "new registration"}.`, module: "clients", recordId: client.id, title: existing ? "Client registration updated" : "New QR client registration" });
+    const notificationRecipients = await notificationRecipientsForOrganization(tx, { branches: [branch.name], module: "clients", organizationId: branch.organizationId });
+    await createAppNotification(tx, { actor: "Client QR Registration", branches: [branch.name], organizationId: branch.organizationId, recipientAccountIds: notificationRecipients, message: `${client.fullName} submitted a ${existing ? "profile update" : "new registration"}.`, module: "clients", recordId: client.id, title: existing ? "Client registration updated" : "New QR client registration" });
     return { client, auditLog };
   });
   response.status(existing ? 200 : 201).json({ submitted: true, clientId: result.client.id, updated: Boolean(existing) });
@@ -7958,9 +8002,12 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       },
     });
 
+    const notificationRecipients = await notificationRecipientsForOrganization(tx, { branches: [appointment.branch], module: "appointments", organizationId: branch.organizationId });
     await createAppNotification(tx, {
       actor: "Online Booking",
       branches: [appointment.branch],
+      organizationId: branch.organizationId,
+      recipientAccountIds: notificationRecipients,
       message: `${appointment.client} requested ${appointment.service} on ${appointment.date} at ${appointment.time}.`,
       module: "appointments",
       recordId: appointment.id,

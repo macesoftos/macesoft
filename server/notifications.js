@@ -1,5 +1,3 @@
-import { hasOrganizationWideAccess, hasValidBranchAssignment } from "./accessControl.js";
-
 const allBranchesLabel = "All branches";
 
 function clean(value) {
@@ -22,25 +20,13 @@ export function normalizeNotificationBranches(value, fallback = allBranchesLabel
 }
 
 export function notificationWhereForActor(actor, allowedModules) {
-  const moduleWhere = { module: { in: Array.isArray(allowedModules) ? allowedModules : [] } };
-  const branch = clean(actor?.branch);
-  const untargetedBranchWhere = actor?.access?.scope === "all" || (hasOrganizationWideAccess(actor) && !actor?.access)
-    ? { recipientAccountIds: { isEmpty: true } }
-    : !hasValidBranchAssignment(actor)
-      ? { id: { in: [] } }
-      : {
-        recipientAccountIds: { isEmpty: true },
-        OR: [
-          { branches: { has: allBranchesLabel } },
-          { branches: { has: branch } },
-        ],
-      };
+  const accountId = clean(actor?.id);
+  const organizationId = clean(actor?.organizationId);
+  if (!accountId || !organizationId) return { id: { in: [] } };
   return {
-    ...moduleWhere,
-    OR: [
-      ...(actor?.id ? [{ recipientAccountIds: { has: actor.id } }] : []),
-      untargetedBranchWhere,
-    ],
+    organizationId,
+    module: { in: Array.isArray(allowedModules) ? allowedModules : [] },
+    recipientAccountIds: { has: accountId },
   };
 }
 

@@ -16,6 +16,7 @@ model Organization {
   invitations     UserInvitation[]
   payrollRuns     PayrollRun[]
   commissionRules CommissionRule[]
+  notifications   AppNotification[]
   subscription    Subscription?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -1499,17 +1500,20 @@ model AuditLog {
 }
 
 model AppNotification {
-  id                  String   @id @default(cuid())
+  id                  String        @id @default(cuid())
+  organizationId      String?
+  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   module              String
   title               String
   message             String
-  recordId            String   @default("")
-  branches            String[] @default(["All branches"])
-  recipientAccountIds String[] @default([])
-  actor               String   @default("System")
-  createdAt           DateTime @default(now())
+  recordId            String        @default("")
+  branches            String[]      @default(["All branches"])
+  recipientAccountIds String[]      @default([])
+  actor               String        @default("System")
+  createdAt           DateTime      @default(now())
 
   @@index([createdAt])
+  @@index([organizationId, createdAt])
   @@index([module, createdAt])
 }
 
