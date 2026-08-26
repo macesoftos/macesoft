@@ -34,6 +34,7 @@ import {
   verifyGoogleCredential,
 } from "./googleAuthentication.js";
 import { registrationConfirmationEmail } from "./registrationConfirmationEmail.js";
+import { providerRegistrationEmail } from "./providerRegistrationEmail.js";
 import {
   clientImageStorageProvider,
   deleteCloudinaryImage,
@@ -3966,7 +3967,10 @@ function publicAccount(account, requestedBranchId = "") {
 }
 
 function platformAdminEmails() {
-  return new Set(clean(process.env.ZENSHOTECH_ADMIN_EMAILS).split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
+  return new Set([
+    ...clean(process.env.ZENSHOTECH_ADMIN_EMAILS).split(","),
+    subscriptionSalesRecipient(process.env),
+  ].map((email) => email.trim().toLowerCase()).filter(Boolean));
 }
 
 function isPlatformAdmin(account) {
@@ -4619,6 +4623,40 @@ async function deliverRegistrationConfirmation(account, authenticationMethod) {
   }
 }
 
+async function deliverProviderRegistrationNotification(account, authenticationMethod, workspaceType = "customer") {
+  if (!emailReady()) {
+    console.warn(JSON.stringify({ event: "provider_registration_notification_skipped", accountId: account.id, reason: "smtp_not_configured" }));
+    return false;
+  }
+  const recipient = subscriptionSalesRecipient(process.env);
+  let transporter;
+  try {
+    transporter = await createVerifiedEmailTransport();
+    const content = providerRegistrationEmail({
+      recipient,
+      account,
+      organization: account.organization,
+      authenticationMethod,
+      registeredAt: account.createdAt,
+      appOrigin: process.env.APP_ORIGIN,
+      workspaceType,
+    });
+    await sendSmtpEmail({ transporter, ...content });
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "provider_registration_notification_failed",
+      accountId: account.id,
+      organizationId: account.organizationId,
+      recipient,
+      error: clean(error.message),
+    }));
+    return false;
+  } finally {
+    transporter?.close();
+  }
+}
+
 function assertGoogleRequestOrigin(request) {
   const origin = clean(request.get("origin"));
   const localOrigin = process.env.NODE_ENV !== "production" && /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(origin);
@@ -4687,6 +4725,7 @@ app.post("/api/auth/register", asyncRoute(async (request, response) => {
 
   const account = await prisma.account.findUnique({ where: { id: registration.accountId }, include: accountAccessInclude });
   const confirmationEmailSent = await deliverRegistrationConfirmation(account, "email and password");
+  await deliverProviderRegistrationNotification(account, "Email and password");
   setSessionCookie(response, token, expiresAt);
   response.status(201).json({
     account: await publicAccountWithSubscription(account),
@@ -4781,6 +4820,7 @@ app.post("/api/auth/google", asyncRoute(async (request, response) => {
   }
 
   const confirmationEmailSent = isNewAccount ? await deliverRegistrationConfirmation(account, "Google") : null;
+  if (isNewAccount) await deliverProviderRegistrationNotification(account, "Google");
   setSessionCookie(response, token, expiresAt);
   response.status(isNewAccount ? 201 : 200).json({
     account: await publicAccountWithSubscription(account),
@@ -4820,8 +4860,9 @@ app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
   const ownerLabel = name.split(" ")[0].replace(/[^A-Za-z0-9'-]/g, "").slice(0, 30) || "Prospect";
   const organizationName = `${ownerLabel}'s ZenshoTech Demo ${suffix}`;
   const branchName = `${ownerLabel}'s Demo Clinic ${suffix}`;
+  let demoAccountId = "";
   try {
-    await prisma.$transaction(async (tx) => {
+    demoAccountId = await prisma.$transaction(async (tx) => {
       const organization = await tx.organization.create({
         data: { name: organizationName, slug: `zenshotech-demo-${demoKey}`, status: "Active" },
       });
@@ -4878,11 +4919,15 @@ app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
         subjectId: account.id,
         details: "A private staging sandbox and isolated sample dataset were created through self-service registration.",
       } });
+      return account.id;
     });
   } catch (error) {
     if (error?.code === "P2002") throw apiError("An account already exists for this email. Sign in instead.", 409);
     throw error;
   }
+
+  const demoAccount = await prisma.account.findUnique({ where: { id: demoAccountId }, include: accountAccessInclude });
+  if (demoAccount) await deliverProviderRegistrationNotification(demoAccount, "Email and password", "demo");
 
   response.status(201).json({ created: true, email, message: "Your private demo workspace is ready." });
 }));
@@ -4914,7 +4959,7 @@ app.use("/api", (request, response, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.get("x-mace-request") !== "app") {
     return next(apiError("This request did not pass the CSRF check.", 403));
   }
-  const subscriptionSafePath = /^\/api\/(?:auth\/(?:session|logout|change-password)|subscription(?:\/|$)|admin\/subscriptions(?:\/|$))/.test(request.originalUrl.split("?")[0]);
+  const subscriptionSafePath = /^\/api\/(?:auth\/(?:session|logout|change-password)|subscription(?:\/|$)|admin\/(?:subscriptions|provider-overview)(?:\/|$))/.test(request.originalUrl.split("?")[0]);
   if (!subscriptionSafePath && request.authSubscription && !request.authSubscription.accessAllowed) {
     const expired = request.authSubscription.status === "expired";
     return next(apiError(
@@ -5099,6 +5144,108 @@ app.get("/api/admin/subscriptions", asyncRoute(async (request, response) => {
     organization: { id: organization.id, name: organization.name },
   })));
   response.json({ subscriptions });
+}));
+
+app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => {
+  requirePlatformAdministrator(request);
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+  const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+  const [organizations, providerAccounts, activeAccountCount, activeBranchCount] = await Promise.all([
+    prisma.organization.findMany({
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        subscription: true,
+        _count: { select: { accounts: true, branches: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.account.findMany({
+      where: { role: { in: ["Owner", "Super Admin", "Demo User", "Demo Viewer"] } },
+      select: {
+        id: true,
+        organizationId: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        createdAt: true,
+        lastLoginAt: true,
+        emailVerifiedAt: true,
+        registrationEmailSentAt: true,
+        identities: { select: { provider: true }, take: 1 },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.account.count({ where: { status: "Active" } }),
+    prisma.branch.count({ where: { status: "Active" } }),
+  ]);
+  const rolePriority = new Map([["Owner", 0], ["Super Admin", 1], ["Demo User", 2], ["Demo Viewer", 3]]);
+  const primaryAccounts = new Map();
+  for (const account of providerAccounts) {
+    const current = primaryAccounts.get(account.organizationId);
+    if (!current || (rolePriority.get(account.role) ?? 99) < (rolePriority.get(current.role) ?? 99)) {
+      primaryAccounts.set(account.organizationId, account);
+    }
+  }
+  const registrations = organizations.map((organization) => {
+    const owner = primaryAccounts.get(organization.id) || null;
+    const workspaceType = organization.slug.startsWith("zenshotech-demo-") || owner?.role?.startsWith("Demo") ? "demo" : "customer";
+    const usage = { users: organization._count.accounts, branches: organization._count.branches };
+    const subscription = workspaceType === "demo"
+      ? { id: null, plan: null, planCode: null, status: "demo", accessAllowed: true, usage }
+      : serializeSubscription(organization.subscription, usage, now, { includePricing: true });
+    return {
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        status: organization.status,
+        createdAt: organization.createdAt,
+        updatedAt: organization.updatedAt,
+      },
+      owner: owner ? {
+        id: owner.id,
+        name: owner.name,
+        email: owner.email,
+        role: owner.role,
+        status: owner.status,
+        createdAt: owner.createdAt,
+        lastLoginAt: owner.lastLoginAt,
+        emailVerified: Boolean(owner.emailVerifiedAt),
+        registrationEmailSent: Boolean(owner.registrationEmailSentAt),
+      } : null,
+      workspaceType,
+      registrationMethod: owner?.identities?.[0]?.provider === "google" ? "Google" : "Email",
+      subscription: {
+        ...subscription,
+        paymentProviderConnected: Boolean(clean(organization.subscription?.paymentProviderReference)),
+      },
+      usage,
+    };
+  });
+  const customerRegistrations = registrations.filter((item) => item.workspaceType === "customer");
+  const subscriptionStatuses = customerRegistrations.map((item) => item.subscription.status);
+  response.json({
+    generatedAt: now,
+    metrics: {
+      totalWorkspaces: registrations.length,
+      customerWorkspaces: customerRegistrations.length,
+      demoWorkspaces: registrations.length - customerRegistrations.length,
+      registrationsLast24Hours: registrations.filter((item) => new Date(item.organization.createdAt) >= twentyFourHoursAgo).length,
+      registrationsLast7Days: registrations.filter((item) => new Date(item.organization.createdAt) >= sevenDaysAgo).length,
+      activeSubscriptions: subscriptionStatuses.filter((status) => ["active", "lifetime"].includes(status)).length,
+      activeTrials: subscriptionStatuses.filter((status) => status === "trialing").length,
+      needsAttention: subscriptionStatuses.filter((status) => ["pending_plan", "pending_activation", "past_due", "expired"].includes(status)).length,
+      activeUsers: activeAccountCount,
+      activeBranches: activeBranchCount,
+    },
+    registrations,
+  });
 }));
 
 app.patch("/api/admin/subscriptions/:organizationId", asyncRoute(async (request, response) => {

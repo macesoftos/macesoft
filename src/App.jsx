@@ -128,6 +128,7 @@ import {
   loginAccount,
   loadPublicPlans,
   loadAdminSubscriptions,
+  loadProviderOverview,
   loadSubscription,
   logoutAccount,
   mergeLeadDuplicate,
@@ -954,8 +955,9 @@ function App() {
   const isAccountRegistrationView = currentPublicPath === "/register" && !currentPublicParams.has("branch");
   const isPricingView = currentPublicPath === "/pricing";
   const isSubscriptionView = currentPublicPath === "/subscription";
+  const isProviderView = currentPublicPath === "/provider";
   const isSubscriptionExpiredView = currentPublicPath === "/subscription/expired";
-  const isSubscriptionRouteView = isAccountRegistrationView || isPricingView || isSubscriptionView || isSubscriptionExpiredView;
+  const isSubscriptionRouteView = isAccountRegistrationView || isPricingView || isSubscriptionView || isProviderView || isSubscriptionExpiredView;
   const isPublicFormView = typeof window !== "undefined" && (
     ["/inquire", "/book", "/client-register"].includes(currentPublicPath)
     || isClientRegistrationView
@@ -1821,7 +1823,7 @@ function App() {
     const user = result.account;
     setSessionNotice("");
     setSession(user);
-    setActiveModule(landingModuleForSession(user), { replace: true });
+    if (!(isProviderView && user.platformAdmin)) setActiveModule(landingModuleForSession(user), { replace: true });
     addAudit("Signed in", `${user.name} opened ${settings.productName} as ${user.role}.`, "Authentication", user);
     notify(`Welcome, ${user.name}.`);
   }
@@ -1846,7 +1848,9 @@ function App() {
     const user = result.account;
     setSessionNotice("");
     setSession(user);
-    if (result.redirectTo?.startsWith("/pricing")) {
+    if (isProviderView && user.platformAdmin) {
+      navigateToPath("/provider", { replace: true });
+    } else if (result.redirectTo?.startsWith("/pricing")) {
       navigateToPath(result.redirectTo, { replace: true });
     } else {
       setActiveModule(landingModuleForSession(user), { replace: true });
@@ -2909,6 +2913,10 @@ function App() {
 
   if (isSubscriptionView) {
     return <SubscriptionPage session={session} onLogout={handleLogout} onNavigate={navigateToPath} onSessionUpdate={handleSubscriptionSession} />;
+  }
+
+  if (isProviderView) {
+    return <ProviderWorkspace session={session} onLogout={handleLogout} onNavigate={navigateToPath} />;
   }
 
   if (isSubscriptionExpiredView) {
@@ -4787,6 +4795,7 @@ function PublicSubscriptionHeader({ session, onNavigate }) {
         {session
           ? <button className="ghost-button" type="button" onClick={() => onNavigate("/subscription")}>Subscription</button>
           : <button className="ghost-button" type="button" onClick={() => onNavigate("/")}>Sign In</button>}
+        {session?.platformAdmin && <button className="primary-button" type="button" onClick={() => onNavigate("/provider")}>Provider workspace</button>}
         {!session && <button className="primary-button" type="button" onClick={() => onNavigate("/register")}>Register</button>}
       </nav>
     </header>
@@ -5240,6 +5249,142 @@ function SubscriptionPage({ session, onLogout, onNavigate }) {
           </article>) : <p>No managed subscription records yet.</p>}
         </div>
       </section>}
+    </main>
+  );
+}
+
+function providerDateTime(value, fallback = "Never") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function providerStatusLabel(status) {
+  return String(status || "pending_plan").replace(/_/g, " ");
+}
+
+function ProviderWorkspace({ session, onLogout, onNavigate }) {
+  const [overview, setOverview] = useState({ metrics: {}, registrations: [], generatedAt: null });
+  const [loading, setLoading] = useState(Boolean(session.platformAdmin));
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [workspaceType, setWorkspaceType] = useState("all");
+  const [subscriptionStatus, setSubscriptionStatus] = useState("all");
+
+  const refreshOverview = useCallback(async () => {
+    if (!session.platformAdmin) return;
+    setLoading(true);
+    setError("");
+    try {
+      setOverview(await loadProviderOverview());
+    } catch (loadError) {
+      setError(loadError.message || "Unable to load provider data.");
+    } finally {
+      setLoading(false);
+    }
+  }, [session.platformAdmin]);
+
+  useEffect(() => {
+    document.title = "Provider workspace — ZenshoTech";
+    refreshOverview();
+  }, [refreshOverview]);
+
+  const statusOptions = useMemo(() => (
+    [...new Set((overview.registrations || []).map((item) => item.subscription?.status).filter(Boolean))].sort()
+  ), [overview.registrations]);
+  const filteredRegistrations = useMemo(() => {
+    const searchTerm = query.trim().toLowerCase();
+    return (overview.registrations || []).filter((item) => {
+      if (workspaceType !== "all" && item.workspaceType !== workspaceType) return false;
+      if (subscriptionStatus !== "all" && item.subscription?.status !== subscriptionStatus) return false;
+      if (!searchTerm) return true;
+      return [item.organization?.name, item.owner?.name, item.owner?.email, item.subscription?.plan?.name]
+        .some((value) => String(value || "").toLowerCase().includes(searchTerm));
+    });
+  }, [overview.registrations, query, subscriptionStatus, workspaceType]);
+
+  if (!session.platformAdmin) {
+    return (
+      <main className="provider-page provider-access-page">
+        <section className="provider-access-card">
+          <ShieldCheck size={36} aria-hidden="true" />
+          <p className="eyebrow">Restricted workspace</p>
+          <h1>ZenshoTech provider access is required.</h1>
+          <p>This area contains customer registrations and subscription information. Your signed-in account is not on the provider administrator allowlist.</p>
+          <div><button className="primary-button" type="button" onClick={() => onNavigate("/dashboard")}>Return to dashboard</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></div>
+        </section>
+      </main>
+    );
+  }
+
+  const metrics = overview.metrics || {};
+  const metricCards = [
+    { label: "Customer workspaces", value: metrics.customerWorkspaces ?? 0, detail: `${metrics.demoWorkspaces ?? 0} demo workspaces`, icon: Store },
+    { label: "New registrations", value: metrics.registrationsLast7Days ?? 0, detail: `${metrics.registrationsLast24Hours ?? 0} in the last 24 hours`, icon: UserCheck },
+    { label: "Active subscriptions", value: metrics.activeSubscriptions ?? 0, detail: `${metrics.activeTrials ?? 0} active trials`, icon: CreditCard },
+    { label: "Needs attention", value: metrics.needsAttention ?? 0, detail: "Plan, payment, or access follow-up", icon: AlertCircle },
+  ];
+
+  return (
+    <main className="provider-page">
+      <header className="provider-header">
+        <button className="provider-brand-button" type="button" onClick={() => onNavigate("/provider")} aria-label="Open ZenshoTech provider workspace"><BrandWordmark /></button>
+        <nav aria-label="Provider navigation">
+          <button className="ghost-button" type="button" onClick={() => onNavigate("/subscription")}><CreditCard size={16} /> Subscription controls</button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate("/dashboard")}><LayoutDashboard size={16} /> Clinic dashboard</button>
+          <button className="text-button" type="button" onClick={onLogout}><LogOut size={16} /> Sign out</button>
+        </nav>
+      </header>
+
+      <div className="provider-shell">
+        <section className="provider-title-row">
+          <div><p className="eyebrow">ZenshoTech owner console</p><h1>Product users &amp; subscriptions</h1><p>Every registered business and demo workspace appears here from the live application database.</p></div>
+          <button className="primary-button" type="button" disabled={loading} onClick={refreshOverview}><RefreshCw className={loading ? "spin" : ""} size={17} /> {loading ? "Refreshing..." : "Refresh data"}</button>
+        </section>
+
+        <section className="provider-metric-grid" aria-label="Provider metrics">
+          {metricCards.map(({ label, value, detail, icon: Icon }) => <article key={label}><span><Icon size={19} aria-hidden="true" /></span><div><small>{label}</small><strong>{value}</strong><p>{detail}</p></div></article>)}
+        </section>
+
+        <section className="provider-system-strip" aria-label="Tracking status">
+          <div><Database size={18} aria-hidden="true" /><span><strong>Live registration tracking</strong><small>Supabase/PostgreSQL is the source of truth for accounts and workspaces.</small></span></div>
+          <div><Mail size={18} aria-hidden="true" /><span><strong>Owner email alerts</strong><small>New registrations notify the configured ZenshoTech sales inbox when SMTP is enabled.</small></span></div>
+          <div><Activity size={18} aria-hidden="true" /><span><strong>{metrics.activeUsers ?? 0} active users</strong><small>Across {metrics.activeBranches ?? 0} active clinic branches.</small></span></div>
+        </section>
+
+        <section className="provider-directory-card">
+          <header>
+            <div><p className="eyebrow">Registration directory</p><h2>Businesses and prospects</h2><span>{filteredRegistrations.length} of {overview.registrations?.length || 0} workspaces shown{overview.generatedAt ? ` · Updated ${providerDateTime(overview.generatedAt)}` : ""}</span></div>
+            <div className="provider-filters">
+              <label className="provider-search"><Search size={17} aria-hidden="true" /><input aria-label="Search registrations" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search business, owner, or email" /></label>
+              <label><span className="sr-only">Workspace type</span><select value={workspaceType} onChange={(event) => setWorkspaceType(event.target.value)}><option value="all">All workspaces</option><option value="customer">Customers</option><option value="demo">Demo accounts</option></select></label>
+              <label><span className="sr-only">Subscription status</span><select value={subscriptionStatus} onChange={(event) => setSubscriptionStatus(event.target.value)}><option value="all">All statuses</option>{statusOptions.map((status) => <option key={status} value={status}>{providerStatusLabel(status)}</option>)}</select></label>
+            </div>
+          </header>
+
+          {error && <div className="inline-state danger" role="alert"><AlertCircle size={18} /> <span>{error}</span><button className="text-button small" type="button" onClick={refreshOverview}>Try again</button></div>}
+          {loading && !overview.registrations?.length && <div className="provider-loading"><RefreshCw className="spin" size={22} /><span>Loading registrations and subscriptions...</span></div>}
+          {!loading && !error && !filteredRegistrations.length && <div className="provider-empty"><Inbox size={30} /><strong>No matching workspaces</strong><span>New registrations will appear here automatically.</span></div>}
+          {filteredRegistrations.length > 0 && <div className="provider-table-wrap"><table className="provider-table">
+            <thead><tr><th>Workspace</th><th>Owner</th><th>Registered</th><th>Subscription</th><th>Usage</th><th>Last activity</th></tr></thead>
+            <tbody>{filteredRegistrations.map((item) => <tr key={item.organization.id}>
+              <td data-label="Workspace"><div className="provider-workspace-cell"><span>{item.organization.name.slice(0, 1).toUpperCase()}</span><div><strong>{item.organization.name}</strong><small>{item.workspaceType === "demo" ? "Isolated demo data" : "Customer workspace"}</small></div></div></td>
+              <td data-label="Owner"><div className="provider-owner-cell"><strong>{item.owner?.name || "Owner not found"}</strong><a href={item.owner?.email ? `mailto:${item.owner.email}` : undefined}>{item.owner?.email || "No email"}</a><small>{item.registrationMethod} registration{item.owner?.emailVerified ? " · verified" : ""}</small></div></td>
+              <td data-label="Registered"><strong>{providerDateTime(item.organization.createdAt)}</strong><small>{item.owner?.registrationEmailSent ? "Welcome email sent" : "No welcome email record"}</small></td>
+              <td data-label="Subscription"><span className={`provider-status status-${item.subscription?.status || "pending_plan"}`}>{providerStatusLabel(item.subscription?.status)}</span><strong>{item.subscription?.plan?.name || (item.workspaceType === "demo" ? "Demo access" : "No plan selected")}</strong><small>{item.subscription?.paymentProviderConnected ? "Payment provider linked" : "No payment provider reference"}</small></td>
+              <td data-label="Usage"><strong>{item.usage.users} user{item.usage.users === 1 ? "" : "s"}</strong><small>{item.usage.branches} branch{item.usage.branches === 1 ? "" : "es"}</small></td>
+              <td data-label="Last activity"><strong>{providerDateTime(item.owner?.lastLoginAt, "Never signed in")}</strong><small>{item.owner?.status || item.organization.status}</small></td>
+            </tr>)}</tbody>
+          </table></div>}
+        </section>
+      </div>
     </main>
   );
 }

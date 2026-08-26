@@ -118,6 +118,10 @@ export function loadAdminSubscriptions() {
   return requestJson("/api/admin/subscriptions");
 }
 
+export function loadProviderOverview() {
+  return requestJson("/api/admin/provider-overview");
+}
+
 export function updateAdminSubscription(organizationId, payload) {
   return requestJson(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}`, {
     method: "PATCH",
