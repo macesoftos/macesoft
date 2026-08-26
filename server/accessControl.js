@@ -8,7 +8,6 @@ const PUBLIC_API_RULES = [
   ["POST", /^\/api\/auth\/google$/],
   ["POST", /^\/api\/auth\/forgot-password$/],
   ["POST", /^\/api\/auth\/provider-setup$/],
-  ["POST", /^\/api\/auth\/provider-bootstrap$/],
   ["POST", /^\/api\/auth\/reset-password$/],
   ["GET", /^\/api\/auth\/session$/],
   ["GET", /^\/api\/invitations\/accept\/[^/]+$/],
