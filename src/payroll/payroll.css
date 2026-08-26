@@ -208,7 +208,9 @@
 }
 
 @media (max-width: 760px) {
-  .payroll-workspace { padding: 0.75rem; }
+  .payroll-workspace { width: 100%; max-width: 100%; min-width: 0; padding: 0.75rem 0.75rem calc(var(--mobile-bottom-nav-height, 74px) + 1.5rem + env(safe-area-inset-bottom)); }
+  .payroll-panel, .payroll-run-layout, .payroll-two-column, .payroll-run-detail { width: 100%; max-width: 100%; min-width: 0; }
+  .payroll-tabs button, .payroll-back, .payroll-detail-actions button, .payroll-form button, .payroll-create-disclosure > summary { min-height: 44px; }
   .payroll-hero { align-items: flex-start; }
   .payroll-hero > button { flex: 0 0 auto; }
   .payroll-metrics { grid-template-columns: 1fr; }

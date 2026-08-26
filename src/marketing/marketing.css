@@ -2153,7 +2153,7 @@
   .marketing-sidebar-heading,
   .marketing-contact-summary { display: none; }
   .marketing-sidebar nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
-  .marketing-sidebar nav button { display: inline-flex; min-height: 39px; flex: 0 0 auto; padding: 8px 11px; }
+  .marketing-sidebar nav button { display: inline-flex; min-height: 44px; flex: 0 0 auto; padding: 8px 11px; }
   .marketing-sidebar nav button.active { box-shadow: inset 0 -2px var(--marketing-espresso); }
   .marketing-sidebar nav button span { font-size: 11px; }
   .marketing-header { min-height: 86px; padding: 15px 14px; }
@@ -2161,7 +2161,7 @@
   .marketing-header-actions { flex: 1; }
   .marketing-header-actions .global-module-search { width: min(360px, 48vw); }
   .marketing-global-menu { display: inline-flex; }
-  .marketing-header > .marketing-primary-button { min-height: 39px; padding-inline: 12px; font-size: 11px; }
+  .marketing-header > .marketing-primary-button { min-height: 44px; padding-inline: 12px; font-size: 11px; }
   .marketing-page-scroll { padding: 16px 12px calc(20px + env(safe-area-inset-bottom)); }
   .marketing-overview-intro { align-items: stretch; flex-direction: column; padding: 23px; }
   .marketing-summary-strip { grid-template-columns: 1fr; }
@@ -2197,12 +2197,12 @@
   .sidebar-collapsed .marketing-header { padding-left: 14px; }
   .sidebar-collapsed .marketing-builder-header { padding-left: 12px; }
   .marketing-builder-title { width: 100%; }
-  .marketing-builder-branch { min-width: 128px; margin-left: auto; }
+  .marketing-builder-branch { width: calc(100% - 46px); min-width: 0; margin: 8px 0 0 46px; }
   .marketing-builder-title h1 { font-size: 23px; }
   .marketing-builder-title p { display: none; }
-  .marketing-back-button { width: 38px; height: 38px; }
+  .marketing-back-button { width: 44px; height: 44px; }
   .marketing-builder-actions { overflow-x: auto; justify-content: flex-start; }
-  .marketing-builder-actions > button { flex: 0 0 auto; min-height: 38px !important; padding: 8px 11px !important; font-size: 10px; }
+  .marketing-builder-actions > button { flex: 0 0 auto; min-height: 44px !important; padding: 8px 11px !important; font-size: 10px; }
   .marketing-stepper { min-height: 44px; padding: 0 8px; }
   .marketing-stepper button { grid-template-columns: 24px minmax(0, auto); gap: 4px; }
   .marketing-stepper button > span { width: 22px; height: 22px; }
@@ -2229,7 +2229,7 @@
   .marketing-sms-designer { grid-template-columns: 1fr; padding: 18px 12px calc(70px + env(safe-area-inset-bottom)); }
   .marketing-sms-form { padding: 22px 17px; }
   .marketing-phone-preview { min-height: 430px; }
-  .marketing-builder-mobile-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: 0.7fr 1.3fr; gap: 8px; padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); border-top: 1px solid var(--marketing-border); background: rgba(255, 255, 255, 0.96); }
+  .marketing-builder-mobile-footer { position: fixed; left: 0; right: 0; bottom: calc(var(--mobile-bottom-nav-height, 74px) + env(safe-area-inset-bottom)); z-index: 20; display: grid; grid-template-columns: 0.7fr 1.3fr; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--marketing-border); background: rgba(255, 255, 255, 0.96); }
   .marketing-builder-mobile-footer > button:first-child { border: 1px solid var(--marketing-border); border-radius: 7px; background: #fff; color: var(--marketing-espresso); font-weight: 750; }
   .marketing-report-bars article { grid-template-columns: 130px minmax(120px, 1fr) 50px; }
 }

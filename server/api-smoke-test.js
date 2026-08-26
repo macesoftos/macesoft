@@ -218,6 +218,27 @@ try {
   }
 
   const firstDemo = await createAndOpenDemo(1);
+  const initialOnboarding = await request("/api/onboarding", { headers: { Cookie: firstDemo.cookie } });
+  assert(initialOnboarding.response.ok, "onboarding state did not load for a new account");
+  assert(initialOnboarding.payload.state.tourVersion === 1, "onboarding tour version was not returned");
+  assert(!initialOnboarding.payload.state.startedAt, "new account onboarding started before user consent");
+  assert(Array.isArray(initialOnboarding.payload.checklist.items), "onboarding checklist was not returned");
+
+  const startedOnboarding = await request("/api/onboarding", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-Mace-Request": "app", Cookie: firstDemo.cookie },
+    body: JSON.stringify({ action: "start" }),
+  });
+  assert(startedOnboarding.response.ok && startedOnboarding.payload.state.startedAt, "onboarding tour did not persist its start state");
+
+  const progressedOnboarding = await request("/api/onboarding", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-Mace-Request": "app", Cookie: firstDemo.cookie },
+    body: JSON.stringify({ action: "progress", currentStep: 3 }),
+  });
+  assert(progressedOnboarding.response.ok && progressedOnboarding.payload.state.currentStep === 3, "onboarding step did not persist");
+  const resumedOnboarding = await request("/api/onboarding", { headers: { Cookie: firstDemo.cookie } });
+  assert(resumedOnboarding.payload.state.currentStep === 3, "onboarding progress did not follow the account across requests");
   const secondDemo = await createAndOpenDemo(2);
   assert(firstDemo.account.organizationId !== secondDemo.account.organizationId, "demo signups shared an organization");
   assert(firstDemo.account.branch !== secondDemo.account.branch, "demo signups shared a branch");

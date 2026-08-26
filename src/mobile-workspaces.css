@@ -1,0 +1,178 @@
+/* Cross-workspace mobile guarantees loaded after feature-owned styles. */
+@media (min-width: 1280px) and (max-width: 1600px) {
+  .topbar-actions .account-menu {
+    min-width: 0;
+    max-width: 180px;
+  }
+
+  .topbar-actions .account-menu summary {
+    max-width: 180px;
+    overflow: hidden;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1450px) {
+  .topbar-actions .global-module-search {
+    min-width: 180px;
+    max-width: 240px;
+    flex-basis: 220px;
+  }
+
+  .topbar-actions .branch-select select {
+    max-width: 118px;
+  }
+
+  .topbar-actions .account-menu,
+  .topbar-actions .account-menu summary {
+    width: 68px;
+    max-width: 68px;
+  }
+
+  .topbar-actions .account-menu summary {
+    justify-content: center;
+    padding-inline: 6px;
+  }
+
+  .topbar-actions .account-menu .account-summary {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .facetrack-exit {
+    gap: 0;
+    font-size: 0 !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .facetrack-app-shell,
+  .facetrack-module-sidebar,
+  .facetrack-module-sidebar nav,
+  .facetrack-page {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .facetrack-module-sidebar nav {
+    overflow-x: auto;
+    contain: inline-size paint;
+    overscroll-behavior-inline: contain;
+  }
+
+  .facetrack-module-sidebar {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    overflow-x: clip;
+  }
+
+  .facetrack-module-sidebar > nav {
+    width: 100%;
+  }
+
+  .facetrack-module-sidebar > .facetrack-exit {
+    justify-self: end;
+  }
+
+  .facetrack-page {
+    padding: 20px 16px calc(var(--mobile-bottom-nav-height, 74px) + 24px + env(safe-area-inset-bottom));
+  }
+
+  .facetrack-module-logo,
+  .facetrack-exit,
+  .facetrack-module-sidebar nav button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .facetrack-module-logo,
+  .facetrack-exit {
+    width: 44px;
+    height: 44px;
+  }
+
+  .facetrack-workspace-header button,
+  .facetrack-dashboard-grid button,
+  .facetrack-inline-actions button,
+  .facetrack-link-button,
+  .facetrack-approve,
+  .facetrack-reject {
+    min-height: 44px;
+  }
+
+  .appointment-view-tabs button,
+  .lead-status-tabs button,
+  .treatments-filter-tabs button,
+  .package-history-details summary {
+    min-height: 44px;
+  }
+
+  .clients-workspace-panel,
+  .clients-workspace-heading,
+  .clients-workspace-heading > *,
+  .clients-workspace-actions,
+  .clients-workspace-actions .clients-view-toggle {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .marketing-builder-title {
+    width: 100%;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .marketing-builder-title > div {
+    min-width: 0;
+    flex: 1 1 120px;
+  }
+
+  .marketing-builder-title .marketing-builder-branch {
+    width: auto;
+    min-width: 0;
+    flex: 1 0 calc(100% - 56px);
+    margin: 8px 0 0 56px;
+  }
+
+  .marketing-editor-mode button,
+  .marketing-html-actions button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar-actions {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  .topbar-actions .global-create-menu {
+    grid-column: 1;
+  }
+
+  .topbar-actions .topbar-pos-button {
+    grid-column: 2;
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  .topbar-actions .notification-center,
+  .topbar-actions .icon-button {
+    grid-column: 3;
+    width: 44px;
+    min-width: 44px;
+  }
+
+  .topbar-actions .branch-select {
+    grid-column: 1 / -1;
+  }
+
+  .appointment-detail-row,
+  .appointment-summary-status-row,
+  .appointment-summary-assignment-row,
+  .appointment-summary-payment-row,
+  .appointment-detail-rows .appointment-detail-row {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+}
