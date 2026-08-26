@@ -18,6 +18,8 @@ test("provider overview stays authenticated and platform-admin protected", () =>
   assert.match(route, /prisma\.account\.findMany/);
   assert.doesNotMatch(route, /passwordHash|providerSubject/);
   assert.match(serverSource, /account\?\.emailVerifiedAt/);
+  assert.match(route, /registrationSource: true/);
+  assert.match(route, /contactName: organization\.contactName/);
 });
 
 test("provider route is gated in the application before loading overview data", () => {
@@ -81,4 +83,19 @@ test("new customer and demo registrations send non-blocking provider notificatio
   assert.match(registrationRoute, /deliverProviderRegistrationNotification\(account, "Email and password"\)/);
   assert.match(registrationRoute, /deliverProviderRegistrationNotification\(account, "Google"\)/);
   assert.match(registrationRoute, /deliverProviderRegistrationNotification\(demoAccount, "Email and password", "demo"\)/);
+});
+
+test("customer registration collects and persists provider contact details", () => {
+  const registrationRoute = serverSource.slice(
+    serverSource.indexOf('app.post("/api/auth/register"'),
+    serverSource.indexOf('app.post("/api/auth/google"'),
+  );
+  assert.match(appSource, />Contact name</);
+  assert.match(appSource, />Phone number</);
+  assert.match(appSource, />Business address</);
+  assert.match(appSource, />Where did you hear about us\?</);
+  assert.match(registrationRoute, /request\.body\?\.phone/);
+  assert.match(registrationRoute, /request\.body\?\.address/);
+  assert.match(registrationRoute, /request\.body\?\.referralSource/);
+  assert.match(serverSource, /registrationSource: referralSource/);
 });

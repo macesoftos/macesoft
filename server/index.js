@@ -4564,6 +4564,9 @@ function registrationWorkspaceValues(businessName) {
 async function createOwnerWorkspace(tx, {
   name,
   businessName,
+  phone,
+  address,
+  referralSource,
   email,
   passwordHash,
   token,
@@ -4573,13 +4576,24 @@ async function createOwnerWorkspace(tx, {
   const values = registrationWorkspaceValues(businessName);
   const organizationModules = roleAccess.Owner;
   const organization = await tx.organization.create({
-    data: { name: businessName, slug: values.organizationSlug, status: "Active" },
+    data: {
+      name: businessName,
+      slug: values.organizationSlug,
+      status: "Active",
+      contactName: name,
+      phone,
+      address,
+      registrationSource: referralSource,
+    },
   });
   const branch = await tx.branch.create({
     data: {
       organizationId: organization.id,
       name: values.branchName,
       code: values.branchCode,
+      phone,
+      address,
+      email,
       status: "Active",
       modules: { create: organizationModules.map((moduleId) => ({ moduleId, enabled: true })) },
     },
@@ -4737,15 +4751,21 @@ app.get("/api/public/plans", (_request, response) => {
 });
 
 app.post("/api/auth/register", asyncRoute(async (request, response) => {
-  const name = requireText(request.body?.name, "Full name").replace(/\s+/g, " ").slice(0, 100);
+  const name = requireText(request.body?.name, "Contact name").replace(/\s+/g, " ").slice(0, 100);
   const businessName = requireText(request.body?.businessName, "Business or clinic name").replace(/\s+/g, " ").slice(0, 140);
+  const phone = requireText(request.body?.phone, "Phone number").replace(/\s+/g, " ").slice(0, 30);
+  const address = requireText(request.body?.address, "Business address").replace(/\s+/g, " ").slice(0, 240);
+  const referralSource = requireText(request.body?.referralSource, "Where you heard about us");
   const email = requireText(request.body?.email, "Email").toLowerCase().slice(0, 160);
   const password = requireText(request.body?.password, "Password");
   if (request.body?.termsAccepted !== true || request.body?.privacyAccepted !== true) {
     throw apiError("Accept the Terms of Service and Privacy Policy to continue.", 400);
   }
-  if (name.length < 2) throw apiError("Enter your full name.", 400);
+  if (name.length < 2) throw apiError("Enter the contact person's name.", 400);
   if (businessName.length < 2) throw apiError("Enter your business or clinic name.", 400);
+  if (phone.replace(/\D/g, "").length < 7 || !/^[0-9+().\-\s]+$/.test(phone)) throw apiError("Enter a valid phone number.", 400);
+  if (address.length < 5) throw apiError("Enter your business address.", 400);
+  if (!["Facebook", "Email"].includes(referralSource)) throw apiError("Choose where you heard about us.", 400);
   if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid email address.", 400);
   if (!demoPasswordMeetsMinimum(password)) throw apiError("Use at least 8 characters for your password.", 400);
   if (await prisma.account.findUnique({ where: { email }, select: { id: true } })) {
@@ -4760,6 +4780,9 @@ app.post("/api/auth/register", asyncRoute(async (request, response) => {
     registration = await prisma.$transaction((tx) => createOwnerWorkspace(tx, {
       name,
       businessName,
+      phone,
+      address,
+      referralSource,
       email,
       passwordHash: hashPassword(password),
       token,
@@ -4842,8 +4865,11 @@ app.post("/api/auth/google", asyncRoute(async (request, response) => {
     ]);
   } else {
     const businessName = clean(request.body?.businessName).replace(/\s+/g, " ").slice(0, 140);
-    if (businessName.length < 2 || request.body?.termsAccepted !== true || request.body?.privacyAccepted !== true) {
-      throw apiError("Complete your clinic name and accept the terms to register with Google.", 422, {
+    const phone = clean(request.body?.phone).replace(/\s+/g, " ").slice(0, 30);
+    const address = clean(request.body?.address).replace(/\s+/g, " ").slice(0, 240);
+    const referralSource = clean(request.body?.referralSource);
+    if (businessName.length < 2 || phone.replace(/\D/g, "").length < 7 || !/^[0-9+().\-\s]+$/.test(phone) || address.length < 5 || !["Facebook", "Email"].includes(referralSource) || request.body?.termsAccepted !== true || request.body?.privacyAccepted !== true) {
+      throw apiError("Complete your business details and accept the terms to register with Google.", 422, {
         code: "GOOGLE_REGISTRATION_REQUIRED",
         profile: { name: profile.name, email: profile.email },
       });
@@ -4852,6 +4878,9 @@ app.post("/api/auth/google", asyncRoute(async (request, response) => {
       const registration = await prisma.$transaction((tx) => createOwnerWorkspace(tx, {
         name: profile.name,
         businessName,
+        phone,
+        address,
+        referralSource,
         email: profile.email,
         passwordHash: hashPassword(randomBytes(48).toString("base64url")),
         token,
@@ -5229,8 +5258,17 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
         name: true,
         slug: true,
         status: true,
+        contactName: true,
+        phone: true,
+        address: true,
+        registrationSource: true,
         createdAt: true,
         updatedAt: true,
+        branches: {
+          select: { id: true, phone: true, address: true, email: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
         subscription: true,
         _count: { select: { accounts: true, branches: true } },
       },
@@ -5283,6 +5321,10 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
         status: organization.status,
         createdAt: organization.createdAt,
         updatedAt: organization.updatedAt,
+        contactName: organization.contactName || owner?.name || "",
+        phone: organization.phone || organization.branches?.[0]?.phone || "",
+        address: organization.address || organization.branches?.[0]?.address || "",
+        registrationSource: organization.registrationSource || "",
       },
       owner: owner ? {
         id: owner.id,

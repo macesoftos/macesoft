@@ -4849,7 +4849,7 @@ function RegistrationProductPreview() {
 }
 
 function RegistrationPage({ session, onRegistered, onNavigate }) {
-  const [form, setForm] = useState({ name: "", businessName: "", email: "", password: "", confirmPassword: "", agreements: false });
+  const [form, setForm] = useState({ name: "", businessName: "", phone: "", address: "", referralSource: "", email: "", password: "", confirmPassword: "", agreements: false });
   const [googleCredential, setGoogleCredential] = useState("");
   const [googleProfile, setGoogleProfile] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -4892,8 +4892,11 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
     if (submitting) return;
     const nextErrors = {};
     if (form.businessName.trim().length < 2) nextErrors.businessName = "Enter your business or clinic name.";
+    if (form.phone.replace(/\D/g, "").length < 7 || !/^[0-9+().\-\s]+$/.test(form.phone.trim())) nextErrors.phone = "Enter a valid phone number.";
+    if (form.address.trim().length < 5) nextErrors.address = "Enter your business address.";
+    if (!["Facebook", "Email"].includes(form.referralSource)) nextErrors.referralSource = "Choose where you heard about us.";
     if (!googleCredential) {
-      if (form.name.trim().length < 2) nextErrors.name = "Enter your full name.";
+      if (form.name.trim().length < 2) nextErrors.name = "Enter the contact person's name.";
       if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) nextErrors.email = "Enter a valid email address.";
       if (form.password.length < 8) nextErrors.password = "Use at least 8 characters.";
       if (form.password !== form.confirmPassword) nextErrors.confirmPassword = "Passwords do not match.";
@@ -4909,12 +4912,18 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
         ? await authenticateWithGoogle({
           credential: googleCredential,
           businessName: form.businessName.trim(),
+          phone: form.phone.trim(),
+          address: form.address.trim(),
+          referralSource: form.referralSource,
           termsAccepted: true,
           privacyAccepted: true,
         })
         : await registerAccount({
           name: form.name.trim(),
           businessName: form.businessName.trim(),
+          phone: form.phone.trim(),
+          address: form.address.trim(),
+          referralSource: form.referralSource,
           email: form.email.trim(),
           password: form.password,
           termsAccepted: true,
@@ -4968,17 +4977,36 @@ function RegistrationPage({ session, onRegistered, onNavigate }) {
                 <GoogleIdentityButton mode="signup" onCredential={startGoogleRegistration} disabled={submitting} hideWhenUnavailable />
                 <div className="login-demo-separator"><span>{googleProfile ? "Google account selected" : "or register with email"}</span></div>
               </div>
-              {googleProfile && <div className="inline-state success"><Check size={17} /><span>Continue as {googleProfile.name} ({googleProfile.email}). Add your clinic name below.</span></div>}
+              {googleProfile && <div className="inline-state success"><Check size={17} /><span>Continue as {googleProfile.name} ({googleProfile.email}). Add your business details below.</span></div>}
               <div className="registration-fields">
                 <label>
-                  <span>Full name</span>
-                  <input autoComplete="name" maxLength={100} placeholder="Enter your full name" value={form.name} readOnly={Boolean(googleProfile)} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? "registration-name-error" : undefined} />
+                  <span>Contact name</span>
+                  <input autoComplete="name" maxLength={100} placeholder="Enter the contact person's name" value={form.name} readOnly={Boolean(googleProfile)} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? "registration-name-error" : undefined} />
                   {errors.name && <small className="field-error" id="registration-name-error">{errors.name}</small>}
                 </label>
                 <label>
                   <span>Business or clinic name</span>
                   <input autoComplete="organization" maxLength={140} placeholder="Enter your business or clinic name" value={form.businessName} onChange={(event) => update("businessName", event.target.value)} aria-invalid={Boolean(errors.businessName)} aria-describedby={errors.businessName ? "registration-business-error" : undefined} />
                   {errors.businessName && <small className="field-error" id="registration-business-error">{errors.businessName}</small>}
+                </label>
+                <label>
+                  <span>Phone number</span>
+                  <input autoComplete="tel" inputMode="tel" maxLength={30} placeholder="Enter your phone number" value={form.phone} onChange={(event) => update("phone", event.target.value)} aria-invalid={Boolean(errors.phone)} aria-describedby={errors.phone ? "registration-phone-error" : undefined} />
+                  {errors.phone && <small className="field-error" id="registration-phone-error">{errors.phone}</small>}
+                </label>
+                <label>
+                  <span>Where did you hear about us?</span>
+                  <select value={form.referralSource} onChange={(event) => update("referralSource", event.target.value)} aria-invalid={Boolean(errors.referralSource)} aria-describedby={errors.referralSource ? "registration-source-error" : undefined}>
+                    <option value="">Select an option</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Email">Email</option>
+                  </select>
+                  {errors.referralSource && <small className="field-error" id="registration-source-error">{errors.referralSource}</small>}
+                </label>
+                <label className="registration-field-full">
+                  <span>Business address</span>
+                  <input autoComplete="street-address" maxLength={240} placeholder="Enter your complete business address" value={form.address} onChange={(event) => update("address", event.target.value)} aria-invalid={Boolean(errors.address)} aria-describedby={errors.address ? "registration-address-error" : undefined} />
+                  {errors.address && <small className="field-error" id="registration-address-error">{errors.address}</small>}
                 </label>
                 <label className="registration-field-full">
                   <span>Email address</span>
@@ -5311,7 +5339,7 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
       if (workspaceType !== "all" && item.workspaceType !== workspaceType) return false;
       if (subscriptionStatus !== "all" && item.subscription?.status !== subscriptionStatus) return false;
       if (!searchTerm) return true;
-      return [item.organization?.name, item.owner?.name, item.owner?.email, item.subscription?.plan?.name]
+      return [item.organization?.name, item.organization?.phone, item.organization?.address, item.organization?.registrationSource, item.owner?.name, item.owner?.email, item.subscription?.plan?.name]
         .some((value) => String(value || "").toLowerCase().includes(searchTerm));
     });
   }, [overview.registrations, query, subscriptionStatus, workspaceType]);
@@ -5425,7 +5453,7 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
             <thead><tr><th>Workspace</th><th>Owner</th><th>Registered</th><th>Subscription</th><th>Usage</th><th>Last activity</th></tr></thead>
             <tbody>{filteredRegistrations.map((item) => <tr key={item.organization.id}>
               <td data-label="Workspace"><div className="provider-workspace-cell"><span>{item.organization.name.slice(0, 1).toUpperCase()}</span><div><strong>{item.organization.name}</strong><small>{item.workspaceType === "demo" ? "Isolated demo data" : "Customer workspace"}</small></div></div></td>
-              <td data-label="Owner"><div className="provider-owner-cell"><strong>{item.owner?.name || "Owner not found"}</strong><a href={item.owner?.email ? `mailto:${item.owner.email}` : undefined}>{item.owner?.email || "No email"}</a><small>{item.registrationMethod} registration{item.owner?.emailVerified ? " · verified" : ""}</small></div></td>
+              <td data-label="Owner"><div className="provider-owner-cell"><strong>{item.organization.contactName || item.owner?.name || "Owner not found"}</strong><a href={item.owner?.email ? `mailto:${item.owner.email}` : undefined}>{item.owner?.email || "No email"}</a>{item.organization.phone && <a href={`tel:${item.organization.phone}`}>{item.organization.phone}</a>}{item.organization.address && <small>{item.organization.address}</small>}<small>{item.registrationMethod} registration{item.owner?.emailVerified ? " · verified" : ""}{item.organization.registrationSource ? ` · ${item.organization.registrationSource}` : ""}</small></div></td>
               <td data-label="Registered"><strong>{providerDateTime(item.organization.createdAt)}</strong><small>{item.owner?.registrationEmailSent ? "Welcome email sent" : "No welcome email record"}</small></td>
               <td data-label="Subscription"><span className={`provider-status status-${item.subscription?.status || "pending_plan"}`}>{providerStatusLabel(item.subscription?.status)}</span><strong>{item.subscription?.plan?.name || (item.workspaceType === "demo" ? "Demo access" : "No plan selected")}</strong><small>{item.subscription?.paymentProviderConnected ? "Payment provider linked" : "No payment provider reference"}</small></td>
               <td data-label="Usage"><strong>{item.usage.users} user{item.usage.users === 1 ? "" : "s"}</strong><small>{item.usage.branches} branch{item.usage.branches === 1 ? "" : "es"}</small></td>

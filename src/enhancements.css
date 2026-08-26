@@ -6219,7 +6219,8 @@ td {
   grid-column: 1 / -1;
 }
 
-.registration-fields input {
+.registration-fields input,
+.registration-fields select {
   width: 100%;
   height: 52px;
   padding: 0 15px;
@@ -6232,21 +6233,28 @@ td {
   outline: none;
 }
 
+.registration-fields select {
+  cursor: pointer;
+}
+
 .registration-fields input::placeholder {
   color: #a39892;
   opacity: 1;
 }
 
-.registration-fields input:hover {
+.registration-fields input:hover,
+.registration-fields select:hover {
   border-color: #bba9a1;
 }
 
-.registration-fields input:focus {
+.registration-fields input:focus,
+.registration-fields select:focus {
   border-color: #8b3042;
   box-shadow: 0 0 0 3px rgba(139, 48, 66, 0.12);
 }
 
-.registration-fields input[aria-invalid="true"] {
+.registration-fields input[aria-invalid="true"],
+.registration-fields select[aria-invalid="true"] {
   border-color: #b43b48;
 }
 
@@ -6399,7 +6407,8 @@ td {
     gap: 5px;
   }
 
-  .registration-fields input {
+  .registration-fields input,
+  .registration-fields select {
     height: 48px;
   }
 

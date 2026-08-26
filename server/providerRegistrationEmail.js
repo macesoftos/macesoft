@@ -31,6 +31,10 @@ export function providerRegistrationEmail({
   const organizationName = clean(organization?.name) || "Unnamed workspace";
   const ownerName = clean(account?.name) || "Unnamed registrant";
   const ownerEmail = clean(account?.email).toLowerCase();
+  const primaryBranch = account?.organization?.branches?.[0];
+  const phone = clean(organization?.phone) || clean(primaryBranch?.phone);
+  const address = clean(organization?.address) || clean(primaryBranch?.address);
+  const registrationSource = clean(organization?.registrationSource);
   const origin = clean(appOrigin).split(",")[0].replace(/\/$/, "");
   const providerUrl = origin ? `${origin}/provider` : "https://zenshotech.com/provider";
   const typeLabel = workspaceType === "demo" ? "Demo workspace" : "Customer workspace";
@@ -39,6 +43,9 @@ export function providerRegistrationEmail({
     ["Workspace ID", clean(organization?.id) || clean(account?.organizationId)],
     ["Registrant", ownerName],
     ["Email", ownerEmail],
+    ["Phone", phone || "Not provided"],
+    ["Business address", address || "Not provided"],
+    ["Heard about us", registrationSource || "Not provided"],
     ["Type", typeLabel],
     ["Sign-in method", authenticationMethod],
     ["Registered at", formatDate(registeredAt)],
