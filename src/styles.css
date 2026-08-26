@@ -6315,11 +6315,12 @@ body:has(.public-lead-page-embedded) #root {
   height: 44px;
   min-width: 0;
   padding: 0 12px;
-  border: 0;
-  border-radius: 0;
-  outline: 0;
-  background: transparent;
-  box-shadow: none;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  appearance: none;
+  background: transparent !important;
+  box-shadow: none !important;
   color: #332c2c;
   font-size: 0.94rem;
 }
