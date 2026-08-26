@@ -361,6 +361,36 @@
   color: #356437;
 }
 
+.provider-status.status-inactive {
+  background: #f2eeec;
+  color: #6f6363;
+}
+
+.provider-user-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 210px;
+}
+
+.provider-protected-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5a775d;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.provider-users-table {
+  min-width: 1180px;
+}
+
+.provider-global-message {
+  margin: 0;
+}
+
 .provider-status.status-trialing {
   background: #e8eef7;
   color: #365a83;

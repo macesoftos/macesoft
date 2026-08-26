@@ -30,6 +30,7 @@
     "restore": "node scripts/restore.mjs",
     "readiness": "node scripts/readiness.mjs",
     "bootstrap:owner": "node scripts/create-owner.mjs",
+    "bootstrap:platform-admin": "node scripts/create-platform-admin.mjs",
     "assets:cleanup": "node scripts/cleanup-assets.mjs",
     "assets:migrate-client-images": "node scripts/migrate-client-images-to-cloudinary.mjs",
     "db:generate": "prisma generate",

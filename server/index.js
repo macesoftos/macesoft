@@ -3974,7 +3974,12 @@ function platformAdminEmails() {
 }
 
 function isPlatformAdmin(account) {
-  return Boolean(account?.email && platformAdminEmails().has(clean(account.email).toLowerCase()));
+  return Boolean(
+    account?.email
+    && account?.status === "Active"
+    && account?.emailVerifiedAt
+    && platformAdminEmails().has(clean(account.email).toLowerCase()),
+  );
 }
 
 async function subscriptionUsage(database, organizationId) {
@@ -4959,7 +4964,7 @@ app.use("/api", (request, response, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.get("x-mace-request") !== "app") {
     return next(apiError("This request did not pass the CSRF check.", 403));
   }
-  const subscriptionSafePath = /^\/api\/(?:auth\/(?:session|logout|change-password)|subscription(?:\/|$)|admin\/(?:subscriptions|provider-overview)(?:\/|$))/.test(request.originalUrl.split("?")[0]);
+  const subscriptionSafePath = /^\/api\/(?:auth\/(?:session|logout|change-password)|subscription(?:\/|$)|admin\/(?:subscriptions|provider-overview|users)(?:\/|$))/.test(request.originalUrl.split("?")[0]);
   if (!subscriptionSafePath && request.authSubscription && !request.authSubscription.accessAllowed) {
     const expired = request.authSubscription.status === "expired";
     return next(apiError(
@@ -4990,6 +4995,29 @@ function requirePlatformAdministrator(request) {
   const account = requireAuthenticatedAccount(request);
   if (!isPlatformAdmin(account)) throw apiError("ZenshoTech administrator access is required.", 403);
   return account;
+}
+
+function publicProviderUser(account) {
+  return {
+    id: account.id,
+    name: account.name,
+    email: account.email,
+    role: account.role,
+    status: account.status,
+    organization: account.organization ? {
+      id: account.organization.id,
+      name: account.organization.name,
+      status: account.organization.status,
+      internal: account.organization.slug === "zenshotech-provider",
+    } : null,
+    platformAdmin: isPlatformAdmin(account),
+    emailVerified: Boolean(account.emailVerifiedAt),
+    mustChangePassword: Boolean(account.mustChangePassword),
+    locked: Boolean(account.lockedUntil && account.lockedUntil > new Date()),
+    lastLoginAt: account.lastLoginAt,
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+  };
 }
 
 app.get("/api/subscription", asyncRoute(async (request, response) => {
@@ -5151,8 +5179,9 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
   const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-  const [organizations, providerAccounts, activeAccountCount, activeBranchCount] = await Promise.all([
+  const [organizations, allAccounts, activeAccountCount, activeBranchCount] = await Promise.all([
     prisma.organization.findMany({
+      where: { slug: { not: "zenshotech-provider" } },
       select: {
         id: true,
         name: true,
@@ -5166,7 +5195,6 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
       orderBy: { createdAt: "desc" },
     }),
     prisma.account.findMany({
-      where: { role: { in: ["Owner", "Super Admin", "Demo User", "Demo Viewer"] } },
       select: {
         id: true,
         organizationId: true,
@@ -5178,16 +5206,22 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
         lastLoginAt: true,
         emailVerifiedAt: true,
         registrationEmailSentAt: true,
+        mustChangePassword: true,
+        failedLoginCount: true,
+        lockedUntil: true,
+        updatedAt: true,
         identities: { select: { provider: true }, take: 1 },
+        organization: { select: { id: true, name: true, slug: true, status: true } },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
     }),
-    prisma.account.count({ where: { status: "Active" } }),
-    prisma.branch.count({ where: { status: "Active" } }),
+    prisma.account.count({ where: { status: "Active", organization: { slug: { not: "zenshotech-provider" } } } }),
+    prisma.branch.count({ where: { status: "Active", organization: { slug: { not: "zenshotech-provider" } } } }),
   ]);
   const rolePriority = new Map([["Owner", 0], ["Super Admin", 1], ["Demo User", 2], ["Demo Viewer", 3]]);
   const primaryAccounts = new Map();
-  for (const account of providerAccounts) {
+  for (const account of [...allAccounts].reverse()) {
+    if (!rolePriority.has(account.role)) continue;
     const current = primaryAccounts.get(account.organizationId);
     if (!current || (rolePriority.get(account.role) ?? 99) < (rolePriority.get(current.role) ?? 99)) {
       primaryAccounts.set(account.organizationId, account);
@@ -5230,6 +5264,7 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
   });
   const customerRegistrations = registrations.filter((item) => item.workspaceType === "customer");
   const subscriptionStatuses = customerRegistrations.map((item) => item.subscription.status);
+  const users = allAccounts.map(publicProviderUser);
   response.json({
     generatedAt: now,
     metrics: {
@@ -5243,9 +5278,67 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
       needsAttention: subscriptionStatuses.filter((status) => ["pending_plan", "pending_activation", "past_due", "expired"].includes(status)).length,
       activeUsers: activeAccountCount,
       activeBranches: activeBranchCount,
+      totalUsers: users.filter((user) => !user.organization?.internal).length,
+      lockedUsers: users.filter((user) => !user.organization?.internal && user.locked).length,
     },
     registrations,
+    users,
   });
+}));
+
+app.patch("/api/admin/users/:accountId", asyncRoute(async (request, response) => {
+  const administrator = requirePlatformAdministrator(request);
+  const accountId = requireText(request.params.accountId, "Account");
+  const action = requireText(request.body?.action, "Action");
+  const target = await prisma.account.findUnique({
+    where: { id: accountId },
+    include: { organization: { select: { id: true, name: true, slug: true, status: true } } },
+  });
+  if (!target) throw apiError("User not found.", 404);
+  if (target.id === administrator.id && action === "deactivate") {
+    throw apiError("You cannot deactivate your own system-provider account.", 409);
+  }
+  if (isPlatformAdmin(target) && action === "deactivate") {
+    throw apiError("System-provider accounts must be removed from the administrator allowlist before deactivation.", 409);
+  }
+
+  let data;
+  let auditAction;
+  let auditDetails;
+  if (action === "deactivate") {
+    data = { status: "Inactive" };
+    auditAction = "User deactivated by provider";
+    auditDetails = `${target.email} was deactivated across the platform by ${administrator.email}.`;
+  } else if (action === "reactivate") {
+    data = { status: "Active", failedLoginCount: 0, lockedUntil: null };
+    auditAction = "User reactivated by provider";
+    auditDetails = `${target.email} was reactivated across the platform by ${administrator.email}.`;
+  } else if (action === "unlock") {
+    data = { failedLoginCount: 0, lockedUntil: null };
+    auditAction = "User login unlocked by provider";
+    auditDetails = `${target.email} login lock was cleared by ${administrator.email}.`;
+  } else {
+    throw apiError("Choose deactivate, reactivate, or unlock.", 400);
+  }
+
+  const saved = await prisma.$transaction(async (tx) => {
+    const account = await tx.account.update({ where: { id: target.id }, data });
+    if (action === "deactivate") await tx.authSession.deleteMany({ where: { accountId: target.id } });
+    await tx.auditLog.create({ data: {
+      time: new Date().toLocaleString("en-PH"),
+      actor: administrator.name,
+      role: "System Provider",
+      actorAccountId: administrator.id,
+      branchId: target.lastBranchId || null,
+      area: "Access",
+      action: auditAction,
+      subjectType: "Account",
+      subjectId: target.id,
+      details: auditDetails,
+    } });
+    return account;
+  });
+  response.json({ user: publicProviderUser({ ...saved, organization: target.organization }) });
 }));
 
 app.patch("/api/admin/subscriptions/:organizationId", asyncRoute(async (request, response) => {

@@ -122,6 +122,13 @@ export function loadProviderOverview() {
   return requestJson("/api/admin/provider-overview");
 }
 
+export function updateProviderUser(accountId, action) {
+  return requestJson(`/api/admin/users/${encodeURIComponent(accountId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action }),
+  });
+}
+
 export function updateAdminSubscription(organizationId, payload) {
   return requestJson(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}`, {
     method: "PATCH",

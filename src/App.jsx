@@ -165,6 +165,7 @@ import {
   updatePosCart,
   updateAccountAccess,
   updateAdminSubscription,
+  updateProviderUser,
   uploadTreatmentPhoto,
   moveMarketingCampaignToDeleted,
   deleteTreatmentPhoto,
@@ -2908,7 +2909,11 @@ function App() {
   if (!session) {
     const resetToken = publicParams.get("reset");
     if (resetToken) return <ResetPasswordScreen token={resetToken} />;
-    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} onGoogleAuthenticated={handleGoogleAuthentication} onNavigate={navigateToPath} settings={settings} />;
+    return <LoginScreen notice={sessionNotice} onLogin={handleLogin} onGoogleAuthenticated={handleGoogleAuthentication} onNavigate={navigateToPath} settings={settings} providerMode={isProviderView} />;
+  }
+
+  if (session.mustChangePassword) {
+    return <ChangePasswordScreen account={session} onChangePassword={handlePasswordChange} onLogout={handleLogout} />;
   }
 
   if (isSubscriptionView) {
@@ -2921,10 +2926,6 @@ function App() {
 
   if (isSubscriptionExpiredView) {
     return <SubscriptionExpiredPage session={session} onLogout={handleLogout} onNavigate={navigateToPath} />;
-  }
-
-  if (session.mustChangePassword) {
-    return <ChangePasswordScreen account={session} onChangePassword={handlePasswordChange} onLogout={handleLogout} />;
   }
 
   if (!session.subscription?.accessAllowed) {
@@ -5271,10 +5272,14 @@ function providerStatusLabel(status) {
 }
 
 function ProviderWorkspace({ session, onLogout, onNavigate }) {
-  const [overview, setOverview] = useState({ metrics: {}, registrations: [], generatedAt: null });
+  const [overview, setOverview] = useState({ metrics: {}, registrations: [], users: [], generatedAt: null });
   const [loading, setLoading] = useState(Boolean(session.platformAdmin));
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
+  const [userQuery, setUserQuery] = useState("");
+  const [userStatus, setUserStatus] = useState("all");
+  const [userActionId, setUserActionId] = useState("");
   const [workspaceType, setWorkspaceType] = useState("all");
   const [subscriptionStatus, setSubscriptionStatus] = useState("all");
 
@@ -5309,6 +5314,47 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
         .some((value) => String(value || "").toLowerCase().includes(searchTerm));
     });
   }, [overview.registrations, query, subscriptionStatus, workspaceType]);
+  const filteredUsers = useMemo(() => {
+    const searchTerm = userQuery.trim().toLowerCase();
+    return (overview.users || []).filter((user) => {
+      if (userStatus !== "all" && user.status !== userStatus) return false;
+      if (!searchTerm) return true;
+      return [user.name, user.email, user.role, user.organization?.name]
+        .some((value) => String(value || "").toLowerCase().includes(searchTerm));
+    });
+  }, [overview.users, userQuery, userStatus]);
+
+  async function applyUserAction(user, action) {
+    setUserActionId(`${user.id}:${action}`);
+    setError("");
+    setMessage("");
+    try {
+      const result = await updateProviderUser(user.id, action);
+      setOverview((current) => ({
+        ...current,
+        users: (current.users || []).map((item) => item.id === user.id ? result.user : item),
+      }));
+      setMessage(`${user.email} was ${action === "deactivate" ? "deactivated" : action === "reactivate" ? "reactivated" : "unlocked"}.`);
+    } catch (actionError) {
+      setError(actionError.message || "Unable to update this user.");
+    } finally {
+      setUserActionId("");
+    }
+  }
+
+  async function sendUserReset(user) {
+    setUserActionId(`${user.id}:reset`);
+    setError("");
+    setMessage("");
+    try {
+      const result = await requestPasswordReset(user.email);
+      setMessage(result.message || `Password-reset instructions were requested for ${user.email}.`);
+    } catch (resetError) {
+      setError(resetError.message || "Unable to send the password-reset email.");
+    } finally {
+      setUserActionId("");
+    }
+  }
 
   if (!session.platformAdmin) {
     return (
@@ -5327,7 +5373,7 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
   const metrics = overview.metrics || {};
   const metricCards = [
     { label: "Customer workspaces", value: metrics.customerWorkspaces ?? 0, detail: `${metrics.demoWorkspaces ?? 0} demo workspaces`, icon: Store },
-    { label: "New registrations", value: metrics.registrationsLast7Days ?? 0, detail: `${metrics.registrationsLast24Hours ?? 0} in the last 24 hours`, icon: UserCheck },
+    { label: "Platform users", value: metrics.totalUsers ?? 0, detail: `${metrics.registrationsLast7Days ?? 0} new workspaces in 7 days`, icon: Users },
     { label: "Active subscriptions", value: metrics.activeSubscriptions ?? 0, detail: `${metrics.activeTrials ?? 0} active trials`, icon: CreditCard },
     { label: "Needs attention", value: metrics.needsAttention ?? 0, detail: "Plan, payment, or access follow-up", icon: AlertCircle },
   ];
@@ -5359,6 +5405,8 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
           <div><Activity size={18} aria-hidden="true" /><span><strong>{metrics.activeUsers ?? 0} active users</strong><small>Across {metrics.activeBranches ?? 0} active clinic branches.</small></span></div>
         </section>
 
+        {message && <div className="inline-state success provider-global-message" role="status"><Check size={18} /><span>{message}</span></div>}
+
         <section className="provider-directory-card">
           <header>
             <div><p className="eyebrow">Registration directory</p><h2>Businesses and prospects</h2><span>{filteredRegistrations.length} of {overview.registrations?.length || 0} workspaces shown{overview.generatedAt ? ` · Updated ${providerDateTime(overview.generatedAt)}` : ""}</span></div>
@@ -5381,6 +5429,34 @@ function ProviderWorkspace({ session, onLogout, onNavigate }) {
               <td data-label="Subscription"><span className={`provider-status status-${item.subscription?.status || "pending_plan"}`}>{providerStatusLabel(item.subscription?.status)}</span><strong>{item.subscription?.plan?.name || (item.workspaceType === "demo" ? "Demo access" : "No plan selected")}</strong><small>{item.subscription?.paymentProviderConnected ? "Payment provider linked" : "No payment provider reference"}</small></td>
               <td data-label="Usage"><strong>{item.usage.users} user{item.usage.users === 1 ? "" : "s"}</strong><small>{item.usage.branches} branch{item.usage.branches === 1 ? "" : "es"}</small></td>
               <td data-label="Last activity"><strong>{providerDateTime(item.owner?.lastLoginAt, "Never signed in")}</strong><small>{item.owner?.status || item.organization.status}</small></td>
+            </tr>)}</tbody>
+          </table></div>}
+        </section>
+
+        <section className="provider-directory-card provider-users-card">
+          <header>
+            <div><p className="eyebrow">System-wide user management</p><h2>All product users</h2><span>{filteredUsers.length} of {overview.users?.length || 0} accounts shown · {metrics.lockedUsers ?? 0} locked</span></div>
+            <div className="provider-filters">
+              <label className="provider-search"><Search size={17} aria-hidden="true" /><input aria-label="Search all users" value={userQuery} onChange={(event) => setUserQuery(event.target.value)} placeholder="Search user, email, role, or business" /></label>
+              <label><span className="sr-only">User status</span><select value={userStatus} onChange={(event) => setUserStatus(event.target.value)}><option value="all">All user statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option></select></label>
+            </div>
+          </header>
+          {!loading && !error && !filteredUsers.length && <div className="provider-empty"><Users size={30} /><strong>No matching users</strong><span>Try another email, business, role, or status.</span></div>}
+          {filteredUsers.length > 0 && <div className="provider-table-wrap"><table className="provider-table provider-users-table">
+            <thead><tr><th>User</th><th>Business</th><th>Role &amp; security</th><th>Last login</th><th>Status</th><th>Management</th></tr></thead>
+            <tbody>{filteredUsers.map((user) => <tr key={user.id}>
+              <td data-label="User"><div className="provider-owner-cell"><strong>{user.name}</strong><a href={`mailto:${user.email}`}>{user.email}</a><small>Created {providerDateTime(user.createdAt)}</small></div></td>
+              <td data-label="Business"><strong>{user.organization?.name || "No workspace"}</strong><small>{user.organization?.internal ? "Internal provider workspace" : user.organization?.status || "Unknown status"}</small></td>
+              <td data-label="Role & security"><strong>{user.platformAdmin ? "System Provider" : user.role}</strong><small>{user.emailVerified ? "Verified email" : "Email not verified"}{user.mustChangePassword ? " · password change required" : ""}{user.locked ? " · login locked" : ""}</small></td>
+              <td data-label="Last login"><strong>{providerDateTime(user.lastLoginAt, "Never signed in")}</strong><small>Account updated {providerDateTime(user.updatedAt)}</small></td>
+              <td data-label="Status"><span className={`provider-status status-${String(user.status).toLowerCase()}`}>{user.status}</span>{user.platformAdmin && <small>Protected administrator</small>}</td>
+              <td data-label="Management"><div className="provider-user-actions">
+                {user.platformAdmin
+                  ? <span className="provider-protected-label"><ShieldCheck size={15} /> Protected</span>
+                  : <button className="ghost-button small" type="button" disabled={Boolean(userActionId)} onClick={() => applyUserAction(user, user.status === "Active" ? "deactivate" : "reactivate")}>{userActionId === `${user.id}:${user.status === "Active" ? "deactivate" : "reactivate"}` ? "Saving..." : user.status === "Active" ? "Deactivate" : "Reactivate"}</button>}
+                {user.locked && <button className="ghost-button small" type="button" disabled={Boolean(userActionId)} onClick={() => applyUserAction(user, "unlock")}>{userActionId === `${user.id}:unlock` ? "Unlocking..." : "Unlock login"}</button>}
+                <button className="text-button small" type="button" disabled={Boolean(userActionId) || user.status !== "Active"} onClick={() => sendUserReset(user)}>{userActionId === `${user.id}:reset` ? "Sending..." : "Send reset link"}</button>
+              </div></td>
             </tr>)}</tbody>
           </table></div>}
         </section>
@@ -5411,7 +5487,7 @@ function TrialBanner({ subscription, onNavigate }) {
   );
 }
 
-function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
+function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate, providerMode = false }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -5475,9 +5551,9 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
         <form className="login-card zensho-login-card" onSubmit={submit}>
           <header className="zensho-login-header">
             <BrandWordmark className="login-logo zensho-login-logo" />
-            <p className="zensho-login-eyebrow">Secure workspace access</p>
-            <h1>Welcome back</h1>
-            <p>Sign in to manage your ZenshoTech workspace.</p>
+            <p className="zensho-login-eyebrow">{providerMode ? "System provider access" : "Secure workspace access"}</p>
+            <h1>{providerMode ? "Provider control center" : "Welcome back"}</h1>
+            <p>{providerMode ? "Sign in with your verified ZenshoTech administrator account." : "Sign in to manage your ZenshoTech workspace."}</p>
           </header>
 
           <div className="zensho-login-fields">
@@ -5530,20 +5606,22 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
             <div className="inline-state warning zensho-reset-panel" aria-live="polite"><Mail size={17} aria-hidden="true" /><span>{forgotMessage || `Send a secure reset link to ${email || "your account"}.`}</span><button type="button" className="ghost-button small" disabled={!email || resetSubmitting} onClick={sendReset}>{resetSubmitting ? "Sending..." : "Send reset link"}</button></div>
           )}
 
-          <div className="login-demo-separator zensho-login-divider"><span>or continue with Google</span></div>
-          <GoogleIdentityButton mode="signin" onCredential={signInWithGoogle} disabled={submitting} />
+          {!providerMode && <>
+            <div className="login-demo-separator zensho-login-divider"><span>or continue with Google</span></div>
+            <GoogleIdentityButton mode="signin" onCredential={signInWithGoogle} disabled={submitting} />
 
-          <div className="login-demo-separator"><span>New to ZenshoTech?</span></div>
-          <section className="zensho-create-workspace" aria-labelledby="zensho-create-workspace-title">
-            <div className="zensho-create-workspace-heading">
-              <span className="zensho-create-icon"><Plus size={20} aria-hidden="true" /></span>
-              <div>
-                <h2 id="zensho-create-workspace-title">Create your workspace</h2>
-                <p>Start your 7-day free trial. No commitment.</p>
+            <div className="login-demo-separator"><span>New to ZenshoTech?</span></div>
+            <section className="zensho-create-workspace" aria-labelledby="zensho-create-workspace-title">
+              <div className="zensho-create-workspace-heading">
+                <span className="zensho-create-icon"><Plus size={20} aria-hidden="true" /></span>
+                <div>
+                  <h2 id="zensho-create-workspace-title">Create your workspace</h2>
+                  <p>Start your 7-day free trial. No commitment.</p>
+                </div>
               </div>
-            </div>
-            <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Create a free account</button>
-          </section>
+              <button className="ghost-button full demo-account-button" type="button" onClick={() => onNavigate("/register")}>Create a free account</button>
+            </section>
+          </>}
 
           <footer className="zensho-login-trust" aria-label="Login security">
             <span><Plus size={14} aria-hidden="true" />Encrypted login</span>
