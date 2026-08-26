@@ -5391,7 +5391,7 @@ function LoginScreen({ notice, onLogin, onGoogleAuthenticated, onNavigate }) {
           <div className="login-demo-separator"><span>New to ZenshoTech?</span></div>
           <section className="zensho-create-workspace" aria-labelledby="zensho-create-workspace-title">
             <div className="zensho-create-workspace-heading">
-              <span className="zensho-create-icon"><Plus size={28} aria-hidden="true" /></span>
+              <span className="zensho-create-icon"><Plus size={20} aria-hidden="true" /></span>
               <div>
                 <h2 id="zensho-create-workspace-title">Create your workspace</h2>
                 <p>Start your 7-day free trial. No commitment.</p>

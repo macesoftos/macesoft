@@ -6141,7 +6141,7 @@ body:has(.public-lead-page-embedded) #root {
   position: relative;
   overflow: hidden;
   min-height: 100svh;
-  padding: clamp(28px, 5vw, 72px) 20px;
+  padding: 12px 18px;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.45), transparent 48%),
     #f7f2f0;
@@ -6193,16 +6193,16 @@ body:has(.public-lead-page-embedded) #root {
 .login-panel.zensho-login-panel {
   position: relative;
   z-index: 1;
-  width: min(680px, 100%);
+  width: min(560px, 100%);
 }
 
 .login-card.zensho-login-card {
   min-height: 0;
   justify-content: flex-start;
-  gap: 22px;
-  padding: clamp(34px, 6vw, 62px) clamp(24px, 6vw, 58px) 34px;
+  gap: 10px;
+  padding: 22px 36px 18px;
   border: 1px solid #eadbd7;
-  border-radius: 34px;
+  border-radius: 28px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 28px 80px rgba(104, 68, 76, 0.12);
   backdrop-filter: blur(10px);
@@ -6215,21 +6215,21 @@ body:has(.public-lead-page-embedded) #root {
 }
 
 .zenshotech-wordmark.zensho-login-logo {
-  width: min(390px, 82%);
+  width: min(250px, 70%);
   max-width: none;
   height: auto;
-  max-height: 98px;
-  margin: 0 auto 28px;
+  max-height: 48px;
+  margin: 0 auto 8px;
 }
 
 .zensho-login-eyebrow {
   display: inline-flex;
-  margin: 0 0 22px;
-  padding: 8px 18px;
+  margin: 0 0 8px;
+  padding: 5px 13px;
   border-radius: 999px;
   background: #f7ecee;
   color: #9f5862;
-  font-size: 0.76rem;
+  font-size: 0.65rem;
   font-weight: 850;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -6238,28 +6238,28 @@ body:has(.public-lead-page-embedded) #root {
 .login-card.zensho-login-card .zensho-login-header h1 {
   margin: 0;
   color: #171515;
-  font-size: clamp(2.25rem, 7vw, 3.4rem);
+  font-size: clamp(1.8rem, 5vw, 2.2rem);
   font-weight: 800;
   letter-spacing: -0.045em;
   line-height: 1;
 }
 
 .zensho-login-header > p:last-child {
-  margin: 14px 0 0;
+  margin: 5px 0 0;
   color: #7e7070;
-  font-size: clamp(0.95rem, 2.2vw, 1.08rem);
-  line-height: 1.5;
+  font-size: 0.88rem;
+  line-height: 1.35;
 }
 
 .zensho-login-fields {
   display: grid;
-  gap: 18px;
-  margin-top: 6px;
+  gap: 9px;
+  margin-top: 0;
 }
 
 .zensho-login-field {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .login-card.zensho-login-card .zensho-login-field > label,
@@ -6295,8 +6295,8 @@ body:has(.public-lead-page-embedded) #root {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 58px;
-  padding: 0 16px;
+  min-height: 46px;
+  padding: 0 13px;
   border: 1.5px solid #dacac7;
   border-radius: 14px;
   background: #fff;
@@ -6312,7 +6312,7 @@ body:has(.public-lead-page-embedded) #root {
 .login-card.zensho-login-card .zensho-login-input-shell input {
   flex: 1;
   width: 100%;
-  height: 56px;
+  height: 44px;
   min-width: 0;
   padding: 0 12px;
   border: 0;
@@ -6321,7 +6321,7 @@ body:has(.public-lead-page-embedded) #root {
   background: transparent;
   box-shadow: none;
   color: #332c2c;
-  font-size: 1rem;
+  font-size: 0.94rem;
 }
 
 .login-card.zensho-login-card .zensho-login-input-shell input::placeholder {
@@ -6358,13 +6358,13 @@ body:has(.public-lead-page-embedded) #root {
 }
 
 .primary-button.zensho-login-submit {
-  min-height: 60px;
+  min-height: 46px;
   border-color: #9f5862;
   border-radius: 14px;
   background: #9f5862;
   box-shadow: 0 12px 26px rgba(159, 88, 98, 0.18);
   color: #fff;
-  font-size: 1rem;
+  font-size: 0.94rem;
   font-weight: 800;
 }
 
@@ -6378,7 +6378,7 @@ body:has(.public-lead-page-embedded) #root {
 }
 
 .zensho-login-divider {
-  margin-top: -4px;
+  margin-top: 0;
 }
 
 .login-card.zensho-login-card .login-demo-separator {
@@ -6395,24 +6395,24 @@ body:has(.public-lead-page-embedded) #root {
 
 .zensho-create-workspace {
   display: grid;
-  gap: 18px;
-  padding: 22px;
+  gap: 9px;
+  padding: 12px 14px;
   border: 1px solid #ebdcd8;
-  border-radius: 20px;
+  border-radius: 16px;
   background: #fcf8f7;
 }
 
 .zensho-create-workspace-heading {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 11px;
 }
 
 .zensho-create-icon {
   display: grid;
-  flex: 0 0 54px;
-  width: 54px;
-  height: 54px;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
   place-items: center;
   border-radius: 50%;
   background: #f3e4e7;
@@ -6420,24 +6420,24 @@ body:has(.public-lead-page-embedded) #root {
 }
 
 .login-card.zensho-login-card .zensho-create-workspace h2 {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   color: #2d2727;
-  font-size: 1.05rem;
+  font-size: 0.94rem;
 }
 
 .zensho-create-workspace p {
   margin: 0;
   color: #857777;
-  font-size: 0.88rem;
+  font-size: 0.78rem;
 }
 
 .login-card.zensho-login-card .demo-account-button {
-  min-height: 52px;
+  min-height: 40px;
   border: 1.5px solid #a45c67;
   border-radius: 12px;
   background: #fff;
   color: #9f5862;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 800;
 }
 
@@ -6449,8 +6449,8 @@ body:has(.public-lead-page-embedded) #root {
   display: flex;
   justify-content: center;
   gap: clamp(18px, 7vw, 40px);
-  margin-top: 4px;
-  padding-top: 22px;
+  margin-top: 0;
+  padding-top: 10px;
   border-top: 1px solid #eee3e0;
   color: #998b8c;
   font-size: 0.76rem;
@@ -6471,25 +6471,25 @@ body:has(.public-lead-page-embedded) #root {
 
 @media (max-width: 560px) {
   .login-page.zensho-login-page {
-    align-items: start;
-    padding: 16px 12px 28px;
+    align-items: center;
+    padding: 8px;
   }
 
   .login-card.zensho-login-card {
-    gap: 18px;
-    padding: 30px 20px 24px;
-    border-radius: 24px;
+    gap: 9px;
+    padding: 18px 18px 14px;
+    border-radius: 22px;
   }
 
   .zenshotech-wordmark.zensho-login-logo {
-    width: min(320px, 86%);
-    margin-bottom: 22px;
+    width: min(230px, 72%);
+    margin-bottom: 6px;
   }
 
   .zensho-login-eyebrow {
-    margin-bottom: 18px;
-    padding: 7px 13px;
-    font-size: 0.65rem;
+    margin-bottom: 7px;
+    padding: 5px 11px;
+    font-size: 0.6rem;
   }
 
   .zensho-login-header > p:last-child {
@@ -6505,7 +6505,7 @@ body:has(.public-lead-page-embedded) #root {
   }
 
   .zensho-create-workspace {
-    padding: 18px;
+    padding: 10px 12px;
   }
 
   .zensho-create-workspace-heading {
@@ -6515,6 +6515,38 @@ body:has(.public-lead-page-embedded) #root {
   .zensho-login-trust {
     gap: 16px;
     font-size: 0.7rem;
+  }
+}
+
+@media (max-height: 720px) and (min-width: 561px) {
+  .login-page.zensho-login-page {
+    padding-block: 8px;
+  }
+
+  .login-card.zensho-login-card {
+    gap: 7px;
+    padding-block: 16px 12px;
+  }
+
+  .zenshotech-wordmark.zensho-login-logo {
+    max-height: 40px;
+    margin-bottom: 5px;
+  }
+
+  .zensho-login-eyebrow {
+    margin-bottom: 5px;
+  }
+
+  .zensho-login-input-shell {
+    min-height: 42px;
+  }
+
+  .login-card.zensho-login-card .zensho-login-input-shell input {
+    height: 40px;
+  }
+
+  .zensho-login-trust {
+    padding-top: 7px;
   }
 }
 
