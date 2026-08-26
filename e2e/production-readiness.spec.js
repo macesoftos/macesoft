@@ -48,6 +48,14 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   }
   await expect(accountMenu).toBeVisible();
 
+  const onboardingWelcome = page.getByTestId("onboarding-welcome");
+  if (await onboardingWelcome.isVisible()) {
+    const onboardingResponse = page.waitForResponse((response) => response.url().endsWith("/api/onboarding") && response.request().method() === "PATCH");
+    await onboardingWelcome.getByRole("button", { name: "Explore on my own" }).click();
+    expect((await onboardingResponse).status()).toBe(200);
+    await expect(onboardingWelcome).toBeHidden();
+  }
+
   let authorization = { status: 0, hasClients: false };
   let bootstrapAttempts = 0;
   for (; bootstrapAttempts < 5; bootstrapAttempts += 1) {
