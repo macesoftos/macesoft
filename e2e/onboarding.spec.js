@@ -89,6 +89,16 @@ test("tour progress resumes after refresh and completed users are not interrupte
   await expect(page.getByTestId("onboarding-tour")).toBeHidden();
 });
 
+test("a new account can follow a deep link before onboarding begins on the dashboard", async ({ page }) => {
+  await mockResponsiveApi(page, { onboarding: newOnboarding() });
+  await page.goto("/appointments");
+  await expect(page.getByTestId("onboarding-welcome")).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Appointments" })).toBeVisible();
+
+  await page.goto("/dashboard");
+  await expect(page.getByTestId("onboarding-welcome")).toBeVisible();
+});
+
 test("role tours contain only modules granted by the server", async ({ page }) => {
   const cases = [
     {

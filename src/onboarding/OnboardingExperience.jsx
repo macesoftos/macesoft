@@ -140,14 +140,22 @@ export function useOnboardingController({
   }, [refresh, session?.id]);
 
   useEffect(() => {
-    if (!payload?.state || !isReady || blocked) return;
+    if (!payload || !isReady || blocked) return;
+    if (!payload.state || !Array.isArray(payload.modules)) {
+      setWelcomeOpen(false);
+      setTourActive(false);
+      return;
+    }
     const state = payload.state;
     if (!state.startedAt && !state.completedAt && !state.dismissedAt) {
-      setWelcomeOpen(true);
+      const hasDashboard = payload.modules.includes("overview");
+      const pathIsDashboard = typeof window === "undefined"
+        || ["/dashboard", "/my-workspace"].includes(window.location.pathname);
+      setWelcomeOpen(!hasDashboard || (pathIsDashboard && activeModule === "overview"));
       return;
     }
     if (state.startedAt && !state.completedAt && !state.dismissedAt) setTourActive(true);
-  }, [blocked, isReady, payload]);
+  }, [activeModule, blocked, isReady, payload]);
 
   useEffect(() => {
     if (!session?.id || typeof window === "undefined") return undefined;
