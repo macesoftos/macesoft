@@ -3423,6 +3423,187 @@ async function sendSmtpEmail({ transporter, to, replyTo = "", subject, text, htm
   return result.messageId;
 }
 
+const leadAutomationClosedStatuses = ["Appointment Booked", "Converted", "Lost", "Unresponsive"];
+const leadAutomationDefaultTemplate = "Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}";
+
+function leadAutomationProviderReady(channel) {
+  if (envFlag(process.env.LEAD_AUTOMATION_DRY_RUN)) return true;
+  return clean(channel).toLowerCase() === "sms" ? smsReady() : emailReady();
+}
+
+function normalizeLeadAutomationPayload(payload, current = null) {
+  const channel = clean(payload?.channel || current?.channel || "Email");
+  if (!["Email", "SMS"].includes(channel)) throw apiError("Choose Email or SMS for the automation channel.", 400);
+  const delayHours = Math.round(numberValue(payload?.delayHours ?? current?.delayHours ?? 48, "Delay", { min: 1 }));
+  if (delayHours > 720) throw apiError("Delay must be 720 hours or fewer.", 400);
+  const bookingUrl = clean(payload?.bookingUrl ?? current?.bookingUrl);
+  if (bookingUrl && !/^https?:\/\/[^\s]+$/i.test(bookingUrl)) throw apiError("Enter a complete http or https booking link.", 400);
+  const messageTemplate = requireText(payload?.messageTemplate ?? current?.messageTemplate ?? leadAutomationDefaultTemplate, "Message template").slice(0, 1500);
+  return {
+    name: (clean(payload?.name ?? current?.name) || "No-response follow-up").slice(0, 120),
+    active: payload?.active === undefined ? Boolean(current?.active) : parseBoolean(payload.active, false),
+    branch: clean(payload?.branch ?? current?.branch) || "All branches",
+    delayHours,
+    channel,
+    subject: (clean(payload?.subject ?? current?.subject) || "Following up on your inquiry").slice(0, 180),
+    prompt: (clean(payload?.prompt ?? current?.prompt) || "Write a warm, concise follow-up that invites the lead to book an appointment.").slice(0, 1000),
+    messageTemplate,
+    bookingUrl,
+  };
+}
+
+function renderLeadAutomationMessage(automation, lead) {
+  const firstName = clean(lead.preferredName || lead.firstName || lead.name.split(/\s+/)[0]) || "there";
+  const interest = clean(lead.interest || lead.interestedTreatment || lead.interestedPackage) || "your inquiry";
+  const replacements = {
+    firstName,
+    name: clean(lead.name) || firstName,
+    interest,
+    bookingLink: clean(automation.bookingUrl) || "reply to this message",
+  };
+  let message = clean(automation.messageTemplate) || leadAutomationDefaultTemplate;
+  for (const [key, value] of Object.entries(replacements)) {
+    message = message.replaceAll(`{${key}}`, value);
+  }
+  message = message.replace(/\{[a-zA-Z]+\}/g, "").replace(/\s+([,.!?])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+  const optOut = clean(automation.channel).toLowerCase() === "sms"
+    ? "Reply STOP to opt out."
+    : "Reply unsubscribe if you no longer want follow-up messages.";
+  return `${message}\n\n${optOut}`.slice(0, clean(automation.channel).toLowerCase() === "sms" ? 1500 : 5000);
+}
+
+async function leadAutomationBranchNames(automation) {
+  const branches = await prisma.branch.findMany({
+    where: {
+      organizationId: automation.organizationId,
+      status: "Active",
+      ...(!isAllBranches(automation.branch) ? { name: automation.branch } : {}),
+    },
+    select: { name: true },
+  });
+  return branches.map((branch) => branch.name);
+}
+
+async function deliverLeadAutomationRun(automation, lead, scheduledAt) {
+  const channel = clean(automation.channel);
+  const recipient = channel === "SMS" ? normalizePhone(lead.mobile) : normalizeEmail(lead.email);
+  if (!recipient) return { skipped: true, reason: `Lead has no valid ${channel === "SMS" ? "mobile number" : "email address"}.` };
+  const message = renderLeadAutomationMessage(automation, lead);
+  let run;
+  try {
+    run = await prisma.leadAutomationRun.create({
+      data: {
+        automationId: automation.id,
+        organizationId: automation.organizationId,
+        leadId: lead.id,
+        channel,
+        recipient,
+        subject: channel === "Email" ? automation.subject : "",
+        message,
+        status: "Processing",
+        scheduledAt,
+        attemptedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    if (error?.code === "P2002") return { skipped: true, reason: "This automation already followed up with the lead." };
+    throw error;
+  }
+
+  try {
+    let providerReference = "dry-run";
+    if (!envFlag(process.env.LEAD_AUTOMATION_DRY_RUN)) {
+      if (channel === "SMS") {
+        providerReference = await sendTwilioSms({ to: recipient, body: message });
+      } else {
+        const transporter = await createVerifiedEmailTransport();
+        try {
+          providerReference = await sendSmtpEmail({ transporter, to: recipient, subject: automation.subject, text: message });
+        } finally {
+          transporter.close();
+        }
+      }
+    }
+    const sentAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Sent", providerReference, sentAt } });
+      await tx.lead.update({
+        where: { id: lead.id },
+        data: { lastContactedAt: sentAt.toISOString(), followUpCount: Number(lead.followUpCount || 0) + 1 },
+      });
+      await createLeadActivity(tx, null, lead.id, {
+        type: "Automated Follow-Up",
+        title: `${channel} follow-up sent`,
+        note: message,
+        channel,
+        actor: "ZenshoTech Automation",
+        actorRole: "System",
+        metadata: { automationId: automation.id, runId: run.id, providerReference },
+      });
+      const recipientAccountIds = await notificationRecipientsForOrganization(tx, {
+        branches: [lead.branch],
+        module: "leads",
+        organizationId: automation.organizationId,
+      });
+      if (recipientAccountIds.length) {
+        await createAppNotification(tx, {
+          actor: "ZenshoTech Automation",
+          branches: [lead.branch],
+          organizationId: automation.organizationId,
+          recipientAccountIds,
+          module: "leads",
+          recordId: lead.id,
+          title: "Automated lead follow-up sent",
+          message: `${channel} follow-up sent to ${lead.name}.`,
+        });
+      }
+    });
+    return { sent: true };
+  } catch (error) {
+    const reason = (clean(error.message) || "Delivery failed.").slice(0, 1000);
+    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Failed", reason } });
+    console.error(JSON.stringify({ event: "lead_automation_delivery_failed", automationId: automation.id, leadId: lead.id, error: reason }));
+    return { failed: true, reason };
+  }
+}
+
+async function processLeadAutomation(automation) {
+  if (!automation?.active) return { evaluated: 0, sent: 0, failed: 0, skipped: 0 };
+  if (!leadAutomationProviderReady(automation.channel)) {
+    return { evaluated: 0, sent: 0, failed: 0, skipped: 0, waitingForProvider: true };
+  }
+  const branchNames = await leadAutomationBranchNames(automation);
+  if (!branchNames.length) return { evaluated: 0, sent: 0, failed: 0, skipped: 0 };
+  const scheduledAt = new Date();
+  const cutoff = new Date(scheduledAt.getTime() - automation.delayHours * 60 * 60 * 1000);
+  const leads = await prisma.lead.findMany({
+    where: {
+      branch: { in: branchNames },
+      archivedAt: "",
+      permissionToContact: true,
+      privacyConsent: true,
+      status: { notIn: leadAutomationClosedStatuses },
+      createdAt: { lte: cutoff },
+      automationRuns: { none: { automationId: automation.id } },
+    },
+    orderBy: [{ createdAt: "asc" }],
+    take: 100,
+  });
+  const eligible = leads.filter((lead) => {
+    if (!lead.lastContactedAt) return true;
+    const lastContact = new Date(lead.lastContactedAt);
+    return Number.isNaN(lastContact.getTime()) || lastContact <= cutoff;
+  });
+  const result = { evaluated: eligible.length, sent: 0, failed: 0, skipped: 0 };
+  for (const lead of eligible) {
+    const delivery = await deliverLeadAutomationRun(automation, lead, scheduledAt);
+    if (delivery.sent) result.sent += 1;
+    else if (delivery.failed) result.failed += 1;
+    else result.skipped += 1;
+  }
+  return result;
+}
+
 async function listBranchesForBootstrap(actor) {
   const organizationManager = canManageOrganization(actor.role) || hasOrganizationPermission(actor, "branches.manage");
   const where = organizationManager
@@ -7314,6 +7495,96 @@ app.put("/api/settings", asyncRoute(async (request, response) => {
   response.json({ settings, auditLog });
 }));
 
+async function assertLeadAutomationBranch(actor, branch) {
+  if (isAllBranches(branch)) return;
+  const record = await prisma.branch.findFirst({ where: { organizationId: actor.organizationId, name: branch, status: "Active" }, select: { id: true } });
+  if (!record) throw apiError("Choose an active branch in your organization.", 400);
+}
+
+function assertLeadAutomationManager(request) {
+  const actor = assertReadAllowed(request, "leads");
+  if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can manage lead automations.", 403);
+  return actor;
+}
+
+app.get("/api/leads/automations", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "leads");
+  const [automations, runs] = await Promise.all([
+    prisma.leadAutomation.findMany({ where: { organizationId: actor.organizationId }, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.leadAutomationRun.findMany({
+      where: { organizationId: actor.organizationId, lead: { is: branchWhere(actor) } },
+      include: { lead: { select: { id: true, name: true, branch: true } }, automation: { select: { id: true, name: true } } },
+      orderBy: [{ createdAt: "desc" }],
+      take: 50,
+    }),
+  ]);
+  response.json({
+    automations,
+    runs,
+    canManage: canManageOrganization(actor.role),
+    providers: {
+      email: emailReady(),
+      sms: smsReady(),
+      dryRun: envFlag(process.env.LEAD_AUTOMATION_DRY_RUN),
+    },
+  });
+}));
+
+app.post("/api/leads/automations", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const data = normalizeLeadAutomationPayload(request.body ?? {});
+  await assertLeadAutomationBranch(actor, data.branch);
+  if (data.active && !leadAutomationProviderReady(data.channel)) {
+    throw apiError(`${data.channel} delivery is not configured. Connect the provider before enabling this automation.`, 503);
+  }
+  const automation = await prisma.$transaction(async (tx) => {
+    const created = await tx.leadAutomation.create({ data: { ...data, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Lead automation created",
+      subjectType: "LeadAutomation",
+      subjectId: created.id,
+      details: `${created.name} created in ${created.active ? "active" : "draft"} mode.`,
+    });
+    return created;
+  });
+  response.status(201).json({ automation });
+}));
+
+app.put("/api/leads/automations/:id", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const current = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  if (!current) throw apiError("Lead automation not found.", 404);
+  const data = normalizeLeadAutomationPayload(request.body ?? {}, current);
+  await assertLeadAutomationBranch(actor, data.branch);
+  if (data.active && !leadAutomationProviderReady(data.channel)) {
+    throw apiError(`${data.channel} delivery is not configured. Connect the provider before enabling this automation.`, 503);
+  }
+  const automation = await prisma.$transaction(async (tx) => {
+    const updated = await tx.leadAutomation.update({ where: { id: current.id }, data: { ...data, updatedById: actor.id } });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Lead automation updated",
+      subjectType: "LeadAutomation",
+      subjectId: updated.id,
+      details: `${updated.name} saved in ${updated.active ? "active" : "draft"} mode.`,
+      beforeValues: current,
+      afterValues: updated,
+    });
+    return updated;
+  });
+  response.json({ automation });
+}));
+
+app.post("/api/leads/automations/:id/run", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const automation = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  if (!automation) throw apiError("Lead automation not found.", 404);
+  if (!automation.active) throw apiError("Enable and save this automation before running it.", 409);
+  const result = await processLeadAutomation(automation);
+  response.json({ result });
+}));
+
 app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
   assertReadAllowed(request, "leads");
   response.json({ integrations: await listLeadIntegrations() });
@@ -9645,6 +9916,24 @@ app.post("/api/marketing/send", asyncRoute(async (request, response) => {
 }));
 
 let marketingSchedulerRunning = false;
+let leadAutomationSchedulerRunning = false;
+
+async function processDueLeadAutomations() {
+  if (leadAutomationSchedulerRunning) return;
+  leadAutomationSchedulerRunning = true;
+  try {
+    const automations = await prisma.leadAutomation.findMany({ where: { active: true }, orderBy: [{ updatedAt: "asc" }], take: 100 });
+    for (const automation of automations) {
+      try {
+        await processLeadAutomation(automation);
+      } catch (error) {
+        console.error(JSON.stringify({ event: "lead_automation_scheduler_failed", automationId: automation.id, error: clean(error.message) }));
+      }
+    }
+  } finally {
+    leadAutomationSchedulerRunning = false;
+  }
+}
 
 async function processDueMarketingCampaigns() {
   if (marketingSchedulerRunning) return;
@@ -9772,9 +10061,16 @@ if (!process.env.VERCEL) {
     : null;
   marketingSchedulerInterval?.unref();
   if (marketingSchedulerEnabled) setTimeout(() => { void processDueMarketingCampaigns().catch((error) => console.error(JSON.stringify({ event: "marketing_scheduler_failed", error: clean(error.message) }))); }, 2_000).unref();
+  const leadAutomationSchedulerEnabled = process.env.NODE_ENV !== "test" && process.env.LEAD_AUTOMATION_SCHEDULER_ENABLED !== "false";
+  const leadAutomationSchedulerInterval = leadAutomationSchedulerEnabled
+    ? setInterval(() => { void processDueLeadAutomations().catch((error) => console.error(JSON.stringify({ event: "lead_automation_scheduler_failed", error: clean(error.message) }))); }, Math.max(30_000, Number(process.env.LEAD_AUTOMATION_SCHEDULER_INTERVAL_MS) || 60_000))
+    : null;
+  leadAutomationSchedulerInterval?.unref();
+  if (leadAutomationSchedulerEnabled) setTimeout(() => { void processDueLeadAutomations().catch((error) => console.error(JSON.stringify({ event: "lead_automation_scheduler_failed", error: clean(error.message) }))); }, 5_000).unref();
 
   function shutdown() {
     if (marketingSchedulerInterval) clearInterval(marketingSchedulerInterval);
+    if (leadAutomationSchedulerInterval) clearInterval(leadAutomationSchedulerInterval);
     server.close(async () => {
       await prisma.$disconnect();
       process.exit(0);

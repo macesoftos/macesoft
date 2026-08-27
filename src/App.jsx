@@ -117,6 +117,7 @@ import {
   loadBootstrap,
   loadLeadIntegrations,
   loadLeadWebhookEvents,
+  loadLeadAutomations,
   loadMyWorkspace,
   loadNotifications,
   loadPayrollOverview,
@@ -150,6 +151,9 @@ import {
   inspectInvitation,
   importInventoryCsvRecords,
   scheduleLeadFollowUp,
+  createLeadAutomation,
+  updateLeadAutomation,
+  runLeadAutomation,
   saveResourceRecord,
   savePayrollDayOffSwap,
   savePayrollSchedule,
@@ -302,6 +306,18 @@ const leadDirectoryTabs = [
   { id: "converted", label: "Converted", statuses: ["Converted"] },
   { id: "lost", label: "Lost", statuses: ["Lost"] },
 ];
+const emptyLeadAutomationDraft = {
+  id: "",
+  name: "No-response follow-up",
+  active: false,
+  branch: "All branches",
+  delayHours: 48,
+  channel: "Email",
+  subject: "Following up on your inquiry",
+  prompt: "Write a warm, concise follow-up that invites the lead to book an appointment.",
+  messageTemplate: "Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}",
+  bookingUrl: "",
+};
 const legacyLeadStatusMap = {
   New: "New Inquiry",
   Contacted: "Connected",
@@ -11867,6 +11883,12 @@ function LeadsModule({
   const [filters, setFilters] = useState({ source: "All", branch: "All", owner: "All", priority: "All", followUp: "All" });
   const [showFilters, setShowFilters] = useState(false);
   const [showCaptureSources, setShowCaptureSources] = useState(false);
+  const [showAutomations, setShowAutomations] = useState(false);
+  const [automationDraft, setAutomationDraft] = useState(emptyLeadAutomationDraft);
+  const [automationRuns, setAutomationRuns] = useState([]);
+  const [automationProviders, setAutomationProviders] = useState({ email: false, sms: false, dryRun: false });
+  const [canManageAutomations, setCanManageAutomations] = useState(false);
+  const [automationBusy, setAutomationBusy] = useState("");
   const [sort, setSort] = useState({ key: "created", direction: "desc" });
   const [page, setPage] = useState(1);
   const [selectedLeadId, setSelectedLeadId] = useStoredState("selected-lead", leads[0]?.id ?? "");
@@ -12170,6 +12192,58 @@ function LeadsModule({
     }
   }
 
+  const refreshLeadAutomations = useCallback(async () => {
+    setAutomationBusy((current) => current || "load");
+    try {
+      const result = await loadLeadAutomations();
+      const first = result.automations?.[0];
+      setAutomationDraft(first ? { ...emptyLeadAutomationDraft, ...first } : emptyLeadAutomationDraft);
+      setAutomationRuns(result.runs || []);
+      setAutomationProviders(result.providers || { email: false, sms: false, dryRun: false });
+      setCanManageAutomations(Boolean(result.canManage));
+    } catch (error) {
+      notify(error.message || "Unable to load lead automations.", "error");
+    } finally {
+      setAutomationBusy("");
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    if (showAutomations) void refreshLeadAutomations();
+  }, [refreshLeadAutomations, showAutomations]);
+
+  async function saveLeadAutomationDraft(event) {
+    event.preventDefault();
+    setAutomationBusy("save");
+    try {
+      const payload = { ...automationDraft, delayHours: Number(automationDraft.delayHours) };
+      const result = automationDraft.id
+        ? await updateLeadAutomation(automationDraft.id, payload)
+        : await createLeadAutomation(payload);
+      setAutomationDraft({ ...emptyLeadAutomationDraft, ...result.automation });
+      notify(result.automation.active ? "Lead automation saved and enabled." : "Lead automation saved as a draft.");
+      await refreshLeadAutomations();
+    } catch (error) {
+      notify(error.message || "Unable to save the lead automation.", "error");
+    } finally {
+      setAutomationBusy("");
+    }
+  }
+
+  async function runDueLeadAutomation() {
+    if (!automationDraft.id) return;
+    setAutomationBusy("run");
+    try {
+      const { result } = await runLeadAutomation(automationDraft.id);
+      notify(`Automation checked ${result.evaluated} eligible lead${result.evaluated === 1 ? "" : "s"}; ${result.sent} sent, ${result.failed} failed.`);
+      await refreshLeadAutomations();
+    } catch (error) {
+      notify(error.message || "Unable to run the lead automation.", "error");
+    } finally {
+      setAutomationBusy("");
+    }
+  }
+
   if (detailLeadId) {
     if (!selectedLead) return <RecordDetailNotFound label="Lead" onBack={onCloseDetail} />;
     return (
@@ -12233,6 +12307,9 @@ function LeadsModule({
           <button className={`secondary-button ${showCaptureSources ? "active" : ""}`} type="button" aria-expanded={showCaptureSources} onClick={() => setShowCaptureSources((current) => !current)}>
             <SlidersHorizontal size={16} aria-hidden="true" /> Capture sources
           </button>
+          <button className={`secondary-button ${showAutomations ? "active" : ""}`} type="button" aria-expanded={showAutomations} onClick={() => setShowAutomations((current) => !current)}>
+            <Sparkles size={16} aria-hidden="true" /> Automations
+          </button>
           <input
             ref={importInputRef}
             className="client-import-input"
@@ -12254,6 +12331,21 @@ function LeadsModule({
         <div className="surface-panel leads-capture-sources-panel">
           <LeadIntegrationsPanel integrations={integrations} webhookEvents={webhookEvents} refreshOperations={refreshOperations} />
         </div>
+      )}
+
+      {showAutomations && (
+        <LeadAutomationPanel
+          draft={automationDraft}
+          setDraft={setAutomationDraft}
+          runs={automationRuns}
+          providers={automationProviders}
+          branches={branches}
+          canManage={canManageAutomations}
+          busy={automationBusy}
+          onSave={saveLeadAutomationDraft}
+          onRun={runDueLeadAutomation}
+          onRefresh={refreshLeadAutomations}
+        />
       )}
 
       <div className="surface-panel leads-directory-panel">
@@ -12742,6 +12834,89 @@ function LeadDetailPanel({
         </div>
       </details>
     </aside>
+  );
+}
+
+function LeadAutomationPanel({ draft, setDraft, runs, providers, branches, canManage, busy, onSave, onRun, onRefresh }) {
+  const channelReady = draft.channel === "SMS" ? providers.sms : providers.email;
+  const preview = draft.messageTemplate
+    .replaceAll("{firstName}", "Jamie")
+    .replaceAll("{name}", "Jamie Santos")
+    .replaceAll("{interest}", "your selected treatment")
+    .replaceAll("{bookingLink}", draft.bookingUrl || "your booking link");
+  const update = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+
+  return (
+    <section className="surface-panel lead-automation-panel" aria-label="Lead follow-up automation">
+      <div className="lead-automation-heading">
+        <div>
+          <span className="eyebrow">Smart lead follow-up</span>
+          <h3>Follow up automatically after no recorded contact</h3>
+          <p>Personalize and send one consent-aware message per lead. The workflow stays off until an owner enables it.</p>
+        </div>
+        <div className="lead-automation-heading-actions">
+          <span className={`lead-provider-state ${channelReady || providers.dryRun ? "ready" : "blocked"}`}>
+            {providers.dryRun ? "Dry-run mode" : channelReady ? `${draft.channel} ready` : `${draft.channel} not connected`}
+          </span>
+          <button className="secondary-button small" type="button" disabled={Boolean(busy)} onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+        </div>
+      </div>
+
+      <div className="lead-automation-layout">
+        <form className="lead-automation-form" onSubmit={onSave}>
+          <div className="lead-automation-toggle-row">
+            <div><strong>Workflow status</strong><small>{draft.active ? "Eligible leads are checked automatically." : "Draft mode — no messages will be sent."}</small></div>
+            <label className="lead-automation-switch">
+              <input type="checkbox" checked={Boolean(draft.active)} disabled={!canManage} onChange={(event) => update("active", event.target.checked)} />
+              <span>{draft.active ? "Enabled" : "Disabled"}</span>
+            </label>
+          </div>
+
+          <div className="lead-automation-fields two-column">
+            <label>Workflow name<input value={draft.name} disabled={!canManage} onChange={(event) => update("name", event.target.value)} /></label>
+            <label>Clinic branch<select value={draft.branch} disabled={!canManage} onChange={(event) => update("branch", event.target.value)}><option>All branches</option>{branches.map((branch) => <option key={branch.id || branch.name}>{branch.name}</option>)}</select></label>
+            <label>Wait after last contact<div className="lead-input-with-suffix"><input type="number" min="1" max="720" value={draft.delayHours} disabled={!canManage} onChange={(event) => update("delayHours", event.target.value)} /><span>hours</span></div></label>
+            <label>Send through<select value={draft.channel} disabled={!canManage} onChange={(event) => update("channel", event.target.value)}><option>Email</option><option>SMS</option></select></label>
+          </div>
+
+          {draft.channel === "Email" && <label>Email subject<input value={draft.subject} disabled={!canManage} onChange={(event) => update("subject", event.target.value)} /></label>}
+          <label>Booking link<input type="url" placeholder="https://your-booking-page.example" value={draft.bookingUrl} disabled={!canManage} onChange={(event) => update("bookingUrl", event.target.value)} /></label>
+          <label>Personalization instructions<textarea rows="2" value={draft.prompt} disabled={!canManage} onChange={(event) => update("prompt", event.target.value)} /><small>Stored with the workflow for review. The current privacy-safe generator uses the template below locally.</small></label>
+          <label>Message template<textarea rows="4" value={draft.messageTemplate} disabled={!canManage} onChange={(event) => update("messageTemplate", event.target.value)} /><small>Available fields: {"{firstName}"}, {"{name}"}, {"{interest}"}, {"{bookingLink}"}. An opt-out line is added automatically.</small></label>
+
+          <div className="lead-automation-safety-note"><ShieldCheck size={18} /><span>Only open leads with contact permission and privacy consent qualify. Each workflow can contact a lead once, and every attempt is logged.</span></div>
+          <div className="lead-automation-form-actions">
+            <button className="primary-button" type="submit" disabled={!canManage || Boolean(busy)}>{busy === "save" ? "Saving..." : draft.id ? "Save workflow" : "Create workflow"}</button>
+            <button className="secondary-button" type="button" disabled={!canManage || !draft.id || !draft.active || Boolean(busy)} onClick={onRun}>{busy === "run" ? "Checking..." : "Run due leads now"}</button>
+          </div>
+          {!canManage && <p className="lead-automation-permission-note">Only an Owner or Super Admin can change or run this workflow.</p>}
+        </form>
+
+        <aside className="lead-automation-preview">
+          <span className="eyebrow">Message preview</span>
+          <div className="lead-message-preview-icon">{draft.channel === "SMS" ? <MessageSquareText size={20} /> : <Mail size={20} />}</div>
+          {draft.channel === "Email" && <strong>{draft.subject || "Following up on your inquiry"}</strong>}
+          <p>{preview}</p>
+          <small>{draft.channel === "SMS" ? "Reply STOP to opt out." : "Reply unsubscribe if you no longer want follow-up messages."}</small>
+        </aside>
+      </div>
+
+      <div className="lead-automation-runs">
+        <div className="lead-automation-runs-heading"><div><span className="eyebrow">Execution history</span><h4>Recent follow-ups</h4></div><span>{runs.length} logged</span></div>
+        <div className="lead-automation-run-list">
+          {runs.slice(0, 12).map((run) => (
+            <div className="lead-automation-run" key={run.id}>
+              <div><strong>{run.lead?.name || "Lead"}</strong><small>{run.automation?.name || "Automation"} · {run.lead?.branch || "Branch"}</small></div>
+              <span>{run.channel}</span>
+              <StatusBadge status={run.status} />
+              <time>{compactDate(run.sentAt || run.attemptedAt || run.createdAt)}</time>
+              {run.reason && <small className="lead-automation-run-error">{run.reason}</small>}
+            </div>
+          ))}
+          {!runs.length && <EmptyState title="No automated follow-ups yet" copy="Delivery attempts will appear here after the workflow is enabled and a lead becomes due." />}
+        </div>
+      </div>
+    </section>
   );
 }
 

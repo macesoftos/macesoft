@@ -750,6 +750,28 @@ export function loadLeadWebhookEvents() {
   return requestJson("/api/leads/webhook-events");
 }
 
+export function loadLeadAutomations() {
+  return requestJson("/api/leads/automations");
+}
+
+export function createLeadAutomation(payload) {
+  return requestJson("/api/leads/automations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateLeadAutomation(id, payload) {
+  return requestJson(`/api/leads/automations/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runLeadAutomation(id) {
+  return requestJson(`/api/leads/automations/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+
 export function updateLeadStage(id, payload) {
   return requestJson(`/api/leads/${encodeURIComponent(id)}/stage`, {
     method: "POST",

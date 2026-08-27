@@ -7,23 +7,25 @@ datasource db {
 }
 
 model Organization {
-  id                 String            @id @default(cuid())
+  id                 String              @id @default(cuid())
   name               String
-  slug               String            @unique
-  status             String            @default("Active")
-  contactName        String            @default("")
-  phone              String            @default("")
-  address            String            @default("")
-  registrationSource String            @default("")
+  slug               String              @unique
+  status             String              @default("Active")
+  contactName        String              @default("")
+  phone              String              @default("")
+  address            String              @default("")
+  registrationSource String              @default("")
   branches           Branch[]
   accounts           Account[]
   invitations        UserInvitation[]
   payrollRuns        PayrollRun[]
   commissionRules    CommissionRule[]
   notifications      AppNotification[]
+  leadAutomations    LeadAutomation[]
+  leadAutomationRuns LeadAutomationRun[]
   subscription       Subscription?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 }
 
 model Subscription {
@@ -1179,6 +1181,7 @@ model Lead {
   assignments         LeadAssignment[]
   conversions         LeadConversion[]
   webhookEvents       WebhookEvent[]
+  automationRuns      LeadAutomationRun[]
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
@@ -1192,6 +1195,56 @@ model Lead {
   @@index([nextFollowUpAt])
   @@index([created])
   @@index([linkedClientId])
+}
+
+model LeadAutomation {
+  id              String              @id @default(cuid())
+  organizationId  String
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name            String              @default("No-response follow-up")
+  active          Boolean             @default(false)
+  branch          String              @default("All branches")
+  delayHours      Int                 @default(48)
+  channel         String              @default("Email")
+  subject         String              @default("Following up on your inquiry")
+  prompt          String              @default("Write a warm, concise follow-up that invites the lead to book an appointment.")
+  messageTemplate String              @default("Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}")
+  bookingUrl      String              @default("")
+  createdById     String              @default("")
+  updatedById     String              @default("")
+  runs            LeadAutomationRun[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([organizationId, active])
+  @@index([organizationId, branch])
+}
+
+model LeadAutomationRun {
+  id                String         @id @default(cuid())
+  automationId      String
+  automation        LeadAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  organizationId    String
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leadId            String
+  lead              Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  channel           String
+  recipient         String         @default("")
+  subject           String         @default("")
+  message           String         @default("")
+  status            String         @default("Processing")
+  reason            String         @default("")
+  providerReference String         @default("")
+  scheduledAt       DateTime
+  attemptedAt       DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([automationId, leadId])
+  @@index([organizationId, createdAt])
+  @@index([status, scheduledAt])
+  @@index([leadId, createdAt])
 }
 
 model LeadActivity {
