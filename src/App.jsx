@@ -146,6 +146,7 @@ import {
   runLeadAutomation,
   loadOnboardingAutomation,
   saveOnboardingAutomation,
+  uploadOnboardingLogo,
   runOnboardingAutomation,
   approveClientInvoice,
   loadPublicInvoice,
@@ -899,6 +900,9 @@ function App() {
   const [inviteCreateRequest, setInviteCreateRequest] = useState(0);
   const [confirm, setConfirm] = useState(null);
   const [toast, setToast] = useState(null);
+  const notify = useCallback((message, tone = "success") => {
+    setToast({ id: createId("toast"), message, tone });
+  }, []);
   const [receiptToPrint, setReceiptToPrint] = useState(null);
   const [printReceiptNonce, setPrintReceiptNonce] = useState(0);
   const inventoryImportInputRef = useRef(null);
@@ -1121,7 +1125,7 @@ function App() {
     } finally {
       setBranchSwitching(false);
     }
-  }, [clearWorkspaceData, session]);
+  }, [clearWorkspaceData, notify, session]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1723,10 +1727,6 @@ function App() {
       returningClients: scopedClients.filter((client) => client.retention === "Returning").length,
     };
   }, [scopedAppointments, scopedClients, scopedExpenses, scopedInventory, scopedLeads, scopedTransactions]);
-
-  function notify(message, tone = "success") {
-    setToast({ id: createId("toast"), message, tone });
-  }
 
   async function markAllNotificationsAsRead() {
     if (!notificationFeed.unreadCount) return;
@@ -10187,6 +10187,18 @@ function ClientProfileDialog({
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${client.fullName} details`}>{profileContent}</div>;
 }
 
+function prepareBrandLogoDataUrl(file) {
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+  if (!allowedTypes.includes(file?.type)) return Promise.reject(new Error("Choose a JPEG, PNG, or WebP logo."));
+  if (file.size > 3 * 1024 * 1024) return Promise.reject(new Error("Choose a logo smaller than 3 MB."));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The selected logo could not be read."));
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsDataURL(file);
+  });
+}
+
 function prepareTreatmentPhotoDataUrl(file) {
   const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
   if (!allowedTypes.includes(file?.type)) {
@@ -11286,6 +11298,23 @@ function LeadsModule({
     }
   }
 
+  async function uploadBrandingLogo(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setOnboardingBusy("logo");
+    try {
+      const dataUrl = await prepareBrandLogoDataUrl(file);
+      const result = await uploadOnboardingLogo(dataUrl, file.name);
+      setOnboardingBranding((current) => ({ ...current, logoUrl: result.asset.url }));
+      notify("Clinic logo uploaded. Save the onboarding workflow to apply it.");
+    } catch (error) {
+      notify(error.message || "Unable to upload the clinic logo.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }
+
   async function runPendingOnboarding() {
     setOnboardingBusy("run");
     try {
@@ -11420,6 +11449,7 @@ function LeadsModule({
               canManage={canManageAutomations}
               busy={onboardingBusy}
               onSave={saveOnboardingDraft}
+              onUploadLogo={uploadBrandingLogo}
               onRun={runPendingOnboarding}
               onRefresh={refreshOnboardingAutomation}
               onApproveInvoice={approveOnboardingInvoice}
@@ -11930,7 +11960,7 @@ function LeadDetailPanel({
   );
 }
 
-function ClientOnboardingAutomationPanel({ workflow, setWorkflow, branding, setBranding, runs, invoices, providers, branches, canManage, busy, onSave, onRun, onRefresh, onApproveInvoice }) {
+function ClientOnboardingAutomationPanel({ workflow, setWorkflow, branding, setBranding, runs, invoices, providers, branches, canManage, busy, onSave, onUploadLogo, onRun, onRefresh, onApproveInvoice }) {
   const updateWorkflow = (key, value) => setWorkflow((current) => ({ ...current, [key]: value }));
   const updateBranding = (key, value) => setBranding((current) => ({ ...current, [key]: value }));
   const preview = workflow.messageTemplate
@@ -11968,7 +11998,7 @@ function ClientOnboardingAutomationPanel({ workflow, setWorkflow, branding, setB
           <aside className="onboarding-branding-card" style={{ "--clinic-brand": branding.primaryColor }}>
             <span className="eyebrow">Client-facing clinic brand</span>
             <div className="onboarding-brand-preview">{branding.logoUrl ? <img src={branding.logoUrl} alt="" /> : <span>{String(branding.businessName || "Clinic").slice(0, 2).toUpperCase()}</span>}<div><strong>{branding.businessName || "Your clinic"}</strong><small>{branding.email || "Clinic contact email"}</small></div></div>
-            <div className="onboarding-brand-fields"><label>Business name<input value={branding.businessName} disabled={!canManage} onChange={(event) => updateBranding("businessName", event.target.value)} /></label><label>Logo URL<input type="url" placeholder="https://..." value={branding.logoUrl} disabled={!canManage} onChange={(event) => updateBranding("logoUrl", event.target.value)} /></label><label>Brand color<input type="color" value={branding.primaryColor} disabled={!canManage} onChange={(event) => updateBranding("primaryColor", event.target.value)} /></label><label>Reply-to email<input type="email" value={branding.email} disabled={!canManage} onChange={(event) => updateBranding("email", event.target.value)} /></label><label>Phone<input value={branding.phone} disabled={!canManage} onChange={(event) => updateBranding("phone", event.target.value)} /></label><label>Website<input type="url" placeholder="https://..." value={branding.website} disabled={!canManage} onChange={(event) => updateBranding("website", event.target.value)} /></label><label className="span-2">Business address<textarea rows="2" value={branding.address} disabled={!canManage} onChange={(event) => updateBranding("address", event.target.value)} /></label></div>
+            <div className="onboarding-brand-fields"><label>Business name<input value={branding.businessName} disabled={!canManage} onChange={(event) => updateBranding("businessName", event.target.value)} /></label><div className="onboarding-brand-field"><span>Clinic logo</span><div className="onboarding-logo-controls"><input aria-label="Logo URL" type="url" placeholder="https://..." value={branding.logoUrl} disabled={!canManage} onChange={(event) => updateBranding("logoUrl", event.target.value)} /><label className="secondary-button small onboarding-logo-upload"><Upload size={15} /> {busy === "logo" ? "Uploading..." : "Upload"}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={!canManage || Boolean(busy)} onChange={onUploadLogo} /></label></div><small>JPEG, PNG, or WebP · maximum 3 MB</small>{branding.logoUrl && <button className="text-button onboarding-logo-remove" type="button" disabled={!canManage || Boolean(busy)} onClick={() => updateBranding("logoUrl", "")}>Remove logo</button>}</div><label>Brand color<input type="color" value={branding.primaryColor} disabled={!canManage} onChange={(event) => updateBranding("primaryColor", event.target.value)} /></label><label>Reply-to email<input type="email" value={branding.email} disabled={!canManage} onChange={(event) => updateBranding("email", event.target.value)} /></label><label>Phone<input value={branding.phone} disabled={!canManage} onChange={(event) => updateBranding("phone", event.target.value)} /></label><label>Website<input type="url" placeholder="https://..." value={branding.website} disabled={!canManage} onChange={(event) => updateBranding("website", event.target.value)} /></label><label className="span-2">Business address<textarea rows="2" value={branding.address} disabled={!canManage} onChange={(event) => updateBranding("address", event.target.value)} /></label></div>
           </aside>
         </div>
 

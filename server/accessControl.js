@@ -21,6 +21,8 @@ const PUBLIC_API_RULES = [
   ["GET", /^\/api\/public\/marketing\/survey\/[^/]+\/[^/]+$/],
   ["GET", /^\/api\/public\/marketing-assets\/[^/]+$/],
   ["HEAD", /^\/api\/public\/marketing-assets\/[^/]+$/],
+  ["GET", /^\/api\/public\/branding-assets\/[^/]+$/],
+  ["HEAD", /^\/api\/public\/branding-assets\/[^/]+$/],
   ["POST", /^\/api\/public\/marketing\/survey\/[^/]+\/[^/]+$/],
   ["GET", /^\/api\/public\/invoices\/[^/]+$/],
   ["GET", /^\/api\/leads\/webhooks\/meta-facebook$/],

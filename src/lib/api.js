@@ -685,6 +685,13 @@ export function saveOnboardingAutomation(payload) {
   return requestJson("/api/leads/onboarding", { method: "PUT", body: JSON.stringify(payload) });
 }
 
+export function uploadOnboardingLogo(dataUrl, originalName = "") {
+  return requestJson("/api/leads/onboarding/logo", {
+    method: "POST",
+    body: JSON.stringify({ dataUrl, originalName }),
+  });
+}
+
 export function runOnboardingAutomation() {
   return requestJson("/api/leads/onboarding/run", { method: "POST" });
 }

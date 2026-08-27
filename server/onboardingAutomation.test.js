@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   brandedEmailHtml,
   normalizeOnboardingWorkflowPayload,
@@ -7,6 +8,10 @@ import {
   publicInvoice,
   renderOnboardingContent,
 } from "./onboardingAutomation.js";
+
+const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+const apiSource = readFileSync(new URL("../src/lib/api.js", import.meta.url), "utf8");
+const serverSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
 
 test("workspace branding is clinic-owned and safely normalized", () => {
   const branding = normalizeWorkspaceBranding({
@@ -65,4 +70,16 @@ test("public invoice serialization excludes private recipient and provider field
   assert.equal(invoice.recipientEmail, undefined);
   assert.equal(invoice.paymentReference, undefined);
   assert.equal(invoice.items[0].description, "Consultation deposit");
+});
+
+test("branding edits are not overwritten by notification polling rerenders", () => {
+  assert.match(appSource, /const notify = useCallback\(\(message, tone = "success"\)/);
+  assert.match(appSource, /setOnboardingBranding\(\(current\) => \(\{ \.\.\.current, logoUrl: result\.asset\.url \}\)\)/);
+});
+
+test("clinic owners can upload a public HTTPS branding logo without exposing storage credentials", () => {
+  assert.match(apiSource, /\/api\/leads\/onboarding\/logo/);
+  assert.match(serverSource, /assertLeadAutomationManager\(request\)[\s\S]*storeImageObject\(request\.body\?\.dataUrl, "branding-logo"\)/);
+  assert.match(serverSource, /\/api\/public\/branding-assets\/\$\{asset\.id\}/);
+  assert.doesNotMatch(appSource, /STORAGE_SERVICE_KEY/);
 });

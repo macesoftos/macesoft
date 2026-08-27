@@ -373,6 +373,7 @@ const uploadCategories = {
   "expense-receipt": { readModule: "expenses", writeModule: "expenses" },
   "treatment-photo": { readModule: "treatments", writeModule: "treatments" },
   "marketing-image": { readModule: null, writeModule: "sms", public: true },
+  "branding-logo": { readModule: null, writeModule: "settings" },
   "flipbook-logo": { readModule: null, writeModule: "flipbooks" },
   "flipbook-pdf": { readModule: "flipbooks", writeModule: "flipbooks" },
 };
@@ -6091,6 +6092,24 @@ app.get("/api/public/marketing-assets/:id", asyncRoute(async (request, response)
   response.send(buffer);
 }));
 
+app.get("/api/public/branding-assets/:id", asyncRoute(async (request, response) => {
+  const asset = await prisma.uploadAsset.findFirst({
+    where: { id: clean(request.params.id), category: "branding-logo", deletedAt: null },
+  });
+  if (!asset) throw apiError("Branding logo was not found.", 404);
+  const stored = await storedAssetRequest(asset);
+  if (!stored.ok) throw apiError("Branding logo is unavailable.", stored.status === 404 ? 404 : 502);
+  const buffer = Buffer.from(await stored.arrayBuffer());
+  response.set({
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Disposition": "inline",
+    "Content-Length": String(buffer.length),
+    "Content-Type": asset.mimeType,
+    "Cross-Origin-Resource-Policy": "cross-origin",
+  });
+  response.send(buffer);
+}));
+
 app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
   const asset = await prisma.uploadAsset.findUnique({ where: { id: clean(request.params.id) } });
   if (!asset) throw apiError("Uploaded asset was not found.", 404);
@@ -6344,6 +6363,36 @@ app.put("/api/leads/onboarding", asyncRoute(async (request, response) => {
     return { workflow, branding };
   });
   response.json(result);
+}));
+
+app.post("/api/leads/onboarding/logo", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const stored = await storeImageObject(request.body?.dataUrl, "branding-logo");
+  try {
+    const asset = await prisma.$transaction(async (tx) => {
+      const created = await tx.uploadAsset.create({
+        data: {
+          ...stored,
+          branch: clean(actor.access?.activeBranch?.name || actor.branch) || "All branches",
+          uploadedById: actor.id,
+          originalName: normalizeMarketingMediaName(request.body?.originalName),
+        },
+      });
+      await writeAudit(tx, request, {
+        area: "Leads",
+        action: "Clinic branding logo uploaded",
+        subjectType: "UploadAsset",
+        subjectId: created.id,
+        details: "A new client-facing clinic logo was uploaded for onboarding branding.",
+      });
+      return created;
+    });
+    const url = new URL(`/api/public/branding-assets/${asset.id}`, appPublicOrigin()).href;
+    response.status(201).json({ asset: { id: asset.id, url, mimeType: asset.mimeType, byteSize: asset.byteSize, originalName: asset.originalName } });
+  } catch (error) {
+    await deleteStoredAsset(stored).catch(() => {});
+    throw error;
+  }
 }));
 
 app.post("/api/leads/onboarding/run", asyncRoute(async (request, response) => {

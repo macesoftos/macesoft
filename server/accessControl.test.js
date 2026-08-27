@@ -35,6 +35,8 @@ test("only explicitly public API methods and paths bypass session authentication
   assert.equal(isPublicApiRequest("GET", "/api/public/marketing-assets/asset-123"), true);
   assert.equal(isPublicApiRequest("HEAD", "/api/public/marketing-assets/asset-123"), true);
   assert.equal(isPublicApiRequest("POST", "/api/public/marketing-assets/asset-123"), false);
+  assert.equal(isPublicApiRequest("GET", "/api/public/branding-assets/logo-123"), true);
+  assert.equal(isPublicApiRequest("POST", "/api/public/branding-assets/logo-123"), false);
   assert.equal(isPublicApiRequest("POST", "/api/public/marketing/survey/campaign-1/survey-1"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public/invoices/abcdef123456"), true);
   assert.equal(isPublicApiRequest("POST", "/api/public/invoices/abcdef123456"), false);
