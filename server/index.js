@@ -1977,6 +1977,8 @@ const resourceConfigs = {
     serialize: serializeClient,
     branchField: "branch",
     unifiedClientAccess: true,
+    directTenant: true,
+    directTenantOrganizationWide: true,
     posSelect: { id: true, fullName: true, mobile: true, branch: true, branchesVisited: true },
   },
   appointments: {
@@ -1990,6 +1992,7 @@ const resourceConfigs = {
     afterWrite: afterAppointmentWrite,
     branchField: "branch",
     relatedClient: true,
+    directTenant: true,
   },
   services: {
     delegate: "service",
@@ -2089,6 +2092,7 @@ const resourceConfigs = {
     afterWrite: writeLeadSideRecords,
     serialize: serializeLead,
     branchField: "branch",
+    directTenant: true,
   },
   staff: {
     delegate: "staffMember",
@@ -2222,7 +2226,11 @@ async function listResource(resource, actor = null) {
   if (!directModuleAllowed && !posSupportAllowed && !clientSupportAllowed) return [];
   let where = {};
   if (actor) {
-    if (config.unifiedClientAccess) {
+    if (config.directTenant) {
+      where = config.directTenantOrganizationWide || actor.access?.scope === "all"
+        ? { organizationId: actor.organizationId }
+        : { organizationId: actor.organizationId, branchId: actor.access?.activeBranchId || "__none__" };
+    } else if (config.unifiedClientAccess) {
       if (!hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
         where = { id: "__none__" };
       } else {
@@ -2815,8 +2823,12 @@ async function processLeadWebhook(provider, request, options = {}) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const fixedBranch = options.branchId
+        ? await tx.branch.findFirst({ where: { id: options.branchId, organizationId: options.organizationId, status: "Active" }, select: { id: true, name: true, organizationId: true } })
+        : null;
+      if (options.branchId && !fixedBranch) throw apiError("The workspace form branch is unavailable.", 409);
       const routing = await routeIncomingLead(tx, normalized, {
-        defaultBranch: integration.defaultBranch,
+        defaultBranch: fixedBranch?.name || integration.defaultBranch,
         allowPayloadBranch: options.allowPayloadBranch === true,
       });
       const duplicate = await detectLeadDuplicate(tx, normalized, routing.branch);
@@ -2832,6 +2844,11 @@ async function processLeadWebhook(provider, request, options = {}) {
         duplicateConfidence: duplicate.confidence,
         duplicateReasons: duplicate.reasons,
       });
+      if (fixedBranch) {
+        leadData.organizationId = fixedBranch.organizationId;
+        leadData.branchId = fixedBranch.id;
+        leadData.workspaceFormId = clean(options.workspaceFormId) || null;
+      }
 
       if (duplicate.lead) {
         const lead = await tx.lead.update({
@@ -2874,7 +2891,7 @@ async function processLeadWebhook(provider, request, options = {}) {
 
       const lead = await tx.lead.create({ data: stripMeta(leadData) });
       await writeLeadSideRecords(tx, null, lead, leadData, null);
-      const notificationBranch = await tx.branch.findUnique({ where: { name: lead.branch }, select: { organizationId: true } });
+      const notificationBranch = fixedBranch || await tx.branch.findUnique({ where: { name: lead.branch }, select: { id: true, organizationId: true } });
       if (notificationBranch) {
         const notificationRecipients = await notificationRecipientsForOrganization(tx, {
           branches: [lead.branch],
@@ -3439,6 +3456,17 @@ async function sendSmtpEmail({ transporter, to, replyTo = "", from = "", subject
   return result.messageId;
 }
 
+async function attachDirectTenantFields(request, config, data) {
+  if (!["client", "lead", "appointment"].includes(config?.delegate)) return data;
+  const actor = actorFromRequest(request);
+  const branchName = clean(data?.branch);
+  const branch = branchName
+    ? await prisma.branch.findFirst({ where: { name: branchName, organizationId: actor.organizationId, status: "Active" }, select: { id: true, organizationId: true } })
+    : null;
+  if (!branch) throw apiError("Choose an active branch in your organization.", 400);
+  return { ...data, organizationId: branch.organizationId, branchId: branch.id };
+}
+
 const leadAutomationClosedStatuses = ["Appointment Booked", "Converted", "Lost", "Unresponsive"];
 const leadAutomationDefaultTemplate = "Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}";
 
@@ -3637,6 +3665,105 @@ async function workspaceBrandingForOrganization(database, organizationId) {
     database.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true, address: true, phone: true } }),
   ]);
   return branding || { ...defaultWorkspaceBranding(organization || {}), organizationId };
+}
+
+const workspaceFormDefinitions = Object.freeze({
+  inquiry: { name: "Public inquiry", path: "f", module: "leads" },
+  booking: { name: "Online booking", path: "book", module: "booking" },
+  registration: { name: "Client registration", path: "register", module: "clients" },
+});
+
+function workspaceFormPublicUrl(form) {
+  const definition = workspaceFormDefinitions[form.type] || workspaceFormDefinitions.inquiry;
+  return `${appPublicOrigin().replace(/\/$/, "")}/${definition.path}/${encodeURIComponent(form.slug)}`;
+}
+
+function serializeWorkspaceForm(form) {
+  return {
+    id: form.id,
+    type: form.type,
+    name: form.name,
+    slug: form.slug,
+    status: form.status,
+    source: form.source,
+    consentVersion: form.consentVersion,
+    consentText: form.consentText,
+    defaultBranchId: form.defaultBranchId || "",
+    defaultWorkflowId: form.defaultWorkflowId || "",
+    notificationRecipientIds: parseJsonList(form.notificationRecipientIds),
+    branches: (form.branches || []).map((link) => link.branch).filter(Boolean),
+    publicUrl: workspaceFormPublicUrl(form),
+  };
+}
+
+async function ensureWorkspaceForms(database, organizationId, actorId = "") {
+  const [organization, branches] = await Promise.all([
+    database.organization.findUnique({ where: { id: organizationId }, select: { id: true, slug: true, name: true } }),
+    database.branch.findMany({ where: { organizationId, status: "Active" }, orderBy: [{ createdAt: "asc" }], select: { id: true, name: true } }),
+  ]);
+  if (!organization) throw apiError("Workspace not found.", 404);
+  const defaultBranchId = branches[0]?.id || null;
+  for (const [type, definition] of Object.entries(workspaceFormDefinitions)) {
+    const form = await database.workspaceForm.upsert({
+      where: { organizationId_type: { organizationId, type } },
+      create: {
+        organizationId,
+        type,
+        name: definition.name,
+        slug: `${organization.slug}-${type}`,
+        defaultBranchId,
+        source: type === "booking" ? "Online Booking" : type === "registration" ? "Client Registration" : "Website",
+        createdById: actorId,
+        updatedById: actorId,
+      },
+      update: {},
+    });
+    if (branches.length) {
+      await database.workspaceFormBranch.createMany({
+        data: branches.map((branch) => ({ formId: form.id, branchId: branch.id })),
+        skipDuplicates: true,
+      });
+    }
+  }
+  return database.workspaceForm.findMany({
+    where: { organizationId },
+    include: { branches: { include: { branch: { select: { id: true, name: true, hours: true, operatingHours: true, status: true } } } } },
+    orderBy: [{ type: "asc" }],
+  });
+}
+
+async function publicWorkspaceForm(slug, expectedType = "") {
+  const normalizedSlug = clean(slug).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{2,119}$/.test(normalizedSlug)) throw apiError("This clinic form link is invalid.", 404);
+  const form = await prisma.workspaceForm.findUnique({
+    where: { slug: normalizedSlug },
+    include: {
+      organization: { select: { id: true, name: true, status: true } },
+      branches: { include: { branch: { include: { modules: true } } } },
+    },
+  });
+  if (!form || form.status !== "Active" || form.organization.status !== "Active" || (expectedType && form.type !== expectedType)) {
+    throw apiError("This clinic form is unavailable.", 404);
+  }
+  const allowedBranches = form.branches
+    .map((link) => link.branch)
+    .filter((branch) => branch?.status === "Active");
+  if (!allowedBranches.length) throw apiError("This clinic form has no available branches.", 503);
+  return { ...form, allowedBranches };
+}
+
+function branchFromWorkspaceForm(form, requestedBranchId, requestedBranchName, moduleId) {
+  const id = clean(requestedBranchId);
+  const name = clean(requestedBranchName);
+  const requested = form.allowedBranches.find((item) => (id && item.id === id) || (!id && name && item.name === name));
+  if ((id || name) && !requested) throw apiError("Selected branch is not available for this workspace form.", 409);
+  const branch = requested
+    || form.allowedBranches.find((item) => item.id === form.defaultBranchId)
+    || form.allowedBranches[0];
+  if (!branch || (moduleId && !branch.modules.some((item) => item.moduleId === moduleId && item.enabled))) {
+    throw apiError("Selected branch is unavailable for this form.", 409);
+  }
+  return branch;
 }
 
 function invoiceUrl(invoice) {
@@ -3838,7 +3965,8 @@ async function processOnboardingRun(run) {
     return { completed: true, invoiceId: invoice?.id || "" };
   } catch (error) {
     const reason = (clean(error.message) || "Onboarding workflow failed.").slice(0, 1000);
-    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Failed", reason } });
+    const retryDelayMinutes = Math.min(60, 2 ** Math.max(0, Number(run.attemptCount || 0)));
+    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Failed", reason, scheduledAt: new Date(Date.now() + retryDelayMinutes * 60_000) } });
     console.error(JSON.stringify({ event: "onboarding_workflow_failed", runId: run.id, error: reason }));
     return { failed: true, reason };
   }
@@ -3850,6 +3978,7 @@ async function processPendingOnboardingRuns({ leadId = "", organizationId = "", 
       ...(leadId ? { leadId } : {}),
       ...(organizationId ? { organizationId } : {}),
       status: { in: ["Pending", "Failed"] },
+      scheduledAt: { lte: new Date() },
       attemptCount: { lt: 3 },
       automation: { is: { kind: "onboarding", active: true } },
     },
@@ -5714,7 +5843,7 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
           take: 1,
         },
         subscription: true,
-        _count: { select: { accounts: true, branches: true } },
+        _count: { select: { accounts: true, branches: true, workspaceForms: true, leadAutomations: true, leadAutomationRuns: true, clientInvoices: true, invoicePayments: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -5773,7 +5902,15 @@ app.get("/api/admin/provider-overview", asyncRoute(async (request, response) => 
   const registrations = organizations.map((organization) => {
     const owner = primaryAccounts.get(organization.id) || null;
     const workspaceType = organization.slug.startsWith("zenshotech-demo-") || owner?.role?.startsWith("Demo") ? "demo" : "customer";
-    const usage = { users: organization._count.accounts, branches: organization._count.branches };
+    const usage = {
+      users: organization._count.accounts,
+      branches: organization._count.branches,
+      publicForms: organization._count.workspaceForms,
+      workflows: organization._count.leadAutomations,
+      workflowExecutions: organization._count.leadAutomationRuns,
+      invoices: organization._count.clientInvoices,
+      invoicePayments: organization._count.invoicePayments,
+    };
     const subscription = workspaceType === "demo"
       ? { id: null, plan: null, planCode: null, status: "demo", accessAllowed: true, usage }
       : serializeSubscription(organization.subscription, usage, now, { includePricing: true });
@@ -7866,9 +8003,54 @@ app.post("/api/leads/automations/:id/run", asyncRoute(async (request, response) 
   response.json({ result });
 }));
 
+app.get("/api/leads/forms", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "leads");
+  const forms = await ensureWorkspaceForms(prisma, actor.organizationId, actor.id);
+  response.json({ forms: forms.map(serializeWorkspaceForm), canManage: canManageOrganization(actor.role) });
+}));
+
+app.put("/api/leads/forms/:id", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const current = await prisma.workspaceForm.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  if (!current) throw apiError("Workspace form not found.", 404);
+  const branchIds = [...new Set((Array.isArray(request.body?.branchIds) ? request.body.branchIds : []).map(clean).filter(Boolean))];
+  const branches = await prisma.branch.findMany({ where: { id: { in: branchIds }, organizationId: actor.organizationId, status: "Active" }, select: { id: true } });
+  if (!branches.length || branches.length !== branchIds.length) throw apiError("Choose at least one active branch in your workspace.", 400);
+  const defaultBranchId = clean(request.body?.defaultBranchId) || branches[0].id;
+  if (!branches.some((branch) => branch.id === defaultBranchId)) throw apiError("The default branch must be enabled for this form.", 400);
+  const status = ["Active", "Paused"].includes(clean(request.body?.status)) ? clean(request.body.status) : current.status;
+  const data = {
+    name: boundedPublicText(request.body?.name || current.name, "Form name", 120),
+    status,
+    defaultBranchId,
+    source: boundedPublicText(request.body?.source || current.source, "Lead source", 80),
+    consentVersion: boundedPublicText(request.body?.consentVersion || current.consentVersion, "Consent version", 40),
+    consentText: boundedPublicText(request.body?.consentText || current.consentText, "Consent wording", 1000),
+    defaultWorkflowId: boundedPublicText(request.body?.defaultWorkflowId, "Default workflow", 120),
+    notificationRecipientIds: jsonText(request.body?.notificationRecipientIds, []),
+    updatedById: actor.id,
+  };
+  const form = await prisma.$transaction(async (tx) => {
+    const updated = await tx.workspaceForm.update({ where: { id: current.id }, data });
+    await tx.workspaceFormBranch.deleteMany({ where: { formId: current.id } });
+    await tx.workspaceFormBranch.createMany({ data: branches.map((branch) => ({ formId: current.id, branchId: branch.id })) });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Workspace form updated",
+      subjectType: "WorkspaceForm",
+      subjectId: current.id,
+      details: `${updated.name} saved for ${branches.length} branch${branches.length === 1 ? "" : "es"}.`,
+      beforeValues: current,
+      afterValues: updated,
+    });
+    return tx.workspaceForm.findUnique({ where: { id: current.id }, include: { branches: { include: { branch: { select: { id: true, name: true, hours: true, operatingHours: true, status: true } } } } } });
+  });
+  response.json({ form: serializeWorkspaceForm(form) });
+}));
+
 app.get("/api/leads/onboarding", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "leads");
-  const [workflow, branding, runs, invoices] = await Promise.all([
+  const [workflow, branding, runs, invoices, forms] = await Promise.all([
     prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] }),
     workspaceBrandingForOrganization(prisma, actor.organizationId),
     prisma.leadAutomationRun.findMany({
@@ -7883,12 +8065,14 @@ app.get("/api/leads/onboarding", asyncRoute(async (request, response) => {
       orderBy: [{ createdAt: "desc" }],
       take: 50,
     }),
+    ensureWorkspaceForms(prisma, actor.organizationId, actor.id),
   ]);
   response.json({
     workflow,
     branding,
     runs: runs.map((run) => ({ ...run, steps: parseJsonList(run.steps) })),
     invoices,
+    forms: forms.map(serializeWorkspaceForm),
     canManage: canManageOrganization(actor.role),
     providers: { email: emailReady() },
   });
@@ -7908,6 +8092,7 @@ app.put("/api/leads/onboarding", asyncRoute(async (request, response) => {
   const organization = await prisma.organization.findUnique({ where: { id: actor.organizationId } });
   const currentBranding = await prisma.workspaceBranding.findUnique({ where: { organizationId: actor.organizationId } });
   const brandingData = normalizeWorkspaceBranding(request.body?.branding || {}, currentBranding || {}, organization || {});
+  const workflowStatus = workflowData.active ? "Active" : current?.active ? "Paused" : current?.status === "Paused" ? "Paused" : "Draft";
   const result = await prisma.$transaction(async (tx) => {
     const branding = await tx.workspaceBranding.upsert({
       where: { organizationId: actor.organizationId },
@@ -7915,8 +8100,8 @@ app.put("/api/leads/onboarding", asyncRoute(async (request, response) => {
       update: brandingData,
     });
     const workflow = current
-      ? await tx.leadAutomation.update({ where: { id: current.id }, data: { ...workflowData, updatedById: actor.id } })
-      : await tx.leadAutomation.create({ data: { ...workflowData, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
+      ? await tx.leadAutomation.update({ where: { id: current.id }, data: { ...workflowData, status: workflowStatus, currentVersion: { increment: 1 }, publishedAt: workflowData.active ? current.publishedAt || new Date() : current.publishedAt, updatedById: actor.id } })
+      : await tx.leadAutomation.create({ data: { ...workflowData, status: workflowStatus, publishedAt: workflowData.active ? new Date() : null, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
     await writeAudit(tx, request, {
       area: "Leads",
       action: current ? "Onboarding workflow updated" : "Onboarding workflow created",
@@ -7965,6 +8150,51 @@ app.post("/api/leads/onboarding/run", asyncRoute(async (request, response) => {
   const actor = assertLeadAutomationManager(request);
   const result = await processPendingOnboardingRuns({ organizationId: actor.organizationId, limit: 50 });
   response.json({ result });
+}));
+
+app.post("/api/leads/onboarding/test", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const workflow = await prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] });
+  if (!workflow) throw apiError("Save the onboarding workflow before testing it.", 409);
+  const branding = await workspaceBrandingForOrganization(prisma, actor.organizationId);
+  const branch = await prisma.branch.findFirst({
+    where: { organizationId: actor.organizationId, status: "Active", ...(workflow.branch === "All branches" ? {} : { name: workflow.branch }) },
+    orderBy: [{ name: "asc" }],
+  });
+  if (!branch) throw apiError("No active branch is available for this test.", 409);
+  const sampleLead = {
+    name: boundedPublicText(request.body?.name || "Jamie Santos", "Test client name", 120),
+    firstName: boundedPublicText(request.body?.firstName || "Jamie", "Test first name", 80),
+    email: normalizeEmail(request.body?.email || actor.email),
+    interest: boundedPublicText(request.body?.interest || "aesthetic consultation", "Test service", 160),
+    branch: branch.name,
+  };
+  const content = renderOnboardingContent(workflow, branding, sampleLead);
+  const recipients = workflow.notifyStaff
+    ? await notificationRecipientsForOrganization(prisma, { branches: [branch.name], module: "leads", organizationId: actor.organizationId })
+    : [];
+  const steps = [
+    { key: "trigger", status: "Simulated", detail: `Sample submission routed only to ${branch.name}.` },
+    { key: "welcome_email", status: "Previewed", detail: `Email preview addressed only to the internal test recipient ${sampleLead.email || actor.email}.` },
+    { key: "staff_notification", status: workflow.notifyStaff ? "Previewed" : "Skipped", detail: `${recipients.length} authorized workspace recipient(s); no notification sent.` },
+    { key: "invoice_draft", status: workflow.createInvoice ? "Previewed" : "Skipped", detail: workflow.createInvoice ? "Non-payable test invoice generated in preview only." : "Invoice creation is disabled." },
+  ];
+  await writeAudit(prisma, request, {
+    area: "Leads",
+    action: "Onboarding workflow tested",
+    subjectType: "LeadAutomation",
+    subjectId: workflow.id,
+    details: `${workflow.name} simulated for ${branch.name}; no client contact or payable invoice was created.`,
+  });
+  response.json({
+    test: true,
+    liveActionsPerformed: false,
+    sampleLead,
+    email: { to: sampleLead.email || actor.email, subject: content.subject, message: content.text },
+    invoice: workflow.createInvoice ? { testMode: true, payable: false, description: workflow.invoiceLabel, amount: workflow.invoiceAmount, currency: branding.currency } : null,
+    recipients: recipients.length,
+    steps,
+  });
 }));
 
 app.post("/api/leads/invoices/:id/approve", asyncRoute(async (request, response) => {
@@ -8022,6 +8252,83 @@ app.post("/api/leads/invoices/:id/approve", asyncRoute(async (request, response)
     return updated;
   });
   response.json({ invoice: saved });
+}));
+
+app.post("/api/leads/invoices/:id/payments", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const invoiceId = String(request.params.id);
+  const provider = boundedPublicText(request.body?.provider || "Manual", "Payment provider", 60);
+  const providerReference = boundedPublicText(request.body?.providerReference, "Payment reference", 160);
+  if (!providerReference) throw apiError("Enter the clinic payment reference.", 400);
+  const requestedAmount = numberValue(request.body?.amount, "Payment amount", { min: 0.01 });
+
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`client-invoice-payment:${invoiceId}`}))`;
+    const existingPayment = await tx.invoicePayment.findUnique({
+      where: { organizationId_provider_providerReference: { organizationId: actor.organizationId, provider, providerReference } },
+    });
+    if (existingPayment) {
+      if (existingPayment.invoiceId !== invoiceId) throw apiError("This payment reference is already assigned to another invoice.", 409);
+      const replayInvoice = await tx.clientInvoice.findUnique({ where: { id: invoiceId }, include: { items: true, payments: true } });
+      return { invoice: replayInvoice, payment: existingPayment, sale: existingPayment.posSaleId ? await tx.sale.findUnique({ where: { id: existingPayment.posSaleId } }) : null, replayed: true };
+    }
+    const invoice = await tx.clientInvoice.findFirst({ where: { id: invoiceId, organizationId: actor.organizationId }, include: { items: true, automationRun: true } });
+    if (!invoice) throw apiError("Invoice not found.", 404);
+    if (!canAccessBranch(actor, invoice.branch)) throw apiError("You do not have access to this invoice branch.", 403);
+    if (!["Sent", "Viewed", "Partially Paid", "Overdue"].includes(invoice.status)) throw apiError("Only a sent invoice can receive payment.", 409);
+    const outstanding = Math.max(0, Number(invoice.total || 0) - Number(invoice.amountPaid || 0));
+    if (requestedAmount > outstanding + 0.001) throw apiError("Payment amount exceeds the invoice balance.", 409);
+    const nextAmountPaid = Math.round((Number(invoice.amountPaid || 0) + requestedAmount) * 100) / 100;
+    const fullyPaid = nextAmountPaid >= Number(invoice.total || 0) - 0.001;
+    let payment = await tx.invoicePayment.create({
+      data: { organizationId: actor.organizationId, invoiceId, provider, providerReference, amount: requestedAmount, currency: invoice.currency, status: "Succeeded", rawSummary: jsonText({ recordedById: actor.id, recordedBy: actor.name }, {}) },
+    });
+    let sale = null;
+    if (fullyPaid) {
+      const saleInvoice = `CI-${invoice.invoiceNumber}`;
+      sale = await tx.sale.findUnique({ where: { invoice: saleInvoice } });
+      if (!sale) {
+        const now = new Date();
+        sale = await tx.sale.create({
+          data: {
+            invoice: saleInvoice,
+            date: posCalendarDate(now),
+            time: now.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" }),
+            clientId: invoice.clientId,
+            client: invoice.recipientName,
+            branch: invoice.branch,
+            staff: actor.name,
+            subtotal: invoice.subtotal,
+            discount: invoice.discount,
+            total: invoice.total,
+            payments: jsonText([{ method: provider, amount: invoice.total, reference: providerReference }], []),
+            status: "Paid",
+            leadId: invoice.leadId || "",
+            notes: `Posted automatically from paid client invoice ${invoice.invoiceNumber}.`,
+            items: { create: invoice.items.map((item) => ({ name: item.description, type: "Service", qty: item.quantity, price: item.unitPrice, originalPrice: item.unitPrice, discount: 0, provider: "N/A" })) },
+          },
+        });
+      }
+      payment = await tx.invoicePayment.update({ where: { id: payment.id }, data: { posSaleId: sale.id } });
+    }
+    const updated = await tx.clientInvoice.update({
+      where: { id: invoice.id },
+      data: { amountPaid: nextAmountPaid, status: fullyPaid ? "Paid" : "Partially Paid", paymentProvider: provider, paymentReference: providerReference },
+      include: { items: true, payments: true },
+    });
+    if (invoice.automationRunId && fullyPaid) {
+      const steps = upsertRunStep(runSteps(invoice.automationRun || {}), "payment", "Completed", `Payment recorded through ${provider}; POS sale ${sale.invoice} created.`);
+      await tx.leadAutomationRun.update({ where: { id: invoice.automationRunId }, data: { steps: jsonText(steps, []) } });
+    }
+    if (invoice.leadId) {
+      await createLeadActivity(tx, request, invoice.leadId, { type: "Payment", title: fullyPaid ? "Invoice paid" : "Partial invoice payment recorded", note: `${provider} payment ${providerReference} recorded for ${invoice.invoiceNumber}.`, metadata: { invoiceId, paymentId: payment.id, saleId: sale?.id || "" } });
+    }
+    const recipients = await notificationRecipientsForOrganization(tx, { branches: [invoice.branch], module: "pos", organizationId: actor.organizationId });
+    await createAppNotification(tx, { actor: actor.name, branches: [invoice.branch], organizationId: actor.organizationId, recipientAccountIds: recipients, module: "pos", recordId: sale?.id || invoice.id, title: fullyPaid ? "Client invoice paid" : "Partial invoice payment", message: `${invoice.invoiceNumber}: ${provider} payment recorded for ${requestedAmount.toFixed(2)} ${invoice.currency}.` });
+    await writeAudit(tx, request, { area: "Leads", action: fullyPaid ? "Client invoice paid and posted to POS" : "Client invoice payment recorded", subjectType: "ClientInvoice", subjectId: invoice.id, details: `${invoice.invoiceNumber} received ${requestedAmount.toFixed(2)} ${invoice.currency} through ${provider}.` });
+    return { invoice: updated, payment, sale, replayed: false };
+  });
+  response.status(result.replayed ? 200 : 201).json(result);
 }));
 
 app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
@@ -8184,6 +8491,10 @@ app.post("/api/leads/:id/appointments", asyncRoute(async (request, response) => 
     notes: clean(request.body?.notes || lead.concern || lead.message),
     internalNotes: "Booked from Leads module.",
   };
+  const actor = actorFromRequest(request);
+  const appointmentBranch = await prisma.branch.findFirst({ where: { name: appointmentData.branch, organizationId: actor.organizationId, status: "Active" }, select: { id: true, organizationId: true } });
+  if (!appointmentBranch) throw apiError("Choose an active branch in your organization.", 400);
+  Object.assign(appointmentData, { organizationId: appointmentBranch.organizationId, branchId: appointmentBranch.id });
   if (service) {
     const offeredBranches = parseJsonList(service.branches);
     if (offeredBranches.length && !offeredBranches.includes(appointmentData.branch) && !offeredBranches.includes("All branches")) {
@@ -8260,8 +8571,7 @@ app.post("/api/leads/:id/convert", asyncRoute(async (request, response) => {
       if (existingClient && !request.body?.allowExistingMatch) {
         throw apiError(`Existing client match found: ${existingClient.fullName}. Link this lead to the existing client instead.`, 409);
       }
-      client = existingClient || await tx.client.create({
-        data: normalizeClientPayload({
+      const convertedClientData = normalizeClientPayload({
           fullName: lead.name,
           mobile: lead.mobile,
           email: lead.email,
@@ -8276,8 +8586,11 @@ app.post("/api/leads/:id/convert", asyncRoute(async (request, response) => {
           tag: "Converted lead",
           retention: "New",
           nextVisit: lead.preferredDate,
-        }),
-      });
+        });
+      const conversionBranch = await tx.branch.findFirst({ where: { name: lead.branch, organizationId: lead.organizationId || actorFromRequest(request).organizationId }, select: { id: true, organizationId: true } });
+      if (!conversionBranch) throw apiError("The lead branch is unavailable.", 409);
+      Object.assign(convertedClientData, { organizationId: conversionBranch.organizationId, branchId: conversionBranch.id, workspaceFormId: lead.workspaceFormId || null });
+      client = existingClient || await tx.client.create({ data: convertedClientData });
     }
 
     const actor = actorFromRequest(request);
@@ -8371,7 +8684,7 @@ app.get("/api/clients", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/clients", asyncRoute(async (request, response) => {
-  const data = normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients));
+  const data = await attachDirectTenantFields(request, resourceConfigs.clients, normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients)));
   assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.create({ data });
   response.status(201).json(client);
@@ -8382,7 +8695,7 @@ app.put("/api/clients/:id", asyncRoute(async (request, response) => {
   const existing = await prisma.client.findUnique({ where: { id } });
   if (!existing) throw apiError("Client not found.", 404);
   assertMutationAllowed(request, "clients", existing.branch);
-  const data = normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients), id);
+  const data = await attachDirectTenantFields(request, resourceConfigs.clients, normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients), id));
   assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.update({ where: { id }, data });
   response.json(client);
@@ -8409,7 +8722,7 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
     throw apiError(`${request.params.resource} cannot be created through the generic API.`, 405);
   }
 
-  const data = await config.normalize(branchScopedPayload(request, request.body, config));
+  const data = await attachDirectTenantFields(request, config, await config.normalize(branchScopedPayload(request, request.body, config)));
   await assertResourceMutationAllowed(request, config, data);
   if (request.params.resource === "staff") assertStaffAccessMutation(request, data);
   if (config.beforeWrite) await config.beforeWrite(data);
@@ -8447,7 +8760,7 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
     throw apiError("Restore this campaign before editing it.", 409);
   }
   await assertResourceMutationAllowed(request, config, existing);
-  const data = await config.normalize(branchScopedPayload(request, request.body, config), id);
+  const data = await attachDirectTenantFields(request, config, await config.normalize(branchScopedPayload(request, request.body, config), id));
   await assertResourceMutationAllowed(request, config, data);
   if (request.params.resource === "staff") assertStaffAccessMutation(request, data, existing);
   if (request.params.resource === "campaigns") {
@@ -8512,33 +8825,35 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
   response.status(204).end();
 }));
 
-app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
-  const [settings, branchRows, serviceRows] = await Promise.all([
-    getPersistedSettings(),
-    prisma.branch.findMany({
-      where: { status: "Active", modules: { some: { moduleId: { in: ["leads", "booking"] }, enabled: true } } },
-      orderBy: [{ name: "asc" }],
-      select: { id: true, name: true, hours: true, operatingHours: true },
-    }),
+app.get("/api/public-leads/config", asyncRoute(async (request, response) => {
+  const form = await publicWorkspaceForm(request.query.workspace);
+  const branchRows = form.allowedBranches;
+  const [branding, serviceRows, siblingForms] = await Promise.all([
+    workspaceBrandingForOrganization(prisma, form.organizationId),
     prisma.service.findMany({
       where: { active: true },
       orderBy: [{ name: "asc" }],
       select: { id: true, name: true, category: true, serviceType: true, branches: true, duration: true, price: true, priceModel: true, priceUnit: true },
     }),
+    prisma.workspaceForm.findMany({ where: { organizationId: form.organizationId, status: "Active" }, select: { type: true, slug: true } }),
   ]);
+  const allowedBranchNames = new Set(branchRows.map((branch) => branch.name));
   const publicServices = [];
   for (const service of serviceRows) {
+    const serviceBranches = parseJsonList(service.branches);
+    const visibleBranches = serviceBranches.filter((branch) => allowedBranchNames.has(branch));
+    if (!visibleBranches.length) continue;
     const key = clean(service.name).toLowerCase();
     const existing = publicServices.find((item) => clean(item.name).toLowerCase() === key);
     if (existing) {
-      existing.branches = [...new Set([...existing.branches, ...parseJsonList(service.branches)])];
+      existing.branches = [...new Set([...existing.branches, ...visibleBranches])];
     } else {
       publicServices.push({
         id: service.id,
         name: service.name,
         category: service.category,
         serviceType: service.serviceType,
-        branches: parseJsonList(service.branches),
+        branches: visibleBranches,
         duration: service.duration,
         price: service.price,
         priceModel: service.priceModel,
@@ -8548,9 +8863,13 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
   }
 
   response.json({
-    company: visibleApplicationBrand(settings.company),
-    tagline: settings.receiptFooter,
-    branches: branchRows.map((branch) => ({ ...branch, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
+    workspace: { id: form.id, slug: form.slug, type: form.type },
+    formSlugs: Object.fromEntries(siblingForms.map((item) => [item.type, item.slug])),
+    company: branding.businessName || form.organization.name,
+    tagline: branding.invoiceFooter || "Personal care, thoughtfully delivered.",
+    branding: invoiceBrandingSnapshot(branding),
+    consent: { version: form.consentVersion, text: form.consentText },
+    branches: branchRows.map((branch) => ({ id: branch.id, name: branch.name, hours: branch.hours, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
     services: publicServices,
   });
 }));
@@ -8582,11 +8901,18 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw apiError("Enter a valid email address.");
   if (values.privacyConsent !== true) throw apiError("Consent is required before sending an inquiry.");
 
+  let form;
+  if (values.platformSales === true) {
+    const providerOrganization = await prisma.organization.findUnique({ where: { slug: "zenshotech-provider" }, select: { id: true } });
+    if (!providerOrganization) throw apiError("The ZenshoTech sales form is unavailable.", 503);
+    await ensureWorkspaceForms(prisma, providerOrganization.id);
+    const providerForm = await prisma.workspaceForm.findUnique({ where: { organizationId_type: { organizationId: providerOrganization.id, type: "inquiry" } }, select: { slug: true } });
+    form = await publicWorkspaceForm(providerForm?.slug, "inquiry");
+  } else {
+    form = await publicWorkspaceForm(values.workspaceSlug, "inquiry");
+  }
   const requestedBranch = boundedPublicText(values.branch, "Branch", 120);
-  const branch = requestedBranch
-    ? await prisma.branch.findFirst({ where: { name: requestedBranch, status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, select: { name: true } })
-    : await prisma.branch.findFirst({ where: { status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, orderBy: [{ name: "asc" }], select: { name: true } });
-  if (!branch) throw apiError(requestedBranch ? "Selected branch is unavailable." : "No clinic branch is available for inquiries.", requestedBranch ? 400 : 503);
+  const branch = branchFromWorkspaceForm(form, values.branchId, requestedBranch, "leads");
 
   const requestedServiceId = boundedPublicText(values.serviceId, "Service", 120);
   const requestedInterest = boundedPublicText(values.interest, "Service interest", 160);
@@ -8622,15 +8948,15 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
     utm_content: boundedPublicText(values.utmContent, "UTM content", 160),
     utm_term: boundedPublicText(values.utmTerm, "UTM term", 160),
     click_id: boundedPublicText(values.clickId, "Click ID", 240),
-    form_id: "mace-public-inquiry-v1",
+    form_id: form.id,
     external_lead_id: boundedPublicText(values.submissionId, "Submission ID", 120) || request.requestId,
     permission_to_contact: true,
     privacy_consent: true,
     marketing_consent: values.marketingConsent === true,
-    consent_source: "Public inquiry form",
+    consent_source: form.source || "Public inquiry form",
     consent_timestamp: submittedAt,
-    consent_version: "v1",
-    consent_text: "I consent to the collection and use of my information so ZenshoTech can respond to this inquiry.",
+    consent_version: form.consentVersion,
+    consent_text: form.consentText,
     submitted_at: submittedAt,
   };
 
@@ -8639,7 +8965,13 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   request.body = publicPayload;
   request.rawBody = JSON.stringify(publicPayload);
   try {
-    const result = await processLeadWebhook("website", request, { authMethod: "public-form", allowPayloadBranch: true });
+    const result = await processLeadWebhook("website", request, {
+      authMethod: "public-form",
+      allowPayloadBranch: false,
+      organizationId: form.organizationId,
+      branchId: branch.id,
+      workspaceFormId: form.id,
+    });
     response.status(result.duplicateEvent ? 200 : 201).json({
       submitted: true,
       reference: result.event?.providerEventId || request.requestId,
@@ -8652,11 +8984,11 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
 
 app.get("/api/public-registration/qr", asyncRoute(async (request, response) => {
   const branchName = requireText(request.query.branch, "Branch");
-  const branch = await prisma.branch.findFirst({ where: { name: branchName, status: "Active" }, select: { name: true } });
+  const branch = await prisma.branch.findFirst({ where: { name: branchName, status: "Active" }, select: { id: true, name: true, organizationId: true } });
   if (!branch) throw apiError("Registration branch is unavailable.", 404);
-  const configuredOrigin = clean(process.env.APP_ORIGIN).split(",")[0];
-  const origin = configuredOrigin || `${request.protocol}://${request.get("host")}`.replace(/:3001$/, ":5173");
-  const url = `${origin.replace(/\/$/, "")}/client-register?branch=${encodeURIComponent(branch.name)}`;
+  await ensureWorkspaceForms(prisma, branch.organizationId);
+  const form = await prisma.workspaceForm.findUnique({ where: { organizationId_type: { organizationId: branch.organizationId, type: "registration" } } });
+  const url = `${workspaceFormPublicUrl(form)}?branchId=${encodeURIComponent(branch.id)}`;
   const svg = await QRCode.toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#1f2937", light: "#ffffff" } });
   response.type("image/svg+xml").set("Cache-Control", "public, max-age=300").send(svg);
 }));
@@ -8668,16 +9000,15 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
     return;
   }
   if (values.privacyConsent !== true) throw apiError("Consent is required before registration.");
-  const branch = await prisma.branch.findFirst({ where: { name: requireText(values.branch, "Branch"), status: "Active" } });
-  if (!branch) throw apiError("Registration branch is unavailable.", 409);
+  const form = await publicWorkspaceForm(values.workspaceSlug, "registration");
+  const branch = branchFromWorkspaceForm(form, values.branchId, values.branch, "clients");
   const firstName = requireText(values.firstName, "First name");
   const lastName = requireText(values.lastName, "Last name");
   const mobile = clean(values.mobile);
   const email = clean(values.email).toLowerCase();
   if (!mobile && !email) throw apiError("Enter a mobile number or email address.");
   const duplicateConditions = [mobile ? { mobile } : null, email ? { email } : null].filter(Boolean);
-  const organizationBranches = await prisma.branch.findMany({ where: { organizationId: branch.organizationId }, select: { name: true } });
-  const existing = duplicateConditions.length ? await prisma.client.findFirst({ where: { branch: { in: organizationBranches.map((item) => item.name) }, OR: duplicateConditions } }) : null;
+  const existing = duplicateConditions.length ? await prisma.client.findFirst({ where: { organizationId: branch.organizationId, OR: duplicateConditions } }) : null;
   const data = normalizeClientPayload({
     ...(existing || {}),
     ...values,
@@ -8692,6 +9023,7 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
     consentStatus: "Pending",
     marketingOptIn: values.marketingOptIn === true,
   }, existing?.id || "");
+  Object.assign(data, { organizationId: branch.organizationId, branchId: branch.id, workspaceFormId: form.id });
   const result = await prisma.$transaction(async (tx) => {
     const client = existing
       ? await tx.client.update({ where: { id: existing.id }, data })
@@ -8715,10 +9047,11 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   if (!service || !service.active) {
     throw apiError("Selected service is unavailable.", 404);
   }
-  const branch = await prisma.branch.findFirst({ where: { name: booking.branch, status: "Active", modules: { some: { moduleId: "booking", enabled: true } } }, include: { rooms: true } });
-  if (!branch) throw apiError("Selected branch is unavailable.", 404);
+  const form = await publicWorkspaceForm(request.body?.workspaceSlug, "booking");
+  const selectedBranch = branchFromWorkspaceForm(form, request.body?.branchId, booking.branch, "booking");
+  const branch = await prisma.branch.findUnique({ where: { id: selectedBranch.id }, include: { rooms: true } });
   const serviceBranches = parseJsonList(service.branches);
-  if (serviceBranches.length && !serviceBranches.includes(booking.branch) && !serviceBranches.includes("All branches")) {
+  if (!serviceBranches.includes(branch.name)) {
     throw apiError("Selected service is not offered at this branch.", 409);
   }
   const publicBookingKey = `public_${createHash("sha256").update(booking.submissionId).digest("hex")}`;
@@ -8739,11 +9072,14 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     const appointmentData = {
       date: booking.date,
       time: booking.time,
+      organizationId: branch.organizationId,
+      branchId: branch.id,
+      workspaceFormId: form.id,
       clientId: null,
       client: booking.fullName,
       serviceId: booking.serviceId,
       service: service.name,
-      branch: booking.branch,
+      branch: branch.name,
       room: "To assign",
       staff: "Any available",
       status: "Pending Confirmation",
@@ -8758,12 +9094,15 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     const lead = await tx.lead.create({
       data: {
         name: booking.fullName,
+        organizationId: branch.organizationId,
+        branchId: branch.id,
+        workspaceFormId: form.id,
         mobile,
         email: booking.email,
         source: "Online Booking",
         firstTouchSource: "Online Booking",
         latestTouchSource: "Online Booking",
-        formId: "mace-public-booking-v1",
+        formId: form.id,
         interest: service.name,
         concern: booking.concern,
         status: "New Inquiry",
@@ -8779,10 +9118,10 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
         permissionToContact: true,
         marketingConsent: booking.marketingConsent,
         privacyConsent: true,
-        consentSource: "Online booking",
+        consentSource: form.source || "Online booking",
         consentTimestamp: new Date().toISOString(),
-        consentVersion: "v1",
-        consentText: "I consent to the collection and use of my information to request this appointment.",
+        consentVersion: form.consentVersion,
+        consentText: form.consentText,
       },
     });
     const appointment = await tx.appointment.create({ data: { ...appointmentData, leadId: lead.id } });
