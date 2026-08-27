@@ -419,6 +419,11 @@ try {
   assert(markedNotifications.response.ok, "mark notifications read failed");
   assert(markedNotifications.payload.unreadCount === 0, "mark notifications read did not clear the unread count");
 
+  // Demo registrations can emit provider/customer onboarding mail before this
+  // invitation-specific sequence. Reset the local SMTP capture so the numbered
+  // assertions below remain scoped to invitation lifecycle messages.
+  smtpMessages.splice(0, smtpMessages.length);
+
   const invitationHeaders = { ...ownerHeaders, "X-Mace-User-Id": notificationOwner.id };
   const invitationBranch = bootstrap.payload.branches.find((branch) => branch.name === "Mace Davao");
   assert(invitationBranch?.id, "invitation smoke test could not find an active branch");
