@@ -963,12 +963,10 @@ function App() {
     || window.location.hash.toLowerCase() === "#/book"
     || new URLSearchParams(window.location.search).get("form") === "appointment"
   ) ? "appointment" : "inquiry";
-  const currentPublicParams = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
   const isClientRegistrationView = typeof window !== "undefined" && (
     workspaceFormRoute?.type === "registration"
     || currentPublicPath === "/client-register"
     || currentPublicPath === "/register"
-    || currentPublicParams.has("branch")
   );
   const isPublicFormView = typeof window !== "undefined" && (
     Boolean(workspaceFormRoute)
