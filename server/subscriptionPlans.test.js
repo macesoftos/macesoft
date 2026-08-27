@@ -28,9 +28,9 @@ const entitlementMigration = readFileSync(new URL("../prisma/migrations/20260826
 test("canonical plans and the dedicated pricing catalog expose the approved prices", () => {
   const plans = Object.fromEntries(["starter", "growth", "unlimited", "lifetime"].map((code) => [code, getSubscriptionPlan(code)]));
   const publicPlans = Object.fromEntries(publicSubscriptionPlans().map((plan) => [plan.code, plan]));
-  assert.equal(plans.starter.monthlyPrice, 3900);
-  assert.equal(plans.growth.monthlyPrice, 5900);
-  assert.equal(plans.unlimited.monthlyPrice, 7999);
+  assert.equal(plans.starter.monthlyPrice, 2900);
+  assert.equal(plans.growth.monthlyPrice, 4900);
+  assert.equal(plans.unlimited.monthlyPrice, 6900);
   assert.equal(plans.lifetime.monthlyPrice, 280000);
   assert.equal(plans.growth.recommended, true);
   for (const plan of Object.values(plans)) {
@@ -46,20 +46,20 @@ test("canonical plans and the dedicated pricing catalog expose the approved pric
   assert.equal(plans.starter.includedWebsitePages, 8);
   assert.equal(plans.growth.includedWebsitePages, 15);
   assert.equal(plans.unlimited.includedWebsitePages, 20);
-  assert.equal(publicPlans.starter.monthlyPrice, 3900);
-  assert.equal(publicPlans.growth.monthlyPrice, 5900);
-  assert.equal(publicPlans.unlimited.monthlyPrice, 7999);
+  assert.equal(publicPlans.starter.monthlyPrice, 2900);
+  assert.equal(publicPlans.growth.monthlyPrice, 4900);
+  assert.equal(publicPlans.unlimited.monthlyPrice, 6900);
   assert.equal(publicPlans.lifetime.monthlyPrice, 280000);
-  assert.equal(publicPlans.starter.annualPrice, 42120);
-  assert.equal(publicPlans.growth.annualPrice, 63720);
-  assert.equal(publicPlans.unlimited.annualPrice, 86389.2);
+  assert.equal(publicPlans.starter.annualPrice, 31320);
+  assert.equal(publicPlans.growth.annualPrice, 52920);
+  assert.equal(publicPlans.unlimited.annualPrice, 74520);
   assert.equal(publicPlans.starter.currency, "PHP");
 });
 
 test("monthly plans support one-month payment or 12 months prepaid with exactly 10 percent off", () => {
   assert.equal(ANNUAL_BILLING_MONTHS, 12);
   assert.equal(ANNUAL_DISCOUNT_PERCENT, 10);
-  const expectedAnnualPrices = { starter: 42120, growth: 63720, unlimited: 86389.2 };
+  const expectedAnnualPrices = { starter: 31320, growth: 52920, unlimited: 74520 };
   for (const [code, annualPrice] of Object.entries(expectedAnnualPrices)) {
     const plan = getSubscriptionPlan(code);
     assert.equal(plan.annualPrice, annualPrice);
@@ -202,6 +202,6 @@ test("shareable pricing shows prices and trials while the homepage has no pricin
   assert.equal("amount" in customerView.billing, false);
   assert.equal("amount" in customerView.requestedBilling, false);
   const adminView = serializeSubscription(subscription, {}, new Date("2026-08-26T00:00:00.000Z"), { includePricing: true });
-  assert.equal(adminView.plan.monthlyPrice, 5900);
-  assert.equal(adminView.billing.amount, 63720);
+  assert.equal(adminView.plan.monthlyPrice, 4900);
+  assert.equal(adminView.billing.amount, 52920);
 });

@@ -56,7 +56,7 @@ export const responsiveAccount = {
     plan: {
       code: "unlimited",
       name: "Unlimited",
-      monthlyPrice: 7999,
+      monthlyPrice: 6900,
       maxUsers: null,
       maxBranches: null,
       includedWebsitePages: 20,
