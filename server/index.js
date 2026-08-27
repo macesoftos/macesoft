@@ -7344,7 +7344,7 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
       : null;
   if (requestedServiceId && !service) throw apiError("Selected service is unavailable.");
   const serviceBranches = parseJsonList(service?.branches);
-  if (service && serviceBranches.length && !serviceBranches.includes("All branches") && !serviceBranches.includes(branch.name)) {
+  if (service && !serviceBranches.includes(branch.name)) {
     throw apiError("Selected service is unavailable at this branch.", 409);
   }
 
