@@ -23,6 +23,14 @@ test("inquiry, booking, and registration writes store direct tenant relationship
   assert.match(schemaSource, /model WorkspaceForm[\s\S]*?organizationId\s+String/);
 });
 
+test("unassigned operational identities cannot use organization-wide client selectors", () => {
+  assert.match(
+    serverSource,
+    /config\.directTenantOrganizationWide && !hasOrganizationWideAccess\(actor\) && !hasValidBranchAssignment\(actor\)/,
+  );
+  assert.match(serverSource, /where = \{ id: "__none__" \}/);
+});
+
 test("payment replay protection is organization scoped and paid invoices post once to POS", () => {
   assert.match(schemaSource, /@@unique\(\[organizationId, provider, providerReference\]\)/);
   assert.match(serverSource, /client-invoice-payment:\$\{invoiceId\}/);
