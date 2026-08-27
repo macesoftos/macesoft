@@ -172,7 +172,26 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
     const bootstrapResponse = await fetch("/api/bootstrap", { credentials: "include" });
     const bootstrap = await bootstrapResponse.json();
     const branch = bootstrap.branches.find((item) => item.rooms.includes(room));
-    const client = bootstrap.clients[0];
+    let client = bootstrap.clients[0];
+    if (!client) {
+      const clientResponse = await fetch("/api/resources/clients", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-Mace-Request": "app" },
+        body: JSON.stringify({
+          fullName: `Release Guard Client ${Date.now()}`,
+          mobile: "09170000001",
+          email: `release-guard-${Date.now()}@example.invalid`,
+          branch: branch.name,
+          source: "Release test",
+          marketingOptIn: false,
+          balance: 0,
+          giftBalance: 0,
+        }),
+      });
+      if (!clientResponse.ok) throw new Error(`Unable to create the release guard client (${clientResponse.status}).`);
+      client = (await clientResponse.json()).record;
+    }
     const response = await fetch("/api/resources/appointments", {
       method: "POST",
       credentials: "include",
