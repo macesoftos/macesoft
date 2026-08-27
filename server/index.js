@@ -36,6 +36,15 @@ import {
 import { registrationConfirmationEmail } from "./registrationConfirmationEmail.js";
 import { providerRegistrationEmail, providerRegistrationRecipient } from "./providerRegistrationEmail.js";
 import {
+  brandedEmailHtml,
+  defaultWorkspaceBranding,
+  invoiceBrandingSnapshot,
+  normalizeOnboardingWorkflowPayload,
+  normalizeWorkspaceBranding,
+  publicInvoice,
+  renderOnboardingContent,
+} from "./onboardingAutomation.js";
+import {
   clientImageStorageProvider,
   deleteCloudinaryImage,
   fetchCloudinaryImage,
@@ -2881,6 +2890,7 @@ async function processLeadWebhook(provider, request, options = {}) {
           recordId: lead.id,
           title: "New lead",
         });
+        await enqueueOnboardingRuns(tx, { lead, organizationId: notificationBranch.organizationId });
       }
       if (clean(leadData.externalLeadId)) {
         await tx.externalLeadIdentity.create({
@@ -2919,6 +2929,11 @@ async function processLeadWebhook(provider, request, options = {}) {
       where: { id: result.lead.id },
       include: resourceConfigs.leads.include,
     });
+    if (result.event.status === "Completed") {
+      await processPendingOnboardingRuns({ leadId: lead.id, limit: 10 }).catch((error) => {
+        console.error(JSON.stringify({ event: "onboarding_workflow_dispatch_failed", leadId: lead.id, error: clean(error.message) }));
+      });
+    }
     return {
       status: result.event.status,
       duplicateEvent: false,
@@ -3406,9 +3421,9 @@ async function createVerifiedEmailTransport() {
   }
 }
 
-async function sendSmtpEmail({ transporter, to, replyTo = "", subject, text, html = "" }) {
+async function sendSmtpEmail({ transporter, to, replyTo = "", from = "", subject, text, html = "" }) {
   const result = await transporter.sendMail({
-    from: clean(process.env.SMTP_FROM),
+    from: clean(from) || clean(process.env.SMTP_FROM),
     to,
     ...(replyTo ? { replyTo } : {}),
     subject,
@@ -3602,6 +3617,253 @@ async function processLeadAutomation(automation) {
     else result.skipped += 1;
   }
   return result;
+}
+
+function appPublicOrigin() {
+  return clean(process.env.APP_ORIGIN).split(",").map(clean).find((value) => /^https?:\/\//i.test(value)) || `http://127.0.0.1:${port}`;
+}
+
+function brandedSmtpFrom(branding) {
+  const configured = clean(process.env.SMTP_FROM);
+  const address = configured.match(/<([^>]+)>/)?.[1] || configured;
+  const label = (clean(branding.businessName) || "Clinic").replace(/[\r\n"<>]/g, "").slice(0, 120);
+  return address ? `"${label}" <${address}>` : configured;
+}
+
+async function workspaceBrandingForOrganization(database, organizationId) {
+  const [branding, organization] = await Promise.all([
+    database.workspaceBranding.findUnique({ where: { organizationId } }),
+    database.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true, address: true, phone: true } }),
+  ]);
+  return branding || { ...defaultWorkspaceBranding(organization || {}), organizationId };
+}
+
+function invoiceUrl(invoice) {
+  return `${appPublicOrigin().replace(/\/$/, "")}/invoice/${encodeURIComponent(invoice.publicToken)}`;
+}
+
+function runSteps(run) {
+  return parseJsonList(run.steps).filter((step) => step && typeof step === "object");
+}
+
+function upsertRunStep(steps, key, status, detail = "") {
+  const next = steps.filter((step) => step.key !== key);
+  next.push({ key, status, detail: clean(detail).slice(0, 500), at: new Date().toISOString() });
+  return next;
+}
+
+function runStepCompleted(steps, key) {
+  return steps.some((step) => step.key === key && ["Completed", "Skipped"].includes(step.status));
+}
+
+async function saveOnboardingRunStep(runId, steps, key, status, detail = "", data = {}) {
+  const next = upsertRunStep(steps, key, status, detail);
+  await prisma.leadAutomationRun.update({ where: { id: runId }, data: { ...data, steps: jsonText(next, []) } });
+  steps.splice(0, steps.length, ...next);
+}
+
+async function createOnboardingInvoice(run, branding) {
+  const existing = await prisma.clientInvoice.findUnique({ where: { automationRunId: run.id }, include: { items: true } });
+  if (existing) return existing;
+  const issueDate = posCalendarDate();
+  const due = new Date(`${issueDate}T00:00:00+08:00`);
+  due.setUTCDate(due.getUTCDate() + Number(run.automation.invoiceDueDays || 3));
+  const dueDate = due.toISOString().slice(0, 10);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`client-invoice:${run.organizationId}`}))`;
+    const count = await tx.clientInvoice.count({ where: { organizationId: run.organizationId } });
+    const prefix = clean(branding.invoicePrefix) || "INV";
+    const invoiceNumber = `${prefix}-${issueDate.replace(/-/g, "")}-${String(count + 1).padStart(4, "0")}`;
+    const amount = Math.round(Number(run.automation.invoiceAmount || 0) * 100) / 100;
+    return tx.clientInvoice.create({
+      data: {
+        organizationId: run.organizationId,
+        branch: run.lead.branch,
+        leadId: run.lead.id,
+        automationRunId: run.id,
+        publicToken: randomBytes(24).toString("hex"),
+        invoiceNumber,
+        recipientName: run.lead.name,
+        recipientEmail: normalizeEmail(run.lead.email),
+        currency: branding.currency || "PHP",
+        subtotal: amount,
+        total: amount,
+        status: run.automation.requireApproval ? "Awaiting Approval" : "Approved",
+        issueDate,
+        dueDate,
+        notes: "Created from the clinic's new-client onboarding workflow.",
+        brandingSnapshot: invoiceBrandingSnapshot(branding),
+        items: { create: [{ description: run.automation.invoiceLabel || "Consultation deposit", quantity: 1, unitPrice: amount, total: amount }] },
+      },
+      include: { items: true },
+    });
+  });
+}
+
+async function sendClientInvoice(invoice, branding) {
+  if (!normalizeEmail(invoice.recipientEmail)) throw apiError("This invoice needs a valid client email address before it can be sent.", 409);
+  const transporter = await createVerifiedEmailTransport();
+  const url = invoiceUrl(invoice);
+  const amount = new Intl.NumberFormat("en-PH", { style: "currency", currency: invoice.currency || "PHP" }).format(Number(invoice.total || 0));
+  const text = `Hi ${invoice.recipientName},\n\n${branding.businessName} prepared invoice ${invoice.invoiceNumber} for ${amount}. It is due on ${invoice.dueDate}.\n\nView your invoice: ${url}`;
+  try {
+    const providerReference = await sendSmtpEmail({
+      transporter,
+      to: invoice.recipientEmail,
+      replyTo: normalizeEmail(branding.email),
+      from: brandedSmtpFrom(branding),
+      subject: `Invoice ${invoice.invoiceNumber} from ${branding.businessName}`,
+      text,
+      html: brandedEmailHtml({ branding, heading: `Invoice ${invoice.invoiceNumber}`, body: `${invoice.recipientName}, your invoice for ${amount} is ready and due on ${invoice.dueDate}.`, actionLabel: "View invoice", actionUrl: url }),
+    });
+    return { providerReference, sentAt: new Date() };
+  } finally {
+    transporter.close();
+  }
+}
+
+async function enqueueOnboardingRuns(tx, { lead, organizationId }) {
+  const automations = await tx.leadAutomation.findMany({
+    where: {
+      organizationId,
+      kind: "onboarding",
+      active: true,
+      OR: [{ branch: "All branches" }, { branch: lead.branch }],
+    },
+  });
+  for (const automation of automations) {
+    try {
+      await tx.leadAutomationRun.create({
+        data: {
+          automationId: automation.id,
+          organizationId,
+          leadId: lead.id,
+          channel: "Email",
+          recipient: normalizeEmail(lead.email),
+          subject: automation.subject,
+          status: "Pending",
+          scheduledAt: new Date(),
+          steps: "[]",
+        },
+      });
+    } catch (error) {
+      if (error?.code !== "P2002") throw error;
+    }
+  }
+}
+
+async function processOnboardingRun(run) {
+  if (!run?.automation || run.automation.kind !== "onboarding" || !run.automation.active) return { skipped: true };
+  const steps = runSteps(run);
+  const claimed = await prisma.leadAutomationRun.updateMany({
+    where: { id: run.id, status: { in: ["Pending", "Failed"] }, attemptCount: { lt: 3 } },
+    data: { status: "Processing", reason: "", attemptedAt: new Date(), attemptCount: { increment: 1 } },
+  });
+  if (claimed.count !== 1) return { skipped: true };
+  try {
+    const branding = await workspaceBrandingForOrganization(prisma, run.organizationId);
+    if (!runStepCompleted(steps, "welcome_email")) {
+      const recipient = normalizeEmail(run.lead.email);
+      if (!recipient) {
+        await saveOnboardingRunStep(run.id, steps, "welcome_email", "Skipped", "Lead has no valid email address.");
+      } else if (!emailReady()) {
+        throw apiError("Email delivery is not configured.", 503);
+      } else {
+        const content = renderOnboardingContent(run.automation, branding, run.lead);
+        const transporter = await createVerifiedEmailTransport();
+        try {
+          const providerReference = await sendSmtpEmail({
+            transporter,
+            to: recipient,
+            replyTo: normalizeEmail(branding.email),
+            from: brandedSmtpFrom(branding),
+            subject: content.subject,
+            text: content.text,
+            html: brandedEmailHtml({ branding, heading: content.subject, body: content.text, ...(run.automation.bookingUrl ? { actionLabel: "Book or view next steps", actionUrl: run.automation.bookingUrl } : {}) }),
+          });
+          await saveOnboardingRunStep(run.id, steps, "welcome_email", "Completed", "Clinic-branded welcome email sent.", { providerReference, message: content.text, subject: content.subject });
+        } finally {
+          transporter.close();
+        }
+      }
+    }
+
+    if (run.automation.notifyStaff && !runStepCompleted(steps, "staff_notification")) {
+      const recipientAccountIds = await notificationRecipientsForOrganization(prisma, { branches: [run.lead.branch], module: "leads", organizationId: run.organizationId });
+      if (recipientAccountIds.length) {
+        await createAppNotification(prisma, {
+          actor: branding.businessName,
+          branches: [run.lead.branch],
+          organizationId: run.organizationId,
+          recipientAccountIds,
+          module: "leads",
+          recordId: run.lead.id,
+          title: "New client onboarding started",
+          message: `${run.lead.name} entered the new-client onboarding workflow.`,
+        });
+        await saveOnboardingRunStep(run.id, steps, "staff_notification", "Completed", `${recipientAccountIds.length} authorized user(s) notified.`);
+      } else {
+        await saveOnboardingRunStep(run.id, steps, "staff_notification", "Skipped", "No authorized recipients were available.");
+      }
+    }
+
+    let invoice = run.invoice || null;
+    if (run.automation.createInvoice && !runStepCompleted(steps, "invoice_draft")) {
+      invoice = await createOnboardingInvoice(run, branding);
+      await saveOnboardingRunStep(run.id, steps, "invoice_draft", "Completed", `${invoice.invoiceNumber} created.`, { status: run.automation.requireApproval ? "Waiting Approval" : "Processing" });
+    }
+
+    if (invoice && run.automation.requireApproval) {
+      await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Waiting Approval", reason: "Invoice approval is required before client delivery." } });
+      return { waitingApproval: true, invoiceId: invoice.id };
+    }
+
+    if (invoice && !runStepCompleted(steps, "invoice_email")) {
+      const delivery = await sendClientInvoice(invoice, branding);
+      invoice = await prisma.clientInvoice.update({ where: { id: invoice.id }, data: { status: "Sent", approvedAt: invoice.approvedAt || new Date(), sentAt: delivery.sentAt }, include: { items: true } });
+      await saveOnboardingRunStep(run.id, steps, "invoice_email", "Completed", "Clinic-branded invoice sent.", { providerReference: delivery.providerReference });
+    }
+
+    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Completed", reason: "", sentAt: new Date() } });
+    await createLeadActivity(prisma, null, run.lead.id, {
+      type: "Automated Onboarding",
+      title: "New-client onboarding completed",
+      note: invoice ? `Welcome workflow completed with invoice ${invoice.invoiceNumber}.` : "Welcome workflow completed.",
+      channel: "Email",
+      actor: branding.businessName,
+      actorRole: "System",
+      metadata: { automationId: run.automationId, runId: run.id, invoiceId: invoice?.id || "" },
+    });
+    return { completed: true, invoiceId: invoice?.id || "" };
+  } catch (error) {
+    const reason = (clean(error.message) || "Onboarding workflow failed.").slice(0, 1000);
+    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Failed", reason } });
+    console.error(JSON.stringify({ event: "onboarding_workflow_failed", runId: run.id, error: reason }));
+    return { failed: true, reason };
+  }
+}
+
+async function processPendingOnboardingRuns({ leadId = "", organizationId = "", limit = 50 } = {}) {
+  const runs = await prisma.leadAutomationRun.findMany({
+    where: {
+      ...(leadId ? { leadId } : {}),
+      ...(organizationId ? { organizationId } : {}),
+      status: { in: ["Pending", "Failed"] },
+      attemptCount: { lt: 3 },
+      automation: { is: { kind: "onboarding", active: true } },
+    },
+    include: { automation: true, lead: true, invoice: { include: { items: true } } },
+    orderBy: [{ scheduledAt: "asc" }],
+    take: Math.min(100, Math.max(1, Number(limit) || 50)),
+  });
+  const summary = { evaluated: runs.length, completed: 0, waitingApproval: 0, failed: 0 };
+  for (const run of runs) {
+    const result = await processOnboardingRun(run);
+    if (result.completed) summary.completed += 1;
+    else if (result.waitingApproval) summary.waitingApproval += 1;
+    else if (result.failed) summary.failed += 1;
+  }
+  return summary;
 }
 
 async function listBranchesForBootstrap(actor) {
@@ -7510,9 +7772,9 @@ function assertLeadAutomationManager(request) {
 app.get("/api/leads/automations", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "leads");
   const [automations, runs] = await Promise.all([
-    prisma.leadAutomation.findMany({ where: { organizationId: actor.organizationId }, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.leadAutomation.findMany({ where: { organizationId: actor.organizationId, kind: "follow_up" }, orderBy: [{ updatedAt: "desc" }] }),
     prisma.leadAutomationRun.findMany({
-      where: { organizationId: actor.organizationId, lead: { is: branchWhere(actor) } },
+      where: { organizationId: actor.organizationId, lead: { is: branchWhere(actor) }, automation: { is: { kind: "follow_up" } } },
       include: { lead: { select: { id: true, name: true, branch: true } }, automation: { select: { id: true, name: true } } },
       orderBy: [{ createdAt: "desc" }],
       take: 50,
@@ -7538,7 +7800,7 @@ app.post("/api/leads/automations", asyncRoute(async (request, response) => {
     throw apiError(`${data.channel} delivery is not configured. Connect the provider before enabling this automation.`, 503);
   }
   const automation = await prisma.$transaction(async (tx) => {
-    const created = await tx.leadAutomation.create({ data: { ...data, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
+    const created = await tx.leadAutomation.create({ data: { ...data, kind: "follow_up", organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
     await writeAudit(tx, request, {
       area: "Leads",
       action: "Lead automation created",
@@ -7553,7 +7815,7 @@ app.post("/api/leads/automations", asyncRoute(async (request, response) => {
 
 app.put("/api/leads/automations/:id", asyncRoute(async (request, response) => {
   const actor = assertLeadAutomationManager(request);
-  const current = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  const current = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId, kind: "follow_up" } });
   if (!current) throw apiError("Lead automation not found.", 404);
   const data = normalizeLeadAutomationPayload(request.body ?? {}, current);
   await assertLeadAutomationBranch(actor, data.branch);
@@ -7578,11 +7840,139 @@ app.put("/api/leads/automations/:id", asyncRoute(async (request, response) => {
 
 app.post("/api/leads/automations/:id/run", asyncRoute(async (request, response) => {
   const actor = assertLeadAutomationManager(request);
-  const automation = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  const automation = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId, kind: "follow_up" } });
   if (!automation) throw apiError("Lead automation not found.", 404);
   if (!automation.active) throw apiError("Enable and save this automation before running it.", 409);
   const result = await processLeadAutomation(automation);
   response.json({ result });
+}));
+
+app.get("/api/leads/onboarding", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "leads");
+  const [workflow, branding, runs, invoices] = await Promise.all([
+    prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] }),
+    workspaceBrandingForOrganization(prisma, actor.organizationId),
+    prisma.leadAutomationRun.findMany({
+      where: { organizationId: actor.organizationId, automation: { is: { kind: "onboarding" } }, lead: { is: branchWhere(actor) } },
+      include: { lead: { select: { id: true, name: true, email: true, branch: true } }, invoice: { select: { id: true, invoiceNumber: true, status: true } } },
+      orderBy: [{ createdAt: "desc" }],
+      take: 50,
+    }),
+    prisma.clientInvoice.findMany({
+      where: { organizationId: actor.organizationId, ...branchWhere(actor) },
+      include: { items: true, lead: { select: { id: true, name: true } } },
+      orderBy: [{ createdAt: "desc" }],
+      take: 50,
+    }),
+  ]);
+  response.json({
+    workflow,
+    branding,
+    runs: runs.map((run) => ({ ...run, steps: parseJsonList(run.steps) })),
+    invoices,
+    canManage: canManageOrganization(actor.role),
+    providers: { email: emailReady() },
+  });
+}));
+
+app.put("/api/leads/onboarding", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const current = await prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] });
+  let workflowData;
+  try {
+    workflowData = normalizeOnboardingWorkflowPayload(request.body?.workflow || {}, current || {});
+  } catch (error) {
+    throw apiError(clean(error.message) || "Review the onboarding workflow settings.", 400);
+  }
+  await assertLeadAutomationBranch(actor, workflowData.branch);
+  if (workflowData.active && !emailReady()) throw apiError("Connect email before enabling the onboarding workflow.", 503);
+  const organization = await prisma.organization.findUnique({ where: { id: actor.organizationId } });
+  const currentBranding = await prisma.workspaceBranding.findUnique({ where: { organizationId: actor.organizationId } });
+  const brandingData = normalizeWorkspaceBranding(request.body?.branding || {}, currentBranding || {}, organization || {});
+  const result = await prisma.$transaction(async (tx) => {
+    const branding = await tx.workspaceBranding.upsert({
+      where: { organizationId: actor.organizationId },
+      create: { ...brandingData, organizationId: actor.organizationId },
+      update: brandingData,
+    });
+    const workflow = current
+      ? await tx.leadAutomation.update({ where: { id: current.id }, data: { ...workflowData, updatedById: actor.id } })
+      : await tx.leadAutomation.create({ data: { ...workflowData, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: current ? "Onboarding workflow updated" : "Onboarding workflow created",
+      subjectType: "LeadAutomation",
+      subjectId: workflow.id,
+      details: `${workflow.name} saved in ${workflow.active ? "active" : "draft"} mode for ${branding.businessName}.`,
+      beforeValues: current || {},
+      afterValues: workflow,
+    });
+    return { workflow, branding };
+  });
+  response.json(result);
+}));
+
+app.post("/api/leads/onboarding/run", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const result = await processPendingOnboardingRuns({ organizationId: actor.organizationId, limit: 50 });
+  response.json({ result });
+}));
+
+app.post("/api/leads/invoices/:id/approve", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const invoice = await prisma.clientInvoice.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId }, include: { items: true, automationRun: { include: { lead: true } } } });
+  if (!invoice) throw apiError("Invoice not found.", 404);
+  if (!canAccessBranch(actor, invoice.branch)) throw apiError("You do not have access to this invoice branch.", 403);
+  if (invoice.status !== "Awaiting Approval") throw apiError("Only an awaiting-approval invoice can be approved and sent.", 409);
+  const claimed = await prisma.clientInvoice.updateMany({
+    where: { id: invoice.id, organizationId: actor.organizationId, status: "Awaiting Approval" },
+    data: { status: "Sending", approvedById: actor.id, approvedAt: new Date() },
+  });
+  if (claimed.count !== 1) throw apiError("This invoice is already being processed.", 409);
+  const branding = await workspaceBrandingForOrganization(prisma, actor.organizationId);
+  let delivery;
+  try {
+    delivery = await sendClientInvoice(invoice, branding);
+  } catch (error) {
+    await prisma.clientInvoice.updateMany({
+      where: { id: invoice.id, organizationId: actor.organizationId, status: "Sending" },
+      data: { status: "Awaiting Approval", approvedById: "", approvedAt: null },
+    });
+    throw error;
+  }
+  const saved = await prisma.$transaction(async (tx) => {
+    const updated = await tx.clientInvoice.update({
+      where: { id: invoice.id },
+      data: { status: "Sent", approvedById: actor.id, approvedAt: new Date(), sentAt: delivery.sentAt },
+      include: { items: true },
+    });
+    if (invoice.automationRunId) {
+      const steps = runSteps(invoice.automationRun || {});
+      const next = upsertRunStep(steps, "invoice_email", "Completed", "Clinic-branded invoice approved and sent.");
+      await tx.leadAutomationRun.update({ where: { id: invoice.automationRunId }, data: { status: "Completed", reason: "", sentAt: new Date(), providerReference: delivery.providerReference, steps: jsonText(next, []) } });
+    }
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Client invoice approved and sent",
+      subjectType: "ClientInvoice",
+      subjectId: invoice.id,
+      details: `${invoice.invoiceNumber} approved and sent to ${invoice.recipientName}.`,
+      afterValues: updated,
+    });
+    if (invoice.leadId) {
+      await createLeadActivity(tx, request, invoice.leadId, {
+        type: "Invoice",
+        title: "Clinic-branded invoice sent",
+        note: `${invoice.invoiceNumber} was approved and sent.`,
+        channel: "Email",
+        actor: actor.name,
+        actorRole: actor.role,
+        metadata: { invoiceId: invoice.id },
+      });
+    }
+    return updated;
+  });
+  response.json({ invoice: saved });
 }));
 
 app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
@@ -8116,6 +8506,17 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
   });
 }));
 
+app.get("/api/public/invoices/:token", asyncRoute(async (request, response) => {
+  const token = clean(request.params.token);
+  if (!/^[a-f0-9]{48}$/i.test(token)) throw apiError("Invoice not found.", 404);
+  const invoice = await prisma.clientInvoice.findUnique({ where: { publicToken: token }, include: { items: true } });
+  if (!invoice || !["Sent", "Viewed", "Partially Paid", "Paid", "Overdue"].includes(invoice.status)) throw apiError("Invoice not found.", 404);
+  const viewed = invoice.viewedAt
+    ? invoice
+    : await prisma.clientInvoice.update({ where: { id: invoice.id }, data: { viewedAt: new Date(), ...(invoice.status === "Sent" ? { status: "Viewed" } : {}) }, include: { items: true } });
+  response.json({ invoice: publicInvoice(viewed) });
+}));
+
 app.post("/api/public-leads", asyncRoute(async (request, response) => {
   const values = request.body ?? {};
   if (clean(values.clinicWebsite)) {
@@ -8372,6 +8773,7 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       recordId: appointment.id,
       title: "New online booking",
     });
+    await enqueueOnboardingRuns(tx, { lead: linkedLead, organizationId: branch.organizationId });
 
     return { lead: linkedLead, appointment, auditLog, replayed: false };
   });
@@ -8387,6 +8789,11 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       status: result.appointment.status,
     },
   });
+  if (!result.replayed) {
+    await processPendingOnboardingRuns({ leadId: result.lead.id, limit: 10 }).catch((error) => {
+      console.error(JSON.stringify({ event: "onboarding_workflow_dispatch_failed", leadId: result.lead.id, error: clean(error.message) }));
+    });
+  }
 }));
 
 app.post("/api/inventory/import", asyncRoute(async (request, response) => {
@@ -9922,7 +10329,7 @@ async function processDueLeadAutomations() {
   if (leadAutomationSchedulerRunning) return;
   leadAutomationSchedulerRunning = true;
   try {
-    const automations = await prisma.leadAutomation.findMany({ where: { active: true }, orderBy: [{ updatedAt: "asc" }], take: 100 });
+    const automations = await prisma.leadAutomation.findMany({ where: { active: true, kind: "follow_up" }, orderBy: [{ updatedAt: "asc" }], take: 100 });
     for (const automation of automations) {
       try {
         await processLeadAutomation(automation);
@@ -9930,6 +10337,7 @@ async function processDueLeadAutomations() {
         console.error(JSON.stringify({ event: "lead_automation_scheduler_failed", automationId: automation.id, error: clean(error.message) }));
       }
     }
+    await processPendingOnboardingRuns();
   } finally {
     leadAutomationSchedulerRunning = false;
   }
