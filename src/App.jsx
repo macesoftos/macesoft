@@ -822,6 +822,11 @@ function publicFlipbookTokenFromPath(pathname) {
   }
 }
 
+function publicInvoiceTokenFromPath(pathname) {
+  const match = normalizedPathname(pathname).match(/^\/invoice\/([a-f0-9]{48})$/i);
+  return match?.[1] || "";
+}
+
 function downloadCsv(filename, rows, columns) {
   const header = columns.map((column) => column.label).join(",");
   const body = rows
