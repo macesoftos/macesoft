@@ -37,8 +37,8 @@ const monthlyPlan = ({ code, name, monthlyPrice, maxUsers, maxBranches, included
 });
 
 export const subscriptionPlans = Object.freeze([
-  monthlyPlan({ code: "starter", name: "Starter", monthlyPrice: 2900, maxUsers: 10, maxBranches: 1, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.starter, displayOrder: 1 }),
-  monthlyPlan({ code: "growth", name: "Growth", monthlyPrice: 4900, maxUsers: 15, maxBranches: 3, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.growth, recommended: true, displayOrder: 2 }),
+  monthlyPlan({ code: "starter", name: "Starter", monthlyPrice: 2900, maxUsers: 10, maxBranches: 2, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.starter, displayOrder: 1 }),
+  monthlyPlan({ code: "growth", name: "Growth", monthlyPrice: 4900, maxUsers: 15, maxBranches: 4, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.growth, recommended: true, displayOrder: 2 }),
   monthlyPlan({ code: "unlimited", name: "Unlimited", monthlyPrice: 6900, maxUsers: null, maxBranches: null, includedWebsitePages: PLAN_WEBSITE_PAGE_ALLOWANCES.unlimited, displayOrder: 3 }),
   Object.freeze({
     code: "lifetime",

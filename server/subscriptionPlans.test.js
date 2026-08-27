@@ -40,8 +40,8 @@ test("canonical plans and the dedicated pricing catalog expose the approved pric
   assert.equal(plans.starter.maxUsers, 10);
   assert.equal(plans.growth.maxUsers, 15);
   assert.equal(plans.unlimited.maxUsers, null);
-  assert.equal(plans.starter.maxBranches, 1);
-  assert.equal(plans.growth.maxBranches, 3);
+  assert.equal(plans.starter.maxBranches, 2);
+  assert.equal(plans.growth.maxBranches, 4);
   assert.equal(plans.unlimited.maxBranches, null);
   assert.equal(plans.starter.includedWebsitePages, 8);
   assert.equal(plans.growth.includedWebsitePages, 15);
@@ -100,11 +100,12 @@ test("user and branch limits differ without limiting modules or operational data
   const starter = getSubscriptionPlan("starter");
   const growth = getSubscriptionPlan("growth");
   const unlimited = getSubscriptionPlan("unlimited");
-  assert.equal(assertUsageWithinPlan(starter, { users: 10, branches: 1 }).allowed, true);
-  assert.equal(assertUsageWithinPlan(starter, { users: 11, branches: 1 }).resource, "users");
-  assert.equal(assertUsageWithinPlan(growth, { users: 15, branches: 3 }).allowed, true);
-  assert.equal(assertUsageWithinPlan(growth, { users: 16, branches: 3 }).resource, "users");
-  assert.equal(assertUsageWithinPlan(growth, { users: 15, branches: 4 }).resource, "branches");
+  assert.equal(assertUsageWithinPlan(starter, { users: 10, branches: 2 }).allowed, true);
+  assert.equal(assertUsageWithinPlan(starter, { users: 11, branches: 2 }).resource, "users");
+  assert.equal(assertUsageWithinPlan(starter, { users: 10, branches: 3 }).resource, "branches");
+  assert.equal(assertUsageWithinPlan(growth, { users: 15, branches: 4 }).allowed, true);
+  assert.equal(assertUsageWithinPlan(growth, { users: 16, branches: 4 }).resource, "users");
+  assert.equal(assertUsageWithinPlan(growth, { users: 15, branches: 5 }).resource, "branches");
   assert.equal(assertUsageWithinPlan(unlimited, { users: 10000, branches: 1000 }).allowed, true);
   assert.deepEqual(starter.moduleEntitlements, growth.moduleEntitlements);
   assert.deepEqual(growth.moduleEntitlements, unlimited.moduleEntitlements);

@@ -9,7 +9,7 @@ import {
 const requestDetails = {
   account: { name: "Jamie Owner", email: "owner@example.com", organizationId: "org-123" },
   organization: { id: "org-123", name: "Glow & Go <Clinic>" },
-  plan: { name: "Growth", currency: "PHP", maxUsers: 15, maxBranches: 3, includedWebsitePages: 15 },
+  plan: { name: "Growth", currency: "PHP", maxUsers: 15, maxBranches: 4, includedWebsitePages: 15 },
   billing: { amount: 4900, discountPercent: 0 },
   billingCycle: "monthly",
   usage: { users: 2, branches: 1 },
