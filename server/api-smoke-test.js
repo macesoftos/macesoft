@@ -618,6 +618,9 @@ try {
     body: JSON.stringify({
       name: "Registered Owner",
       businessName: `Registration Smoke ${suffix}`,
+      phone: "+63 917 555 0101",
+      address: "123 Release Test Avenue, Davao City",
+      referralSource: "Email",
       email: registeredOwnerEmail,
       password: "RegistrationSmoke2026!",
       termsAccepted: true,
