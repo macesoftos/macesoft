@@ -12,30 +12,23 @@ test("notification branches are normalized and default to all branches", () => {
   assert.deepEqual(normalizeNotificationBranches([]), ["All branches"]);
 });
 
-test("notification queries are scoped by modules and branch", () => {
+test("notification queries require an authenticated tenant account", () => {
   assert.deepEqual(notificationWhereForActor(
-    { role: "Receptionist", branch: "Mace Davao" },
+    { id: "reception-davao", organizationId: "org-davao", role: "Receptionist", branch: "Mace Davao" },
     ["leads", "services"],
   ), {
+    organizationId: "org-davao",
     module: { in: ["leads", "services"] },
-    OR: [
-      {
-        recipientAccountIds: { isEmpty: true },
-        OR: [
-          { branches: { has: "All branches" } },
-          { branches: { has: "Mace Davao" } },
-        ],
-      },
-    ],
+    recipientAccountIds: { has: "reception-davao" },
   });
   assert.deepEqual(notificationWhereForActor(
-    { role: "Super Admin", branch: "All branches" },
+    { id: "owner", organizationId: "org-main", role: "Super Admin", branch: "All branches" },
     ["leads"],
-  ), { module: { in: ["leads"] }, OR: [{ recipientAccountIds: { isEmpty: true } }] });
+  ), { organizationId: "org-main", module: { in: ["leads"] }, recipientAccountIds: { has: "owner" } });
   assert.deepEqual(notificationWhereForActor(
     { role: "Receptionist", branch: "All branches" },
     ["leads"],
-  ), { module: { in: ["leads"] }, OR: [{ id: { in: [] } }] });
+  ), { id: { in: [] } });
 });
 
 test("unread state is based on each account's read timestamp", () => {
@@ -47,9 +40,12 @@ test("unread state is based on each account's read timestamp", () => {
 
 test("targeted notifications are visible only to named accounts", () => {
   const where = notificationWhereForActor(
-    { id: "manager-davao", role: "Branch Manager", branch: "Mace Davao" },
+    { id: "manager-davao", organizationId: "org-davao", role: "Branch Manager", branch: "Mace Davao" },
     ["staff"],
   );
-  assert.deepEqual(where.OR[0], { recipientAccountIds: { has: "manager-davao" } });
-  assert.deepEqual(where.OR[1].recipientAccountIds, { isEmpty: true });
+  assert.deepEqual(where, {
+    organizationId: "org-davao",
+    module: { in: ["staff"] },
+    recipientAccountIds: { has: "manager-davao" },
+  });
 });

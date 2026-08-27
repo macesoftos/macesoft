@@ -10,7 +10,7 @@ test("the public contact portal exposes separate inquiry and appointment actions
   assert.match(appSource, /<MessageSquareText size=\{16\} \/> Inquire/);
   assert.match(appSource, /<CalendarDays size=\{16\} \/> Book an appointment/);
   assert.match(appSource, /submitPublicLead\(/);
-  assert.match(appSource, /submitPublicBooking\(form\)/);
+  assert.match(appSource, /submitPublicBooking\(\{[\s\S]*?workspaceSlug,[\s\S]*?branchId:/);
 });
 
 test("the public booking client posts to the anonymous booking endpoint", () => {
@@ -26,5 +26,7 @@ test("a public booking creates an appointment linked to a lead and notifies Appo
   assert.match(serverSource, /status: "Pending Confirmation"/);
   assert.match(serverSource, /clientId: null/);
   assert.match(serverSource, /publicBookingKey/);
+  assert.match(serverSource, /publicWorkspaceForm\(request\.body\?\.workspaceSlug, "booking"\)/);
+  assert.match(serverSource, /workspaceFormId: form\.id/);
   assert.doesNotMatch(serverSource.match(/app\.post\("\/api\/public-bookings"[\s\S]*?response\.status\(result\.replayed \? 200 : 201\)/)?.[0] ?? "", /tx\.client\.(?:findFirst|create)/);
 });

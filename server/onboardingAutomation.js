@@ -21,12 +21,18 @@ export function defaultWorkspaceBranding(organization = {}) {
     businessName: clean(organization.name) || "Your clinic",
     logoUrl: "",
     primaryColor: "#9f5964",
+    secondaryColor: "#efe4e5",
     address: clean(organization.address),
     phone: clean(organization.phone),
     email: "",
     website: "",
     invoicePrefix: "INV",
     invoiceFooter: "Thank you for choosing our clinic.",
+    paymentInstructions: "",
+    taxRegistration: "",
+    timezone: "Asia/Manila",
+    sendingDomain: "",
+    emailSenderStatus: "Platform fallback",
     currency: "PHP",
     poweredBy: false,
   };
@@ -35,18 +41,25 @@ export function defaultWorkspaceBranding(organization = {}) {
 export function normalizeWorkspaceBranding(payload = {}, current = {}, organization = {}) {
   const defaults = { ...defaultWorkspaceBranding(organization), ...current };
   const color = clean(payload.primaryColor ?? defaults.primaryColor);
+  const secondaryColor = clean(payload.secondaryColor ?? defaults.secondaryColor);
   const invoicePrefix = clean(payload.invoicePrefix ?? defaults.invoicePrefix).toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 16);
   const currency = clean(payload.currency ?? defaults.currency).toUpperCase();
   return {
     businessName: (clean(payload.businessName ?? defaults.businessName) || defaults.businessName).slice(0, 140),
     logoUrl: safeHttpsUrl(payload.logoUrl ?? defaults.logoUrl),
     primaryColor: /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : "#9f5964",
+    secondaryColor: /^#[0-9a-f]{6}$/i.test(secondaryColor) ? secondaryColor.toLowerCase() : "#efe4e5",
     address: clean(payload.address ?? defaults.address).slice(0, 500),
     phone: clean(payload.phone ?? defaults.phone).slice(0, 40),
     email: clean(payload.email ?? defaults.email).toLowerCase().slice(0, 160),
     website: safeHttpsUrl(payload.website ?? defaults.website),
     invoicePrefix: invoicePrefix || "INV",
     invoiceFooter: clean(payload.invoiceFooter ?? defaults.invoiceFooter).slice(0, 1000),
+    paymentInstructions: clean(payload.paymentInstructions ?? defaults.paymentInstructions).slice(0, 1200),
+    taxRegistration: clean(payload.taxRegistration ?? defaults.taxRegistration).slice(0, 120),
+    timezone: clean(payload.timezone ?? defaults.timezone).slice(0, 80) || "Asia/Manila",
+    sendingDomain: clean(payload.sendingDomain ?? defaults.sendingDomain).toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").slice(0, 253),
+    emailSenderStatus: ["Platform fallback", "SMTP connected", "Domain verified"].includes(clean(defaults.emailSenderStatus)) ? clean(defaults.emailSenderStatus) : "Platform fallback",
     currency: /^[A-Z]{3}$/.test(currency) ? currency : "PHP",
     poweredBy: payload.poweredBy === undefined ? Boolean(defaults.poweredBy) : payload.poweredBy === true,
   };
@@ -121,11 +134,14 @@ export function invoiceBrandingSnapshot(branding) {
     businessName: branding.businessName,
     logoUrl: branding.logoUrl,
     primaryColor: branding.primaryColor,
+    secondaryColor: branding.secondaryColor,
     address: branding.address,
     phone: branding.phone,
     email: branding.email,
     website: branding.website,
     invoiceFooter: branding.invoiceFooter,
+    paymentInstructions: branding.paymentInstructions,
+    taxRegistration: branding.taxRegistration,
     poweredBy: branding.poweredBy,
   });
 }
