@@ -677,6 +677,26 @@ export function runLeadAutomation(id) {
   return requestJson(`/api/leads/automations/${encodeURIComponent(id)}/run`, { method: "POST" });
 }
 
+export function loadOnboardingAutomation() {
+  return requestJson("/api/leads/onboarding");
+}
+
+export function saveOnboardingAutomation(payload) {
+  return requestJson("/api/leads/onboarding", { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export function runOnboardingAutomation() {
+  return requestJson("/api/leads/onboarding/run", { method: "POST" });
+}
+
+export function approveClientInvoice(id) {
+  return requestJson(`/api/leads/invoices/${encodeURIComponent(id)}/approve`, { method: "POST" });
+}
+
+export function loadPublicInvoice(token) {
+  return requestJson(`/api/public/invoices/${encodeURIComponent(token)}`);
+}
+
 export function updateLeadStage(id, payload) {
   return requestJson(`/api/leads/${encodeURIComponent(id)}/stage`, {
     method: "POST",

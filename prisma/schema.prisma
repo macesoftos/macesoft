@@ -18,6 +18,9 @@ model Organization {
   commissionRules    CommissionRule[]
   leadAutomations    LeadAutomation[]
   leadAutomationRuns LeadAutomationRun[]
+  workspaceBranding  WorkspaceBranding?
+  clientInvoices     ClientInvoice[]
+  appNotifications   AppNotification[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 }
@@ -68,6 +71,7 @@ model Client {
   treatments         Treatment[]
   packages           ClinicPackage[]
   sales              Sale[]
+  clientInvoices     ClientInvoice[]
   consentSubmissions ClientConsentSubmission[]
 
   @@index([fullName])
@@ -1112,6 +1116,7 @@ model Lead {
   conversions         LeadConversion[]
   webhookEvents       WebhookEvent[]
   automationRuns      LeadAutomationRun[]
+  clientInvoices      ClientInvoice[]
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
@@ -1140,6 +1145,13 @@ model LeadAutomation {
   prompt          String              @default("Write a warm, concise follow-up that invites the lead to book an appointment.")
   messageTemplate String              @default("Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}")
   bookingUrl      String              @default("")
+  kind            String              @default("follow_up")
+  notifyStaff     Boolean             @default(true)
+  createInvoice   Boolean             @default(false)
+  requireApproval Boolean             @default(true)
+  invoiceAmount   Float               @default(0)
+  invoiceLabel    String              @default("Consultation deposit")
+  invoiceDueDays  Int                 @default(3)
   createdById     String              @default("")
   updatedById     String              @default("")
   runs            LeadAutomationRun[]
@@ -1165,16 +1177,93 @@ model LeadAutomationRun {
   status            String         @default("Processing")
   reason            String         @default("")
   providerReference String         @default("")
+  steps             String         @default("[]")
+  attemptCount      Int            @default(0)
   scheduledAt       DateTime
   attemptedAt       DateTime?
   sentAt            DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
+  invoice           ClientInvoice?
 
   @@unique([automationId, leadId])
   @@index([organizationId, createdAt])
   @@index([status, scheduledAt])
   @@index([leadId, createdAt])
+}
+
+model WorkspaceBranding {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessName   String
+  logoUrl        String       @default("")
+  primaryColor   String       @default("#9f5964")
+  address        String       @default("")
+  phone          String       @default("")
+  email          String       @default("")
+  website        String       @default("")
+  invoicePrefix  String       @default("INV")
+  invoiceFooter  String       @default("")
+  currency       String       @default("PHP")
+  poweredBy      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model ClientInvoice {
+  id               String              @id @default(cuid())
+  organizationId   String
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch           String
+  leadId           String?
+  lead             Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  clientId         String?
+  client           Client?             @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  automationRunId  String?             @unique
+  automationRun    LeadAutomationRun?  @relation(fields: [automationRunId], references: [id], onDelete: SetNull)
+  publicToken      String              @unique
+  invoiceNumber    String
+  recipientName    String
+  recipientEmail   String              @default("")
+  currency         String              @default("PHP")
+  subtotal         Float               @default(0)
+  tax              Float               @default(0)
+  discount         Float               @default(0)
+  total            Float               @default(0)
+  amountPaid       Float               @default(0)
+  status           String              @default("Awaiting Approval")
+  issueDate        String
+  dueDate          String
+  notes            String              @default("")
+  brandingSnapshot String              @default("{}")
+  approvedById     String              @default("")
+  approvedAt       DateTime?
+  sentAt           DateTime?
+  viewedAt         DateTime?
+  paymentProvider  String              @default("")
+  paymentReference String              @default("")
+  items            ClientInvoiceItem[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status, createdAt])
+  @@index([branch, createdAt])
+  @@index([leadId])
+}
+
+model ClientInvoiceItem {
+  id          String        @id @default(cuid())
+  invoiceId   String
+  invoice     ClientInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Float         @default(1)
+  unitPrice   Float         @default(0)
+  total       Float         @default(0)
+  createdAt   DateTime      @default(now())
+
+  @@index([invoiceId])
 }
 
 model LeadActivity {
@@ -1487,7 +1576,9 @@ model AuditLog {
 }
 
 model AppNotification {
-  id                  String   @id @default(cuid())
+  id                  String        @id @default(cuid())
+  organizationId      String?
+  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   module              String
   title               String
   message             String
@@ -1498,6 +1589,7 @@ model AppNotification {
   createdAt           DateTime @default(now())
 
   @@index([createdAt])
+  @@index([organizationId, createdAt])
   @@index([module, createdAt])
 }
 
