@@ -2227,9 +2227,13 @@ async function listResource(resource, actor = null) {
   let where = {};
   if (actor) {
     if (config.directTenant) {
-      where = config.directTenantOrganizationWide || actor.access?.scope === "all"
-        ? { organizationId: actor.organizationId }
-        : { organizationId: actor.organizationId, branchId: actor.access?.activeBranchId || "__none__" };
+      if (config.directTenantOrganizationWide && !hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
+        where = { id: "__none__" };
+      } else {
+        where = config.directTenantOrganizationWide || actor.access?.scope === "all"
+          ? { organizationId: actor.organizationId }
+          : { organizationId: actor.organizationId, branchId: actor.access?.activeBranchId || "__none__" };
+      }
     } else if (config.unifiedClientAccess) {
       if (!hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
         where = { id: "__none__" };
