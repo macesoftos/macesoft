@@ -144,6 +144,14 @@ import {
   createLeadAutomation,
   updateLeadAutomation,
   runLeadAutomation,
+  loadOnboardingAutomation,
+  saveOnboardingAutomation,
+  uploadOnboardingLogo,
+  runOnboardingAutomation,
+  testOnboardingAutomation,
+  approveClientInvoice,
+  recordClientInvoicePayment,
+  loadPublicInvoice,
   saveResourceRecord,
   savePayrollDayOffSwap,
   savePayrollSchedule,
@@ -270,6 +278,38 @@ const emptyLeadAutomationDraft = {
   prompt: "Write a warm, concise follow-up that invites the lead to book an appointment.",
   messageTemplate: "Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}",
   bookingUrl: "",
+};
+const emptyOnboardingWorkflow = {
+  id: "",
+  name: "New client onboarding",
+  active: false,
+  branch: "All branches",
+  subject: "Thank you for contacting {businessName}",
+  messageTemplate: "Hi {firstName}, thank you for contacting {businessName} about {interest}. Our team at {branchName} will review your inquiry and contact you with the next steps.",
+  bookingUrl: "",
+  notifyStaff: true,
+  createInvoice: false,
+  requireApproval: true,
+  invoiceAmount: 0,
+  invoiceLabel: "Consultation deposit",
+  invoiceDueDays: 3,
+};
+const emptyWorkspaceBranding = {
+  businessName: "Your clinic",
+  logoUrl: "",
+  primaryColor: "#9f5964",
+  secondaryColor: "#efe4e5",
+  address: "",
+  phone: "",
+  email: "",
+  website: "",
+  invoicePrefix: "INV",
+  invoiceFooter: "Thank you for choosing our clinic.",
+  paymentInstructions: "",
+  taxRegistration: "",
+  timezone: "Asia/Manila",
+  currency: "PHP",
+  poweredBy: false,
 };
 const legacyLeadStatusMap = {
   New: "New Inquiry",
@@ -782,6 +822,11 @@ function publicFlipbookTokenFromPath(pathname) {
   }
 }
 
+function publicInvoiceTokenFromPath(pathname) {
+  const match = normalizedPathname(pathname).match(/^\/invoice\/([a-f0-9]{48})$/i);
+  return match?.[1] || "";
+}
+
 function downloadCsv(filename, rows, columns) {
   const header = columns.map((column) => column.label).join(",");
   const body = rows
@@ -866,6 +911,9 @@ function App() {
   const [inviteCreateRequest, setInviteCreateRequest] = useState(0);
   const [confirm, setConfirm] = useState(null);
   const [toast, setToast] = useState(null);
+  const notify = useCallback((message, tone = "success") => {
+    setToast({ id: createId("toast"), message, tone });
+  }, []);
   const [receiptToPrint, setReceiptToPrint] = useState(null);
   const [printReceiptNonce, setPrintReceiptNonce] = useState(0);
   const inventoryImportInputRef = useRef(null);
@@ -911,14 +959,24 @@ function App() {
   const isFlipbooksView = activeModule === "flipbooks";
   const isFaceTrackKioskView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/attendance/kiosk";
   const publicFlipbookToken = typeof window === "undefined" ? "" : publicFlipbookTokenFromPath(window.location.pathname);
+  const publicInvoiceToken = typeof window === "undefined" ? "" : publicInvoiceTokenFromPath(window.location.pathname);
+  const currentPublicPath = typeof window === "undefined" ? "/" : normalizedPathname(window.location.pathname);
+  const workspaceFormRoute = typeof window === "undefined" ? null : workspacePublicFormRoute(currentPublicPath);
   const publicFormMode = typeof window !== "undefined" && (
-    normalizedPathname(window.location.pathname) === "/book"
+    currentPublicPath === "/book"
+    || workspaceFormRoute?.type === "booking"
     || window.location.hash.toLowerCase() === "#/book"
     || new URLSearchParams(window.location.search).get("form") === "appointment"
   ) ? "appointment" : "inquiry";
-  const isClientRegistrationView = typeof window !== "undefined" && normalizedPathname(window.location.pathname) === "/register";
+  const isClientRegistrationView = typeof window !== "undefined" && (
+    workspaceFormRoute?.type === "registration"
+    || currentPublicPath === "/client-register"
+    || currentPublicPath === "/register"
+  );
   const isPublicFormView = typeof window !== "undefined" && (
-    ["/inquire", "/book", "/register"].includes(normalizedPathname(window.location.pathname))
+    Boolean(workspaceFormRoute)
+    || ["/inquire", "/book", "/client-register", "/register"].includes(currentPublicPath)
+    || isClientRegistrationView
     || ["#/inquire", "#/book"].includes(window.location.hash.toLowerCase())
   );
   const posTouchStartRef = useRef(null);
@@ -1087,7 +1145,7 @@ function App() {
     } finally {
       setBranchSwitching(false);
     }
-  }, [clearWorkspaceData, session]);
+  }, [clearWorkspaceData, notify, session]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1276,14 +1334,14 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isPublicFormView) return;
-    if (publicFlipbookToken) return;
+    if (publicFlipbookToken || publicInvoiceToken) return;
     const publicQuery = new URLSearchParams(window.location.search);
     if (normalizedPathname(window.location.pathname) === "/accept-invitation" || publicQuery.has("invitation") || publicQuery.has("token")) return;
     if (moduleFromPath(window.location.pathname)) return;
     if (!moduleFromHash(window.location.hash)) {
       setActiveModule(activeModule, { replace: true, keepDrawerOpen: true });
     }
-  }, [activeModule, isPublicFormView, publicFlipbookToken, setActiveModule]);
+  }, [activeModule, isPublicFormView, publicFlipbookToken, publicInvoiceToken, setActiveModule]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsBooting(false), 350);
@@ -1499,10 +1557,10 @@ function App() {
             : "";
 
   useEffect(() => {
-    if (typeof document === "undefined" || isPublicFormView || publicFlipbookToken || isFaceTrackKioskView) return;
+    if (typeof document === "undefined" || isPublicFormView || publicFlipbookToken || publicInvoiceToken || isFaceTrackKioskView) return;
     const pageLabel = activeRecordTitle || navItems.find((item) => item.id === activeModule)?.label || "Dashboard";
     document.title = `${pageLabel} — MACE ClinicOS`;
-  }, [activeModule, activeRecordTitle, isFaceTrackKioskView, isPublicFormView, publicFlipbookToken]);
+  }, [activeModule, activeRecordTitle, isFaceTrackKioskView, isPublicFormView, publicFlipbookToken, publicInvoiceToken]);
 
   const scopedAppointments = useMemo(
     () => appointments.filter((item) => branchScope === "All branches" || item.branch === branchScope),
@@ -1689,10 +1747,6 @@ function App() {
       returningClients: scopedClients.filter((client) => client.retention === "Returning").length,
     };
   }, [scopedAppointments, scopedClients, scopedExpenses, scopedInventory, scopedLeads, scopedTransactions]);
-
-  function notify(message, tone = "success") {
-    setToast({ id: createId("toast"), message, tone });
-  }
 
   async function markAllNotificationsAsRead() {
     if (!notificationFeed.unreadCount) return;
@@ -2766,8 +2820,14 @@ function App() {
     });
   }
 
+  if (publicInvoiceToken) {
+    return <PublicClientInvoicePage token={publicInvoiceToken} />;
+  }
+
   if (isPublicFormView) {
-    return isClientRegistrationView ? <PublicClientRegistrationPage /> : <PublicLeadCapturePage initialMode={publicFormMode} />;
+    return isClientRegistrationView
+      ? <PublicClientRegistrationPage workspaceSlug={workspaceFormRoute?.slug || ""} />
+      : <PublicLeadCapturePage initialMode={publicFormMode} workspaceSlug={workspaceFormRoute?.slug || ""} />;
   }
 
   if (publicFlipbookToken) {
@@ -4163,20 +4223,83 @@ function publicLeadAttribution() {
   };
 }
 
-function PublicClientRegistrationPage() {
-  const branch = new URLSearchParams(window.location.search).get("branch") || "";
+function PublicClientInvoicePage({ token }) {
+  const [invoice, setInvoice] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    loadPublicInvoice(token)
+      .then((result) => {
+        if (!active) return;
+        setInvoice(result.invoice);
+        document.title = `Invoice ${result.invoice.invoiceNumber} — ${result.invoice.branding?.businessName || "Clinic"}`;
+      })
+      .catch((loadError) => active && setError(loadError.message || "Invoice not found."));
+    return () => { active = false; };
+  }, [token]);
+
+  if (error) return <main className="public-invoice-page"><section className="public-invoice-card public-invoice-state"><AlertCircle size={36} /><h1>Invoice unavailable</h1><p>{error}</p></section></main>;
+  if (!invoice) return <main className="public-invoice-page"><section className="public-invoice-card public-invoice-state"><RefreshCw className="spin" size={30} /><h1>Opening your invoice</h1></section></main>;
+  const branding = invoice.branding || {};
+  const money = new Intl.NumberFormat("en-PH", { style: "currency", currency: invoice.currency || "PHP" });
+  const balance = Math.max(0, Number(invoice.total || 0) - Number(invoice.amountPaid || 0));
+  return (
+    <main className="public-invoice-page" style={{ "--invoice-accent": branding.primaryColor || "#9f5964" }}>
+      <div className="public-invoice-actions"><button className="secondary-button" type="button" onClick={() => window.print()}><Printer size={16} /> Print or save PDF</button></div>
+      <section className="public-invoice-card">
+        <header className="public-invoice-header">
+          <div className="public-invoice-brand">{branding.logoUrl ? <img src={branding.logoUrl} alt={branding.businessName || "Clinic"} /> : <span>{String(branding.businessName || "Clinic").slice(0, 2).toUpperCase()}</span>}<div><h1>{branding.businessName || "Clinic"}</h1><p>{branding.address}</p></div></div>
+          <div className="public-invoice-title"><span>Invoice</span><strong>{invoice.invoiceNumber}</strong><StatusBadge status={invoice.status} /></div>
+        </header>
+        <div className="public-invoice-meta"><div><span>Bill to</span><strong>{invoice.recipientName}</strong></div><div><span>Issued</span><strong>{invoice.issueDate}</strong></div><div><span>Due</span><strong>{invoice.dueDate}</strong></div></div>
+        <div className="public-invoice-table"><div className="public-invoice-row public-invoice-row-heading"><span>Description</span><span>Qty</span><span>Price</span><span>Total</span></div>{invoice.items.map((item, index) => <div className="public-invoice-row" key={`${item.description}-${index}`}><strong>{item.description}</strong><span>{item.quantity}</span><span>{money.format(item.unitPrice)}</span><span>{money.format(item.total)}</span></div>)}</div>
+        <div className="public-invoice-totals"><div><span>Subtotal</span><strong>{money.format(invoice.subtotal)}</strong></div>{invoice.discount > 0 && <div><span>Discount</span><strong>-{money.format(invoice.discount)}</strong></div>}{invoice.tax > 0 && <div><span>Tax</span><strong>{money.format(invoice.tax)}</strong></div>}<div className="public-invoice-total"><span>Amount due</span><strong>{money.format(balance)}</strong></div></div>
+        <div className="public-invoice-payment-note"><ShieldCheck size={20} /><div><strong>Payment arrangements</strong><p>{branding.paymentInstructions || `Please contact ${branding.businessName || "the clinic"} using the details below to complete payment. Online payment options will appear here when the clinic connects a payment provider.`}</p></div></div>
+        <footer className="public-invoice-footer"><div><strong>{branding.businessName}</strong><span>{[branding.phone, branding.email, branding.website].filter(Boolean).join(" · ")}</span></div><p>{branding.invoiceFooter}</p>{branding.poweredBy && <small>Powered by MACE ClinicOS</small>}</footer>
+      </section>
+    </main>
+  );
+}
+
+function workspacePublicFormRoute(pathname) {
+  const match = normalizedPathname(pathname).match(/^\/(f|book|register)\/([a-z0-9][a-z0-9-]{2,119})$/i);
+  if (!match) return null;
+  return {
+    type: match[1].toLowerCase() === "f" ? "inquiry" : match[1].toLowerCase() === "book" ? "booking" : "registration",
+    slug: match[2].toLowerCase(),
+  };
+}
+
+function PublicClientRegistrationPage({ workspaceSlug = "" }) {
+  const branchIdParam = new URLSearchParams(window.location.search).get("branchId") || "";
+  const [config, setConfig] = useState({ company: "Clinic", branding: {}, branches: [], consent: {} });
+  const [branchId, setBranchId] = useState(branchIdParam);
   const [form, setForm] = useState({ firstName: "", middleName: "", lastName: "", birthday: "", gender: "", civilStatus: "", mobile: "", email: "", street: "", barangay: "", city: "", province: "", occupation: "", emergencyName: "", emergencyPhone: "", marketingOptIn: false, privacyConsent: false, clinicWebsite: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const update = (name, value) => setForm((current) => ({ ...current, [name]: value }));
+  const branch = config.branches.find((item) => item.id === branchId) || config.branches[0];
+
+  useEffect(() => {
+    if (!workspaceSlug) {
+      setError("Use the private registration link provided by your clinic.");
+      return;
+    }
+    loadPublicLeadConfig(workspaceSlug)
+      .then((result) => {
+        setConfig(result);
+        setBranchId((current) => result.branches.some((item) => item.id === current) ? current : result.branches[0]?.id || "");
+      })
+      .catch((loadError) => setError(loadError.message || "Registration form unavailable."));
+  }, [workspaceSlug]);
 
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await submitPublicRegistration({ ...form, branch });
+      await submitPublicRegistration({ ...form, workspaceSlug, branchId: branch?.id, branch: branch?.name });
       setSubmitted(true);
     } catch (submitError) {
       setError(submitError.message || "Registration could not be submitted.");
@@ -4188,14 +4311,14 @@ function PublicClientRegistrationPage() {
   return (
     <main className="public-registration-page">
       <section className="public-registration-card">
-        <img src={assets.logo} alt="MACE Medical Aesthetics Clinic & Essentials" />
+        {config.branding?.logoUrl ? <img className="public-registration-wordmark" src={config.branding.logoUrl} alt={config.company} /> : <h2 className="public-registration-wordmark">{config.company}</h2>}
         {submitted ? (
-          <div className="confirmation-panel"><Check size={30} /><h2>Registration received</h2><p>Thank you. The {branch || "MACE"} team can now review your unified client profile.</p></div>
+          <div className="confirmation-panel"><Check size={30} /><h2>Registration received</h2><p>Thank you. The {branch?.name || config.company} team can now review your client profile.</p></div>
         ) : (
           <form onSubmit={submit}>
-            <p className="eyebrow">Secure client registration · {branch || "Select clinic"}</p>
+            <p className="eyebrow">Secure client registration · {branch?.name || "Select clinic"}</p>
             <h1>Tell us about you</h1>
-            <p>Your information creates one MACE profile that can be used across clinic branches.</p>
+            <p>Your information creates a secure profile for {config.company}.</p>
             {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
             <div className="form-grid">
               <label><span>First name *</span><input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
@@ -4213,11 +4336,11 @@ function PublicClientRegistrationPage() {
               <label><span>Occupation</span><input value={form.occupation} onChange={(event) => update("occupation", event.target.value)} /></label>
               <label><span>Emergency contact name</span><input value={form.emergencyName} onChange={(event) => update("emergencyName", event.target.value)} /></label>
               <label><span>Emergency contact number</span><input value={form.emergencyPhone} onChange={(event) => update("emergencyPhone", event.target.value)} /></label>
-              <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => update("marketingOptIn", event.target.checked)} /><span>I would like to receive MACE care reminders and offers.</span></label>
-              <label className="checkbox-field span-2"><input required type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} /><span>I consent to MACE securely collecting this information for my clinic profile. *</span></label>
+              <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => update("marketingOptIn", event.target.checked)} /><span>I would like to receive clinic care reminders and offers.</span></label>
+              <label className="checkbox-field span-2"><input required type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} /><span>{config.consent?.text || "I consent to the clinic securely collecting this information for my client profile."} *</span></label>
               <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} value={form.clinicWebsite} onChange={(event) => update("clinicWebsite", event.target.value)} /></label>
             </div>
-            <button className="primary-button full" disabled={saving || !branch || !form.firstName || !form.lastName || (!form.mobile && !form.email) || !form.privacyConsent} type="submit"><Check size={17} /> {saving ? "Submitting..." : "Submit registration"}</button>
+            <button className="primary-button full" disabled={saving || !workspaceSlug || !branch?.id || !form.firstName || !form.lastName || (!form.mobile && !form.email) || !form.privacyConsent} type="submit"><Check size={17} /> {saving ? "Submitting..." : "Submit registration"}</button>
           </form>
         )}
       </section>
@@ -4225,10 +4348,11 @@ function PublicClientRegistrationPage() {
   );
 }
 
-function PublicLeadCapturePage({ initialMode = "inquiry" }) {
-  const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
+function PublicLeadCapturePage({ initialMode = "inquiry", workspaceSlug = "" }) {
+  const inquiryParams = new URLSearchParams(window.location.search);
+  const isContactEmbed = inquiryParams.get("embed") === "contact";
   const [formMode, setFormMode] = useState(initialMode);
-  const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
+  const [config, setConfig] = useState({ company: "Clinic", tagline: "Personal care, thoughtfully delivered.", branding: {}, consent: {}, formSlugs: {}, branches: [], services: [] });
   const [form, setForm] = useState({
     fullName: "",
     mobile: "",
@@ -4272,14 +4396,22 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
 
   useEffect(() => {
     let cancelled = false;
-    loadPublicLeadConfig()
+    if (!workspaceSlug) {
+      setError("Use the private inquiry or booking link provided by your clinic.");
+      setLoadingConfig(false);
+      return undefined;
+    }
+    loadPublicLeadConfig(workspaceSlug)
       .then((result) => {
         if (cancelled) return;
         const branches = Array.isArray(result.branches) ? result.branches : [];
         const services = Array.isArray(result.services) ? result.services : [];
         setConfig({
-          company: result.company || "MACE by Dr. Mace",
+          company: result.company || "Clinic",
           tagline: result.tagline || "The brand behind beautiful faces.",
+          branding: result.branding || {},
+          consent: result.consent || {},
+          formSlugs: result.formSlugs || {},
           branches,
           services,
         });
@@ -4303,7 +4435,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceSlug]);
 
   const availableServices = useMemo(() => config.services.filter((service) => {
     const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
@@ -4335,6 +4467,8 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
       const submissionId = globalThis.crypto?.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const result = await submitPublicLead({
         ...form,
+        workspaceSlug: config.formSlugs?.inquiry || workspaceSlug,
+        branchId: config.branches.find((branch) => branch.name === form.branch)?.id || "",
         ...publicLeadAttribution(),
         submissionId,
       });
@@ -4367,7 +4501,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
       <section className="public-lead-shell">
         {!isContactEmbed && (
           <div className="public-lead-brand">
-            <img className="public-lead-logo" src={assets.logo} alt={config.company} />
+            {config.branding?.logoUrl ? <img className="public-lead-logo" src={config.branding.logoUrl} alt={config.company} /> : <strong className="public-lead-logo">{config.company}</strong>}
             <div>
               <p className="eyebrow">{formMode === "appointment" ? "Online appointment request" : "Private consultation request"}</p>
               <h1>{formMode === "appointment" ? "Choose a visit time that works for you." : "Let’s talk about the care that feels right for you."}</h1>
@@ -4392,12 +4526,12 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
           </div>
 
           {formMode === "appointment" ? (
-            <PublicAppointmentBookingForm config={config} loadingConfig={loadingConfig} />
+            <PublicAppointmentBookingForm config={config} loadingConfig={loadingConfig} workspaceSlug={config.formSlugs?.booking || workspaceSlug} />
           ) : submitted ? (
             <div className="public-lead-success" role="status">
               <span className="public-lead-success-icon"><Check size={28} /></span>
               <p className="eyebrow">Inquiry received</p>
-              <h2>Thank you — the MACE team will be in touch.</h2>
+              <h2>{`Thank you — the ${config.company} team will be in touch.`}</h2>
               <p>Your request is now in the clinic&apos;s Leads inbox for a personal follow-up.</p>
               <button className="secondary-button" type="button" onClick={sendAnother}>Send another inquiry</button>
             </div>
@@ -4423,7 +4557,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
                 <label><span>Preferred contact</span><select value={form.preferredChannel} onChange={(event) => updateField("preferredChannel", event.target.value)}><option>Phone</option><option>SMS</option><option>Messenger</option><option>WhatsApp</option><option>Email</option></select></label>
 
                 <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
-                <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>I consent to the collection and use of my information so MACE can respond to this inquiry. *</span></label>
+                <label className="checkbox-field span-2"><input type="checkbox" required checked={form.privacyConsent} onChange={(event) => updateField("privacyConsent", event.target.checked)} /><span>{config.consent?.text || "I consent to the collection and use of my information so the clinic can respond to this inquiry."} *</span></label>
                 <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} autoComplete="off" value={form.clinicWebsite} onChange={(event) => updateField("clinicWebsite", event.target.value)} /></label>
               </div>
 
@@ -4440,7 +4574,7 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
   );
 }
 
-function PublicAppointmentBookingForm({ config, loadingConfig }) {
+function PublicAppointmentBookingForm({ config, loadingConfig, workspaceSlug = "" }) {
   const [form, setForm] = useState({
     fullName: "",
     mobile: "",
@@ -4517,7 +4651,12 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
     setSaving(true);
     setError("");
     try {
-      const result = await submitPublicBooking(form);
+      const result = await submitPublicBooking({
+        ...form,
+        workspaceSlug,
+        branchId: config.branches.find((branch) => branch.name === form.branch)?.id || "",
+        submissionId: globalThis.crypto?.randomUUID?.() || `booking-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      });
       setSubmitted(result);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (submitError) {
@@ -4548,7 +4687,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
         <span className="public-lead-success-icon"><Check size={28} /></span>
         <p className="eyebrow">Appointment requested</p>
         <h2>Thank you — your request is in the clinic schedule.</h2>
-        <p>The appointment is listed as Pending Confirmation. The MACE team will contact you to confirm the final schedule.</p>
+        <p>The appointment is listed as Pending Confirmation. The {config.company} team will contact you to confirm the final schedule.</p>
         <div className="public-booking-summary">
           <span><CalendarDays size={16} /><strong>{submitted.appointment?.date}</strong></span>
           <span><Clock size={16} /><strong>{formatScheduleTime(parseTimeToMinutes(submitted.appointment?.time))}</strong></span>
@@ -10112,6 +10251,18 @@ function ClientProfileDialog({
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${client.fullName} details`}>{profileContent}</div>;
 }
 
+function prepareBrandLogoDataUrl(file) {
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+  if (!allowedTypes.includes(file?.type)) return Promise.reject(new Error("Choose a JPEG, PNG, or WebP logo."));
+  if (file.size > 3 * 1024 * 1024) return Promise.reject(new Error("Choose a logo smaller than 3 MB."));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The selected logo could not be read."));
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsDataURL(file);
+  });
+}
+
 function prepareTreatmentPhotoDataUrl(file) {
   const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
   if (!allowedTypes.includes(file?.type)) {
@@ -10811,6 +10962,14 @@ function LeadsModule({
   const [automationProviders, setAutomationProviders] = useState({ email: false, sms: false, dryRun: false });
   const [canManageAutomations, setCanManageAutomations] = useState(false);
   const [automationBusy, setAutomationBusy] = useState("");
+  const [automationView, setAutomationView] = useState("onboarding");
+  const [onboardingWorkflow, setOnboardingWorkflow] = useState(emptyOnboardingWorkflow);
+  const [onboardingBranding, setOnboardingBranding] = useState(emptyWorkspaceBranding);
+  const [onboardingRuns, setOnboardingRuns] = useState([]);
+  const [onboardingInvoices, setOnboardingInvoices] = useState([]);
+  const [workspaceForms, setWorkspaceForms] = useState([]);
+  const [onboardingTestResult, setOnboardingTestResult] = useState(null);
+  const [onboardingBusy, setOnboardingBusy] = useState("");
   const [sort, setSort] = useState({ key: "created", direction: "desc" });
   const [page, setPage] = useState(1);
   const [selectedLeadId, setSelectedLeadId] = useStoredState("selected-lead", leads[0]?.id ?? "");
@@ -11105,7 +11264,11 @@ function LeadsModule({
   }
 
   async function copyCaptureLink() {
-    const captureUrl = `${window.location.origin}/inquire`;
+    const captureUrl = workspaceForms.find((form) => form.type === "inquiry")?.publicUrl;
+    if (!captureUrl) {
+      notify("Open Automations once to prepare your workspace form link.", "warning");
+      return;
+    }
     try {
       await navigator.clipboard.writeText(captureUrl);
       notify("Public inquiry link copied.");
@@ -11130,9 +11293,30 @@ function LeadsModule({
     }
   }, [notify]);
 
+  const refreshOnboardingAutomation = useCallback(async () => {
+    setOnboardingBusy((current) => current || "load");
+    try {
+      const result = await loadOnboardingAutomation();
+      setOnboardingWorkflow({ ...emptyOnboardingWorkflow, ...(result.workflow || {}) });
+      setOnboardingBranding({ ...emptyWorkspaceBranding, ...(result.branding || {}) });
+      setOnboardingRuns(result.runs || []);
+      setOnboardingInvoices(result.invoices || []);
+      setWorkspaceForms(result.forms || []);
+      setCanManageAutomations(Boolean(result.canManage));
+      setAutomationProviders((current) => ({ ...current, email: Boolean(result.providers?.email) }));
+    } catch (error) {
+      notify(error.message || "Unable to load client onboarding.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }, [notify]);
+
   useEffect(() => {
-    if (showAutomations) void refreshLeadAutomations();
-  }, [refreshLeadAutomations, showAutomations]);
+    if (showAutomations) {
+      void refreshLeadAutomations();
+      void refreshOnboardingAutomation();
+    }
+  }, [refreshLeadAutomations, refreshOnboardingAutomation, showAutomations]);
 
   async function saveLeadAutomationDraft(event) {
     event.preventDefault();
@@ -11163,6 +11347,97 @@ function LeadsModule({
       notify(error.message || "Unable to run the lead automation.", "error");
     } finally {
       setAutomationBusy("");
+    }
+  }
+
+  async function saveOnboardingDraft(event) {
+    event.preventDefault();
+    setOnboardingBusy("save");
+    try {
+      const result = await saveOnboardingAutomation({
+        workflow: { ...onboardingWorkflow, invoiceAmount: Number(onboardingWorkflow.invoiceAmount), invoiceDueDays: Number(onboardingWorkflow.invoiceDueDays) },
+        branding: onboardingBranding,
+      });
+      setOnboardingWorkflow({ ...emptyOnboardingWorkflow, ...result.workflow });
+      setOnboardingBranding({ ...emptyWorkspaceBranding, ...result.branding });
+      notify(result.workflow.active ? "Clinic-branded onboarding is enabled." : "Onboarding workflow saved as a draft.");
+      await refreshOnboardingAutomation();
+    } catch (error) {
+      notify(error.message || "Unable to save client onboarding.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }
+
+  async function uploadBrandingLogo(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setOnboardingBusy("logo");
+    try {
+      const dataUrl = await prepareBrandLogoDataUrl(file);
+      const result = await uploadOnboardingLogo(dataUrl, file.name);
+      setOnboardingBranding((current) => ({ ...current, logoUrl: result.asset.url }));
+      notify("Clinic logo uploaded. Save the onboarding workflow to apply it.");
+    } catch (error) {
+      notify(error.message || "Unable to upload the clinic logo.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }
+
+  async function runPendingOnboarding() {
+    setOnboardingBusy("run");
+    try {
+      const { result } = await runOnboardingAutomation();
+      notify(`Onboarding checked ${result.evaluated} pending run${result.evaluated === 1 ? "" : "s"}; ${result.completed} completed, ${result.waitingApproval} awaiting approval, ${result.failed} failed.`);
+      await refreshOnboardingAutomation();
+    } catch (error) {
+      notify(error.message || "Unable to run pending onboarding.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }
+
+  async function testOnboarding() {
+    setOnboardingBusy("test");
+    try {
+      const result = await testOnboardingAutomation();
+      setOnboardingTestResult(result);
+      notify("Test completed safely. No client was contacted and no payable invoice was created.");
+    } catch (error) {
+      notify(error.message || "Unable to test client onboarding.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }
+
+  async function approveOnboardingInvoice(invoice) {
+    setOnboardingBusy(`invoice-${invoice.id}`);
+    try {
+      await approveClientInvoice(invoice.id);
+      notify(`${invoice.invoiceNumber} approved and sent with clinic branding.`);
+      await refreshOnboardingAutomation();
+    } catch (error) {
+      notify(error.message || "Unable to approve and send the invoice.", "error");
+    } finally {
+      setOnboardingBusy("");
+    }
+  }
+
+  async function recordOnboardingInvoicePayment(invoice) {
+    const reference = window.prompt(`Enter the clinic payment reference for ${invoice.invoiceNumber}:`);
+    if (!reference?.trim()) return;
+    setOnboardingBusy(`payment-${invoice.id}`);
+    try {
+      const amount = Math.max(0, Number(invoice.total || 0) - Number(invoice.amountPaid || 0));
+      await recordClientInvoicePayment(invoice.id, { provider: "Manual", providerReference: reference.trim(), amount });
+      notify(`${invoice.invoiceNumber} marked paid and posted to POS.`);
+      await refreshOnboardingAutomation();
+    } catch (error) {
+      notify(error.message || "Unable to record the invoice payment.", "error");
+    } finally {
+      setOnboardingBusy("");
     }
   }
 
@@ -11220,7 +11495,7 @@ function LeadsModule({
           ))}
         </div>
         <div className="leads-header-actions">
-          <a className="secondary-button" href="/inquire" target="_blank" rel="noreferrer">
+          <a className="secondary-button" href={workspaceForms.find((form) => form.type === "inquiry")?.publicUrl || "/inquire"} target="_blank" rel="noreferrer">
             <Globe2 size={16} aria-hidden="true" /> Preview form
           </a>
           <button className="secondary-button" type="button" onClick={copyCaptureLink}>
@@ -11256,18 +11531,48 @@ function LeadsModule({
       )}
 
       {showAutomations && (
-        <LeadAutomationPanel
-          draft={automationDraft}
-          setDraft={setAutomationDraft}
-          runs={automationRuns}
-          providers={automationProviders}
-          branches={branches}
-          canManage={canManageAutomations}
-          busy={automationBusy}
-          onSave={saveLeadAutomationDraft}
-          onRun={runDueLeadAutomation}
-          onRefresh={refreshLeadAutomations}
-        />
+        <div className="lead-automation-workspace">
+          <div className="lead-automation-workspace-tabs" role="tablist" aria-label="Automation type">
+            <button className={automationView === "onboarding" ? "active" : ""} type="button" role="tab" aria-selected={automationView === "onboarding"} onClick={() => setAutomationView("onboarding")}><Sparkles size={16} /> New client onboarding</button>
+            <button className={automationView === "followup" ? "active" : ""} type="button" role="tab" aria-selected={automationView === "followup"} onClick={() => setAutomationView("followup")}><Clock size={16} /> No-response follow-up</button>
+          </div>
+          {automationView === "onboarding" ? (
+            <ClientOnboardingAutomationPanel
+              workflow={onboardingWorkflow}
+              setWorkflow={setOnboardingWorkflow}
+              branding={onboardingBranding}
+              setBranding={setOnboardingBranding}
+              runs={onboardingRuns}
+              invoices={onboardingInvoices}
+              forms={workspaceForms}
+              testResult={onboardingTestResult}
+              providers={automationProviders}
+              branches={branches}
+              canManage={canManageAutomations}
+              busy={onboardingBusy}
+              onSave={saveOnboardingDraft}
+              onUploadLogo={uploadBrandingLogo}
+              onRun={runPendingOnboarding}
+              onTest={testOnboarding}
+              onRefresh={refreshOnboardingAutomation}
+              onApproveInvoice={approveOnboardingInvoice}
+              onRecordPayment={recordOnboardingInvoicePayment}
+            />
+          ) : (
+            <LeadAutomationPanel
+              draft={automationDraft}
+              setDraft={setAutomationDraft}
+              runs={automationRuns}
+              providers={automationProviders}
+              branches={branches}
+              canManage={canManageAutomations}
+              busy={automationBusy}
+              onSave={saveLeadAutomationDraft}
+              onRun={runDueLeadAutomation}
+              onRefresh={refreshLeadAutomations}
+            />
+          )}
+        </div>
       )}
 
       <div className="surface-panel leads-directory-panel">
@@ -11756,6 +12061,69 @@ function LeadDetailPanel({
         </div>
       </details>
     </aside>
+  );
+}
+
+function ClientOnboardingAutomationPanel({ workflow, setWorkflow, branding, setBranding, runs, invoices, forms = [], testResult, providers, branches, canManage, busy, onSave, onUploadLogo, onRun, onTest, onRefresh, onApproveInvoice, onRecordPayment }) {
+  const updateWorkflow = (key, value) => setWorkflow((current) => ({ ...current, [key]: value }));
+  const updateBranding = (key, value) => setBranding((current) => ({ ...current, [key]: value }));
+  const preview = workflow.messageTemplate
+    .replaceAll("{firstName}", "Jamie")
+    .replaceAll("{name}", "Jamie Santos")
+    .replaceAll("{interest}", "your selected treatment")
+    .replaceAll("{businessName}", branding.businessName || "Your clinic")
+    .replaceAll("{branchName}", workflow.branch === "All branches" ? "your preferred branch" : workflow.branch);
+  const currency = new Intl.NumberFormat("en-PH", { style: "currency", currency: branding.currency || "PHP" });
+  const workflowSteps = [
+    { key: "trigger", icon: Globe2, title: "Inquiry or booking submitted", detail: "Enroll one new lead once, scoped to this workspace and branch.", enabled: true },
+    { key: "welcome", icon: Mail, title: "Send clinic-branded welcome email", detail: providers.email ? "Connected to the clinic email delivery service." : "Connect email before activating.", enabled: true },
+    { key: "notify", icon: Bell, title: "Notify authorized clinic staff", detail: "Recipients are limited to this organization and branch.", enabled: workflow.notifyStaff },
+    { key: "invoice", icon: ReceiptText, title: "Create invoice draft", detail: workflow.createInvoice ? `${currency.format(Number(workflow.invoiceAmount || 0))} · ${workflow.invoiceLabel}` : "Optional — enable when the clinic collects a consultation fee or deposit.", enabled: workflow.createInvoice },
+    { key: "approval", icon: ShieldCheck, title: "Staff approval before sending", detail: workflow.requireApproval ? "An Owner or Super Admin reviews every invoice." : "Invoices send automatically after creation.", enabled: workflow.createInvoice && workflow.requireApproval },
+  ];
+
+  return (
+    <section className="surface-panel onboarding-automation-panel" aria-label="New client onboarding automation">
+      <div className="lead-automation-heading">
+        <div><span className="eyebrow">Aesthetic clinic onboarding</span><h3>Welcome, notify, and prepare the client invoice</h3><p>Every external message and invoice uses the clinic&apos;s branding. MACE ClinicOS remains the platform, not the customer-facing sender.</p></div>
+        <div className="lead-automation-heading-actions"><span className={`lead-provider-state ${providers.email ? "ready" : "blocked"}`}>{providers.email ? "Email ready" : "Email not connected"}</span><button className="secondary-button small" type="button" disabled={Boolean(busy)} onClick={onRefresh}><RefreshCw size={15} /> Refresh</button></div>
+      </div>
+
+      <form className="onboarding-automation-form" onSubmit={onSave}>
+        <div className="onboarding-public-form-links">
+          <div><span className="eyebrow">Workspace-specific forms</span><h4>Share only these clinic links</h4><p>Each link is locked to this workspace and its allowed branches.</p></div>
+          <div className="onboarding-form-link-list">{forms.map((form) => <article key={form.id}><div><strong>{form.name}</strong><small>{form.branches.map((branch) => branch.name).join(", ")}</small></div><a className="secondary-button small" href={form.publicUrl} target="_blank" rel="noreferrer"><Globe2 size={14} /> Open</a><button className="secondary-button small" type="button" onClick={() => navigator.clipboard.writeText(form.publicUrl)}><Link size={14} /> Copy</button></article>)}</div>
+        </div>
+        <div className="lead-automation-toggle-row"><div><strong>Workflow status</strong><small>{workflow.active ? "New inquiry and booking submissions are enrolled automatically." : "Draft mode — no clients will be contacted."}</small></div><label className="lead-automation-switch"><input type="checkbox" checked={Boolean(workflow.active)} disabled={!canManage} onChange={(event) => updateWorkflow("active", event.target.checked)} /><span>{workflow.active ? "Enabled" : "Disabled"}</span></label></div>
+
+        <div className="onboarding-builder-layout">
+          <div className="onboarding-step-list">
+            <div className="lead-automation-fields two-column"><label>Workflow name<input value={workflow.name} disabled={!canManage} onChange={(event) => updateWorkflow("name", event.target.value)} /></label><label>Clinic branch<select value={workflow.branch} disabled={!canManage} onChange={(event) => updateWorkflow("branch", event.target.value)}><option>All branches</option>{branches.map((branch) => <option key={branch.id || branch.name}>{branch.name}</option>)}</select></label></div>
+            {workflowSteps.map((step, index) => { const StepIcon = step.icon; return <div className={`onboarding-step-card ${step.enabled ? "enabled" : "optional"}`} key={step.key}><span className="onboarding-step-number">{index + 1}</span><span className="onboarding-step-icon"><StepIcon size={19} /></span><div><strong>{step.title}</strong><small>{step.detail}</small></div><span className="onboarding-step-state">{step.enabled ? "On" : "Off"}</span></div>; })}
+            <div className="onboarding-action-options"><label className="checkbox-field"><input type="checkbox" checked={Boolean(workflow.notifyStaff)} disabled={!canManage} onChange={(event) => updateWorkflow("notifyStaff", event.target.checked)} /> Notify staff</label><label className="checkbox-field"><input type="checkbox" checked={Boolean(workflow.createInvoice)} disabled={!canManage} onChange={(event) => updateWorkflow("createInvoice", event.target.checked)} /> Create invoice draft</label><label className="checkbox-field"><input type="checkbox" checked={Boolean(workflow.requireApproval)} disabled={!canManage || !workflow.createInvoice} onChange={(event) => updateWorkflow("requireApproval", event.target.checked)} /> Require approval</label></div>
+          </div>
+
+          <aside className="onboarding-branding-card" style={{ "--clinic-brand": branding.primaryColor }}>
+            <span className="eyebrow">Client-facing clinic brand</span>
+            <div className="onboarding-brand-preview">{branding.logoUrl ? <img src={branding.logoUrl} alt="" /> : <span>{String(branding.businessName || "Clinic").slice(0, 2).toUpperCase()}</span>}<div><strong>{branding.businessName || "Your clinic"}</strong><small>{branding.email || "Clinic contact email"}</small></div></div>
+            <div className="onboarding-brand-fields"><label>Business name<input value={branding.businessName} disabled={!canManage} onChange={(event) => updateBranding("businessName", event.target.value)} /></label><div className="onboarding-brand-field"><span>Clinic logo</span><div className="onboarding-logo-controls"><input aria-label="Logo URL" type="url" placeholder="https://..." value={branding.logoUrl} disabled={!canManage} onChange={(event) => updateBranding("logoUrl", event.target.value)} /><label className="secondary-button small onboarding-logo-upload"><Upload size={15} /> {busy === "logo" ? "Uploading..." : "Upload"}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={!canManage || Boolean(busy)} onChange={onUploadLogo} /></label></div><small>JPEG, PNG, or WebP · maximum 3 MB</small>{branding.logoUrl && <button className="text-button onboarding-logo-remove" type="button" disabled={!canManage || Boolean(busy)} onClick={() => updateBranding("logoUrl", "")}>Remove logo</button>}</div><label>Primary color<input type="color" value={branding.primaryColor} disabled={!canManage} onChange={(event) => updateBranding("primaryColor", event.target.value)} /></label><label>Secondary color<input type="color" value={branding.secondaryColor || "#efe4e5"} disabled={!canManage} onChange={(event) => updateBranding("secondaryColor", event.target.value)} /></label><label>Reply-to email<input type="email" value={branding.email} disabled={!canManage} onChange={(event) => updateBranding("email", event.target.value)} /></label><label>Phone<input value={branding.phone} disabled={!canManage} onChange={(event) => updateBranding("phone", event.target.value)} /></label><label>Website<input type="url" placeholder="https://..." value={branding.website} disabled={!canManage} onChange={(event) => updateBranding("website", event.target.value)} /></label><label>Tax / registration no.<input value={branding.taxRegistration || ""} disabled={!canManage} onChange={(event) => updateBranding("taxRegistration", event.target.value)} /></label><label>Time zone<input value={branding.timezone || "Asia/Manila"} disabled={!canManage} onChange={(event) => updateBranding("timezone", event.target.value)} /></label><label className="span-2">Business address<textarea rows="2" value={branding.address} disabled={!canManage} onChange={(event) => updateBranding("address", event.target.value)} /></label></div>
+          </aside>
+        </div>
+
+        <div className="onboarding-message-settings"><div><label>Welcome email subject<input value={workflow.subject} disabled={!canManage} onChange={(event) => updateWorkflow("subject", event.target.value)} /></label><label>Welcome message<textarea rows="4" value={workflow.messageTemplate} disabled={!canManage} onChange={(event) => updateWorkflow("messageTemplate", event.target.value)} /><small>Fields: {"{firstName}"}, {"{name}"}, {"{interest}"}, {"{businessName}"}, {"{branchName}"}.</small></label><label>Booking or next-steps link<input type="url" placeholder="https://..." value={workflow.bookingUrl} disabled={!canManage} onChange={(event) => updateWorkflow("bookingUrl", event.target.value)} /></label></div><aside className="lead-automation-preview"><span className="eyebrow">Clinic email preview</span><div className="lead-message-preview-icon"><Mail size={20} /></div><strong>{workflow.subject.replaceAll("{businessName}", branding.businessName || "Your clinic")}</strong><p>{preview}</p><small>Sent using {branding.businessName || "the clinic"} as the visible brand and reply-to identity.</small></aside></div>
+
+        {workflow.createInvoice && <div className="onboarding-invoice-settings"><div className="lead-automation-fields two-column"><label>Invoice description<input value={workflow.invoiceLabel} disabled={!canManage} onChange={(event) => updateWorkflow("invoiceLabel", event.target.value)} /></label><label>Deposit or invoice amount<input type="number" min="0.01" step="0.01" value={workflow.invoiceAmount} disabled={!canManage} onChange={(event) => updateWorkflow("invoiceAmount", event.target.value)} /></label><label>Due after<div className="lead-input-with-suffix"><input type="number" min="1" max="90" value={workflow.invoiceDueDays} disabled={!canManage} onChange={(event) => updateWorkflow("invoiceDueDays", event.target.value)} /><span>days</span></div></label><label>Invoice prefix<input value={branding.invoicePrefix} disabled={!canManage} onChange={(event) => updateBranding("invoicePrefix", event.target.value)} /></label></div><label>Payment instructions<textarea rows="2" value={branding.paymentInstructions || ""} disabled={!canManage} onChange={(event) => updateBranding("paymentInstructions", event.target.value)} /></label><label>Invoice footer<textarea rows="2" value={branding.invoiceFooter} disabled={!canManage} onChange={(event) => updateBranding("invoiceFooter", event.target.value)} /></label><label className="checkbox-field"><input type="checkbox" checked={Boolean(branding.poweredBy)} disabled={!canManage} onChange={(event) => updateBranding("poweredBy", event.target.checked)} /> Show a small “Powered by MACE ClinicOS” footer</label></div>}
+
+        <div className="lead-automation-safety-note"><ShieldCheck size={18} /><span>Medical suitability, consent approval, treatment selection, and final clinical pricing remain staff-controlled. Unapproved invoice drafts never post revenue, stock, or commission entries.</span></div>
+        {testResult && <div className="lead-automation-safety-note"><Check size={18} /><span>Safe test passed: {testResult.steps?.filter((step) => step.status !== "Skipped").length || 0} steps previewed, {testResult.recipients || 0} authorized notification recipients found, and no live actions performed.</span></div>}
+        <div className="lead-automation-form-actions"><button className="primary-button" type="submit" disabled={!canManage || Boolean(busy)}>{busy === "save" ? "Saving..." : workflow.id ? "Save onboarding workflow" : "Create onboarding workflow"}</button><button className="secondary-button" type="button" disabled={!canManage || !workflow.id || Boolean(busy)} onClick={onTest}>{busy === "test" ? "Testing safely..." : "Test workflow"}</button><button className="secondary-button" type="button" disabled={!canManage || !workflow.id || !workflow.active || Boolean(busy)} onClick={onRun}>{busy === "run" ? "Checking..." : "Run pending enrollments"}</button></div>
+      </form>
+
+      <div className="onboarding-operations-grid">
+        <section className="lead-automation-runs"><div className="lead-automation-runs-heading"><div><span className="eyebrow">Approval queue</span><h4>Clinic invoices</h4></div><span>{invoices.length} logged</span></div><div className="onboarding-invoice-list">{invoices.slice(0, 12).map((invoice) => <article key={invoice.id}><div><strong>{invoice.invoiceNumber}</strong><small>{invoice.recipientName} · {invoice.branch}</small></div><span>{currency.format(Number(invoice.total || 0))}</span><StatusBadge status={invoice.status} />{invoice.status === "Awaiting Approval" && <button className="primary-button small" type="button" disabled={!canManage || Boolean(busy)} onClick={() => onApproveInvoice(invoice)}>{busy === `invoice-${invoice.id}` ? "Sending..." : "Approve & send"}</button>}{["Sent", "Viewed", "Partially Paid", "Overdue"].includes(invoice.status) && <button className="secondary-button small" type="button" disabled={!canManage || Boolean(busy)} onClick={() => onRecordPayment(invoice)}>{busy === `payment-${invoice.id}` ? "Posting..." : "Record payment"}</button>}</article>)}{!invoices.length && <EmptyState title="No onboarding invoices yet" copy="Invoice drafts will appear here after eligible clients submit an inquiry or booking." />}</div></section>
+        <section className="lead-automation-runs"><div className="lead-automation-runs-heading"><div><span className="eyebrow">Execution history</span><h4>Onboarding runs</h4></div><span>{runs.length} logged</span></div><div className="lead-automation-run-list">{runs.slice(0, 12).map((run) => <div className="lead-automation-run onboarding-run" key={run.id}><div><strong>{run.lead?.name || "Lead"}</strong><small>{run.lead?.branch || "Branch"} · {run.steps?.length || 0} steps recorded</small></div><StatusBadge status={run.status} /><time>{compactDate(run.sentAt || run.attemptedAt || run.createdAt)}</time>{run.reason && <small className="lead-automation-run-error">{run.reason}</small>}</div>)}{!runs.length && <EmptyState title="No onboarding runs yet" copy="New public inquiries and bookings will appear here after the workflow is enabled." />}</div></section>
+      </div>
+    </section>
   );
 }
 

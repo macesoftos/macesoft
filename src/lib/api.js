@@ -606,8 +606,9 @@ export function submitPublicBooking(payload) {
   });
 }
 
-export function loadPublicLeadConfig() {
-  return requestJson("/api/public-leads/config");
+export function loadPublicLeadConfig(workspaceSlug) {
+  const query = new URLSearchParams({ workspace: String(workspaceSlug || "") });
+  return requestJson(`/api/public-leads/config?${query}`);
 }
 
 export function submitPublicLead(payload) {
@@ -675,6 +676,41 @@ export function updateLeadAutomation(id, payload) {
 
 export function runLeadAutomation(id) {
   return requestJson(`/api/leads/automations/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+
+export function loadOnboardingAutomation() {
+  return requestJson("/api/leads/onboarding");
+}
+
+export function saveOnboardingAutomation(payload) {
+  return requestJson("/api/leads/onboarding", { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export function uploadOnboardingLogo(dataUrl, originalName = "") {
+  return requestJson("/api/leads/onboarding/logo", {
+    method: "POST",
+    body: JSON.stringify({ dataUrl, originalName }),
+  });
+}
+
+export function runOnboardingAutomation() {
+  return requestJson("/api/leads/onboarding/run", { method: "POST" });
+}
+
+export function testOnboardingAutomation(payload = {}) {
+  return requestJson("/api/leads/onboarding/test", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function approveClientInvoice(id) {
+  return requestJson(`/api/leads/invoices/${encodeURIComponent(id)}/approve`, { method: "POST" });
+}
+
+export function recordClientInvoicePayment(id, payload) {
+  return requestJson(`/api/leads/invoices/${encodeURIComponent(id)}/payments`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function loadPublicInvoice(token) {
+  return requestJson(`/api/public/invoices/${encodeURIComponent(token)}`);
 }
 
 export function updateLeadStage(id, payload) {

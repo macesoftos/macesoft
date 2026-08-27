@@ -11,6 +11,15 @@ import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import { prisma } from "./prisma.js";
 import { mvpModules, sidebarModules } from "./moduleRegistry.js";
+import {
+  brandedEmailHtml,
+  defaultWorkspaceBranding,
+  invoiceBrandingSnapshot,
+  normalizeOnboardingWorkflowPayload,
+  normalizeWorkspaceBranding,
+  publicInvoice,
+  renderOnboardingContent,
+} from "./onboardingAutomation.js";
 import { initialSettings, roleAccess } from "../src/data.js";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "../src/organizationRoles.js";
 import { nextRoomNames, renameBranchReferences } from "./organizationBranches.js";
@@ -364,6 +373,7 @@ const uploadCategories = {
   "expense-receipt": { readModule: "expenses", writeModule: "expenses" },
   "treatment-photo": { readModule: "treatments", writeModule: "treatments" },
   "marketing-image": { readModule: null, writeModule: "sms", public: true },
+  "branding-logo": { readModule: null, writeModule: "settings" },
   "flipbook-logo": { readModule: null, writeModule: "flipbooks" },
   "flipbook-pdf": { readModule: "flipbooks", writeModule: "flipbooks" },
 };
@@ -876,6 +886,7 @@ const notificationTitles = {
 async function createAppNotification(tx, {
   actor = "System",
   branches = ["All branches"],
+  organizationId,
   recipientAccountIds = [],
   message,
   module,
@@ -886,6 +897,7 @@ async function createAppNotification(tx, {
     data: {
       actor: clean(actor) || "System",
       branches: normalizeNotificationBranches(branches),
+      organizationId: requireText(organizationId, "Notification organization"),
       recipientAccountIds: uniqueStrings(recipientAccountIds),
       message: requireText(message, "Notification message"),
       module: requireText(module, "Notification module"),
@@ -893,6 +905,31 @@ async function createAppNotification(tx, {
       title: requireText(title, "Notification title"),
     },
   });
+}
+
+async function notificationRecipientsForOrganization(tx, {
+  branches = ["All branches"],
+  module,
+  organizationId,
+}) {
+  const normalizedBranches = normalizeNotificationBranches(branches);
+  const allBranches = normalizedBranches.includes("All branches");
+  const branchNames = new Set(normalizedBranches);
+  const accounts = await tx.account.findMany({
+    where: { organizationId, status: "Active" },
+    include: accountAccessInclude,
+  });
+  return accounts.filter((account) => {
+    if (hasOrganizationWideAccess(account)) {
+      return moduleAllowed(publicAccount(account, ALL_BRANCHES_ID), module, roleAccess);
+    }
+    return account.branchMemberships.some((membership) => (
+      membership.status === "Active"
+      && membership.branch?.status === "Active"
+      && (allBranches || branchNames.has(membership.branch.name))
+      && moduleAllowed(publicAccount(account, membership.branchId), module, roleAccess)
+    ));
+  }).map((account) => account.id);
 }
 
 async function notificationBranchesForResource(tx, config, record) {
@@ -910,6 +947,8 @@ async function writeResourceNotification(tx, request, config, record) {
   return createAppNotification(tx, {
     actor: actor.name,
     branches: await notificationBranchesForResource(tx, config, record),
+    organizationId: actor.organizationId,
+    recipientAccountIds: actor.id ? [actor.id] : [],
     message: `${config.label(record)} was created by ${actor.name || "System"}.`,
     module: config.module,
     recordId: record.id,
@@ -1848,6 +1887,8 @@ const resourceConfigs = {
     serialize: serializeClient,
     branchField: "branch",
     unifiedClientAccess: true,
+    directTenant: true,
+    directTenantOrganizationWide: true,
     posSelect: { id: true, fullName: true, mobile: true, branch: true, branchesVisited: true },
   },
   appointments: {
@@ -1861,6 +1902,7 @@ const resourceConfigs = {
     afterWrite: afterAppointmentWrite,
     branchField: "branch",
     relatedClient: true,
+    directTenant: true,
   },
   services: {
     delegate: "service",
@@ -1960,6 +2002,7 @@ const resourceConfigs = {
     afterWrite: writeLeadSideRecords,
     serialize: serializeLead,
     branchField: "branch",
+    directTenant: true,
   },
   staff: {
     delegate: "staffMember",
@@ -2093,7 +2136,15 @@ async function listResource(resource, actor = null) {
   if (!directModuleAllowed && !posSupportAllowed && !clientSupportAllowed) return [];
   let where = {};
   if (actor) {
-    if (config.unifiedClientAccess) {
+    if (config.directTenant) {
+      if (config.directTenantOrganizationWide && !hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
+        where = { id: "__none__" };
+      } else {
+        where = config.directTenantOrganizationWide || actor.access?.scope === "all"
+          ? { organizationId: actor.organizationId }
+          : { organizationId: actor.organizationId, branchId: actor.access?.activeBranchId || "__none__" };
+      }
+    } else if (config.unifiedClientAccess) {
       if (!hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
         where = { id: "__none__" };
       } else {
@@ -2686,8 +2737,12 @@ async function processLeadWebhook(provider, request, options = {}) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const fixedBranch = options.branchId
+        ? await tx.branch.findFirst({ where: { id: options.branchId, organizationId: options.organizationId, status: "Active" }, select: { id: true, name: true, organizationId: true } })
+        : null;
+      if (options.branchId && !fixedBranch) throw apiError("The workspace form branch is unavailable.", 409);
       const routing = await routeIncomingLead(tx, normalized, {
-        defaultBranch: integration.defaultBranch,
+        defaultBranch: fixedBranch?.name || integration.defaultBranch,
         allowPayloadBranch: options.allowPayloadBranch === true,
       });
       const duplicate = await detectLeadDuplicate(tx, normalized, routing.branch);
@@ -2703,6 +2758,11 @@ async function processLeadWebhook(provider, request, options = {}) {
         duplicateConfidence: duplicate.confidence,
         duplicateReasons: duplicate.reasons,
       });
+      if (fixedBranch) {
+        leadData.organizationId = fixedBranch.organizationId;
+        leadData.branchId = fixedBranch.id;
+        leadData.workspaceFormId = clean(options.workspaceFormId) || null;
+      }
 
       if (duplicate.lead) {
         const lead = await tx.lead.update({
@@ -2745,14 +2805,25 @@ async function processLeadWebhook(provider, request, options = {}) {
 
       const lead = await tx.lead.create({ data: stripMeta(leadData) });
       await writeLeadSideRecords(tx, null, lead, leadData, null);
-      await createAppNotification(tx, {
-        actor: "Lead Ingestion",
-        branches: [lead.branch],
-        message: `${lead.name} submitted an inquiry via ${integration.label || provider}.`,
-        module: "leads",
-        recordId: lead.id,
-        title: "New lead",
-      });
+      const notificationBranch = fixedBranch || await tx.branch.findUnique({ where: { name: lead.branch }, select: { id: true, organizationId: true } });
+      if (notificationBranch) {
+        const notificationRecipients = await notificationRecipientsForOrganization(tx, {
+          branches: [lead.branch],
+          module: "leads",
+          organizationId: notificationBranch.organizationId,
+        });
+        await createAppNotification(tx, {
+          actor: "Lead Ingestion",
+          branches: [lead.branch],
+          organizationId: notificationBranch.organizationId,
+          recipientAccountIds: notificationRecipients,
+          message: `${lead.name} submitted an inquiry via ${integration.label || provider}.`,
+          module: "leads",
+          recordId: lead.id,
+          title: "New lead",
+        });
+        await enqueueOnboardingRuns(tx, { lead, organizationId: notificationBranch.organizationId });
+      }
       if (clean(leadData.externalLeadId)) {
         await tx.externalLeadIdentity.create({
           data: {
@@ -2790,6 +2861,11 @@ async function processLeadWebhook(provider, request, options = {}) {
       where: { id: result.lead.id },
       include: resourceConfigs.leads.include,
     });
+    if (result.event.status === "Completed") {
+      await processPendingOnboardingRuns({ leadId: lead.id, limit: 10 }).catch((error) => {
+        console.error(JSON.stringify({ event: "onboarding_workflow_dispatch_failed", leadId: lead.id, error: clean(error.message) }));
+      });
+    }
     return {
       status: result.event.status,
       duplicateEvent: false,
@@ -3277,10 +3353,11 @@ async function createVerifiedEmailTransport() {
   }
 }
 
-async function sendSmtpEmail({ transporter, to, subject, text, html = "" }) {
+async function sendSmtpEmail({ transporter, to, replyTo = "", from = "", subject, text, html = "" }) {
   const result = await transporter.sendMail({
-    from: clean(process.env.SMTP_FROM),
+    from: clean(from) || clean(process.env.SMTP_FROM),
     to,
+    ...(replyTo ? { replyTo } : {}),
     subject,
     text,
     html: html || textToHtml(text),
@@ -3291,6 +3368,17 @@ async function sendSmtpEmail({ transporter, to, subject, text, html = "" }) {
   }
 
   return result.messageId;
+}
+
+async function attachDirectTenantFields(request, config, data) {
+  if (!["client", "lead", "appointment"].includes(config?.delegate)) return data;
+  const actor = actorFromRequest(request);
+  const branchName = clean(data?.branch);
+  const branch = branchName
+    ? await prisma.branch.findFirst({ where: { name: branchName, organizationId: actor.organizationId, status: "Active" }, select: { id: true, organizationId: true } })
+    : null;
+  if (!branch) throw apiError("Choose an active branch in your organization.", 400);
+  return { ...data, organizationId: branch.organizationId, branchId: branch.id };
 }
 
 const leadAutomationClosedStatuses = ["Appointment Booked", "Converted", "Lost", "Unresponsive"];
@@ -3416,6 +3504,7 @@ async function deliverLeadAutomationRun(automation, lead, scheduledAt) {
         await createAppNotification(tx, {
           actor: "MACE Automation",
           branches: [lead.branch],
+          organizationId: automation.organizationId,
           recipientAccountIds: managers.map((account) => account.id),
           module: "leads",
           recordId: lead.id,
@@ -3466,6 +3555,354 @@ async function processLeadAutomation(automation) {
     else result.skipped += 1;
   }
   return result;
+}
+
+function appPublicOrigin() {
+  return clean(process.env.APP_ORIGIN).split(",").map(clean).find((value) => /^https?:\/\//i.test(value)) || `http://127.0.0.1:${port}`;
+}
+
+function brandedSmtpFrom(branding) {
+  const configured = clean(process.env.SMTP_FROM);
+  const address = configured.match(/<([^>]+)>/)?.[1] || configured;
+  const label = (clean(branding.businessName) || "Clinic").replace(/[\r\n"<>]/g, "").slice(0, 120);
+  return address ? `"${label}" <${address}>` : configured;
+}
+
+async function workspaceBrandingForOrganization(database, organizationId) {
+  const [branding, organization] = await Promise.all([
+    database.workspaceBranding.findUnique({ where: { organizationId } }),
+    database.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true, address: true, phone: true } }),
+  ]);
+  return branding || { ...defaultWorkspaceBranding(organization || {}), organizationId };
+}
+
+const workspaceFormDefinitions = Object.freeze({
+  inquiry: { name: "Public inquiry", path: "f", module: "leads" },
+  booking: { name: "Online booking", path: "book", module: "booking" },
+  registration: { name: "Client registration", path: "register", module: "clients" },
+});
+
+function workspaceFormPublicUrl(form) {
+  const definition = workspaceFormDefinitions[form.type] || workspaceFormDefinitions.inquiry;
+  return `${appPublicOrigin().replace(/\/$/, "")}/${definition.path}/${encodeURIComponent(form.slug)}`;
+}
+
+function serializeWorkspaceForm(form) {
+  return {
+    id: form.id,
+    type: form.type,
+    name: form.name,
+    slug: form.slug,
+    status: form.status,
+    source: form.source,
+    consentVersion: form.consentVersion,
+    consentText: form.consentText,
+    defaultBranchId: form.defaultBranchId || "",
+    defaultWorkflowId: form.defaultWorkflowId || "",
+    notificationRecipientIds: parseJsonList(form.notificationRecipientIds),
+    branches: (form.branches || []).map((link) => link.branch).filter(Boolean),
+    publicUrl: workspaceFormPublicUrl(form),
+  };
+}
+
+async function ensureWorkspaceForms(database, organizationId, actorId = "") {
+  const [organization, branches] = await Promise.all([
+    database.organization.findUnique({ where: { id: organizationId }, select: { id: true, slug: true, name: true } }),
+    database.branch.findMany({ where: { organizationId, status: "Active" }, orderBy: [{ createdAt: "asc" }], select: { id: true, name: true } }),
+  ]);
+  if (!organization) throw apiError("Workspace not found.", 404);
+  const defaultBranchId = branches[0]?.id || null;
+  for (const [type, definition] of Object.entries(workspaceFormDefinitions)) {
+    const form = await database.workspaceForm.upsert({
+      where: { organizationId_type: { organizationId, type } },
+      create: {
+        organizationId,
+        type,
+        name: definition.name,
+        slug: `${organization.slug}-${type}`,
+        defaultBranchId,
+        source: type === "booking" ? "Online Booking" : type === "registration" ? "Client Registration" : "Website",
+        createdById: actorId,
+        updatedById: actorId,
+      },
+      update: {},
+    });
+    if (branches.length) {
+      await database.workspaceFormBranch.createMany({
+        data: branches.map((branch) => ({ formId: form.id, branchId: branch.id })),
+        skipDuplicates: true,
+      });
+    }
+  }
+  return database.workspaceForm.findMany({
+    where: { organizationId },
+    include: { branches: { include: { branch: { select: { id: true, name: true, hours: true, operatingHours: true, status: true } } } } },
+    orderBy: [{ type: "asc" }],
+  });
+}
+
+async function publicWorkspaceForm(slug, expectedType = "") {
+  const normalizedSlug = clean(slug).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{2,119}$/.test(normalizedSlug)) throw apiError("This clinic form link is invalid.", 404);
+  const form = await prisma.workspaceForm.findUnique({
+    where: { slug: normalizedSlug },
+    include: {
+      organization: { select: { id: true, name: true, status: true } },
+      branches: { include: { branch: { include: { modules: true } } } },
+    },
+  });
+  if (!form || form.status !== "Active" || form.organization.status !== "Active" || (expectedType && form.type !== expectedType)) {
+    throw apiError("This clinic form is unavailable.", 404);
+  }
+  const allowedBranches = form.branches
+    .map((link) => link.branch)
+    .filter((branch) => branch?.status === "Active");
+  if (!allowedBranches.length) throw apiError("This clinic form has no available branches.", 503);
+  return { ...form, allowedBranches };
+}
+
+function branchFromWorkspaceForm(form, requestedBranchId, requestedBranchName, moduleId) {
+  const id = clean(requestedBranchId);
+  const name = clean(requestedBranchName);
+  const requested = form.allowedBranches.find((item) => (id && item.id === id) || (!id && name && item.name === name));
+  if ((id || name) && !requested) throw apiError("Selected branch is not available for this workspace form.", 409);
+  const branch = requested
+    || form.allowedBranches.find((item) => item.id === form.defaultBranchId)
+    || form.allowedBranches[0];
+  if (!branch || (moduleId && !branch.modules.some((item) => item.moduleId === moduleId && item.enabled))) {
+    throw apiError("Selected branch is unavailable for this form.", 409);
+  }
+  return branch;
+}
+
+function invoiceUrl(invoice) {
+  return `${appPublicOrigin().replace(/\/$/, "")}/invoice/${encodeURIComponent(invoice.publicToken)}`;
+}
+
+function runSteps(run) {
+  return parseJsonList(run.steps).filter((step) => step && typeof step === "object");
+}
+
+function upsertRunStep(steps, key, status, detail = "") {
+  const next = steps.filter((step) => step.key !== key);
+  next.push({ key, status, detail: clean(detail).slice(0, 500), at: new Date().toISOString() });
+  return next;
+}
+
+function runStepCompleted(steps, key) {
+  return steps.some((step) => step.key === key && ["Completed", "Skipped"].includes(step.status));
+}
+
+async function saveOnboardingRunStep(runId, steps, key, status, detail = "", data = {}) {
+  const next = upsertRunStep(steps, key, status, detail);
+  await prisma.leadAutomationRun.update({ where: { id: runId }, data: { ...data, steps: jsonText(next, []) } });
+  steps.splice(0, steps.length, ...next);
+}
+
+async function createOnboardingInvoice(run, branding) {
+  const existing = await prisma.clientInvoice.findUnique({ where: { automationRunId: run.id }, include: { items: true } });
+  if (existing) return existing;
+  const issueDate = posCalendarDate();
+  const due = new Date(`${issueDate}T00:00:00+08:00`);
+  due.setUTCDate(due.getUTCDate() + Number(run.automation.invoiceDueDays || 3));
+  const dueDate = due.toISOString().slice(0, 10);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`client-invoice:${run.organizationId}`}))`;
+    const count = await tx.clientInvoice.count({ where: { organizationId: run.organizationId } });
+    const prefix = clean(branding.invoicePrefix) || "INV";
+    const invoiceNumber = `${prefix}-${issueDate.replace(/-/g, "")}-${String(count + 1).padStart(4, "0")}`;
+    const amount = Math.round(Number(run.automation.invoiceAmount || 0) * 100) / 100;
+    return tx.clientInvoice.create({
+      data: {
+        organizationId: run.organizationId,
+        branch: run.lead.branch,
+        leadId: run.lead.id,
+        automationRunId: run.id,
+        publicToken: randomBytes(24).toString("hex"),
+        invoiceNumber,
+        recipientName: run.lead.name,
+        recipientEmail: normalizeEmail(run.lead.email),
+        currency: branding.currency || "PHP",
+        subtotal: amount,
+        total: amount,
+        status: run.automation.requireApproval ? "Awaiting Approval" : "Approved",
+        issueDate,
+        dueDate,
+        notes: "Created from the clinic's new-client onboarding workflow.",
+        brandingSnapshot: invoiceBrandingSnapshot(branding),
+        items: { create: [{ description: run.automation.invoiceLabel || "Consultation deposit", quantity: 1, unitPrice: amount, total: amount }] },
+      },
+      include: { items: true },
+    });
+  });
+}
+
+async function sendClientInvoice(invoice, branding) {
+  if (!normalizeEmail(invoice.recipientEmail)) throw apiError("This invoice needs a valid client email address before it can be sent.", 409);
+  const transporter = await createVerifiedEmailTransport();
+  const url = invoiceUrl(invoice);
+  const amount = new Intl.NumberFormat("en-PH", { style: "currency", currency: invoice.currency || "PHP" }).format(Number(invoice.total || 0));
+  const text = `Hi ${invoice.recipientName},\n\n${branding.businessName} prepared invoice ${invoice.invoiceNumber} for ${amount}. It is due on ${invoice.dueDate}.\n\nView your invoice: ${url}`;
+  try {
+    const providerReference = await sendSmtpEmail({
+      transporter,
+      to: invoice.recipientEmail,
+      replyTo: normalizeEmail(branding.email),
+      from: brandedSmtpFrom(branding),
+      subject: `Invoice ${invoice.invoiceNumber} from ${branding.businessName}`,
+      text,
+      html: brandedEmailHtml({ branding, heading: `Invoice ${invoice.invoiceNumber}`, body: `${invoice.recipientName}, your invoice for ${amount} is ready and due on ${invoice.dueDate}.`, actionLabel: "View invoice", actionUrl: url }),
+    });
+    return { providerReference, sentAt: new Date() };
+  } finally {
+    transporter.close();
+  }
+}
+
+async function enqueueOnboardingRuns(tx, { lead, organizationId }) {
+  const automations = await tx.leadAutomation.findMany({
+    where: {
+      organizationId,
+      kind: "onboarding",
+      active: true,
+      OR: [{ branch: "All branches" }, { branch: lead.branch }],
+    },
+  });
+  for (const automation of automations) {
+    try {
+      await tx.leadAutomationRun.create({
+        data: {
+          automationId: automation.id,
+          organizationId,
+          leadId: lead.id,
+          channel: "Email",
+          recipient: normalizeEmail(lead.email),
+          subject: automation.subject,
+          status: "Pending",
+          scheduledAt: new Date(),
+          steps: "[]",
+        },
+      });
+    } catch (error) {
+      if (error?.code !== "P2002") throw error;
+    }
+  }
+}
+
+async function processOnboardingRun(run) {
+  if (!run?.automation || run.automation.kind !== "onboarding" || !run.automation.active) return { skipped: true };
+  const steps = runSteps(run);
+  const claimed = await prisma.leadAutomationRun.updateMany({
+    where: { id: run.id, status: { in: ["Pending", "Failed"] }, attemptCount: { lt: 3 } },
+    data: { status: "Processing", reason: "", attemptedAt: new Date(), attemptCount: { increment: 1 } },
+  });
+  if (claimed.count !== 1) return { skipped: true };
+  try {
+    const branding = await workspaceBrandingForOrganization(prisma, run.organizationId);
+    if (!runStepCompleted(steps, "welcome_email")) {
+      const recipient = normalizeEmail(run.lead.email);
+      if (!recipient) {
+        await saveOnboardingRunStep(run.id, steps, "welcome_email", "Skipped", "Lead has no valid email address.");
+      } else if (!emailReady()) {
+        throw apiError("Email delivery is not configured.", 503);
+      } else {
+        const content = renderOnboardingContent(run.automation, branding, run.lead);
+        const transporter = await createVerifiedEmailTransport();
+        try {
+          const providerReference = await sendSmtpEmail({
+            transporter,
+            to: recipient,
+            replyTo: normalizeEmail(branding.email),
+            from: brandedSmtpFrom(branding),
+            subject: content.subject,
+            text: content.text,
+            html: brandedEmailHtml({ branding, heading: content.subject, body: content.text, ...(run.automation.bookingUrl ? { actionLabel: "Book or view next steps", actionUrl: run.automation.bookingUrl } : {}) }),
+          });
+          await saveOnboardingRunStep(run.id, steps, "welcome_email", "Completed", "Clinic-branded welcome email sent.", { providerReference, message: content.text, subject: content.subject });
+        } finally {
+          transporter.close();
+        }
+      }
+    }
+
+    if (run.automation.notifyStaff && !runStepCompleted(steps, "staff_notification")) {
+      const recipientAccountIds = await notificationRecipientsForOrganization(prisma, { branches: [run.lead.branch], module: "leads", organizationId: run.organizationId });
+      if (recipientAccountIds.length) {
+        await createAppNotification(prisma, {
+          actor: branding.businessName,
+          branches: [run.lead.branch],
+          organizationId: run.organizationId,
+          recipientAccountIds,
+          module: "leads",
+          recordId: run.lead.id,
+          title: "New client onboarding started",
+          message: `${run.lead.name} entered the new-client onboarding workflow.`,
+        });
+        await saveOnboardingRunStep(run.id, steps, "staff_notification", "Completed", `${recipientAccountIds.length} authorized user(s) notified.`);
+      } else {
+        await saveOnboardingRunStep(run.id, steps, "staff_notification", "Skipped", "No authorized recipients were available.");
+      }
+    }
+
+    let invoice = run.invoice || null;
+    if (run.automation.createInvoice && !runStepCompleted(steps, "invoice_draft")) {
+      invoice = await createOnboardingInvoice(run, branding);
+      await saveOnboardingRunStep(run.id, steps, "invoice_draft", "Completed", `${invoice.invoiceNumber} created.`, { status: run.automation.requireApproval ? "Waiting Approval" : "Processing" });
+    }
+
+    if (invoice && run.automation.requireApproval) {
+      await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Waiting Approval", reason: "Invoice approval is required before client delivery." } });
+      return { waitingApproval: true, invoiceId: invoice.id };
+    }
+
+    if (invoice && !runStepCompleted(steps, "invoice_email")) {
+      const delivery = await sendClientInvoice(invoice, branding);
+      invoice = await prisma.clientInvoice.update({ where: { id: invoice.id }, data: { status: "Sent", approvedAt: invoice.approvedAt || new Date(), sentAt: delivery.sentAt }, include: { items: true } });
+      await saveOnboardingRunStep(run.id, steps, "invoice_email", "Completed", "Clinic-branded invoice sent.", { providerReference: delivery.providerReference });
+    }
+
+    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Completed", reason: "", sentAt: new Date() } });
+    await createLeadActivity(prisma, null, run.lead.id, {
+      type: "Automated Onboarding",
+      title: "New-client onboarding completed",
+      note: invoice ? `Welcome workflow completed with invoice ${invoice.invoiceNumber}.` : "Welcome workflow completed.",
+      channel: "Email",
+      actor: branding.businessName,
+      actorRole: "System",
+      metadata: { automationId: run.automationId, runId: run.id, invoiceId: invoice?.id || "" },
+    });
+    return { completed: true, invoiceId: invoice?.id || "" };
+  } catch (error) {
+    const reason = (clean(error.message) || "Onboarding workflow failed.").slice(0, 1000);
+    const retryDelayMinutes = Math.min(60, 2 ** Math.max(0, Number(run.attemptCount || 0)));
+    await prisma.leadAutomationRun.update({ where: { id: run.id }, data: { status: "Failed", reason, scheduledAt: new Date(Date.now() + retryDelayMinutes * 60_000) } });
+    console.error(JSON.stringify({ event: "onboarding_workflow_failed", runId: run.id, error: reason }));
+    return { failed: true, reason };
+  }
+}
+
+async function processPendingOnboardingRuns({ leadId = "", organizationId = "", limit = 50 } = {}) {
+  const runs = await prisma.leadAutomationRun.findMany({
+    where: {
+      ...(leadId ? { leadId } : {}),
+      ...(organizationId ? { organizationId } : {}),
+      status: { in: ["Pending", "Failed"] },
+      scheduledAt: { lte: new Date() },
+      attemptCount: { lt: 3 },
+      automation: { is: { kind: "onboarding", active: true } },
+    },
+    include: { automation: true, lead: true, invoice: { include: { items: true } } },
+    orderBy: [{ scheduledAt: "asc" }],
+    take: Math.min(100, Math.max(1, Number(limit) || 50)),
+  });
+  const summary = { evaluated: runs.length, completed: 0, waitingApproval: 0, failed: 0 };
+  for (const run of runs) {
+    const result = await processOnboardingRun(run);
+    if (result.completed) summary.completed += 1;
+    else if (result.waitingApproval) summary.waitingApproval += 1;
+    else if (result.failed) summary.failed += 1;
+  }
+  return summary;
 }
 
 async function listBranchesForBootstrap(actor) {
@@ -4240,6 +4677,7 @@ async function expireInvitations() {
         });
         if (owners.length) {
           await createAppNotification(tx, {
+            organizationId: invitation.organizationId,
             module: "staff",
             title: "Privileged invitation expired",
             message: `The ${invitation.role} invitation for ${invitation.email} expired.`,
@@ -4677,6 +5115,7 @@ async function cancelInvitation(request, response) {
       if (owners.length) {
         await createAppNotification(tx, {
           actor: actor.name,
+          organizationId: invitation.organizationId,
           module: "staff",
           title: "Privileged invitation cancelled",
           message: `The ${invitation.role} invitation for ${invitation.email} was cancelled.`,
@@ -4866,6 +5305,7 @@ app.post("/api/invitations/accept/:token", asyncRoute(async (request, response) 
       await createAppNotification(tx, {
         actor: account.name,
         branches: branchRecords.map((branch) => branch.name),
+        organizationId: invitation.organizationId,
         recipientAccountIds,
         module: "staff",
         recordId: account.id,
@@ -5067,6 +5507,7 @@ app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
       if (owners.length) {
         await createAppNotification(tx, {
           actor: actor.name,
+          organizationId: actor.organizationId,
           module: "staff",
           title: "Organization-wide role granted",
           message: `${saved.name} was granted ${nextRole} access.`,
@@ -5784,6 +6225,24 @@ app.get("/api/public/marketing-assets/:id", asyncRoute(async (request, response)
   response.send(buffer);
 }));
 
+app.get("/api/public/branding-assets/:id", asyncRoute(async (request, response) => {
+  const asset = await prisma.uploadAsset.findFirst({
+    where: { id: clean(request.params.id), category: "branding-logo", deletedAt: null },
+  });
+  if (!asset) throw apiError("Branding logo was not found.", 404);
+  const stored = await storageRequest(asset.objectPath);
+  if (!stored.ok) throw apiError("Branding logo is unavailable.", stored.status === 404 ? 404 : 502);
+  const buffer = Buffer.from(await stored.arrayBuffer());
+  response.set({
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Disposition": "inline",
+    "Content-Length": String(buffer.length),
+    "Content-Type": asset.mimeType,
+    "Cross-Origin-Resource-Policy": "cross-origin",
+  });
+  response.send(buffer);
+}));
+
 app.delete("/api/uploads/:id", asyncRoute(async (request, response) => {
   const asset = await prisma.uploadAsset.findUnique({ where: { id: clean(request.params.id) } });
   if (!asset) throw apiError("Uploaded asset was not found.", 404);
@@ -5916,9 +6375,9 @@ function assertLeadAutomationManager(request) {
 app.get("/api/leads/automations", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "leads");
   const [automations, runs] = await Promise.all([
-    prisma.leadAutomation.findMany({ where: { organizationId: actor.organizationId }, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.leadAutomation.findMany({ where: { organizationId: actor.organizationId, kind: "follow_up" }, orderBy: [{ updatedAt: "desc" }] }),
     prisma.leadAutomationRun.findMany({
-      where: { organizationId: actor.organizationId, lead: { is: branchWhere(actor) } },
+      where: { organizationId: actor.organizationId, lead: { is: branchWhere(actor) }, automation: { is: { kind: "follow_up" } } },
       include: { lead: { select: { id: true, name: true, branch: true } }, automation: { select: { id: true, name: true } } },
       orderBy: [{ createdAt: "desc" }],
       take: 50,
@@ -5938,8 +6397,14 @@ app.post("/api/leads/automations", asyncRoute(async (request, response) => {
   await assertLeadAutomationBranch(actor, data.branch);
   if (data.active && !leadAutomationProviderReady(data.channel)) throw apiError(`${data.channel} delivery is not configured. Connect the provider before enabling this automation.`, 503);
   const automation = await prisma.$transaction(async (tx) => {
-    const created = await tx.leadAutomation.create({ data: { ...data, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
-    await writeAudit(tx, request, { area: "Leads", action: "Lead automation created", subjectType: "LeadAutomation", subjectId: created.id, details: `${created.name} created in ${created.active ? "active" : "draft"} mode.` });
+    const created = await tx.leadAutomation.create({ data: { ...data, kind: "follow_up", organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Lead automation created",
+      subjectType: "LeadAutomation",
+      subjectId: created.id,
+      details: `${created.name} created in ${created.active ? "active" : "draft"} mode.`,
+    });
     return created;
   });
   response.status(201).json({ automation });
@@ -5947,7 +6412,7 @@ app.post("/api/leads/automations", asyncRoute(async (request, response) => {
 
 app.put("/api/leads/automations/:id", asyncRoute(async (request, response) => {
   const actor = assertLeadAutomationManager(request);
-  const current = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  const current = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId, kind: "follow_up" } });
   if (!current) throw apiError("Lead automation not found.", 404);
   const data = normalizeLeadAutomationPayload(request.body ?? {}, current);
   await assertLeadAutomationBranch(actor, data.branch);
@@ -5962,10 +6427,338 @@ app.put("/api/leads/automations/:id", asyncRoute(async (request, response) => {
 
 app.post("/api/leads/automations/:id/run", asyncRoute(async (request, response) => {
   const actor = assertLeadAutomationManager(request);
-  const automation = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  const automation = await prisma.leadAutomation.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId, kind: "follow_up" } });
   if (!automation) throw apiError("Lead automation not found.", 404);
   if (!automation.active) throw apiError("Enable and save this automation before running it.", 409);
   response.json({ result: await processLeadAutomation(automation) });
+}));
+
+app.get("/api/leads/forms", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "leads");
+  const forms = await ensureWorkspaceForms(prisma, actor.organizationId, actor.id);
+  response.json({ forms: forms.map(serializeWorkspaceForm), canManage: canManageOrganization(actor.role) });
+}));
+
+app.put("/api/leads/forms/:id", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const current = await prisma.workspaceForm.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  if (!current) throw apiError("Workspace form not found.", 404);
+  const branchIds = [...new Set((Array.isArray(request.body?.branchIds) ? request.body.branchIds : []).map(clean).filter(Boolean))];
+  const branches = await prisma.branch.findMany({ where: { id: { in: branchIds }, organizationId: actor.organizationId, status: "Active" }, select: { id: true } });
+  if (!branches.length || branches.length !== branchIds.length) throw apiError("Choose at least one active branch in your workspace.", 400);
+  const defaultBranchId = clean(request.body?.defaultBranchId) || branches[0].id;
+  if (!branches.some((branch) => branch.id === defaultBranchId)) throw apiError("The default branch must be enabled for this form.", 400);
+  const status = ["Active", "Paused"].includes(clean(request.body?.status)) ? clean(request.body.status) : current.status;
+  const data = {
+    name: boundedPublicText(request.body?.name || current.name, "Form name", 120),
+    status,
+    defaultBranchId,
+    source: boundedPublicText(request.body?.source || current.source, "Lead source", 80),
+    consentVersion: boundedPublicText(request.body?.consentVersion || current.consentVersion, "Consent version", 40),
+    consentText: boundedPublicText(request.body?.consentText || current.consentText, "Consent wording", 1000),
+    defaultWorkflowId: boundedPublicText(request.body?.defaultWorkflowId, "Default workflow", 120),
+    notificationRecipientIds: jsonText(request.body?.notificationRecipientIds, []),
+    updatedById: actor.id,
+  };
+  const form = await prisma.$transaction(async (tx) => {
+    const updated = await tx.workspaceForm.update({ where: { id: current.id }, data });
+    await tx.workspaceFormBranch.deleteMany({ where: { formId: current.id } });
+    await tx.workspaceFormBranch.createMany({ data: branches.map((branch) => ({ formId: current.id, branchId: branch.id })) });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Workspace form updated",
+      subjectType: "WorkspaceForm",
+      subjectId: current.id,
+      details: `${updated.name} saved for ${branches.length} branch${branches.length === 1 ? "" : "es"}.`,
+      beforeValues: current,
+      afterValues: updated,
+    });
+    return tx.workspaceForm.findUnique({ where: { id: current.id }, include: { branches: { include: { branch: { select: { id: true, name: true, hours: true, operatingHours: true, status: true } } } } } });
+  });
+  response.json({ form: serializeWorkspaceForm(form) });
+}));
+
+app.get("/api/leads/onboarding", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "leads");
+  const [workflow, branding, runs, invoices, forms] = await Promise.all([
+    prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] }),
+    workspaceBrandingForOrganization(prisma, actor.organizationId),
+    prisma.leadAutomationRun.findMany({
+      where: { organizationId: actor.organizationId, automation: { is: { kind: "onboarding" } }, lead: { is: branchWhere(actor) } },
+      include: { lead: { select: { id: true, name: true, email: true, branch: true } }, invoice: { select: { id: true, invoiceNumber: true, status: true } } },
+      orderBy: [{ createdAt: "desc" }],
+      take: 50,
+    }),
+    prisma.clientInvoice.findMany({
+      where: { organizationId: actor.organizationId, ...branchWhere(actor) },
+      include: { items: true, lead: { select: { id: true, name: true } } },
+      orderBy: [{ createdAt: "desc" }],
+      take: 50,
+    }),
+    ensureWorkspaceForms(prisma, actor.organizationId, actor.id),
+  ]);
+  response.json({
+    workflow,
+    branding,
+    runs: runs.map((run) => ({ ...run, steps: parseJsonList(run.steps) })),
+    invoices,
+    forms: forms.map(serializeWorkspaceForm),
+    canManage: canManageOrganization(actor.role),
+    providers: { email: emailReady() },
+  });
+}));
+
+app.put("/api/leads/onboarding", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const current = await prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] });
+  let workflowData;
+  try {
+    workflowData = normalizeOnboardingWorkflowPayload(request.body?.workflow || {}, current || {});
+  } catch (error) {
+    throw apiError(clean(error.message) || "Review the onboarding workflow settings.", 400);
+  }
+  await assertLeadAutomationBranch(actor, workflowData.branch);
+  if (workflowData.active && !emailReady()) throw apiError("Connect email before enabling the onboarding workflow.", 503);
+  const organization = await prisma.organization.findUnique({ where: { id: actor.organizationId } });
+  const currentBranding = await prisma.workspaceBranding.findUnique({ where: { organizationId: actor.organizationId } });
+  const brandingData = normalizeWorkspaceBranding(request.body?.branding || {}, currentBranding || {}, organization || {});
+  const workflowStatus = workflowData.active ? "Active" : current?.active ? "Paused" : current?.status === "Paused" ? "Paused" : "Draft";
+  const result = await prisma.$transaction(async (tx) => {
+    const branding = await tx.workspaceBranding.upsert({
+      where: { organizationId: actor.organizationId },
+      create: { ...brandingData, organizationId: actor.organizationId },
+      update: brandingData,
+    });
+    const workflow = current
+      ? await tx.leadAutomation.update({ where: { id: current.id }, data: { ...workflowData, status: workflowStatus, currentVersion: { increment: 1 }, publishedAt: workflowData.active ? current.publishedAt || new Date() : current.publishedAt, updatedById: actor.id } })
+      : await tx.leadAutomation.create({ data: { ...workflowData, status: workflowStatus, publishedAt: workflowData.active ? new Date() : null, organizationId: actor.organizationId, createdById: actor.id, updatedById: actor.id } });
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: current ? "Onboarding workflow updated" : "Onboarding workflow created",
+      subjectType: "LeadAutomation",
+      subjectId: workflow.id,
+      details: `${workflow.name} saved in ${workflow.active ? "active" : "draft"} mode for ${branding.businessName}.`,
+      beforeValues: current || {},
+      afterValues: workflow,
+    });
+    return { workflow, branding };
+  });
+  response.json(result);
+}));
+
+app.post("/api/leads/onboarding/logo", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const stored = await storeImageObject(request.body?.dataUrl, "branding-logo");
+  try {
+    const asset = await prisma.$transaction(async (tx) => {
+      const created = await tx.uploadAsset.create({
+        data: {
+          ...stored,
+          branch: clean(actor.access?.activeBranch?.name || actor.branch) || "All branches",
+          uploadedById: actor.id,
+          originalName: normalizeMarketingMediaName(request.body?.originalName),
+        },
+      });
+      await writeAudit(tx, request, {
+        area: "Leads",
+        action: "Clinic branding logo uploaded",
+        subjectType: "UploadAsset",
+        subjectId: created.id,
+        details: "A new client-facing clinic logo was uploaded for onboarding branding.",
+      });
+      return created;
+    });
+    const url = new URL(`/api/public/branding-assets/${asset.id}`, appPublicOrigin()).href;
+    response.status(201).json({ asset: { id: asset.id, url, mimeType: asset.mimeType, byteSize: asset.byteSize, originalName: asset.originalName } });
+  } catch (error) {
+    await storageRequest(stored.objectPath, { method: "DELETE" }).catch(() => {});
+    throw error;
+  }
+}));
+
+app.post("/api/leads/onboarding/run", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const result = await processPendingOnboardingRuns({ organizationId: actor.organizationId, limit: 50 });
+  response.json({ result });
+}));
+
+app.post("/api/leads/onboarding/test", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const workflow = await prisma.leadAutomation.findFirst({ where: { organizationId: actor.organizationId, kind: "onboarding" }, orderBy: [{ updatedAt: "desc" }] });
+  if (!workflow) throw apiError("Save the onboarding workflow before testing it.", 409);
+  const branding = await workspaceBrandingForOrganization(prisma, actor.organizationId);
+  const branch = await prisma.branch.findFirst({
+    where: { organizationId: actor.organizationId, status: "Active", ...(workflow.branch === "All branches" ? {} : { name: workflow.branch }) },
+    orderBy: [{ name: "asc" }],
+  });
+  if (!branch) throw apiError("No active branch is available for this test.", 409);
+  const sampleLead = {
+    name: boundedPublicText(request.body?.name || "Jamie Santos", "Test client name", 120),
+    firstName: boundedPublicText(request.body?.firstName || "Jamie", "Test first name", 80),
+    email: normalizeEmail(request.body?.email || actor.email),
+    interest: boundedPublicText(request.body?.interest || "aesthetic consultation", "Test service", 160),
+    branch: branch.name,
+  };
+  const content = renderOnboardingContent(workflow, branding, sampleLead);
+  const recipients = workflow.notifyStaff
+    ? await notificationRecipientsForOrganization(prisma, { branches: [branch.name], module: "leads", organizationId: actor.organizationId })
+    : [];
+  const steps = [
+    { key: "trigger", status: "Simulated", detail: `Sample submission routed only to ${branch.name}.` },
+    { key: "welcome_email", status: "Previewed", detail: `Email preview addressed only to the internal test recipient ${sampleLead.email || actor.email}.` },
+    { key: "staff_notification", status: workflow.notifyStaff ? "Previewed" : "Skipped", detail: `${recipients.length} authorized workspace recipient(s); no notification sent.` },
+    { key: "invoice_draft", status: workflow.createInvoice ? "Previewed" : "Skipped", detail: workflow.createInvoice ? "Non-payable test invoice generated in preview only." : "Invoice creation is disabled." },
+  ];
+  await writeAudit(prisma, request, {
+    area: "Leads",
+    action: "Onboarding workflow tested",
+    subjectType: "LeadAutomation",
+    subjectId: workflow.id,
+    details: `${workflow.name} simulated for ${branch.name}; no client contact or payable invoice was created.`,
+  });
+  response.json({
+    test: true,
+    liveActionsPerformed: false,
+    sampleLead,
+    email: { to: sampleLead.email || actor.email, subject: content.subject, message: content.text },
+    invoice: workflow.createInvoice ? { testMode: true, payable: false, description: workflow.invoiceLabel, amount: workflow.invoiceAmount, currency: branding.currency } : null,
+    recipients: recipients.length,
+    steps,
+  });
+}));
+
+app.post("/api/leads/invoices/:id/approve", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const invoice = await prisma.clientInvoice.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId }, include: { items: true, automationRun: { include: { lead: true } } } });
+  if (!invoice) throw apiError("Invoice not found.", 404);
+  if (!canAccessBranch(actor, invoice.branch)) throw apiError("You do not have access to this invoice branch.", 403);
+  if (invoice.status !== "Awaiting Approval") throw apiError("Only an awaiting-approval invoice can be approved and sent.", 409);
+  const claimed = await prisma.clientInvoice.updateMany({
+    where: { id: invoice.id, organizationId: actor.organizationId, status: "Awaiting Approval" },
+    data: { status: "Sending", approvedById: actor.id, approvedAt: new Date() },
+  });
+  if (claimed.count !== 1) throw apiError("This invoice is already being processed.", 409);
+  const branding = await workspaceBrandingForOrganization(prisma, actor.organizationId);
+  let delivery;
+  try {
+    delivery = await sendClientInvoice(invoice, branding);
+  } catch (error) {
+    await prisma.clientInvoice.updateMany({
+      where: { id: invoice.id, organizationId: actor.organizationId, status: "Sending" },
+      data: { status: "Awaiting Approval", approvedById: "", approvedAt: null },
+    });
+    throw error;
+  }
+  const saved = await prisma.$transaction(async (tx) => {
+    const updated = await tx.clientInvoice.update({
+      where: { id: invoice.id },
+      data: { status: "Sent", approvedById: actor.id, approvedAt: new Date(), sentAt: delivery.sentAt },
+      include: { items: true },
+    });
+    if (invoice.automationRunId) {
+      const steps = runSteps(invoice.automationRun || {});
+      const next = upsertRunStep(steps, "invoice_email", "Completed", "Clinic-branded invoice approved and sent.");
+      await tx.leadAutomationRun.update({ where: { id: invoice.automationRunId }, data: { status: "Completed", reason: "", sentAt: new Date(), providerReference: delivery.providerReference, steps: jsonText(next, []) } });
+    }
+    await writeAudit(tx, request, {
+      area: "Leads",
+      action: "Client invoice approved and sent",
+      subjectType: "ClientInvoice",
+      subjectId: invoice.id,
+      details: `${invoice.invoiceNumber} approved and sent to ${invoice.recipientName}.`,
+      afterValues: updated,
+    });
+    if (invoice.leadId) {
+      await createLeadActivity(tx, request, invoice.leadId, {
+        type: "Invoice",
+        title: "Clinic-branded invoice sent",
+        note: `${invoice.invoiceNumber} was approved and sent.`,
+        channel: "Email",
+        actor: actor.name,
+        actorRole: actor.role,
+        metadata: { invoiceId: invoice.id },
+      });
+    }
+    return updated;
+  });
+  response.json({ invoice: saved });
+}));
+
+app.post("/api/leads/invoices/:id/payments", asyncRoute(async (request, response) => {
+  const actor = assertLeadAutomationManager(request);
+  const invoiceId = String(request.params.id);
+  const provider = boundedPublicText(request.body?.provider || "Manual", "Payment provider", 60);
+  const providerReference = boundedPublicText(request.body?.providerReference, "Payment reference", 160);
+  if (!providerReference) throw apiError("Enter the clinic payment reference.", 400);
+  const requestedAmount = numberValue(request.body?.amount, "Payment amount", { min: 0.01 });
+
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`client-invoice-payment:${invoiceId}`}))`;
+    const existingPayment = await tx.invoicePayment.findUnique({
+      where: { organizationId_provider_providerReference: { organizationId: actor.organizationId, provider, providerReference } },
+    });
+    if (existingPayment) {
+      if (existingPayment.invoiceId !== invoiceId) throw apiError("This payment reference is already assigned to another invoice.", 409);
+      const replayInvoice = await tx.clientInvoice.findUnique({ where: { id: invoiceId }, include: { items: true, payments: true } });
+      return { invoice: replayInvoice, payment: existingPayment, sale: existingPayment.posSaleId ? await tx.sale.findUnique({ where: { id: existingPayment.posSaleId } }) : null, replayed: true };
+    }
+    const invoice = await tx.clientInvoice.findFirst({ where: { id: invoiceId, organizationId: actor.organizationId }, include: { items: true, automationRun: true } });
+    if (!invoice) throw apiError("Invoice not found.", 404);
+    if (!canAccessBranch(actor, invoice.branch)) throw apiError("You do not have access to this invoice branch.", 403);
+    if (!["Sent", "Viewed", "Partially Paid", "Overdue"].includes(invoice.status)) throw apiError("Only a sent invoice can receive payment.", 409);
+    const outstanding = Math.max(0, Number(invoice.total || 0) - Number(invoice.amountPaid || 0));
+    if (requestedAmount > outstanding + 0.001) throw apiError("Payment amount exceeds the invoice balance.", 409);
+    const nextAmountPaid = Math.round((Number(invoice.amountPaid || 0) + requestedAmount) * 100) / 100;
+    const fullyPaid = nextAmountPaid >= Number(invoice.total || 0) - 0.001;
+    let payment = await tx.invoicePayment.create({
+      data: { organizationId: actor.organizationId, invoiceId, provider, providerReference, amount: requestedAmount, currency: invoice.currency, status: "Succeeded", rawSummary: jsonText({ recordedById: actor.id, recordedBy: actor.name }, {}) },
+    });
+    let sale = null;
+    if (fullyPaid) {
+      const saleInvoice = `CI-${invoice.invoiceNumber}`;
+      sale = await tx.sale.findUnique({ where: { invoice: saleInvoice } });
+      if (!sale) {
+        const now = new Date();
+        sale = await tx.sale.create({
+          data: {
+            invoice: saleInvoice,
+            date: posCalendarDate(now),
+            time: now.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" }),
+            clientId: invoice.clientId,
+            client: invoice.recipientName,
+            branch: invoice.branch,
+            staff: actor.name,
+            subtotal: invoice.subtotal,
+            discount: invoice.discount,
+            total: invoice.total,
+            payments: jsonText([{ method: provider, amount: invoice.total, reference: providerReference }], []),
+            status: "Paid",
+            leadId: invoice.leadId || "",
+            notes: `Posted automatically from paid client invoice ${invoice.invoiceNumber}.`,
+            items: { create: invoice.items.map((item) => ({ name: item.description, type: "Service", qty: item.quantity, price: item.unitPrice, originalPrice: item.unitPrice, discount: 0, provider: "N/A" })) },
+          },
+        });
+      }
+      payment = await tx.invoicePayment.update({ where: { id: payment.id }, data: { posSaleId: sale.id } });
+    }
+    const updated = await tx.clientInvoice.update({
+      where: { id: invoice.id },
+      data: { amountPaid: nextAmountPaid, status: fullyPaid ? "Paid" : "Partially Paid", paymentProvider: provider, paymentReference: providerReference },
+      include: { items: true, payments: true },
+    });
+    if (invoice.automationRunId && fullyPaid) {
+      const steps = upsertRunStep(runSteps(invoice.automationRun || {}), "payment", "Completed", `Payment recorded through ${provider}; POS sale ${sale.invoice} created.`);
+      await tx.leadAutomationRun.update({ where: { id: invoice.automationRunId }, data: { steps: jsonText(steps, []) } });
+    }
+    if (invoice.leadId) {
+      await createLeadActivity(tx, request, invoice.leadId, { type: "Payment", title: fullyPaid ? "Invoice paid" : "Partial invoice payment recorded", note: `${provider} payment ${providerReference} recorded for ${invoice.invoiceNumber}.`, metadata: { invoiceId, paymentId: payment.id, saleId: sale?.id || "" } });
+    }
+    const recipients = await notificationRecipientsForOrganization(tx, { branches: [invoice.branch], module: "pos", organizationId: actor.organizationId });
+    await createAppNotification(tx, { actor: actor.name, branches: [invoice.branch], organizationId: actor.organizationId, recipientAccountIds: recipients, module: "pos", recordId: sale?.id || invoice.id, title: fullyPaid ? "Client invoice paid" : "Partial invoice payment", message: `${invoice.invoiceNumber}: ${provider} payment recorded for ${requestedAmount.toFixed(2)} ${invoice.currency}.` });
+    await writeAudit(tx, request, { area: "Leads", action: fullyPaid ? "Client invoice paid and posted to POS" : "Client invoice payment recorded", subjectType: "ClientInvoice", subjectId: invoice.id, details: `${invoice.invoiceNumber} received ${requestedAmount.toFixed(2)} ${invoice.currency} through ${provider}.` });
+    return { invoice: updated, payment, sale, replayed: false };
+  });
+  response.status(result.replayed ? 200 : 201).json(result);
 }));
 
 app.get("/api/leads/integrations", asyncRoute(async (request, response) => {
@@ -6128,6 +6921,10 @@ app.post("/api/leads/:id/appointments", asyncRoute(async (request, response) => 
     notes: clean(request.body?.notes || lead.concern || lead.message),
     internalNotes: "Booked from Leads module.",
   };
+  const actor = actorFromRequest(request);
+  const appointmentBranch = await prisma.branch.findFirst({ where: { name: appointmentData.branch, organizationId: actor.organizationId, status: "Active" }, select: { id: true, organizationId: true } });
+  if (!appointmentBranch) throw apiError("Choose an active branch in your organization.", 400);
+  Object.assign(appointmentData, { organizationId: appointmentBranch.organizationId, branchId: appointmentBranch.id });
   if (service) {
     const offeredBranches = parseJsonList(service.branches);
     if (offeredBranches.length && !offeredBranches.includes(appointmentData.branch) && !offeredBranches.includes("All branches")) {
@@ -6204,8 +7001,7 @@ app.post("/api/leads/:id/convert", asyncRoute(async (request, response) => {
       if (existingClient && !request.body?.allowExistingMatch) {
         throw apiError(`Existing client match found: ${existingClient.fullName}. Link this lead to the existing client instead.`, 409);
       }
-      client = existingClient || await tx.client.create({
-        data: normalizeClientPayload({
+      const convertedClientData = normalizeClientPayload({
           fullName: lead.name,
           mobile: lead.mobile,
           email: lead.email,
@@ -6220,8 +7016,11 @@ app.post("/api/leads/:id/convert", asyncRoute(async (request, response) => {
           tag: "Converted lead",
           retention: "New",
           nextVisit: lead.preferredDate,
-        }),
-      });
+        });
+      const conversionBranch = await tx.branch.findFirst({ where: { name: lead.branch, organizationId: lead.organizationId || actorFromRequest(request).organizationId }, select: { id: true, organizationId: true } });
+      if (!conversionBranch) throw apiError("The lead branch is unavailable.", 409);
+      Object.assign(convertedClientData, { organizationId: conversionBranch.organizationId, branchId: conversionBranch.id, workspaceFormId: lead.workspaceFormId || null });
+      client = existingClient || await tx.client.create({ data: convertedClientData });
     }
 
     const actor = actorFromRequest(request);
@@ -6315,7 +7114,7 @@ app.get("/api/clients", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/clients", asyncRoute(async (request, response) => {
-  const data = normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients));
+  const data = await attachDirectTenantFields(request, resourceConfigs.clients, normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients)));
   assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.create({ data });
   response.status(201).json(client);
@@ -6326,7 +7125,7 @@ app.put("/api/clients/:id", asyncRoute(async (request, response) => {
   const existing = await prisma.client.findUnique({ where: { id } });
   if (!existing) throw apiError("Client not found.", 404);
   assertMutationAllowed(request, "clients", existing.branch);
-  const data = normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients), id);
+  const data = await attachDirectTenantFields(request, resourceConfigs.clients, normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients), id));
   assertMutationAllowed(request, "clients", data.branch);
   const client = await prisma.client.update({ where: { id }, data });
   response.json(client);
@@ -6353,7 +7152,7 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
     throw apiError(`${request.params.resource} cannot be created through the generic API.`, 405);
   }
 
-  const data = await config.normalize(branchScopedPayload(request, request.body, config));
+  const data = await attachDirectTenantFields(request, config, await config.normalize(branchScopedPayload(request, request.body, config)));
   await assertResourceMutationAllowed(request, config, data);
   if (request.params.resource === "staff") assertStaffAccessMutation(request, data);
   if (config.beforeWrite) await config.beforeWrite(data);
@@ -6391,7 +7190,7 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
     throw apiError("Restore this campaign before editing it.", 409);
   }
   await assertResourceMutationAllowed(request, config, existing);
-  const data = await config.normalize(branchScopedPayload(request, request.body, config), id);
+  const data = await attachDirectTenantFields(request, config, await config.normalize(branchScopedPayload(request, request.body, config), id));
   await assertResourceMutationAllowed(request, config, data);
   if (request.params.resource === "staff") assertStaffAccessMutation(request, data, existing);
   if (request.params.resource === "campaigns") {
@@ -6456,33 +7255,35 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
   response.status(204).end();
 }));
 
-app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
-  const [settings, branchRows, serviceRows] = await Promise.all([
-    getPersistedSettings(),
-    prisma.branch.findMany({
-      where: { status: "Active", modules: { some: { moduleId: { in: ["leads", "booking"] }, enabled: true } } },
-      orderBy: [{ name: "asc" }],
-      select: { id: true, name: true, hours: true, operatingHours: true },
-    }),
+app.get("/api/public-leads/config", asyncRoute(async (request, response) => {
+  const form = await publicWorkspaceForm(request.query.workspace);
+  const branchRows = form.allowedBranches;
+  const [branding, serviceRows, siblingForms] = await Promise.all([
+    workspaceBrandingForOrganization(prisma, form.organizationId),
     prisma.service.findMany({
       where: { active: true },
       orderBy: [{ name: "asc" }],
       select: { id: true, name: true, category: true, serviceType: true, branches: true, duration: true, price: true, priceModel: true, priceUnit: true },
     }),
+    prisma.workspaceForm.findMany({ where: { organizationId: form.organizationId, status: "Active" }, select: { type: true, slug: true } }),
   ]);
+  const allowedBranchNames = new Set(branchRows.map((branch) => branch.name));
   const publicServices = [];
   for (const service of serviceRows) {
+    const serviceBranches = parseJsonList(service.branches);
+    const visibleBranches = serviceBranches.filter((branch) => allowedBranchNames.has(branch));
+    if (!visibleBranches.length) continue;
     const key = clean(service.name).toLowerCase();
     const existing = publicServices.find((item) => clean(item.name).toLowerCase() === key);
     if (existing) {
-      existing.branches = [...new Set([...existing.branches, ...parseJsonList(service.branches)])];
+      existing.branches = [...new Set([...existing.branches, ...visibleBranches])];
     } else {
       publicServices.push({
         id: service.id,
         name: service.name,
         category: service.category,
         serviceType: service.serviceType,
-        branches: parseJsonList(service.branches),
+        branches: visibleBranches,
         duration: service.duration,
         price: service.price,
         priceModel: service.priceModel,
@@ -6492,11 +7293,26 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
   }
 
   response.json({
-    company: settings.company,
-    tagline: settings.receiptFooter,
-    branches: branchRows.map((branch) => ({ ...branch, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
+    workspace: { id: form.id, slug: form.slug, type: form.type },
+    formSlugs: Object.fromEntries(siblingForms.map((item) => [item.type, item.slug])),
+    company: branding.businessName || form.organization.name,
+    tagline: branding.invoiceFooter || "Personal care, thoughtfully delivered.",
+    branding: invoiceBrandingSnapshot(branding),
+    consent: { version: form.consentVersion, text: form.consentText },
+    branches: branchRows.map((branch) => ({ id: branch.id, name: branch.name, hours: branch.hours, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
     services: publicServices,
   });
+}));
+
+app.get("/api/public/invoices/:token", asyncRoute(async (request, response) => {
+  const token = clean(request.params.token);
+  if (!/^[a-f0-9]{48}$/i.test(token)) throw apiError("Invoice not found.", 404);
+  const invoice = await prisma.clientInvoice.findUnique({ where: { publicToken: token }, include: { items: true } });
+  if (!invoice || !["Sent", "Viewed", "Partially Paid", "Paid", "Overdue"].includes(invoice.status)) throw apiError("Invoice not found.", 404);
+  const viewed = invoice.viewedAt
+    ? invoice
+    : await prisma.clientInvoice.update({ where: { id: invoice.id }, data: { viewedAt: new Date(), ...(invoice.status === "Sent" ? { status: "Viewed" } : {}) }, include: { items: true } });
+  response.json({ invoice: publicInvoice(viewed) });
 }));
 
 app.post("/api/public-leads", asyncRoute(async (request, response) => {
@@ -6515,11 +7331,9 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw apiError("Enter a valid email address.");
   if (values.privacyConsent !== true) throw apiError("Consent is required before sending an inquiry.");
 
+  const form = await publicWorkspaceForm(values.workspaceSlug, "inquiry");
   const requestedBranch = boundedPublicText(values.branch, "Branch", 120);
-  const branch = requestedBranch
-    ? await prisma.branch.findFirst({ where: { name: requestedBranch, status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, select: { name: true } })
-    : await prisma.branch.findFirst({ where: { status: "Active", modules: { some: { moduleId: "leads", enabled: true } } }, orderBy: [{ name: "asc" }], select: { name: true } });
-  if (!branch) throw apiError(requestedBranch ? "Selected branch is unavailable." : "No clinic branch is available for inquiries.", requestedBranch ? 400 : 503);
+  const branch = branchFromWorkspaceForm(form, values.branchId, requestedBranch, "leads");
 
   const requestedServiceId = boundedPublicText(values.serviceId, "Service", 120);
   const requestedInterest = boundedPublicText(values.interest, "Service interest", 160);
@@ -6530,7 +7344,7 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
       : null;
   if (requestedServiceId && !service) throw apiError("Selected service is unavailable.");
   const serviceBranches = parseJsonList(service?.branches);
-  if (service && serviceBranches.length && !serviceBranches.includes("All branches") && !serviceBranches.includes(branch.name)) {
+  if (service && !serviceBranches.includes(branch.name)) {
     throw apiError("Selected service is unavailable at this branch.", 409);
   }
 
@@ -6555,15 +7369,15 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
     utm_content: boundedPublicText(values.utmContent, "UTM content", 160),
     utm_term: boundedPublicText(values.utmTerm, "UTM term", 160),
     click_id: boundedPublicText(values.clickId, "Click ID", 240),
-    form_id: "mace-public-inquiry-v1",
+    form_id: form.id,
     external_lead_id: boundedPublicText(values.submissionId, "Submission ID", 120) || request.requestId,
     permission_to_contact: true,
     privacy_consent: true,
     marketing_consent: values.marketingConsent === true,
-    consent_source: "Public inquiry form",
+    consent_source: form.source || "Public inquiry form",
     consent_timestamp: submittedAt,
-    consent_version: "v1",
-    consent_text: "I consent to the collection and use of my information so MACE can respond to this inquiry.",
+    consent_version: form.consentVersion,
+    consent_text: form.consentText,
     submitted_at: submittedAt,
   };
 
@@ -6572,7 +7386,13 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   request.body = publicPayload;
   request.rawBody = JSON.stringify(publicPayload);
   try {
-    const result = await processLeadWebhook("website", request, { authMethod: "public-form", allowPayloadBranch: true });
+    const result = await processLeadWebhook("website", request, {
+      authMethod: "public-form",
+      allowPayloadBranch: false,
+      organizationId: form.organizationId,
+      branchId: branch.id,
+      workspaceFormId: form.id,
+    });
     response.status(result.duplicateEvent ? 200 : 201).json({
       submitted: true,
       reference: result.event?.providerEventId || request.requestId,
@@ -6585,11 +7405,11 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
 
 app.get("/api/public-registration/qr", asyncRoute(async (request, response) => {
   const branchName = requireText(request.query.branch, "Branch");
-  const branch = await prisma.branch.findFirst({ where: { name: branchName, status: "Active" }, select: { name: true } });
+  const branch = await prisma.branch.findFirst({ where: { name: branchName, status: "Active" }, select: { id: true, name: true, organizationId: true } });
   if (!branch) throw apiError("Registration branch is unavailable.", 404);
-  const configuredOrigin = clean(process.env.APP_ORIGIN).split(",")[0];
-  const origin = configuredOrigin || `${request.protocol}://${request.get("host")}`.replace(/:3001$/, ":5173");
-  const url = `${origin.replace(/\/$/, "")}/register?branch=${encodeURIComponent(branch.name)}`;
+  await ensureWorkspaceForms(prisma, branch.organizationId);
+  const form = await prisma.workspaceForm.findUnique({ where: { organizationId_type: { organizationId: branch.organizationId, type: "registration" } } });
+  const url = `${workspaceFormPublicUrl(form)}?branchId=${encodeURIComponent(branch.id)}`;
   const svg = await QRCode.toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#1f2937", light: "#ffffff" } });
   response.type("image/svg+xml").set("Cache-Control", "public, max-age=300").send(svg);
 }));
@@ -6601,16 +7421,15 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
     return;
   }
   if (values.privacyConsent !== true) throw apiError("Consent is required before registration.");
-  const branch = await prisma.branch.findFirst({ where: { name: requireText(values.branch, "Branch"), status: "Active" } });
-  if (!branch) throw apiError("Registration branch is unavailable.", 409);
+  const form = await publicWorkspaceForm(values.workspaceSlug, "registration");
+  const branch = branchFromWorkspaceForm(form, values.branchId, values.branch, "clients");
   const firstName = requireText(values.firstName, "First name");
   const lastName = requireText(values.lastName, "Last name");
   const mobile = clean(values.mobile);
   const email = clean(values.email).toLowerCase();
   if (!mobile && !email) throw apiError("Enter a mobile number or email address.");
   const duplicateConditions = [mobile ? { mobile } : null, email ? { email } : null].filter(Boolean);
-  const organizationBranches = await prisma.branch.findMany({ where: { organizationId: branch.organizationId }, select: { name: true } });
-  const existing = duplicateConditions.length ? await prisma.client.findFirst({ where: { branch: { in: organizationBranches.map((item) => item.name) }, OR: duplicateConditions } }) : null;
+  const existing = duplicateConditions.length ? await prisma.client.findFirst({ where: { organizationId: branch.organizationId, OR: duplicateConditions } }) : null;
   const data = normalizeClientPayload({
     ...(existing || {}),
     ...values,
@@ -6625,12 +7444,14 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
     consentStatus: "Pending",
     marketingOptIn: values.marketingOptIn === true,
   }, existing?.id || "");
+  Object.assign(data, { organizationId: branch.organizationId, branchId: branch.id, workspaceFormId: form.id });
   const result = await prisma.$transaction(async (tx) => {
     const client = existing
       ? await tx.client.update({ where: { id: existing.id }, data })
       : await tx.client.create({ data });
     const auditLog = await tx.auditLog.create({ data: { time: new Date().toLocaleString("en-PH"), actor: "Client QR Registration", role: "Public", area: "Client Records", action: existing ? "Client QR profile updated" : "Client QR profile created", details: `${client.fullName} submitted registration for ${branch.name}.` } });
-    await createAppNotification(tx, { actor: "Client QR Registration", branches: [branch.name], message: `${client.fullName} submitted a ${existing ? "profile update" : "new registration"}.`, module: "clients", recordId: client.id, title: existing ? "Client registration updated" : "New QR client registration" });
+    const notificationRecipients = await notificationRecipientsForOrganization(tx, { branches: [branch.name], module: "clients", organizationId: branch.organizationId });
+    await createAppNotification(tx, { actor: "Client QR Registration", branches: [branch.name], organizationId: branch.organizationId, recipientAccountIds: notificationRecipients, message: `${client.fullName} submitted a ${existing ? "profile update" : "new registration"}.`, module: "clients", recordId: client.id, title: existing ? "Client registration updated" : "New QR client registration" });
     return { client, auditLog };
   });
   response.status(existing ? 200 : 201).json({ submitted: true, clientId: result.client.id, updated: Boolean(existing) });
@@ -6647,10 +7468,11 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   if (!service || !service.active) {
     throw apiError("Selected service is unavailable.", 404);
   }
-  const branch = await prisma.branch.findFirst({ where: { name: booking.branch, status: "Active", modules: { some: { moduleId: "booking", enabled: true } } }, include: { rooms: true } });
-  if (!branch) throw apiError("Selected branch is unavailable.", 404);
+  const form = await publicWorkspaceForm(request.body?.workspaceSlug, "booking");
+  const selectedBranch = branchFromWorkspaceForm(form, request.body?.branchId, booking.branch, "booking");
+  const branch = await prisma.branch.findUnique({ where: { id: selectedBranch.id }, include: { rooms: true } });
   const serviceBranches = parseJsonList(service.branches);
-  if (serviceBranches.length && !serviceBranches.includes(booking.branch) && !serviceBranches.includes("All branches")) {
+  if (!serviceBranches.includes(branch.name)) {
     throw apiError("Selected service is not offered at this branch.", 409);
   }
   const publicBookingKey = `public_${createHash("sha256").update(booking.submissionId).digest("hex")}`;
@@ -6671,11 +7493,14 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     const appointmentData = {
       date: booking.date,
       time: booking.time,
+      organizationId: branch.organizationId,
+      branchId: branch.id,
+      workspaceFormId: form.id,
       clientId: null,
       client: booking.fullName,
       serviceId: booking.serviceId,
       service: service.name,
-      branch: booking.branch,
+      branch: branch.name,
       room: "To assign",
       staff: "Any available",
       status: "Pending Confirmation",
@@ -6690,12 +7515,15 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     const lead = await tx.lead.create({
       data: {
         name: booking.fullName,
+        organizationId: branch.organizationId,
+        branchId: branch.id,
+        workspaceFormId: form.id,
         mobile,
         email: booking.email,
         source: "Online Booking",
         firstTouchSource: "Online Booking",
         latestTouchSource: "Online Booking",
-        formId: "mace-public-booking-v1",
+        formId: form.id,
         interest: service.name,
         concern: booking.concern,
         status: "New Inquiry",
@@ -6711,10 +7539,10 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
         permissionToContact: true,
         marketingConsent: booking.marketingConsent,
         privacyConsent: true,
-        consentSource: "Online booking",
+        consentSource: form.source || "Online booking",
         consentTimestamp: new Date().toISOString(),
-        consentVersion: "v1",
-        consentText: "I consent to the collection and use of my information to request this appointment.",
+        consentVersion: form.consentVersion,
+        consentText: form.consentText,
       },
     });
     const appointment = await tx.appointment.create({ data: { ...appointmentData, leadId: lead.id } });
@@ -6743,14 +7571,18 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       },
     });
 
+    const notificationRecipients = await notificationRecipientsForOrganization(tx, { branches: [appointment.branch], module: "appointments", organizationId: branch.organizationId });
     await createAppNotification(tx, {
       actor: "Online Booking",
       branches: [appointment.branch],
+      organizationId: branch.organizationId,
+      recipientAccountIds: notificationRecipients,
       message: `${appointment.client} requested ${appointment.service} on ${appointment.date} at ${appointment.time}.`,
       module: "appointments",
       recordId: appointment.id,
       title: "New online booking",
     });
+    await enqueueOnboardingRuns(tx, { lead: linkedLead, organizationId: branch.organizationId });
 
     return { lead: linkedLead, appointment, auditLog, replayed: false };
   });
@@ -6766,6 +7598,11 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       status: result.appointment.status,
     },
   });
+  if (!result.replayed) {
+    await processPendingOnboardingRuns({ leadId: result.lead.id, limit: 10 }).catch((error) => {
+      console.error(JSON.stringify({ event: "onboarding_workflow_dispatch_failed", leadId: result.lead.id, error: clean(error.message) }));
+    });
+  }
 }));
 
 app.post("/api/inventory/import", asyncRoute(async (request, response) => {
@@ -8301,7 +9138,7 @@ async function processDueLeadAutomations() {
   if (leadAutomationSchedulerRunning) return;
   leadAutomationSchedulerRunning = true;
   try {
-    const automations = await prisma.leadAutomation.findMany({ where: { active: true }, orderBy: [{ updatedAt: "asc" }], take: 100 });
+    const automations = await prisma.leadAutomation.findMany({ where: { active: true, kind: "follow_up" }, orderBy: [{ updatedAt: "asc" }], take: 100 });
     for (const automation of automations) {
       try {
         await processLeadAutomation(automation);
@@ -8309,6 +9146,7 @@ async function processDueLeadAutomations() {
         console.error(JSON.stringify({ event: "lead_automation_scheduler_failed", automationId: automation.id, error: clean(error.message) }));
       }
     }
+    await processPendingOnboardingRuns();
   } finally {
     leadAutomationSchedulerRunning = false;
   }

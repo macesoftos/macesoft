@@ -12,18 +12,32 @@ model Organization {
   slug               String              @unique
   status             String              @default("Active")
   branches           Branch[]
+  clients            Client[]
+  leads              Lead[]
+  appointments       Appointment[]
+  workspaceForms     WorkspaceForm[]
   accounts           Account[]
   invitations        UserInvitation[]
   payrollRuns        PayrollRun[]
   commissionRules    CommissionRule[]
   leadAutomations    LeadAutomation[]
   leadAutomationRuns LeadAutomationRun[]
+  workspaceBranding  WorkspaceBranding?
+  clientInvoices     ClientInvoice[]
+  appNotifications   AppNotification[]
+  invoicePayments    InvoicePayment[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 }
 
 model Client {
   id                 String                    @id @default(cuid())
+  organizationId     String?
+  organization       Organization?             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branchId           String?
+  branchRecord       Branch?                   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  workspaceFormId    String?
+  workspaceForm      WorkspaceForm?            @relation(fields: [workspaceFormId], references: [id], onDelete: SetNull)
   fullName           String
   firstName          String                    @default("")
   middleName         String                    @default("")
@@ -68,11 +82,15 @@ model Client {
   treatments         Treatment[]
   packages           ClinicPackage[]
   sales              Sale[]
+  clientInvoices     ClientInvoice[]
   consentSubmissions ClientConsentSubmission[]
 
   @@index([fullName])
   @@index([mobile])
   @@index([branch])
+  @@index([organizationId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([workspaceFormId])
 }
 
 model Branch {
@@ -99,6 +117,11 @@ model Branch {
   modules               BranchModule[]
   auditLogs             AuditLog[]
   invitationAssignments UserInvitationBranch[]
+  clients               Client[]
+  leads                 Lead[]
+  appointments          Appointment[]
+  defaultWorkspaceForms WorkspaceForm[]        @relation("WorkspaceFormDefaultBranch")
+  workspaceFormLinks    WorkspaceFormBranch[]
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
@@ -514,39 +537,48 @@ model Service {
 }
 
 model Appointment {
-  id               String   @id @default(cuid())
+  id               String         @id @default(cuid())
+  organizationId   String?
+  organization     Organization?  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branchId         String?
+  branchRecord     Branch?        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  workspaceFormId  String?
+  workspaceForm    WorkspaceForm? @relation(fields: [workspaceFormId], references: [id], onDelete: SetNull)
   date             String
   time             String
   clientId         String?
-  clientRecord     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientRecord     Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
   client           String
   serviceId        String?
-  serviceRecord    Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  serviceRecord    Service?       @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   service          String
   branch           String
-  room             String   @default("")
-  staff            String   @default("")
-  duration         Int      @default(0)
-  appointmentType  String   @default("Treatment")
-  insurance        String   @default("")
-  tags             String   @default("")
-  packageName      String   @default("")
-  timezone         String   @default("Asia/Manila")
-  recurrence       String   @default("None")
-  recurrenceUntil  String   @default("")
-  status           String   @default("Pending")
-  deposit          Float    @default(0)
-  leadId           String   @default("")
-  notes            String   @default("")
-  internalNotes    String   @default("")
-  publicBookingKey String?  @unique
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  room             String         @default("")
+  staff            String         @default("")
+  duration         Int            @default(0)
+  appointmentType  String         @default("Treatment")
+  insurance        String         @default("")
+  tags             String         @default("")
+  packageName      String         @default("")
+  timezone         String         @default("Asia/Manila")
+  recurrence       String         @default("None")
+  recurrenceUntil  String         @default("")
+  status           String         @default("Pending")
+  deposit          Float          @default(0)
+  leadId           String         @default("")
+  notes            String         @default("")
+  internalNotes    String         @default("")
+  publicBookingKey String?        @unique
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   @@index([date])
   @@index([branch])
   @@index([status])
   @@index([leadId])
+  @@index([organizationId, date])
+  @@index([branchId, date])
+  @@index([workspaceFormId])
 }
 
 model Treatment {
@@ -1032,6 +1064,12 @@ model PosCart {
 
 model Lead {
   id                  String                 @id @default(cuid())
+  organizationId      String?
+  organization        Organization?          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branchId            String?
+  branchRecord        Branch?                @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  workspaceFormId     String?
+  workspaceForm       WorkspaceForm?         @relation(fields: [workspaceFormId], references: [id], onDelete: SetNull)
   name                String
   firstName           String                 @default("")
   middleName          String                 @default("")
@@ -1112,6 +1150,7 @@ model Lead {
   conversions         LeadConversion[]
   webhookEvents       WebhookEvent[]
   automationRuns      LeadAutomationRun[]
+  clientInvoices      ClientInvoice[]
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
@@ -1125,6 +1164,48 @@ model Lead {
   @@index([nextFollowUpAt])
   @@index([created])
   @@index([linkedClientId])
+  @@index([organizationId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([workspaceFormId])
+}
+
+model WorkspaceForm {
+  id                       String                @id @default(cuid())
+  organizationId           String
+  organization             Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type                     String
+  name                     String
+  slug                     String                @unique
+  status                   String                @default("Active")
+  defaultBranchId          String?
+  defaultBranch            Branch?               @relation("WorkspaceFormDefaultBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
+  source                   String                @default("Website")
+  consentVersion           String                @default("v1")
+  consentText              String                @default("I consent to the collection and use of my information so the clinic can respond to my request.")
+  defaultWorkflowId        String                @default("")
+  notificationRecipientIds String                @default("[]")
+  createdById              String                @default("")
+  updatedById              String                @default("")
+  branches                 WorkspaceFormBranch[]
+  leads                    Lead[]
+  clients                  Client[]
+  appointments             Appointment[]
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+
+  @@unique([organizationId, type])
+  @@index([organizationId, status])
+}
+
+model WorkspaceFormBranch {
+  formId    String
+  form      WorkspaceForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+
+  @@id([formId, branchId])
+  @@index([branchId])
 }
 
 model LeadAutomation {
@@ -1133,6 +1214,10 @@ model LeadAutomation {
   organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name            String              @default("No-response follow-up")
   active          Boolean             @default(false)
+  status          String              @default("Draft")
+  currentVersion  Int                 @default(1)
+  publishedAt     DateTime?
+  archivedAt      DateTime?
   branch          String              @default("All branches")
   delayHours      Int                 @default(48)
   channel         String              @default("Email")
@@ -1140,6 +1225,13 @@ model LeadAutomation {
   prompt          String              @default("Write a warm, concise follow-up that invites the lead to book an appointment.")
   messageTemplate String              @default("Hi {firstName}, just checking in about your interest in {interest}. We’d be happy to help whenever you’re ready. Book here: {bookingLink}")
   bookingUrl      String              @default("")
+  kind            String              @default("follow_up")
+  notifyStaff     Boolean             @default(true)
+  createInvoice   Boolean             @default(false)
+  requireApproval Boolean             @default(true)
+  invoiceAmount   Float               @default(0)
+  invoiceLabel    String              @default("Consultation deposit")
+  invoiceDueDays  Int                 @default(3)
   createdById     String              @default("")
   updatedById     String              @default("")
   runs            LeadAutomationRun[]
@@ -1165,16 +1257,121 @@ model LeadAutomationRun {
   status            String         @default("Processing")
   reason            String         @default("")
   providerReference String         @default("")
+  steps             String         @default("[]")
+  attemptCount      Int            @default(0)
   scheduledAt       DateTime
   attemptedAt       DateTime?
   sentAt            DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
+  invoice           ClientInvoice?
 
   @@unique([automationId, leadId])
   @@index([organizationId, createdAt])
   @@index([status, scheduledAt])
   @@index([leadId, createdAt])
+}
+
+model WorkspaceBranding {
+  id                  String       @id @default(cuid())
+  organizationId      String       @unique
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessName        String
+  logoUrl             String       @default("")
+  primaryColor        String       @default("#9f5964")
+  secondaryColor      String       @default("#efe4e5")
+  address             String       @default("")
+  phone               String       @default("")
+  email               String       @default("")
+  website             String       @default("")
+  invoicePrefix       String       @default("INV")
+  invoiceFooter       String       @default("")
+  paymentInstructions String       @default("")
+  taxRegistration     String       @default("")
+  timezone            String       @default("Asia/Manila")
+  sendingDomain       String       @default("")
+  emailSenderStatus   String       @default("Platform fallback")
+  currency            String       @default("PHP")
+  poweredBy           Boolean      @default(false)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model ClientInvoice {
+  id               String              @id @default(cuid())
+  organizationId   String
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch           String
+  leadId           String?
+  lead             Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  clientId         String?
+  client           Client?             @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  automationRunId  String?             @unique
+  automationRun    LeadAutomationRun?  @relation(fields: [automationRunId], references: [id], onDelete: SetNull)
+  publicToken      String              @unique
+  invoiceNumber    String
+  recipientName    String
+  recipientEmail   String              @default("")
+  currency         String              @default("PHP")
+  subtotal         Float               @default(0)
+  tax              Float               @default(0)
+  discount         Float               @default(0)
+  total            Float               @default(0)
+  amountPaid       Float               @default(0)
+  status           String              @default("Awaiting Approval")
+  issueDate        String
+  dueDate          String
+  notes            String              @default("")
+  brandingSnapshot String              @default("{}")
+  approvedById     String              @default("")
+  approvedAt       DateTime?
+  sentAt           DateTime?
+  viewedAt         DateTime?
+  paymentProvider  String              @default("")
+  paymentReference String              @default("")
+  items            ClientInvoiceItem[]
+  payments         InvoicePayment[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status, createdAt])
+  @@index([branch, createdAt])
+  @@index([leadId])
+}
+
+model InvoicePayment {
+  id                String        @id @default(cuid())
+  organizationId    String
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoiceId         String
+  invoice           ClientInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  provider          String
+  providerReference String
+  amount            Float
+  currency          String        @default("PHP")
+  status            String        @default("Succeeded")
+  posSaleId         String        @default("")
+  rawSummary        String        @default("{}")
+  receivedAt        DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+
+  @@unique([organizationId, provider, providerReference])
+  @@index([invoiceId, receivedAt])
+  @@index([organizationId, status, receivedAt])
+}
+
+model ClientInvoiceItem {
+  id          String        @id @default(cuid())
+  invoiceId   String
+  invoice     ClientInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Float         @default(1)
+  unitPrice   Float         @default(0)
+  total       Float         @default(0)
+  createdAt   DateTime      @default(now())
+
+  @@index([invoiceId])
 }
 
 model LeadActivity {
@@ -1487,7 +1684,9 @@ model AuditLog {
 }
 
 model AppNotification {
-  id                  String   @id @default(cuid())
+  id                  String        @id @default(cuid())
+  organizationId      String?
+  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   module              String
   title               String
   message             String
@@ -1498,6 +1697,7 @@ model AppNotification {
   createdAt           DateTime @default(now())
 
   @@index([createdAt])
+  @@index([organizationId, createdAt])
   @@index([module, createdAt])
 }
 
