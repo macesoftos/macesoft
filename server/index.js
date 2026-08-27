@@ -4712,7 +4712,7 @@ function demoDate(offsetDays = 0) {
   return posCalendarDate(value);
 }
 
-async function seedDemoWorkspace(tx, { branchName, demoKey, ownerName }) {
+async function seedDemoWorkspace(tx, { branchName, branchId, organizationId, demoKey, ownerName }) {
   const suffix = demoKey.slice(0, 6).toUpperCase();
   const variant = Number.parseInt(demoKey.slice(0, 2), 16) % 5;
   const services = await Promise.all([
@@ -4728,6 +4728,8 @@ async function seedDemoWorkspace(tx, { branchName, demoKey, ownerName }) {
   ];
   const clients = await Promise.all(clientNames.map((fullName, index) => tx.client.create({
     data: {
+      organizationId,
+      branchId,
       fullName,
       firstName: fullName.split(" ")[0],
       lastName: fullName.split(" ").slice(1).join(" "),
@@ -4752,6 +4754,8 @@ async function seedDemoWorkspace(tx, { branchName, demoKey, ownerName }) {
   await Promise.all(appointmentRows.map(({ clientRecord, serviceRecord, ...appointment }) => tx.appointment.create({
     data: {
       ...appointment,
+      organizationId,
+      branchId,
       clientId: clientRecord.id,
       client: clientRecord.fullName,
       serviceId: serviceRecord.id,
@@ -4791,6 +4795,8 @@ async function seedDemoWorkspace(tx, { branchName, demoKey, ownerName }) {
     { name: `Casey Lead ${suffix}`, status: "Qualified", interest: services[2].name, source: "Referral", score: 74 },
   ].map((lead, index) => tx.lead.create({ data: {
     ...lead,
+    organizationId,
+    branchId,
     branch: branchName,
     assignedBranch: branchName,
     created: demoDate(-index),
@@ -5555,7 +5561,7 @@ app.post("/api/auth/demo-register", asyncRoute(async (request, response) => {
           isPrimary: true,
         },
       });
-      await seedDemoWorkspace(tx, { branchName, demoKey, ownerName: ownerLabel });
+      await seedDemoWorkspace(tx, { branchName, branchId: branch.id, organizationId: branch.organizationId, demoKey, ownerName: ownerLabel });
       await tx.auditLog.create({ data: {
         time: new Date().toLocaleString("en-PH"),
         actor: name,
