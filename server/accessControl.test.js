@@ -27,6 +27,9 @@ test("only explicitly public API methods and paths bypass session authentication
   assert.equal(isPublicApiRequest("POST", "/api/public-leads"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public-leads"), false);
   assert.equal(isPublicApiRequest("POST", "/api/public-bookings"), true);
+  assert.equal(isPublicApiRequest("GET", "/api/public-registration/open?branch=Mace%20Davao"), true);
+  assert.equal(isPublicApiRequest("POST", "/api/public-registration/open"), false);
+  assert.equal(isPublicApiRequest("GET", "/api/public-registration/qr?branch=Mace%20Davao"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123"), true);
   assert.equal(isPublicApiRequest("POST", "/api/public/flipbooks/token-123/access"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public/flipbooks/token-123/file"), true);

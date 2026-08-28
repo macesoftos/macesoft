@@ -13531,7 +13531,7 @@ function BranchesModule({ branchScope, branchRecords, staff, transactions, appoi
             {branchToEdit && (
               <div className="branch-registration-qr">
                 <img src={`/api/public-registration/qr?branch=${encodeURIComponent(branchToEdit.name)}`} alt={`Client registration QR for ${branchToEdit.name}`} />
-                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified MACE profile.</span><a href={`/register?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
+                <div><strong>Client self-registration QR</strong><span>Display this at reception so clients can create or update their unified MACE profile.</span><a href={`/api/public-registration/open?branch=${encodeURIComponent(branchToEdit.name)}`} target="_blank" rel="noreferrer">Open registration form</a></div>
               </div>
             )}
             <div className="form-grid">

@@ -11,6 +11,7 @@ const PUBLIC_API_RULES = [
   ["GET", /^\/api\/public-leads\/config$/],
   ["POST", /^\/api\/public-leads$/],
   ["POST", /^\/api\/public-bookings$/],
+  ["GET", /^\/api\/public-registration\/open$/],
   ["GET", /^\/api\/public-registration\/qr$/],
   ["POST", /^\/api\/public-registration$/],
   ["GET", /^\/api\/public\/flipbooks\/[^/]+$/],
