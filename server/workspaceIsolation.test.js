@@ -20,6 +20,13 @@ test("workspace branding fallback only selects fields stored on Organization", (
   assert.doesNotMatch(helper, /address: true|phone: true/);
 });
 
+test("workspace-specific inquiry and booking pages use the trusted MACE embed allowlist", () => {
+  assert.match(serverSource, /const workspaceFormEmbedPathPattern = \/\^\\\/\(\?:f\|book\)\\\//);
+  assert.match(serverSource, /workspaceFormEmbedPathPattern\.test\(request\.path\)/);
+  assert.match(serverSource, /https:\/\/macebydrmace\.com/);
+  assert.match(serverSource, /https:\/\/www\.macebydrmace\.com/);
+});
+
 test("public inquiry services must be assigned to the selected tenant branch", () => {
   const handler = serverSource.match(/app\.post\("\/api\/public-leads"[\s\S]*?app\.get\("\/api\/public-registration\/qr"/)?.[0] || "";
   assert.match(handler, /!serviceBranches\.includes\(branch\.name\)/);

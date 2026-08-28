@@ -150,6 +150,7 @@ const inquiryEmbedFrameAncestors = [
   "https://macebydrmace.com",
   "https://www.macebydrmace.com",
 ];
+const workspaceFormEmbedPathPattern = /^\/(?:f|book)\/[a-z0-9][a-z0-9-]{2,119}$/i;
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -171,7 +172,7 @@ app.use(helmet({
   referrerPolicy: { policy: "no-referrer" },
 }));
 app.use((request, response, next) => {
-  if (!["/inquire", "/book"].includes(request.path)) return next();
+  if (!["/inquire", "/book"].includes(request.path) && !workspaceFormEmbedPathPattern.test(request.path)) return next();
 
   response.removeHeader("X-Frame-Options");
   response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
