@@ -14,6 +14,12 @@ test("public forms resolve one active workspace before branches or services are 
   assert.match(handler, /workspaceBrandingForOrganization\(prisma, form\.organizationId\)/);
 });
 
+test("workspace branding fallback only selects fields stored on Organization", () => {
+  const helper = serverSource.match(/async function workspaceBrandingForOrganization[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(helper, /select: \{ id: true, name: true \}/);
+  assert.doesNotMatch(helper, /address: true|phone: true/);
+});
+
 test("public inquiry services must be assigned to the selected tenant branch", () => {
   const handler = serverSource.match(/app\.post\("\/api\/public-leads"[\s\S]*?app\.get\("\/api\/public-registration\/qr"/)?.[0] || "";
   assert.match(handler, /!serviceBranches\.includes\(branch\.name\)/);

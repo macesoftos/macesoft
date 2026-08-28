@@ -3635,7 +3635,7 @@ function brandedSmtpFrom(branding) {
 async function workspaceBrandingForOrganization(database, organizationId) {
   const [branding, organization] = await Promise.all([
     database.workspaceBranding.findUnique({ where: { organizationId } }),
-    database.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true, address: true, phone: true } }),
+    database.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true } }),
   ]);
   return branding || { ...defaultWorkspaceBranding(organization || {}), organizationId };
 }
