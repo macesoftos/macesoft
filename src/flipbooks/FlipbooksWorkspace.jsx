@@ -942,7 +942,7 @@ function CreateFlipbook({ navigate, notify }) {
         {file ? (
           <><span className="flipbook-file-icon"><FileText size={27} /></span><div><strong>{file.name}</strong><small>{pageCount} pages · {formatBytes(file.size)}</small></div><button type="button" onClick={() => { setFile(null); setPageCount(0); setProgress(0); }}>Replace</button></>
         ) : (
-          <><span className="flipbook-upload-icon"><UploadCloud size={28} /></span><h2>{processing ? "Reading your PDF…" : "Drop your PDF here"}</h2><p>or</p><button className="flipbook-secondary" type="button" onClick={() => inputRef.current?.click()}>Browse files</button><small>PDF only · Up to 30 MB</small></>
+          <><span className="flipbook-upload-icon"><UploadCloud size={28} /></span><h2>{processing ? "Reading your PDF…" : "Drop your PDF here"}</h2><p>or</p><button className="flipbook-secondary" type="button" onClick={() => inputRef.current?.click()}>Browse files</button><small>PDF only · Up to 100 MB</small></>
         )}
         <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => void chooseFile(event.target.files?.[0])} />
       </section>
