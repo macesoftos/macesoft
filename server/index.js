@@ -6287,9 +6287,25 @@ app.post("/api/forms/staff", asyncRoute(async (request, response) => {
   const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
   if (!staff) throw apiError("Employee profile not found.", 404);
   const branch = clean(request.body?.branch) || clean(actor.access?.activeBranch?.name) || staff.branch;
+  const assignedBranches = uniqueStrings([staff.branch, ...parseJsonList(staff.branches)]);
+  const [formBranch, staffTenantBranch] = await Promise.all([
+    prisma.branch.findFirst({ where: { name: branch, organizationId: actor.organizationId, status: "Active" } }),
+    prisma.branch.findFirst({ where: { name: { in: assignedBranches }, organizationId: actor.organizationId } }),
+  ]);
+  if (!formBranch || !staffTenantBranch || !assignedBranches.includes(branch)) {
+    throw apiError("Employee profile is not assigned to this organization and branch.", 404);
+  }
   if (!reviewer && !canAccessBranch(actor, branch)) throw apiError("You do not have access to this branch.", 403);
   if (reviewer) assertMutationAllowed(request, "staff", branch);
-  const recipients = await notificationRecipientsForOrganization(prisma, { organizationId: actor.organizationId, branches: [branch], module: "staff" });
+  const eligibleRecipientIds = await notificationRecipientsForOrganization(prisma, { organizationId: actor.organizationId, branches: [branch], module: "staff" });
+  const eligibleAccounts = eligibleRecipientIds.length
+    ? await prisma.account.findMany({ where: { id: { in: eligibleRecipientIds } }, include: accountAccessInclude })
+    : [];
+  const recipientAccountIds = eligibleAccounts.filter((account) => {
+    if (hasOrganizationWideAccess(account)) return canReviewStaffForms(publicAccount(account, ALL_BRANCHES_ID));
+    const membership = account.branchMemberships.find((item) => item.status === "Active" && item.branch?.name === branch);
+    return Boolean(membership && canReviewStaffForms(publicAccount(account, membership.branchId)));
+  }).map((account) => account.id);
   const result = await prisma.$transaction(async (tx) => {
     const form = await tx.staffForm.create({
       data: {
@@ -6309,7 +6325,7 @@ app.post("/api/forms/staff", asyncRoute(async (request, response) => {
       actor: actor.name,
       branches: [branch],
       organizationId: actor.organizationId,
-      recipientAccountIds: recipients.filter((account) => canReviewStaffForms(publicAccount(account))).map((account) => account.id),
+      recipientAccountIds,
       message: `${staff.name} submitted ${formType}.`,
       module: "staff",
       recordId: form.id,
