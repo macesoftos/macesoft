@@ -612,9 +612,10 @@ try {
 
   const crossBranchUpdate = await jsonRequestAs(`/api/resources/clients/${bgcClientId}`, {
     ...createdBgcClient.payload.record,
-    fullName: "Cross-branch update must fail",
+    fullName: "Automated BGC Smoke Client Updated From Davao",
   }, davaoReceptionist, { method: "PUT" });
-  assert(crossBranchUpdate.response.status === 403, "Davao user could update a BGC client");
+  assert(crossBranchUpdate.response.ok, "Davao receptionist could not update a client visiting from BGC");
+  assert(crossBranchUpdate.payload.record?.branch === "Mace BGC", "cross-branch client update changed the registration branch");
   const invalidAllBranchesList = await request("/api/bootstrap", { headers: invalidAllBranchesReceptionist });
   assert(invalidAllBranchesList.response.ok && invalidAllBranchesList.payload.clients.length === 0, "an operational All branches account received client records");
 
