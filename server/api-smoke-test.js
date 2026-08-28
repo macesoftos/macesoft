@@ -593,10 +593,14 @@ try {
   const davaoReceptionist = branchHeaders("Receptionist", "Mace Davao");
   const bgcReceptionist = branchHeaders("Receptionist", "Mace BGC");
   const invalidAllBranchesReceptionist = branchHeaders("Receptionist", "All branches");
-  const blockedDavaoClients = await request("/api/resources/clients", { headers: davaoReceptionist });
-  const blockedBgcClients = await request("/api/resources/clients", { headers: bgcReceptionist });
-  assert(blockedDavaoClients.response.status === 403, "POS-only Davao user could open the Clients module API");
-  assert(blockedBgcClients.response.status === 403, "POS-only BGC user could open the Clients module API");
+  const davaoClientDirectory = await request("/api/resources/clients", { headers: davaoReceptionist });
+  const bgcClientDirectory = await request("/api/resources/clients", { headers: bgcReceptionist });
+  assert(davaoClientDirectory.response.ok, "Davao receptionist could not open the unified Clients directory");
+  assert(bgcClientDirectory.response.ok, "BGC receptionist could not open the unified Clients directory");
+  assert(davaoClientDirectory.payload.some((client) => client.id === clientId) && davaoClientDirectory.payload.some((client) => client.id === bgcClientId), "Davao receptionist did not receive the unified client directory");
+  assert(bgcClientDirectory.payload.some((client) => client.id === clientId) && bgcClientDirectory.payload.some((client) => client.id === bgcClientId), "BGC receptionist did not receive the unified client directory");
+  const blockedReceptionistExpenses = await request("/api/resources/expenses", { headers: davaoReceptionist });
+  assert(blockedReceptionistExpenses.response.status === 403, "Receptionist could open an owner-only Expenses API");
   const davaoPos = await request("/api/bootstrap", { headers: davaoReceptionist });
   const bgcPos = await request("/api/bootstrap", { headers: bgcReceptionist });
   assert(davaoPos.response.ok && davaoPos.payload.clients.some((client) => client.id === clientId), "Davao POS did not include its own customer selector data");
