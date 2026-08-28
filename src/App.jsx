@@ -139,6 +139,8 @@ import {
   revokeInvitation,
   inspectInvitation,
   importInventoryCsvRecords,
+  importHistoricalSales,
+  transferInventoryStock,
   scheduleLeadFollowUp,
   saveResourceRecord,
   savePayrollDayOffSwap,
@@ -1967,6 +1969,9 @@ function App() {
     for (const pkg of result.packages ?? []) {
       upsertById(setPackages, pkg);
     }
+    for (const treatment of result.treatments ?? []) {
+      upsertById(setTreatments, treatment);
+    }
     if (result.client) upsertById(setClients, result.client);
     if (result.posCartId) removeById(setPosCarts, result.posCartId);
     applyAuditLog(result.auditLog);
@@ -2045,6 +2050,8 @@ function App() {
       id: values.id || createId("cl"),
       balance: Number(values.balance || 0),
       giftBalance: Number(values.giftBalance || 0),
+      storeCredit: Number(values.storeCredit || 0),
+      serviceCredit: Number(values.serviceCredit || 0),
       marketingOptIn: Boolean(values.marketingOptIn),
     };
 
@@ -2067,6 +2074,8 @@ function App() {
         id: values.id || createId("cl"),
         balance: Number(values.balance || 0),
         giftBalance: Number(values.giftBalance || 0),
+        storeCredit: Number(values.storeCredit || 0),
+        serviceCredit: Number(values.serviceCredit || 0),
         marketingOptIn: Boolean(values.marketingOptIn),
       };
 
@@ -2119,7 +2128,8 @@ function App() {
       packageSessions,
       packagePrice,
       serviceValue: Number(values.serviceValue || (packageSessions ? packagePrice / packageSessions : values.price) || 0),
-      recommendedIntervalDays: Number(values.recommendedIntervalDays || 0),
+      recommendedIntervalValue: Number(values.recommendedIntervalValue || 0),
+      maintenanceIntervalValue: Number(values.maintenanceIntervalValue || 0),
       active: values.active !== false,
       pos: values.pos !== false,
       branches: splitList(values.branches),
@@ -2194,6 +2204,8 @@ function App() {
         supplier: values.supplier || "",
         receivedBy: values.receivedBy || "",
         checkNumber: values.checkNumber || "",
+        expiry: values.expiry || "",
+        batch: values.batch || "",
         unit: values.unit || "",
         notes: values.notes || "",
       });
@@ -2205,6 +2217,31 @@ function App() {
     } catch (error) {
       notify(error.message || "Unable to save stock movement.", "error");
     }
+  }
+
+  async function transferStock(id, values = {}) {
+    const result = await transferInventoryStock(id, {
+      targetBranch: values.targetBranch,
+      qty: Number(values.qty || 0),
+      date: values.date || todayDate(),
+      receivedBy: values.receivedBy || session?.name || "",
+      notes: values.notes || "",
+    });
+    for (const item of result.inventory ?? []) upsertById(setInventory, item);
+    for (const movement of result.movements ?? []) upsertById(setInventoryMovements, movement);
+    applyAuditLog(result.auditLog);
+    closeModal();
+    notify("Inventory transferred between branches.");
+  }
+
+  async function importSales(records) {
+    const result = await importHistoricalSales(records);
+    for (const sale of result.sales ?? []) upsertById(setTransactions, sale);
+    for (const treatment of result.treatments ?? []) upsertById(setTreatments, treatment);
+    for (const client of result.clients ?? []) upsertById(setClients, client);
+    applyAuditLog(result.auditLog);
+    notify(`Historical sales imported: ${result.imported || 0} added, ${result.skipped || 0} skipped.`);
+    return result;
   }
 
   async function saveLead(values) {
@@ -2513,11 +2550,18 @@ function App() {
     notify("Package installment recorded.");
   }
 
-  async function redeemPackage(id) {
+  async function redeemPackage(values) {
     try {
-      const result = await redeemPackageRecord(id);
+      const result = await redeemPackageRecord(values.id, {
+        date: values.date || todayDate(),
+        branch: values.branch || (branchScope !== "All branches" ? branchScope : ""),
+        service: values.service || "",
+        provider: values.provider || "",
+        notes: values.notes || "",
+      });
       upsertById(setPackages, result.record);
       applyAuditLog(result.auditLog);
+      closeModal();
       notify("Package session redeemed.");
     } catch (error) {
       notify(error.message || "Unable to redeem package session.", "error");
@@ -2832,6 +2876,7 @@ function App() {
       </>
     );
   }
+
 
   if (isFlipbooksView) {
     return (
@@ -3242,8 +3287,8 @@ function App() {
               packages={scopedPackages}
               giftCertificates={giftCertificates}
               clients={clients}
+              branchRecords={branchRecords}
               openModal={openModal}
-              redeemPackage={redeemPackage}
               globalSearch={globalSearch}
             />
           )}
@@ -3356,7 +3401,10 @@ function App() {
               inventory={scopedInventory}
               staff={staff}
               clients={clients}
+              branchRecords={branchRecords}
               globalSearch={globalSearch}
+              onImportSales={importSales}
+              canImportSales={canManageOrganization(session.role)}
             />
           )}
           {activeModule === "booking" && (
@@ -3415,12 +3463,14 @@ function App() {
         saveService={saveService}
         saveInventory={saveInventory}
         receiveStock={receiveStock}
+        transferStock={transferStock}
         saveLead={saveLead}
         saveTreatment={saveTreatment}
         saveExpense={saveExpense}
         saveStaff={saveStaff}
         savePackage={savePackage}
         savePackageInstallment={savePackageInstallment}
+        redeemPackage={redeemPackage}
         saveGiftCertificate={saveGiftCertificate}
         saveCampaign={saveCampaign}
         saveSettings={saveSettings}
@@ -3463,7 +3513,7 @@ function PrintableReceipt({ receipt, settings, services = [] }) {
       recommendedIntervalDays: Number(item.recommendedIntervalDays || service?.recommendedIntervalDays || 0),
     };
   });
-  const serviceProtocolItems = items.filter((item) => item.type === "Service" && (item.aftercare || Number(item.recommendedIntervalDays) > 0));
+  const serviceProtocolItems = items.filter((item) => item.aftercare || Number(item.recommendedIntervalDays) > 0);
   const payments = receipt?.payments ?? [];
   const subtotal = Number(receipt?.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1), 0));
   const discount = Number(receipt?.discount || 0);
@@ -3488,6 +3538,7 @@ function PrintableReceipt({ receipt, settings, services = [] }) {
             <div><span>Client</span><strong>{receipt.client}</strong></div>
             <div><span>Branch</span><strong>{receipt.branch}</strong></div>
             <div><span>Staff</span><strong>{receipt.staff}</strong></div>
+            {receipt.room && <div><span>Room / couch</span><strong>{receipt.room}</strong></div>}
           </div>
 
           <table className="print-receipt-table">
@@ -3518,7 +3569,7 @@ function PrintableReceipt({ receipt, settings, services = [] }) {
 
           {serviceProtocolItems.length > 0 && (
             <section className="print-receipt-aftercare">
-              <strong>Aftercare instructions & service interval</strong>
+              <strong>Directions / aftercare & service interval</strong>
               {serviceProtocolItems.map((item, index) => {
                 const intervalDays = Number(item.recommendedIntervalDays || 0);
                 const nextDate = Number(item.recommendedIntervalDays) > 0 && receipt.date
@@ -3619,6 +3670,17 @@ function HelperText({ children }) {
 
 function DataTable(props) {
   return <SmartTable {...props} />;
+}
+
+function expiryStatus(item) {
+  if (!item.expiry) return "Not recorded";
+  const expiry = new Date(`${item.expiry}T00:00:00`);
+  if (Number.isNaN(expiry.getTime())) return "Not recorded";
+  const now = new Date(`${todayDate()}T00:00:00`);
+  if (expiry < now) return "Expired";
+  const warningDate = new Date(now);
+  warningDate.setMonth(warningDate.getMonth() + 10);
+  return expiry <= warningDate ? "Near expiry" : "Current";
 }
 
 function EdgeRevealNavigation({ activeModule, open, onClose, onNavigate, onOpen, sections, session }) {
@@ -4149,7 +4211,7 @@ function publicLeadAttribution() {
 
 function PublicClientRegistrationPage() {
   const branch = new URLSearchParams(window.location.search).get("branch") || "";
-  const [form, setForm] = useState({ firstName: "", middleName: "", lastName: "", birthday: "", gender: "", civilStatus: "", mobile: "", email: "", street: "", barangay: "", city: "", province: "", occupation: "", emergencyName: "", emergencyPhone: "", marketingOptIn: false, privacyConsent: false, clinicWebsite: "" });
+  const [form, setForm] = useState({ firstName: "", middleName: "", lastName: "", birthday: "", gender: "", civilStatus: "", mobile: "", email: "", street: "", barangay: "", city: "", province: "", occupation: "", emergencyName: "", emergencyPhone: "", allergies: "", pastMedicalHistory: "", aestheticHistory: "", familyHistory: "", surgicalHistory: "", obstetricHistory: "", medications: "", marketingOptIn: false, privacyConsent: false, clinicWebsite: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -4197,6 +4259,13 @@ function PublicClientRegistrationPage() {
               <label><span>Occupation</span><input value={form.occupation} onChange={(event) => update("occupation", event.target.value)} /></label>
               <label><span>Emergency contact name</span><input value={form.emergencyName} onChange={(event) => update("emergencyName", event.target.value)} /></label>
               <label><span>Emergency contact number</span><input value={form.emergencyPhone} onChange={(event) => update("emergencyPhone", event.target.value)} /></label>
+              <label className="span-2"><span>Allergies</span><textarea value={form.allergies} onChange={(event) => update("allergies", event.target.value)} /></label>
+              <label className="span-2"><span>Past medical history</span><textarea value={form.pastMedicalHistory} onChange={(event) => update("pastMedicalHistory", event.target.value)} placeholder="Conditions, hospitalizations, or relevant health history" /></label>
+              <label className="span-2"><span>Aesthetic treatment history</span><textarea value={form.aestheticHistory} onChange={(event) => update("aestheticHistory", event.target.value)} /></label>
+              <label className="span-2"><span>Family medical history</span><textarea value={form.familyHistory} onChange={(event) => update("familyHistory", event.target.value)} /></label>
+              <label className="span-2"><span>Surgical history</span><textarea value={form.surgicalHistory} onChange={(event) => update("surgicalHistory", event.target.value)} /></label>
+              <label className="span-2"><span>Obstetric history (if applicable)</span><textarea value={form.obstetricHistory} onChange={(event) => update("obstetricHistory", event.target.value)} /></label>
+              <label className="span-2"><span>Current medications</span><textarea value={form.medications} onChange={(event) => update("medications", event.target.value)} /></label>
               <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingOptIn} onChange={(event) => update("marketingOptIn", event.target.checked)} /><span>I would like to receive MACE care reminders and offers.</span></label>
               <label className="checkbox-field span-2"><input required type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} /><span>I consent to MACE securely collecting this information for my clinic profile. *</span></label>
               <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} value={form.clinicWebsite} onChange={(event) => update("clinicWebsite", event.target.value)} /></label>
@@ -4212,7 +4281,7 @@ function PublicClientRegistrationPage() {
 function PublicLeadCapturePage({ initialMode = "inquiry" }) {
   const isContactEmbed = new URLSearchParams(window.location.search).get("embed") === "contact";
   const [formMode, setFormMode] = useState(initialMode);
-  const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [] });
+  const [config, setConfig] = useState({ company: "MACE by Dr. Mace", tagline: "The brand behind beautiful faces.", branches: [], services: [], staff: [] });
   const [form, setForm] = useState({
     fullName: "",
     mobile: "",
@@ -4261,11 +4330,13 @@ function PublicLeadCapturePage({ initialMode = "inquiry" }) {
         if (cancelled) return;
         const branches = Array.isArray(result.branches) ? result.branches : [];
         const services = Array.isArray(result.services) ? result.services : [];
+        const staff = Array.isArray(result.staff) ? result.staff : [];
         setConfig({
           company: result.company || "MACE by Dr. Mace",
           tagline: result.tagline || "The brand behind beautiful faces.",
           branches,
           services,
+          staff,
         });
         const defaultBranch = branches[0]?.name || "";
         const defaultService = services.find((service) => {
@@ -4434,6 +4505,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
     date: todayDate(),
     time: "",
     concern: "",
+    preferredStaff: "Any available",
     marketingConsent: false,
     privacyConsent: false,
     clinicWebsite: "",
@@ -4449,6 +4521,12 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
 
   const selectedService = availableServices.find((service) => service.id === form.serviceId);
   const selectedBranch = config.branches.find((branch) => branch.name === form.branch);
+  const availableProviders = useMemo(() => (config.staff || []).filter((person) => {
+    const assignedBranches = Array.isArray(person.branches) ? person.branches : splitList(person.branches);
+    const branchMatches = person.branch === form.branch || assignedBranches.includes(form.branch) || person.branch === "All branches";
+    const allowedRoles = selectedService?.staffRoles || [];
+    return branchMatches && (!allowedRoles.length || allowedRoles.includes("All staff") || allowedRoles.includes(person.role));
+  }), [config.staff, form.branch, selectedService?.staffRoles]);
   const timeOptions = useMemo(() => {
     const duration = Math.max(15, Number(selectedService?.duration || 60));
     const window = branchOperatingWindow(selectedBranch, form.date);
@@ -4470,6 +4548,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
       ...current,
       branch: current.branch || defaultBranch,
       serviceId: validServices.some((service) => service.id === current.serviceId) ? current.serviceId : validServices[0]?.id || "",
+      preferredStaff: "Any available",
     }));
   }, [config.branches, config.services, form.branch]);
 
@@ -4480,7 +4559,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
   }, [form.time, timeOptions]);
 
   function updateField(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => ({ ...current, [field]: value, ...(field === "serviceId" ? { preferredStaff: "Any available" } : {}) }));
   }
 
   function chooseBranch(branch) {
@@ -4492,6 +4571,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
       ...current,
       branch,
       serviceId: validServices.some((service) => service.id === current.serviceId) ? current.serviceId : validServices[0]?.id || "",
+      preferredStaff: "Any available",
     }));
   }
 
@@ -4564,6 +4644,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig }) {
         <label><span>Service *</span><select disabled={loadingConfig || !availableServices.length} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)} required>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name} - {servicePriceLabel(service)}</option>)}</select></label>
         <label><span>Preferred date *</span><input type="date" min={todayDate()} value={form.date} onChange={(event) => updateField("date", event.target.value)} required /></label>
         <label><span>Preferred time *</span><select disabled={!timeOptions.length} value={form.time} onChange={(event) => updateField("time", event.target.value)} required>{timeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+        <label className="span-2"><span>Preferred service provider</span><select value={form.preferredStaff} onChange={(event) => updateField("preferredStaff", event.target.value)}><option>Any available</option>{availableProviders.map((person) => <option key={person.id} value={person.name}>{person.name} · {person.role}</option>)}</select></label>
         <small className="span-2 public-lead-contact-help">Available request times follow the selected branch&apos;s operating hours. 12:00 noon remains bookable.</small>
 
         <label className="span-2"><span>Concern or notes</span><textarea rows={4} maxLength={1000} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder="Tell us what you would like to address during your visit." /></label>
@@ -5690,6 +5771,8 @@ function POSModule({
   const [manualDiscountTargetKey, setManualDiscountTargetKey] = useState("");
   const [isDiscountPanelExpanded, setIsDiscountPanelExpanded] = useState(false);
   const [saleDate, setSaleDate] = useState(todayDate());
+  const [room, setRoom] = useState("");
+  const [arrivalTime, setArrivalTime] = useState("");
   const [testMode, setTestMode] = useState(false);
   const [activeCartId, setActiveCartId] = useState("");
   const [catalogTab, setCatalogTab] = useState("Services");
@@ -5716,10 +5799,20 @@ function POSModule({
     [branch, posCarts],
   );
   const activeOpenCart = posCarts.find((openCart) => openCart.id === activeCartId);
+  const selectedBranchRecord = branchRecords.find((item) => item.name === branch);
+  const roomOptions = useMemo(() => [
+    ...(selectedBranchRecord?.rooms || []),
+    ...Array.from({ length: Number(selectedBranchRecord?.couches || 0) }, (_, index) => `Couch ${index + 1}`),
+  ], [selectedBranchRecord]);
 
   useEffect(() => {
     if (branchScope !== "All branches") setBranch(branchScope);
   }, [branchScope]);
+
+  useEffect(() => {
+    if (room && roomOptions.includes(room)) return;
+    setRoom(roomOptions[0] || "");
+  }, [room, roomOptions]);
 
   useEffect(() => {
     if (activeOpenCart?.branch === branch) return;
@@ -5734,6 +5827,8 @@ function POSModule({
       setManualDiscountScope(next.manualDiscountScope || "Transaction");
       setManualDiscountTargetKey(next.manualDiscountTargetKey || "");
       setSaleDate(next.saleDate || todayDate());
+      setRoom(next.room || "");
+      setArrivalTime(next.arrivalTime || "");
       setTestMode(Boolean(next.testMode));
       setCart(Array.isArray(next.items) ? next.items : []);
     } else {
@@ -5745,6 +5840,8 @@ function POSModule({
       setManualDiscountScope("Transaction");
       setManualDiscountTargetKey("");
       setSaleDate(todayDate());
+      setRoom("");
+      setArrivalTime("");
       setTestMode(false);
     }
   }, [activeOpenCart?.branch, branch, openCartsForBranch, setCart]);
@@ -5764,16 +5861,18 @@ function POSModule({
       manualDiscountScope,
       manualDiscountTargetKey,
       saleDate,
+      room,
+      arrivalTime,
       testMode,
     };
-    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, manualDiscountType: activeOpenCart.manualDiscountType || "", manualDiscountValue: Number(activeOpenCart.manualDiscountValue || 0), manualDiscountScope: activeOpenCart.manualDiscountScope || "Transaction", manualDiscountTargetKey: activeOpenCart.manualDiscountTargetKey || "", saleDate: activeOpenCart.saleDate || todayDate(), testMode: Boolean(activeOpenCart.testMode) });
-    const pending = JSON.stringify({ clientId, staff: staffName, items: cart, discountId, manualDiscountType, manualDiscountValue: Number(manualDiscountValue || 0), manualDiscountScope, manualDiscountTargetKey, saleDate, testMode });
+    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, manualDiscountType: activeOpenCart.manualDiscountType || "", manualDiscountValue: Number(activeOpenCart.manualDiscountValue || 0), manualDiscountScope: activeOpenCart.manualDiscountScope || "Transaction", manualDiscountTargetKey: activeOpenCart.manualDiscountTargetKey || "", saleDate: activeOpenCart.saleDate || todayDate(), room: activeOpenCart.room || "", arrivalTime: activeOpenCart.arrivalTime || "", testMode: Boolean(activeOpenCart.testMode) });
+    const pending = JSON.stringify({ clientId, staff: staffName, items: cart, discountId, manualDiscountType, manualDiscountValue: Number(manualDiscountValue || 0), manualDiscountScope, manualDiscountTargetKey, saleDate, room, arrivalTime, testMode });
     if (stored === pending) return undefined;
     const timer = window.setTimeout(() => {
       void saveOpenCart(nextDraft).catch((error) => notify(error.message || "Unable to save the open POS cart.", "error"));
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [activeOpenCart, branch, cart, clientId, clients, discountId, manualDiscountScope, manualDiscountTargetKey, manualDiscountType, manualDiscountValue, notify, saleDate, saveOpenCart, staffName, testMode]);
+  }, [activeOpenCart, arrivalTime, branch, cart, clientId, clients, discountId, manualDiscountScope, manualDiscountTargetKey, manualDiscountType, manualDiscountValue, notify, room, saleDate, saveOpenCart, staffName, testMode]);
 
   useEffect(() => {
     if (!canManagePosCatalog && posScreen !== "Checkout") {
@@ -5916,6 +6015,8 @@ function POSModule({
       manualDiscountScope,
       manualDiscountTargetKey,
       saleDate,
+      room,
+      arrivalTime,
       testMode,
     });
   }
@@ -5933,6 +6034,8 @@ function POSModule({
       setManualDiscountScope(openCart.manualDiscountScope || "Transaction");
       setManualDiscountTargetKey(openCart.manualDiscountTargetKey || "");
       setSaleDate(openCart.saleDate || todayDate());
+      setRoom(openCart.room || "");
+      setArrivalTime(openCart.arrivalTime || "");
       setTestMode(Boolean(openCart.testMode));
       setCart(Array.isArray(openCart.items) ? openCart.items : []);
       setCheckoutStep("review");
@@ -5962,6 +6065,8 @@ function POSModule({
         manualDiscountScope: "Transaction",
         manualDiscountTargetKey: "",
         saleDate: todayDate(),
+        room: "",
+        arrivalTime: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }),
         testMode: false,
       });
       setActiveCartId(created.id);
@@ -5972,6 +6077,8 @@ function POSModule({
       setManualDiscountScope("Transaction");
       setManualDiscountTargetKey("");
       setSaleDate(created.saleDate || todayDate());
+      setRoom(created.room || "");
+      setArrivalTime(created.arrivalTime || "");
       setTestMode(Boolean(created.testMode));
       setCart([]);
       setCheckoutStep("review");
@@ -6068,7 +6175,11 @@ function POSModule({
         openPayment({
           clientId,
           clientName: client?.fullName ?? "Walk-in",
+          storeCredit: Number(client?.storeCredit || 0),
+          serviceCredit: Number(client?.serviceCredit || 0),
           branch,
+          room,
+          arrivalTime,
           staff: staffName,
           cart,
           subtotal,
@@ -6110,13 +6221,17 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [activeCartId, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, saleDate, setCart, staffName, subtotal, testMode, total]);
+  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.serviceCredit, client?.storeCredit, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, setCart, staffName, subtotal, testMode, total]);
 
   function createPaymentDraft(patch = {}) {
     return {
       clientId,
       clientName: client?.fullName ?? "Walk-in",
+      storeCredit: Number(client?.storeCredit || 0),
+      serviceCredit: Number(client?.serviceCredit || 0),
       branch,
+      room,
+      arrivalTime,
       staff: staffName,
       cart,
       subtotal,
@@ -6163,6 +6278,8 @@ function POSModule({
       client: client?.fullName ?? "Walk-in",
       branch,
       staff: staffName || "Unassigned",
+      room,
+      arrivalTime,
       items: cart.map((item) => ({
         serviceId: item.serviceId || "",
         name: item.name,
@@ -6440,7 +6557,7 @@ function POSModule({
                     tabIndex={catalogFocusIndex === index ? 0 : -1}
                     onFocus={() => setCatalogFocusIndex(index)}
                     onKeyDown={(event) => handleCatalogItemKeyDown(event, index)}
-                    onClick={() => void addPosCartItem({ key: `product-${item.id}`, inventoryId: item.id, type: "Product", name: item.item, category: item.category, price: item.price })}
+                    onClick={() => void addPosCartItem({ key: `product-${item.id}`, inventoryId: item.id, type: "Product", name: item.item, category: item.category, price: item.price, aftercare: item.directions || "" })}
                     type="button"
                     disabled={item.stock <= 0}
                   >
@@ -6844,6 +6961,17 @@ function POSModule({
                 <select value={staffName} onChange={(event) => setStaffName(event.target.value)}>
                   {staffAtBranch.map((person) => <option key={person.id}>{person.name}</option>)}
                 </select>
+              </label>
+              <label className="stacked-field">
+                <span>Assigned room / couch</span>
+                <select value={room} onChange={(event) => setRoom(event.target.value)}>
+                  <option value="">Not assigned</option>
+                  {roomOptions.map((name) => <option key={name}>{name}</option>)}
+                </select>
+              </label>
+              <label className="stacked-field">
+                <span>Client arrival time</span>
+                <input type="time" value={arrivalTime} onChange={(event) => setArrivalTime(event.target.value)} />
               </label>
               <label className="stacked-field">
                 <span>Transaction date</span>
@@ -10069,6 +10197,8 @@ function ClientProfileDialog({
               <RecordItem label="Email" value={sensitiveAllowed ? client.email : "Restricted"} />
               <RecordItem label="Branches visited" value={branchesVisited.join(", ")} />
               <RecordItem label="Total spent since first visit" value={money.format(totalSpent)} />
+              <RecordItem label="Client credit" value={money.format(client.storeCredit || 0)} />
+              <RecordItem label="Service credit" value={money.format(client.serviceCredit || 0)} />
               <RecordItem label="Date of birth / age" value={client.birthday ? `${formatDate(client.birthday)}${age === null ? "" : ` · ${age} years old`}` : "Not recorded"} />
               <RecordItem label="Civil status" value={client.civilStatus} />
               <RecordItem label="Address" value={[client.street, client.barangay, client.city, client.province].filter(Boolean).join(", ") || client.address} />
@@ -10079,6 +10209,11 @@ function ClientProfileDialog({
               <RecordItem label="Contraindications" value={sensitiveAllowed ? client.contraindications : "Restricted"} />
               <RecordItem label="Skin concerns" value={client.skinConcerns} />
               <RecordItem label="Package balance" value={client.packageBalance} />
+              <RecordItem label="Past medical history" value={sensitiveAllowed ? client.pastMedicalHistory : "Restricted"} />
+              <RecordItem label="Aesthetic history" value={sensitiveAllowed ? client.aestheticHistory : "Restricted"} />
+              <RecordItem label="Family history" value={sensitiveAllowed ? client.familyHistory : "Restricted"} />
+              <RecordItem label="Surgical / obstetric history" value={sensitiveAllowed ? [client.surgicalHistory, client.obstetricHistory].filter(Boolean).join(" · ") : "Restricted"} />
+              <RecordItem label="Current medications" value={sensitiveAllowed ? client.medications : "Restricted"} />
             </div>
             <div className="dashboard-grid compact client-profile-panels">
               <MiniPanel icon={HeartPulse} title="Treatment history" rows={treatments.map((item) => `${item.date} · ${item.branch || "Branch not recorded"} · ${item.service} · ${item.provider || "Provider N/A"}`)} empty="No treatments yet." />
@@ -10610,14 +10745,38 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
             { key: "branch", label: "Branch", className: "inventory-col-branch" },
             { key: "stock", label: "Stock", className: "inventory-col-stock inventory-col-center", render: (row) => `${row.stock} ${row.unit}` },
             { key: "status", label: "Status", className: "inventory-col-status inventory-col-center", render: (row) => <StatusBadge status={stockStatus(row)} /> },
+            { key: "expiry", label: "Expiry", render: (row) => <span><StatusBadge status={expiryStatus(row)} />{row.expiry ? <small className="table-cell-note">{formatDate(row.expiry)}</small> : null}</span> },
             {
               key: "actions",
               label: "Actions",
               className: "inventory-col-actions inventory-col-center",
               render: (row) => (
                 <div className="inline-actions">
-                  <button type="button" onClick={() => openModal("inventory-receive", { inventoryId: row.id, unit: row.unit, supplier: row.supplier })}><PackagePlus size={15} /> Receive</button>
-                  <button type="button" onClick={() => openModal("inventory", row)}><Edit3 size={15} /> Edit</button>
+                  <button
+                    type="button"
+                    aria-label={`Receive stock for ${row.item}`}
+                    title="Receive stock"
+                    onClick={() => openModal("inventory-receive", { inventoryId: row.id, unit: row.unit, supplier: row.supplier })}
+                  >
+                    <PackagePlus size={15} aria-hidden="true" /> <span className="inventory-action-label">Receive</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Transfer ${row.item}`}
+                    title="Transfer stock"
+                    disabled={Number(row.stock || 0) <= 0}
+                    onClick={() => openModal("inventory-transfer", { inventoryId: row.id, item: row.item, branch: row.branch })}
+                  >
+                    <RefreshCw size={15} aria-hidden="true" /> <span className="inventory-action-label">Transfer</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Edit ${row.item}`}
+                    title="Edit product"
+                    onClick={() => openModal("inventory", row)}
+                  >
+                    <Edit3 size={15} aria-hidden="true" /> <span className="inventory-action-label">Edit</span>
+                  </button>
                 </div>
               ),
               exportValue: () => "",
@@ -10640,6 +10799,8 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
             { key: "supplier", label: "Supplier" },
             { key: "receivedBy", label: "Received by" },
             { key: "checkNumber", label: "Check no." },
+            { key: "expiry", label: "Expiry", render: (row) => row.expiry ? formatDate(row.expiry) : "—" },
+            { key: "batch", label: "Batch" },
             { key: "reason", label: "Reason" },
             { key: "user", label: "User" },
           ]}
@@ -10649,7 +10810,7 @@ function InventoryModule({ inventory, movements, openModal, globalSearch }) {
   );
 }
 
-function PackagesModule({ packages, giftCertificates = [], clients, openModal, redeemPackage, globalSearch }) {
+function PackagesModule({ packages, giftCertificates = [], clients, openModal, globalSearch }) {
   const [giftCertificateQuery, setGiftCertificateQuery] = useState("");
   const normalizedGiftCertificateQuery = giftCertificateQuery.trim().toLowerCase();
   const normalizedPackageQuery = globalSearch.trim().toLowerCase();
@@ -10690,12 +10851,12 @@ function PackagesModule({ packages, giftCertificates = [], clients, openModal, r
                 <summary>Payment & session history</summary>
                 <div>
                   {(pkg.paymentHistory || []).slice(-3).map((entry, index) => <span key={`payment-${index}`}>{formatDate(entry.date)} · {money.format(entry.amount)} · {entry.method || "Payment"}</span>)}
-                  {(pkg.sessionHistory || []).slice(-3).map((entry, index) => <span key={`session-${index}`}>{formatDate(entry.date)} · {entry.sessions > 0 ? "+" : ""}{entry.sessions} session · {entry.branch || pkg.branch}</span>)}
+                  {(pkg.sessionHistory || []).slice(-3).map((entry, index) => <span key={`session-${index}`}>{formatDate(entry.date)} · {entry.sessions > 0 ? "+" : ""}{entry.sessions} session · {entry.branch || pkg.branch}{entry.service ? ` · ${entry.service}` : ""}{entry.provider ? ` · ${entry.provider}` : ""}{entry.notes ? ` · ${entry.notes}` : ""}</span>)}
                   {!pkg.paymentHistory?.length && !pkg.sessionHistory?.length && <span>No package activity recorded yet.</span>}
                 </div>
               </details>
               <div className="inline-actions">
-                <button type="button" onClick={() => redeemPackage(pkg.id)}>Redeem session</button>
+                <button type="button" onClick={() => openModal("package-redeem", pkg)}>Redeem session</button>
                 {Number(pkg.outstandingBalance ?? Math.max(0, Number(pkg.price || 0) - Number(pkg.amountPaid || 0))) > 0 && (
                   <button type="button" onClick={() => openModal("package-payment", pkg)}><HandCoins size={15} /> Record installment</button>
                 )}
@@ -12695,11 +12856,60 @@ function ExpensesModule({ expenses, openModal, globalSearch }) {
     map[expense.category] = (map[expense.category] || 0) + Number(expense.amount || 0);
     return map;
   }, {});
+  const currentMonth = todayDate().slice(0, 7);
+  const totalSpend = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const monthlySpend = expenses
+    .filter((expense) => String(expense.date || "").startsWith(currentMonth))
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const expensesForApproval = expenses.filter((expense) => normalize(expense.status) === "for approval");
+  const approvalAmount = expensesForApproval.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const expenseKpis = [
+    {
+      label: "Expense records",
+      value: expenses.length.toLocaleString("en-PH"),
+      note: "In the current branch scope",
+      icon: ReceiptText,
+      tone: "products",
+    },
+    {
+      label: "Total spend",
+      value: money.format(totalSpend),
+      note: "Across all recorded expenses",
+      icon: CircleDollarSign,
+      tone: "value",
+    },
+    {
+      label: "This month",
+      value: money.format(monthlySpend),
+      note: "Recorded this calendar month",
+      icon: CalendarDays,
+      tone: "reorder",
+    },
+    {
+      label: "For approval",
+      value: expensesForApproval.length.toLocaleString("en-PH"),
+      note: `${money.format(approvalAmount)} awaiting review`,
+      icon: AlertCircle,
+      tone: "empty",
+    },
+  ];
 
   return (
     <section className="module-grid two">
       <div className="surface-panel wide">
         <SectionHeader icon={ReceiptText} title="Expense Tracking" action={`${expenses.length} records`} />
+        <div className="inventory-kpi-grid" aria-label="Expense key performance indicators">
+          {expenseKpis.map(({ label, value, note, icon: Icon, tone }) => (
+            <article className={`inventory-kpi inventory-kpi-${tone}`} key={label}>
+              <span className="inventory-kpi-icon" aria-hidden="true"><Icon size={18} /></span>
+              <div>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                <small>{note}</small>
+              </div>
+            </article>
+          ))}
+        </div>
         <SmartTable
           rows={expenses}
           globalSearch={globalSearch}
@@ -12722,25 +12932,75 @@ function ExpensesModule({ expenses, openModal, globalSearch }) {
   );
 }
 
-function ReportsModule({ stats, transactions, expenses, appointments, inventory, staff, clients, globalSearch }) {
+function ReportsModule({ stats, transactions, expenses, appointments, inventory, staff, clients, branchRecords = [], globalSearch, onImportSales, canImportSales = false }) {
   const reportTabs = ["Daily Sales", "Annual Sales", "Expenses", "Monthly Net Profit", "Staff Commission", "Product Inventory"];
   const [reportView, setReportView] = useState("Daily Sales");
+  const [reportMonth, setReportMonth] = useState(todayDate().slice(0, 7));
+  const [reportBranch, setReportBranch] = useState("All branches");
+  const [reportStaff, setReportStaff] = useState("All staff");
+  const [dailyReportDate, setDailyReportDate] = useState(todayDate());
+  const [importing, setImporting] = useState(false);
+  const importSalesRef = useRef(null);
   const currentYear = todayDate().slice(0, 4);
-  const activeTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode);
+  const activeTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode
+    && (reportBranch === "All branches" || transaction.branch === reportBranch)
+    && (reportStaff === "All staff" || transaction.staff === reportStaff));
   const months = Array.from({ length: 12 }, (_, index) => `${currentYear}-${String(index + 1).padStart(2, "0")}`);
 
-  const dailySalesRows = Object.values(
-    activeTransactions.reduce((map, transaction) => {
-      const key = transaction.date;
-      const current = map[key] ?? { id: key, date: key, transactions: 0, services: 0, products: 0, total: 0 };
-      current.transactions += 1;
-      current.services += transaction.items.filter((item) => item.type === "Service").reduce((sum, item) => sum + Number(item.qty || 1), 0);
-      current.products += transaction.items.filter((item) => item.type === "Product").reduce((sum, item) => sum + Number(item.qty || 1), 0);
-      current.total += Number(transaction.total || 0);
-      map[key] = current;
-      return map;
-    }, {}),
-  ).sort((a, b) => b.date.localeCompare(a.date));
+  const dailyTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode
+    && transaction.date === dailyReportDate
+    && (reportBranch === "All branches" || transaction.branch === reportBranch)
+    && (reportStaff === "All staff" || transaction.staff === reportStaff));
+  const dailySalesRows = dailyTransactions.map((transaction) => ({
+    ...transaction,
+    itemsSummary: (transaction.items || []).map((item) => `${item.name} × ${item.qty || 1}`).join(", "),
+    paymentsSummary: (transaction.payments || []).map((payment) => `${payment.method}: ${money.format(payment.amount || 0)}`).join(" · ") || transaction.status,
+  }));
+  const tenderSummaryRows = Object.values(dailyTransactions.flatMap((transaction) => transaction.payments || []).reduce((map, payment) => {
+    const method = payment.method || "Unspecified";
+    map[method] = map[method] || { id: method, method, transactions: 0, amount: 0 };
+    map[method].transactions += 1;
+    map[method].amount += Number(payment.amount || 0);
+    return map;
+  }, {})).sort((a, b) => b.amount - a.amount);
+
+  async function handleHistoricalSalesFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const rows = parseCsvRows(await file.text());
+      if (rows.length < 2) throw new Error("The CSV has no sales rows.");
+      const keys = rows[0].map((header) => normalize(header).replace(/[^a-z0-9]/g, ""));
+      const value = (record, aliases) => {
+        const index = aliases.map((alias) => keys.indexOf(alias)).find((position) => position >= 0);
+        return index >= 0 ? record[index] : "";
+      };
+      const records = rows.slice(1).map((record) => ({
+        date: value(record, ["date", "saledate", "transactiondate"]),
+        invoice: value(record, ["invoice", "invoiceno", "referenceno"]),
+        branch: value(record, ["branch", "location"]),
+        client: value(record, ["client", "clientname", "clientsname", "patient"]),
+        item: value(record, ["productservice", "item", "service", "product"]),
+        type: value(record, ["type", "category"]),
+        qty: value(record, ["quantity", "qty"]) || 1,
+        serviceValue: value(record, ["servicevalue", "price", "unitprice"]),
+        totalPaid: value(record, ["totalpaid", "total", "amount"]),
+        paymentMethod: value(record, ["paymentmethod", "modeofpayment", "tender"]),
+        provider: value(record, ["serviceprovider", "provider", "staff"]),
+        room: value(record, ["assignedroom", "room", "couch"]),
+        arrivalTime: value(record, ["arrivaltime", "arrival"]),
+        checkoutTime: value(record, ["checkouttime", "time"]),
+        notes: value(record, ["notes", "remarks"]),
+      }));
+      await onImportSales(records);
+    } catch (error) {
+      window.alert(error.message || "Unable to import historical sales.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const annualSalesRows = months.map((month) => {
     const monthTransactions = activeTransactions.filter((transaction) => transaction.date?.startsWith(month));
@@ -12770,7 +13030,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   });
 
   const commissionRows = staff.map((person) => {
-    const staffSales = activeTransactions.filter((transaction) => transaction.staff === person.name);
+    const staffSales = activeTransactions.filter((transaction) => transaction.staff === person.name && (!reportMonth || transaction.date?.startsWith(reportMonth)));
     const sales = staffSales.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
     const rate = Number(person.commissionRate || 0);
     return {
@@ -12884,17 +13144,37 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
     }
 
     return (
-      <SmartTable
-        rows={dailySalesRows}
-        globalSearch={globalSearch}
-        columns={[
-          { key: "date", label: "Date" },
-          { key: "transactions", label: "Transactions" },
-          { key: "services", label: "Services" },
-          { key: "products", label: "Products" },
-          { key: "total", label: "Total", render: (row) => money.format(row.total) },
-        ]}
-      />
+      <>
+        <div className="report-filters report-daily-filter">
+          <label><span>Daily sales date</span><input type="date" max={todayDate()} value={dailyReportDate} onChange={(event) => setDailyReportDate(event.target.value)} /></label>
+          <strong>{money.format(dailyTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0))} total</strong>
+        </div>
+        <SmartTable
+          rows={dailySalesRows}
+          globalSearch={globalSearch}
+          emptyTitle="No posted sales for this date"
+          columns={[
+            { key: "invoice", label: "Invoice" },
+            { key: "time", label: "Time" },
+            { key: "client", label: "Client" },
+            { key: "itemsSummary", label: "Product / service" },
+            { key: "staff", label: "Staff" },
+            { key: "room", label: "Room / couch" },
+            { key: "paymentsSummary", label: "Mode of payment" },
+            { key: "total", label: "Total", render: (row) => money.format(row.total) },
+          ]}
+        />
+        <SectionHeader icon={CreditCard} title="Tender Summary" action={`${tenderSummaryRows.length} methods`} />
+        <SmartTable
+          rows={tenderSummaryRows}
+          showToolbar={false}
+          columns={[
+            { key: "method", label: "Mode of payment" },
+            { key: "transactions", label: "Entries" },
+            { key: "amount", label: "Amount", render: (row) => money.format(row.amount) },
+          ]}
+        />
+      </>
     );
   }
 
@@ -12903,9 +13183,10 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
       <div className="surface-panel wide">
         <SectionHeader icon={BarChart3} title="Reports and Analytics" action={reportView} />
         <div className="report-filters">
-          <label><span>Date range</span><input type="month" defaultValue={todayDate().slice(0, 7)} /></label>
-          <label><span>Branch</span><select><option>All branches</option>{branches.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
-          <label><span>Staff</span><select><option>All staff</option>{staff.map((person) => <option key={person.id}>{person.name}</option>)}</select></label>
+          <label><span>Date range</span><input type="month" value={reportMonth} onChange={(event) => setReportMonth(event.target.value)} /></label>
+          <label><span>Branch</span><select value={reportBranch} onChange={(event) => setReportBranch(event.target.value)}><option>All branches</option>{branchRecords.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
+          <label><span>Staff</span><select value={reportStaff} onChange={(event) => setReportStaff(event.target.value)}><option>All staff</option>{staff.map((person) => <option key={person.id}>{person.name}</option>)}</select></label>
+          {canImportSales && <><input ref={importSalesRef} type="file" accept=".csv,text/csv" hidden onChange={handleHistoricalSalesFile} /><button className="secondary-button small" type="button" disabled={importing} onClick={() => importSalesRef.current?.click()}><Upload size={16} /> {importing ? "Importing..." : "Import past sales"}</button></>}
           <button className="secondary-button small" type="button" onClick={() => window.print()}><Printer size={16} /> Print</button>
         </div>
         <div className="segmented-control report-tabs" role="tablist" aria-label="Report type">
@@ -13296,12 +13577,14 @@ function ModalHost({
   saveService,
   saveInventory,
   receiveStock,
+  transferStock,
   saveLead,
   saveTreatment,
   saveExpense,
   saveStaff,
   savePackage,
   savePackageInstallment,
+  redeemPackage,
   saveGiftCertificate,
   saveCampaign,
   saveSettings,
@@ -13543,6 +13826,14 @@ function ModalHost({
         balance: 0,
         packageBalance: "None",
         giftBalance: 0,
+        storeCredit: 0,
+        serviceCredit: 0,
+        pastMedicalHistory: "",
+        aestheticHistory: "",
+        familyHistory: "",
+        surgicalHistory: "",
+        obstetricHistory: "",
+        medications: "",
         ...modal.payload,
         ...clientNameParts(modal.payload),
       },
@@ -13572,7 +13863,15 @@ function ModalHost({
         field("contraindications", "Contraindications"),
         field("skinConcerns", "Skin concerns"),
         field("treatmentGoals", "Treatment goals"),
+        field("storeCredit", "Client credit", "number", null, "", false),
+        field("serviceCredit", "Service credit", "number", null, "", false),
         field("medicalNotes", "Medical notes", "textarea", null, "span-2"),
+        field("pastMedicalHistory", "Past medical history", "textarea", null, "span-2", false),
+        field("aestheticHistory", "Aesthetic history", "textarea", null, "span-2", false),
+        field("familyHistory", "Family history", "textarea", null, "span-2", false),
+        field("surgicalHistory", "Surgical history", "textarea", null, "span-2", false),
+        field("obstetricHistory", "Obstetric history", "textarea", null, "span-2", false),
+        field("medications", "Current medications", "textarea", null, "span-2", false),
         field("marketingOptIn", "Marketing opt-in", "checkbox"),
       ],
     },
@@ -13589,7 +13888,10 @@ function ModalHost({
         packageSessions: 0,
         packagePrice: 0,
         serviceValue: 0,
-        recommendedIntervalDays: 0,
+        recommendedIntervalValue: 0,
+        recommendedIntervalUnit: "Weeks",
+        maintenanceIntervalValue: 0,
+        maintenanceIntervalUnit: "Months",
         commission: "",
         room: "Treatment Room",
         active: true,
@@ -13615,7 +13917,10 @@ function ModalHost({
         field("packageSessions", "Package sessions", "number", null, "", false),
         field("packagePrice", "Package price", "number", null, "", false),
         field("serviceValue", "Service value per session", "number", null, "", false),
-        field("recommendedIntervalDays", "Recommended interval (days)", "number", null, "", false),
+        field("recommendedIntervalValue", "Recommended interval", "number", null, "", false),
+        field("recommendedIntervalUnit", "Interval unit", "select", ["Days", "Weeks", "Months"], "", false),
+        field("maintenanceIntervalValue", "Maintenance interval", "number", null, "", false),
+        field("maintenanceIntervalUnit", "Maintenance unit", "select", ["Days", "Weeks", "Months"], "", false),
         field("branches", "Branch availability"),
         field("staff", "Staff allowed", "multi-select", ["Doctor", "Nurse", "Head Nurse", "Aesthetician", "Head Aesthetician", "N/A"]),
         field("room", "Room / device required"),
@@ -13637,6 +13942,8 @@ function ModalHost({
         supplier: "",
         receivedBy: session?.name || "",
         checkNumber: "",
+        expiry: "",
+        batch: "",
         notes: "",
         ...modal.payload,
       },
@@ -13650,7 +13957,31 @@ function ModalHost({
         field("supplier", "Supplier"),
         field("receivedBy", "Received by"),
         field("checkNumber", "Check number", "text", null, "", false),
+        field("expiry", "Expiry date", "date", null, "", false),
+        field("batch", "Batch / lot number", "text", null, "", false),
         field("notes", "Receiving notes", "textarea", null, "span-2", false),
+      ],
+    },
+    "inventory-transfer": {
+      title: `Transfer stock · ${modal.payload?.item || "Inventory item"}`,
+      initial: {
+        inventoryId: modal.payload?.inventoryId || modal.payload?.id || "",
+        sourceBranch: modal.payload?.branch || "",
+        targetBranch: branchOptions.find((name) => name !== modal.payload?.branch) || "",
+        date: todayDate(),
+        qty: 1,
+        receivedBy: session?.name || "",
+        notes: "",
+      },
+      submitLabel: "Transfer stock",
+      onSubmit: (values) => transferStock(values.inventoryId, values),
+      fields: [
+        field("sourceBranch", "From branch", "text", null, "", false),
+        field("targetBranch", "To branch", "select", branchOptions.filter((name) => name !== modal.payload?.branch)),
+        field("date", "Transfer date", "date"),
+        field("qty", "Quantity", "number"),
+        field("receivedBy", "Handled by"),
+        field("notes", "Transfer notes", "textarea", null, "span-2", false),
       ],
     },
     inventory: {
@@ -13674,6 +14005,7 @@ function ModalHost({
         cost: 0,
         price: 0,
         image: "",
+        directions: "",
         ...modal.payload,
       },
       submitLabel: "Save inventory",
@@ -13691,6 +14023,7 @@ function ModalHost({
         field("reorder", "Reorder level", "number"),
         field("cost", "Cost", "number"),
         field("price", "Retail price", "number"),
+        field("directions", "Directions for use / invoice note", "textarea", null, "span-2", false),
       ],
     },
     lead: {
@@ -13883,6 +14216,9 @@ function ModalHost({
       initial: {
         code: `MACE-GC-${Date.now().toString(36).toUpperCase()}`,
         client: clients[0]?.fullName || "",
+        issueType: "Client Gift",
+        company: "",
+        event: "",
         type: "Monetary Value",
         serviceId: "",
         service: "",
@@ -13897,7 +14233,10 @@ function ModalHost({
       onSubmit: saveGiftCertificate,
       fields: [
         field("code", "Certificate code"),
-        field("client", "Issued to", "select", clients.map((client) => client.fullName)),
+        field("issueType", "Issued for", "select", ["Client Gift", "Partnership", "Sponsorship"]),
+        field("client", "Issued to (optional)", "select", [{ value: "", label: "Not assigned" }, ...clients.map((client) => client.fullName)], "", false),
+        field("company", "Company / partner", "text", null, "", false),
+        field("event", "Event / campaign", "text", null, "", false),
         field("type", "Certificate type", "select", ["Monetary Value", "Specific Service"]),
         field("serviceId", "Specific service (when applicable)", "select", [{ value: "", label: "Not service-specific" }, ...serviceOptions], "", false),
         field("balance", "Value / remaining balance", "number"),
@@ -13945,6 +14284,26 @@ function ModalHost({
         field("method", "Payment method", "select", installmentPaymentMethods.length ? installmentPaymentMethods : ["Cash"]),
         field("nextPayment", "Next expected payment (optional)", "date", null, "", false),
         field("notes", "Notes (optional)", "textarea", null, "span-2", false),
+      ],
+    },
+    "package-redeem": {
+      title: `Redeem session · ${modal.payload?.name || "Package"}`,
+      initial: {
+        id: modal.payload?.id || "",
+        date: todayDate(),
+        branch: branchScope !== "All branches" ? branchScope : (modal.payload?.branch || defaultRecordBranch),
+        service: modal.payload?.name || "",
+        provider: "",
+        notes: "",
+      },
+      submitLabel: "Redeem session",
+      onSubmit: redeemPackage,
+      fields: [
+        field("date", "Session date", "date"),
+        field("branch", "Branch", "select", recordBranchOptions),
+        field("service", "Service rendered"),
+        field("provider", "Service provider", "select", [{ value: "", label: "Not assigned" }, ...staffOptions], "", false),
+        field("notes", "Session / medical notes", "textarea", null, "span-2", false),
       ],
     },
     campaign: {
@@ -14198,6 +14557,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     return [{ method: draft.paymentMethod || firstMethod, amount: draft.total, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) }];
   });
   const [notes, setNotes] = useState(draft.notes ?? "");
+  const [creditChangeType, setCreditChangeType] = useState("");
   const [packageInstallments, setPackageInstallments] = useState(() => packagePurchaseLines.map((item) => ({
     lineKey: item.key,
     name: item.name,
@@ -14237,7 +14597,9 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   const tenderIncomplete = payments.some((payment) =>
     (payment.method === "Gift Certificate" && !payment.giftCertificateId)
     || (payment.method === "Package" && (!payment.packageId || !payment.packageLineKey))
-    || (payment.method === "Salary Deduction" && !payment.employeeId));
+    || (payment.method === "Salary Deduction" && !payment.employeeId)
+    || (payment.method === "Client Credit" && (!draft.clientId || Number(payment.amount || 0) > Number(draft.storeCredit || 0)))
+    || (payment.method === "Service Credit" && (!draft.clientId || Number(payment.amount || 0) > Number(draft.serviceCredit || 0))));
   const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete && !packageAllocationInvalid;
 
   function updatePayment(index, patch) {
@@ -14280,13 +14642,13 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     setSaving(true);
     setError("");
     try {
-      await onSubmit({ payments, notes, packageInstallments });
+      await onSubmit({ payments, notes, packageInstallments, creditChangeType });
     } catch (submitError) {
       setError(submitError?.message || "Payment could not be completed.");
     } finally {
       setSaving(false);
     }
-  }, [canPost, notes, onSubmit, packageInstallments, payments, saving]);
+  }, [canPost, creditChangeType, notes, onSubmit, packageInstallments, payments, saving]);
 
   const submitUnpaid = useCallback(async () => {
     if (saving || !draft.clientId) return;
@@ -14416,6 +14778,12 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                   {salaryDeductionEmployees.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.role}</option>)}
                 </select>
               )}
+              {payment.method === "Client Credit" && (
+                <span className="payment-tender-hint">Available client credit: {money.format(draft.storeCredit || 0)}{!draft.clientId ? " · Select a registered client first." : ""}</span>
+              )}
+              {payment.method === "Service Credit" && (
+                <span className="payment-tender-hint">Available service credit: {money.format(draft.serviceCredit || 0)}{!draft.clientId ? " · Select a registered client first." : ""}</span>
+              )}
               {payment.method === "Gift Certificate" && !usableCertificates.length && (
                 <span className="payment-tender-hint">No active gift certificates for this branch.</span>
               )}
@@ -14457,6 +14825,16 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
           <span>Payment notes</span>
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />
         </label>
+        {change > 0 && draft.clientId && (
+          <label className="stacked-field">
+            <span>Return change</span>
+            <select value={creditChangeType} onChange={(event) => setCreditChangeType(event.target.value)}>
+              <option value="">Cash change</option>
+              <option value="Client Credit">Add to client credit</option>
+              <option value="Service Credit">Add to service credit</option>
+            </select>
+          </label>
+        )}
         <div className="receipt-preview">
           <div><span>Paid</span><strong>{money.format(paid)}</strong></div>
           <div><span>Change</span><strong>{money.format(change)}</strong></div>

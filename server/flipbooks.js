@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import express from "express";
 
 const { Router, raw } = express;
-const DEFAULT_MAX_PDF_BYTES = 30 * 1024 * 1024;
+const DEFAULT_MAX_PDF_BYTES = 100 * 1024 * 1024;
 const ACCESS_GRANT_LIFETIME_MS = 4 * 60 * 60 * 1000;
 const VIEW_DEDUPLICATION_MS = 30 * 60 * 1000;
 

@@ -294,6 +294,12 @@ const clientStringFields = [
   "contraindications",
   "skinConcerns",
   "treatmentGoals",
+  "pastMedicalHistory",
+  "aestheticHistory",
+  "familyHistory",
+  "surgicalHistory",
+  "obstetricHistory",
+  "medications",
   "consentStatus",
   "preferredStaff",
   "tag",
@@ -947,6 +953,8 @@ function normalizeClientPayload(payload, existingId = "") {
     fullName,
     balance: numberValue(payload.balance, "Client balance"),
     giftBalance: numberValue(payload.giftBalance, "Gift balance"),
+    storeCredit: numberValue(payload.storeCredit, "Client credit", { min: 0 }),
+    serviceCredit: numberValue(payload.serviceCredit, "Service credit", { min: 0 }),
     marketingOptIn: Boolean(payload.marketingOptIn),
   };
 
@@ -1027,6 +1035,11 @@ function normalizeServicePayload(payload, existingId = "") {
   if (priceModel === "Per unit" && !requestedPriceUnit) {
     throw apiError("Choose whether the unit price is per syringe, ml, vial, or ampoule.");
   }
+  const intervalUnit = ["Days", "Weeks", "Months"].includes(clean(payload.recommendedIntervalUnit)) ? clean(payload.recommendedIntervalUnit) : "Days";
+  const intervalValue = numberValue(payload.recommendedIntervalValue ?? payload.recommendedIntervalDays, "Recommended interval", { min: 0, integer: true });
+  const intervalMultiplier = intervalUnit === "Months" ? 30 : intervalUnit === "Weeks" ? 7 : 1;
+  const maintenanceIntervalUnit = ["Days", "Weeks", "Months"].includes(clean(payload.maintenanceIntervalUnit)) ? clean(payload.maintenanceIntervalUnit) : "Days";
+  const maintenanceIntervalValue = numberValue(payload.maintenanceIntervalValue, "Maintenance interval", { min: 0, integer: true });
   const data = {
     name: requireText(payload.name, "Service name"),
     category: serviceType === "Package" ? "Packages" : requireText(payload.category, "Service category"),
@@ -1038,7 +1051,11 @@ function normalizeServicePayload(payload, existingId = "") {
     packageSessions,
     packagePrice: serviceType === "Package" ? packagePrice : 0,
     serviceValue: numberValue(serviceType === "Package" ? payload.serviceValue ?? (packageSessions ? packagePrice / packageSessions : price) : price, "Service value", { min: 0 }),
-    recommendedIntervalDays: numberValue(payload.recommendedIntervalDays, "Recommended interval", { min: 0, integer: true }),
+    recommendedIntervalDays: intervalValue * intervalMultiplier,
+    recommendedIntervalValue: intervalValue,
+    recommendedIntervalUnit: intervalUnit,
+    maintenanceIntervalValue,
+    maintenanceIntervalUnit,
     commission: clean(payload.commission),
     consumables: jsonText(treatmentConsumableUsage(payload.consumables), []),
     branches: jsonList(payload.branches),
@@ -1073,6 +1090,7 @@ function normalizeInventoryPayload(payload, existingId = "") {
     expiry: clean(payload.expiry),
     batch: clean(payload.batch),
     supplier: clean(payload.supplier),
+    directions: clean(payload.directions),
     cost: numberValue(payload.cost, "Cost", { min: 0 }),
     price: numberValue(payload.price, "Retail price", { min: 0 }),
     image: assetReference(payload.image, "Inventory image"),
@@ -1324,8 +1342,8 @@ async function normalizePackagePayload(payload, existingId = "") {
     sessions,
     used,
     expires: "",
-    branch: clean(payload.branch) || "All branches",
-    transferable: Boolean(payload.transferable),
+    branch: "All branches",
+    transferable: true,
     status: packageStatus,
     price: numberValue(payload.price, "Package price", { min: 0 }),
     amountPaid: numberValue(payload.amountPaid, "Amount paid", { min: 0 }),
@@ -1345,11 +1363,14 @@ function normalizeGiftCertificatePayload(payload, existingId = "") {
   const type = ["Service", "Specific Service"].includes(requestedType) ? "Specific Service" : "Monetary Value";
   const data = {
     code: requireText(payload.code, "Gift certificate code"),
-    client: requireText(payload.client, "Client"),
+    client: clean(payload.client),
     type,
     serviceId: clean(payload.serviceId),
     service: clean(payload.service),
     issueDate: clean(payload.issueDate) || new Date().toISOString().slice(0, 10),
+    issueType: ["Client Gift", "Partnership", "Sponsorship"].includes(clean(payload.issueType)) ? clean(payload.issueType) : "Client Gift",
+    company: clean(payload.company),
+    event: clean(payload.event),
     branch: clean(payload.branch) || "All branches",
     balance: numberValue(payload.balance, "Gift certificate balance", { min: 0 }),
     expires: clean(payload.expires),
@@ -1848,7 +1869,7 @@ const resourceConfigs = {
     serialize: serializeClient,
     branchField: "branch",
     unifiedClientAccess: true,
-    posSelect: { id: true, fullName: true, mobile: true, branch: true, branchesVisited: true },
+    posSelect: { id: true, fullName: true, mobile: true, branch: true, branchesVisited: true, storeCredit: true, serviceCredit: true },
   },
   appointments: {
     delegate: "appointment",
@@ -1875,6 +1896,8 @@ const resourceConfigs = {
       id: true, name: true, category: true, serviceType: true, duration: true, price: true,
       priceModel: true, priceUnit: true, packageSessions: true, packagePrice: true,
       serviceValue: true, recommendedIntervalDays: true, aftercare: true, staff: true,
+      recommendedIntervalValue: true, recommendedIntervalUnit: true,
+      maintenanceIntervalValue: true, maintenanceIntervalUnit: true,
       branches: true, active: true, pos: true,
     },
   },
@@ -1888,7 +1911,7 @@ const resourceConfigs = {
     branchField: "branch",
     posSelect: {
       id: true, item: true, sku: true, brand: true, category: true, type: true,
-      stock: true, branch: true, price: true, image: true,
+      stock: true, branch: true, price: true, image: true, directions: true,
     },
   },
   treatments: {
@@ -1938,6 +1961,7 @@ const resourceConfigs = {
       id: true, code: true, client: true, branch: true, balance: true,
       expires: true, status: true, type: true, serviceId: true, service: true,
       issueDate: true, redeemedDate: true, redeemedBranch: true, transactionId: true,
+      issueType: true, company: true, event: true,
     },
   },
   leads: {
@@ -3492,6 +3516,8 @@ async function buildSaleDraftItems(cart, branch) {
         priceUnit: clean(product.unit),
         provider: "N/A",
         inventoryId: product.id,
+        aftercare: product.directions,
+        recommendedIntervalDays: 0,
       });
     } else {
       throw apiError("Unsupported POS item type.");
@@ -6215,7 +6241,7 @@ app.delete("/api/resources/:resource/:id", asyncRoute(async (request, response) 
 }));
 
 app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
-  const [settings, branchRows, serviceRows] = await Promise.all([
+  const [settings, branchRows, serviceRows, staffRows] = await Promise.all([
     getPersistedSettings(),
     prisma.branch.findMany({
       where: { status: "Active", modules: { some: { moduleId: { in: ["leads", "booking"] }, enabled: true } } },
@@ -6225,7 +6251,12 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
     prisma.service.findMany({
       where: { active: true },
       orderBy: [{ name: "asc" }],
-      select: { id: true, name: true, category: true, serviceType: true, branches: true, duration: true, price: true, priceModel: true, priceUnit: true },
+      select: { id: true, name: true, category: true, serviceType: true, branches: true, staff: true, duration: true, price: true, priceModel: true, priceUnit: true },
+    }),
+    prisma.staffMember.findMany({
+      where: { status: { not: "Inactive" } },
+      orderBy: [{ name: "asc" }],
+      select: { id: true, name: true, role: true, branch: true, branches: true },
     }),
   ]);
   const publicServices = [];
@@ -6241,6 +6272,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
         category: service.category,
         serviceType: service.serviceType,
         branches: parseJsonList(service.branches),
+        staffRoles: parseJsonList(service.staff),
         duration: service.duration,
         price: service.price,
         priceModel: service.priceModel,
@@ -6254,6 +6286,7 @@ app.get("/api/public-leads/config", asyncRoute(async (_request, response) => {
     tagline: settings.receiptFooter,
     branches: branchRows.map((branch) => ({ ...branch, operatingHours: parseJsonObject(branch.operatingHours, defaultOperatingHours) })),
     services: publicServices,
+    staff: staffRows.map((person) => ({ ...person, branches: parseJsonList(person.branches) })),
   });
 }));
 
@@ -6396,7 +6429,7 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
 
 app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   const booking = normalizePublicBookingRequest(request.body ?? {});
-  if (booking.spam) {
+  if (!("mobile" in booking)) {
     response.status(202).json({ submitted: true, bookingReference: request.requestId });
     return;
   }
@@ -6419,6 +6452,17 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
     if (replay) return { appointment: replay, replayed: true };
 
     const staffCandidates = await tx.staffMember.findMany({ where: { status: { not: "Inactive" } } });
+    const preferredStaff = booking.preferredStaff && booking.preferredStaff !== "Any available"
+      ? staffCandidates.find((person) => person.name === booking.preferredStaff)
+      : null;
+    if (booking.preferredStaff && booking.preferredStaff !== "Any available" && !preferredStaff) throw apiError("Preferred service provider is unavailable.", 409);
+    if (preferredStaff) {
+      const providerBranches = parseJsonList(preferredStaff.branches);
+      const allowedRoles = parseJsonList(service.staff);
+      if ((preferredStaff.branch !== booking.branch && !providerBranches.includes(booking.branch)) || (allowedRoles.length && !allowedRoles.includes("All staff") && !allowedRoles.includes(preferredStaff.role))) {
+        throw apiError("Preferred service provider is unavailable for this service and branch.", 409);
+      }
+    }
     const staffCapacity = staffCandidates.filter((staffMember) =>
       staffMember.branch === booking.branch || parseJsonList(staffMember.branches).includes(booking.branch)).length;
     const roomCapacity = activeRoomRecords(branch.rooms).length;
@@ -6435,7 +6479,7 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       service: service.name,
       branch: booking.branch,
       room: "To assign",
-      staff: "Any available",
+      staff: preferredStaff?.name || "Any available",
       status: "Pending Confirmation",
       deposit: 0,
       notes: booking.concern,
@@ -6592,6 +6636,93 @@ app.post("/api/inventory/import", asyncRoute(async (request, response) => {
   response.status(201).json(result);
 }));
 
+app.post("/api/sales/import", asyncRoute(async (request, response) => {
+  const actor = actorFromRequest(request);
+  if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can import historical sales.", 403);
+  const records = Array.isArray(request.body?.records) ? request.body.records : [];
+  if (!records.length) throw apiError("The spreadsheet does not contain any sales rows.");
+  if (records.length > 5000) throw apiError("Import sales in batches of 5,000 rows or fewer.");
+
+  const result = await prisma.$transaction(async (tx) => {
+    const sales = [];
+    const treatments = [];
+    const clients = new Map();
+    let skipped = 0;
+    for (let index = 0; index < records.length; index += 1) {
+      const input = records[index] || {};
+      const rowNumber = index + 2;
+      try {
+        const date = requireText(input.date, "Sale date");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || date > posCalendarDate()) throw apiError("Choose a valid sale date that is not in the future.");
+        const branch = requireText(input.branch, "Branch");
+        assertMutationAllowed(request, "pos", branch);
+        const branchRecord = await tx.branch.findFirst({ where: { name: branch, status: "Active" }, select: { id: true } });
+        if (!branchRecord) throw apiError("Branch is unavailable.");
+        const clientName = clean(input.client || input.clientName) || "Walk-in";
+        const itemName = requireText(input.item || input.service || input.product, "Product or service");
+        const itemType = /product|retail/i.test(clean(input.type || input.category)) ? "Product" : "Service";
+        const qty = numberValue(input.qty || input.quantity || 1, "Quantity", { min: 0.01 });
+        const unitPrice = numberValue(input.serviceValue ?? input.price ?? input.amount ?? input.totalPaid, "Amount", { min: 0 });
+        const total = numberValue(input.totalPaid ?? input.total ?? unitPrice * qty, "Total paid", { min: 0 });
+        const paymentMethod = clean(input.paymentMethod) || "Cash";
+        const externalInvoice = clean(input.invoice).toUpperCase().replace(/[^A-Z0-9_-]+/g, "-").slice(0, 80);
+        if (externalInvoice && await tx.sale.findUnique({ where: { invoice: externalInvoice } })) {
+          skipped += 1;
+          continue;
+        }
+        let invoice = externalInvoice || `MACE-IMP-${date.slice(2).replace(/-/g, "")}-${String(index + 1).padStart(4, "0")}`;
+        while (await tx.sale.findUnique({ where: { invoice } })) invoice = `${invoice}-${randomBytes(2).toString("hex").toUpperCase()}`;
+        const client = clientName === "Walk-in" ? null : await tx.client.findFirst({ where: { fullName: { equals: clientName, mode: "insensitive" } } });
+        const service = itemType === "Service" ? await tx.service.findFirst({ where: { name: { equals: itemName, mode: "insensitive" } } }) : null;
+        const referenceNumber = systemPaymentReference("", "IMP", date);
+        const checkoutTime = clean(input.checkoutTime || input.time);
+        const sale = await tx.sale.create({
+          data: {
+            invoice,
+            date,
+            time: checkoutTime || "Imported",
+            clientId: client?.id || null,
+            client: client?.fullName || clientName,
+            branch,
+            staff: clean(input.provider || input.staff) || actor.name,
+            subtotal: total,
+            total,
+            payments: jsonText(total > 0 ? [{ id: randomBytes(12).toString("hex"), method: paymentMethod, amount: total, referenceNumber }] : [], []),
+            status: total > 0 ? "Paid" : "Unpaid",
+            notes: clean(input.notes),
+            room: clean(input.room),
+            arrivalTime: clean(input.arrivalTime),
+            checkoutTime,
+            imported: true,
+            items: { create: [{ name: itemName, type: itemType, qty, price: unitPrice, originalPrice: unitPrice, provider: clean(input.provider) || "N/A", serviceId: service?.id || "", aftercare: service?.aftercare || "", recommendedIntervalDays: Number(service?.recommendedIntervalDays || 0) }] },
+          },
+          include: { items: true },
+        });
+        sales.push(sale);
+        if (client) {
+          const visited = new Set(parseJsonList(client.branchesVisited));
+          visited.add(branch);
+          const updatedClient = await tx.client.update({ where: { id: client.id }, data: { branchesVisited: jsonText([...visited], []), lastVisit: !client.lastVisit || date > client.lastVisit ? date : client.lastVisit } });
+          clients.set(updatedClient.id, updatedClient);
+          const saleItem = sale.items[0];
+          if (itemType === "Service" && service?.serviceType !== "Package") {
+            const intervalDate = new Date(`${date}T00:00:00.000Z`);
+            const intervalDays = Number(service?.recommendedIntervalDays || 0);
+            if (intervalDays > 0) intervalDate.setUTCDate(intervalDate.getUTCDate() + intervalDays);
+            treatments.push(await tx.treatment.create({ data: { clientId: client.id, client: client.fullName, date, service: itemName, branch, provider: clean(input.provider), room: clean(input.room), preNotes: clean(input.notes), postNotes: "Imported from historical sales.", aftercare: service?.aftercare || "", arrivalTime: clean(input.arrivalTime), completedTime: checkoutTime, checkoutTime, consumables: "[]", consent: client.consentStatus || "Pending", followUp: intervalDays > 0 ? intervalDate.toISOString().slice(0, 10) : "", sourceSaleId: sale.id, sourceSaleItemId: saleItem.id } }));
+          }
+        }
+      } catch (error) {
+        throw apiError(`Row ${rowNumber}: ${error.message || "Invalid sales data."}`, error.status || 400);
+      }
+    }
+    const auditLog = await writeAudit(tx, request, { area: "POS", action: "Historical sales imported", details: `${sales.length} historical sale row(s) imported; ${skipped} duplicate invoice row(s) skipped. Current inventory quantities were not changed.` });
+    return { sales: sales.map(serializeSale), treatments: treatments.map(serializeTreatment), clients: [...clients.values()].map(serializeClient), imported: sales.length, skipped, auditLog };
+  });
+
+  response.status(201).json(result);
+}));
+
 app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
   const qty = numberValue(request.body?.qty, "Movement quantity");
@@ -6612,7 +6743,18 @@ app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) =>
     if (nextStock < 0) {
       throw apiError(`Inventory is insufficient for ${item.item}.`, 409);
     }
-    const inventoryItem = await tx.inventoryItem.update({ where: { id }, data: { stock: nextStock } });
+    const receivedExpiry = clean(request.body?.expiry);
+    const receivedBatch = clean(request.body?.batch);
+    const receivedSupplier = clean(request.body?.supplier);
+    const inventoryItem = await tx.inventoryItem.update({
+      where: { id },
+      data: {
+        stock: nextStock,
+        ...(qty > 0 && receivedExpiry ? { expiry: receivedExpiry } : {}),
+        ...(qty > 0 && receivedBatch ? { batch: receivedBatch } : {}),
+        ...(qty > 0 && receivedSupplier ? { supplier: receivedSupplier } : {}),
+      },
+    });
     const movement = await tx.inventoryMovement.create({
       data: {
         date: clean(request.body?.date) || new Date().toISOString().slice(0, 10),
@@ -6622,11 +6764,13 @@ app.post("/api/inventory/:id/movements", asyncRoute(async (request, response) =>
         qty,
         reason: clean(request.body?.reason) || "Stock movement",
         user: actor.name,
-        supplier: clean(request.body?.supplier),
+        supplier: receivedSupplier,
         receivedBy: clean(request.body?.receivedBy) || actor.name,
         checkNumber: clean(request.body?.checkNumber),
         unit: clean(request.body?.unit) || item.unit,
         notes: clean(request.body?.notes),
+        expiry: receivedExpiry,
+        batch: receivedBatch,
       },
     });
     const auditLog = await writeAudit(tx, request, {
@@ -6647,7 +6791,8 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
     throw apiError("Package not found.", 404);
   }
 
-  assertMutationAllowed(request, "packages", pkg.branch);
+  const redemptionBranch = clean(request.body?.branch) || actorFromRequest(request).branch || pkg.branch;
+  assertMutationAllowed(request, "packages", redemptionBranch);
 
   const result = await prisma.$transaction(async (tx) => {
     const current = await tx.clinicPackage.findUnique({ where: { id } });
@@ -6658,7 +6803,14 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
         used: { increment: 1 },
         sessionHistory: jsonText([
           ...parseJsonList(current.sessionHistory),
-          { date: clean(request.body?.date) || new Date().toISOString().slice(0, 10), branch: clean(request.body?.branch) || current.branch, sessions: 1, service: clean(request.body?.service), provider: clean(request.body?.provider) },
+          {
+            date: clean(request.body?.date) || new Date().toISOString().slice(0, 10),
+            branch: redemptionBranch,
+            sessions: 1,
+            service: clean(request.body?.service),
+            provider: clean(request.body?.provider),
+            notes: clean(request.body?.notes),
+          },
         ], []),
       },
     });
@@ -6678,12 +6830,49 @@ app.post("/api/packages/:id/redeem", asyncRoute(async (request, response) => {
   response.json(result);
 }));
 
+app.post("/api/inventory/:id/transfer", asyncRoute(async (request, response) => {
+  const id = clean(request.params.id);
+  const qty = numberValue(request.body?.qty, "Transfer quantity", { min: 0.01 });
+  const targetBranch = requireText(request.body?.targetBranch, "Destination branch");
+  const source = await prisma.inventoryItem.findUnique({ where: { id } });
+  if (!source) throw apiError("Inventory item not found.", 404);
+  if (source.branch === targetBranch) throw apiError("Choose a different destination branch.");
+  assertMutationAllowed(request, "inventory", source.branch);
+  assertMutationAllowed(request, "inventory", targetBranch);
+  const branch = await prisma.branch.findFirst({ where: { name: targetBranch, status: "Active" }, select: { id: true } });
+  if (!branch) throw apiError("Destination branch is unavailable.", 404);
+  const actor = actorFromRequest(request);
+  const date = clean(request.body?.date) || posCalendarDate();
+  const notes = clean(request.body?.notes);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const debited = await tx.inventoryItem.updateMany({ where: { id, stock: { gte: qty } }, data: { stock: { decrement: qty } } });
+    if (debited.count !== 1) throw apiError(`Inventory is insufficient for ${source.item}.`, 409);
+    let destination = await tx.inventoryItem.findFirst({ where: { item: { equals: source.item, mode: "insensitive" }, branch: targetBranch } });
+    if (destination) {
+      destination = await tx.inventoryItem.update({ where: { id: destination.id }, data: { stock: { increment: qty } } });
+    } else {
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...copy } = source;
+      destination = await tx.inventoryItem.create({ data: { ...copy, branch: targetBranch, beginning: 0, stock: qty } });
+    }
+    const movements = await Promise.all([
+      tx.inventoryMovement.create({ data: { date, itemId: source.id, item: source.item, branch: source.branch, qty: -qty, reason: `Transfer to ${targetBranch}`, user: actor.name, unit: source.unit, notes, expiry: source.expiry, batch: source.batch } }),
+      tx.inventoryMovement.create({ data: { date, itemId: destination.id, item: destination.item, branch: targetBranch, qty, reason: `Transfer from ${source.branch}`, user: actor.name, receivedBy: clean(request.body?.receivedBy) || actor.name, unit: destination.unit, notes, expiry: destination.expiry, batch: destination.batch } }),
+    ]);
+    const auditLog = await writeAudit(tx, request, { area: "Inventory", action: "Stock transferred", details: `${qty} ${source.unit || "unit(s)"} of ${source.item} transferred from ${source.branch} to ${targetBranch}.` });
+    return { inventory: [await tx.inventoryItem.findUnique({ where: { id: source.id } }), destination], movements, auditLog };
+  });
+
+  response.status(201).json(result);
+}));
+
 app.post("/api/packages/:id/payments", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
   const pkg = await prisma.clinicPackage.findUnique({ where: { id } });
   if (!pkg) throw apiError("Package not found.", 404);
 
-  assertMutationAllowed(request, "packages", pkg.branch);
+  const paymentBranch = clean(request.body?.branch) || actorFromRequest(request).branch || pkg.branch;
+  assertMutationAllowed(request, "packages", paymentBranch);
   const actor = actorFromRequest(request);
   const amount = numberValue(request.body?.amount, "Installment amount", { min: 0.01 });
   const date = clean(request.body?.date) || posCalendarDate();
@@ -6834,15 +7023,27 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     }
 
     const salePayments = parseJsonList(sale.payments);
+    const removedTreatments = await tx.treatment.deleteMany({ where: { sourceSaleId: sale.id } });
     let updatedClient = null;
     if (sale.clientId && !sale.testMode) {
       const paid = salePayments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
       const outstanding = Math.max(0, Number(sale.total || 0) - paid);
       const client = await tx.client.findUnique({ where: { id: sale.clientId } });
-      if (client && outstanding > 0) {
+      if (client) {
+        const usedStoreCredit = salePayments.filter((payment) => payment.method === "Client Credit").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+        const usedServiceCredit = salePayments.filter((payment) => payment.method === "Service Credit").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+        const creditedStoreChange = salePayments.filter((payment) => payment.changeCreditType === "Client Credit").reduce((sum, payment) => sum + Number(payment.changeCreditAmount || 0), 0);
+        const creditedServiceChange = salePayments.filter((payment) => payment.changeCreditType === "Service Credit").reduce((sum, payment) => sum + Number(payment.changeCreditAmount || 0), 0);
+        const nextStoreCredit = Number(client.storeCredit || 0) + usedStoreCredit - creditedStoreChange;
+        const nextServiceCredit = Number(client.serviceCredit || 0) + usedServiceCredit - creditedServiceChange;
+        if (nextStoreCredit < -0.009 || nextServiceCredit < -0.009) throw apiError("Client credit issued by this sale has already been used and must be restored before voiding.", 409);
         updatedClient = await tx.client.update({
           where: { id: client.id },
-          data: { balance: Math.max(0, Number(client.balance || 0) - outstanding) },
+          data: {
+            balance: Math.max(0, Number(client.balance || 0) - outstanding),
+            storeCredit: Math.max(0, nextStoreCredit),
+            serviceCredit: Math.max(0, nextServiceCredit),
+          },
         });
       }
     }
@@ -6898,6 +7099,7 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
     }
 
     const reversalNotes = [
+      ...(removedTreatments.count ? [`${removedTreatments.count} linked treatment record(s) removed`] : []),
       ...(reversalMovements.length ? [`${reversalMovements.length} stock movement(s) reversed`] : []),
       ...restoredCertificates.map((certificate) => `GC ${certificate.code} restored to ${certificate.balance}`),
       ...restoredPackages.map((pkg) => `${pkg.name} back to ${pkg.used}/${pkg.sessions} sessions`),
@@ -6994,6 +7196,8 @@ function normalizePosCartPayload(payload, actor, existing = null) {
     manualDiscountTargetKey: manualDiscount?.targetKey || "",
     saleDate,
     testMode,
+    room: clean(payload?.room ?? existing?.room),
+    arrivalTime: clean(payload?.arrivalTime ?? existing?.arrivalTime),
   };
 }
 
@@ -7140,6 +7344,15 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     throw apiError("Select a registered client before selling a package so its sessions can be issued.");
   }
   const paidAmount = normalizedPayments.reduce((sum, payment) => sum + payment.amount, 0);
+  const changeAmount = Math.max(0, paidAmount - checkout.total);
+  const creditChangeType = ["Client Credit", "Service Credit"].includes(clean(paymentData.creditChangeType)) ? clean(paymentData.creditChangeType) : "";
+  if (changeAmount > 0 && creditChangeType && normalizedPayments[0]) {
+    normalizedPayments[0].changeCreditType = creditChangeType;
+    normalizedPayments[0].changeCreditAmount = changeAmount;
+  }
+  if (changeAmount > 0 && creditChangeType && !checkout.client && !testMode) {
+    throw apiError("Select a registered client before converting change to account credit.");
+  }
   const outstandingAmount = Math.max(0, checkout.total - paidAmount);
   if (outstandingAmount > 0 && !checkout.client && !testMode) {
     throw apiError("Select a registered client before posting an unpaid or partially paid transaction.");
@@ -7264,6 +7477,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
               sessions,
               service: redemptionPayments.map((payment) => payment.packageServiceName).filter(Boolean).join(", "),
               provider: redemptionPayments.map((payment) => payment.packageProvider).filter((value) => value && value !== "N/A").join(", "),
+              notes: clean(paymentData.notes),
             },
           ], []),
         },
@@ -7274,6 +7488,17 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         settled = await tx.clinicPackage.update({ where: { id: packageId }, data: { status: "Completed" } });
       }
       settledPackages.push(settled);
+    }
+
+    for (const payment of operationalPayments) {
+      const creditField = payment.method === "Client Credit" ? "storeCredit" : payment.method === "Service Credit" ? "serviceCredit" : "";
+      if (!creditField) continue;
+      if (!checkout.client) throw apiError(`Select a registered client before using ${payment.method}.`);
+      const debited = await tx.client.updateMany({
+        where: { id: checkout.client.id, [creditField]: { gte: payment.amount } },
+        data: { [creditField]: { decrement: payment.amount } },
+      });
+      if (debited.count !== 1) throw apiError(`${payment.method} balance is insufficient. Refresh the client profile and try again.`, 409);
     }
 
     const saleCount = await tx.sale.count();
@@ -7295,6 +7520,9 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         status: testMode ? "Test" : paidAmount >= checkout.total ? "Paid" : paidAmount > 0 ? "Partially Paid" : "Unpaid",
         appointmentId: testMode ? null : checkout.appointmentId,
         notes: clean(paymentData.notes || draft.notes),
+        room: clean(draft.room),
+        arrivalTime: clean(draft.arrivalTime),
+        checkoutTime: new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()),
         testMode,
         items: {
           create: checkout.items.map((item) => ({
@@ -7315,6 +7543,39 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       },
       include: { items: true },
     });
+
+    const syncedTreatments = [];
+    if (!testMode && checkout.client) {
+      for (const saleItem of sale.items.filter((item) => item.type === "Service")) {
+        const service = saleItem.serviceId ? await tx.service.findUnique({ where: { id: saleItem.serviceId } }) : null;
+        if (service?.serviceType === "Package") continue;
+        const intervalDays = Number(saleItem.recommendedIntervalDays || service?.recommendedIntervalDays || 0);
+        const followUpDate = new Date(`${saleDate}T00:00:00.000Z`);
+        if (intervalDays > 0 && !Number.isNaN(followUpDate.getTime())) followUpDate.setUTCDate(followUpDate.getUTCDate() + intervalDays);
+        syncedTreatments.push(await tx.treatment.create({
+          data: {
+            clientId: checkout.client.id,
+            client: checkout.client.fullName,
+            date: saleDate,
+            service: saleItem.name,
+            branch,
+            provider: saleItem.provider || clean(draft.staff),
+            room: clean(draft.room),
+            preNotes: clean(paymentData.notes || draft.notes),
+            postNotes: "Created automatically from POS checkout.",
+            aftercare: saleItem.aftercare || service?.aftercare || "",
+            arrivalTime: clean(draft.arrivalTime),
+            completedTime: sale.checkoutTime,
+            checkoutTime: sale.checkoutTime,
+            consumables: jsonText(parseJsonList(service?.consumables), []),
+            consent: checkout.client.consentStatus || "Pending",
+            followUp: intervalDays > 0 && !Number.isNaN(followUpDate.getTime()) ? followUpDate.toISOString().slice(0, 10) : "",
+            sourceSaleId: sale.id,
+            sourceSaleItemId: saleItem.id,
+          },
+        }));
+      }
+    }
 
     const issuedPackages = [];
     if (!testMode && checkout.client) {
@@ -7425,6 +7686,8 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
           branchesVisited: jsonText([...visited], []),
           lastVisit: saleDate,
           balance: { increment: outstandingAmount },
+          ...(creditChangeType === "Client Credit" && changeAmount > 0 ? { storeCredit: { increment: changeAmount } } : {}),
+          ...(creditChangeType === "Service Credit" && changeAmount > 0 ? { serviceCredit: { increment: changeAmount } } : {}),
         },
       });
     }
@@ -7449,6 +7712,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       giftCertificates: settledCertificates,
       packages: [...settledPackages, ...issuedPackages].map(serializePackage),
       client: updatedClient ? serializeClient(updatedClient) : null,
+      treatments: syncedTreatments.map(serializeTreatment),
       posCartId,
       auditLog,
     };

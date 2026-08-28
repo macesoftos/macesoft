@@ -42,6 +42,11 @@ test("rejects invalid contact details, dates, and missing consent", () => {
   assert.throws(() => normalizePublicBookingRequest({ ...validBooking, privacyConsent: false }, { today: "2026-08-14" }), /consent/i);
 });
 
+test("preserves an optional preferred service provider", () => {
+  const booking = normalizePublicBookingRequest({ ...validBooking, preferredStaff: "Nurse Ana" }, { today: "2026-08-14" });
+  assert.equal("preferredStaff" in booking ? booking.preferredStaff : undefined, "Nurse Ana");
+});
+
 test("quietly accepts honeypot submissions without creating booking data", () => {
   assert.deepEqual(normalizePublicBookingRequest({ clinicWebsite: "spam.example" }), { spam: true });
 });

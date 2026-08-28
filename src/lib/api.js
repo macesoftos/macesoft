@@ -631,6 +631,20 @@ export function importInventoryCsvRecords(records) {
   });
 }
 
+export function importHistoricalSales(records) {
+  return requestJson("/api/sales/import", {
+    method: "POST",
+    body: JSON.stringify({ records }),
+  });
+}
+
+export function transferInventoryStock(id, transfer) {
+  return requestJson(`/api/inventory/${encodeURIComponent(id)}/transfer`, {
+    method: "POST",
+    body: JSON.stringify(transfer),
+  });
+}
+
 export function submitPublicRegistration(payload) {
   return requestJson("/api/public-registration", { method: "POST", body: JSON.stringify(payload) });
 }
@@ -697,9 +711,10 @@ export function mergeLeadDuplicate(id, payload) {
   });
 }
 
-export function redeemPackageRecord(id) {
+export function redeemPackageRecord(id, session = {}) {
   return requestJson(`/api/packages/${encodeURIComponent(id)}/redeem`, {
     method: "POST",
+    body: JSON.stringify(session),
   });
 }
 

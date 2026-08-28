@@ -24,6 +24,9 @@ export function manilaDate(now = new Date()) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+/**
+ * @returns {{ spam: true } | { spam: false, fullName: string, mobile: string, email: string, serviceId: string, branch: string, date: string, time: string, submissionId: string, concern: string, preferredStaff?: string, marketingConsent: boolean }}
+ */
 export function normalizePublicBookingRequest(values = {}, { today = manilaDate() } = {}) {
   if (clean(values.clinicWebsite)) return { spam: true };
 
@@ -64,6 +67,7 @@ export function normalizePublicBookingRequest(values = {}, { today = manilaDate(
     time,
     submissionId,
     concern: bounded(values.concern, "Concern or notes", 1000),
+    ...(clean(values.preferredStaff) ? { preferredStaff: bounded(values.preferredStaff, "Preferred service provider", 120) } : {}),
     marketingConsent: values.marketingConsent === true || values.marketingOptIn === true,
   };
 }

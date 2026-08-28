@@ -6749,6 +6749,29 @@ body:has(.public-lead-page-embedded) #root {
   justify-content: center;
 }
 
+.inventory-management-panel td.inventory-col-actions .inline-actions button {
+  white-space: nowrap;
+}
+
+@media (min-width: 761px) and (max-width: 1400px) {
+  .inventory-management-panel .inventory-col-photo { width: 10%; }
+  .inventory-management-panel .inventory-col-item { width: 18%; }
+
+  .inventory-management-panel td.inventory-col-actions .inline-actions {
+    gap: 6px;
+  }
+
+  .inventory-management-panel td.inventory-col-actions .inline-actions button {
+    width: var(--touch-target);
+    padding: 0;
+    gap: 0;
+  }
+
+  .inventory-management-panel .inventory-action-label {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .inventory-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
