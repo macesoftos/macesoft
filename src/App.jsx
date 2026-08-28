@@ -23,6 +23,7 @@ import {
   Edit3,
   EllipsisVertical,
   Eye,
+  FilePenLine,
   FileText,
   Filter,
   Gift,
@@ -117,6 +118,12 @@ import {
   loadLeadWebhookEvents,
   loadLeadAutomations,
   loadMyWorkspace,
+  loadStaffForms,
+  submitStaffForm,
+  reviewStaffForm,
+  loadClientDocuments,
+  attachClientDocument,
+  removeClientDocument,
   loadNotifications,
   loadPayrollOverview,
   loadMarketingMedia,
@@ -173,6 +180,7 @@ import {
   moveMarketingCampaignToDeleted,
   deleteTreatmentPhoto,
   uploadImageAsset,
+  uploadDocumentAsset,
   voidTransactionRecord,
   apiAuthenticationRequiredEvent,
   apiNotificationCreatedEvent,
@@ -10300,6 +10308,47 @@ function ClientProfileDialog({
   onAddConsent,
   onDelete,
 }) {
+  const [documents, setDocuments] = useState([]);
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const [documentError, setDocumentError] = useState("");
+  useEffect(() => {
+    let active = true;
+    loadClientDocuments(client.id)
+      .then((result) => { if (active) setDocuments(result.documents || []); })
+      .catch((error) => { if (active) setDocumentError(error.message || "Unable to load client documents."); });
+    return () => { active = false; };
+  }, [client.id]);
+
+  async function uploadClientDocument(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setDocumentBusy(true);
+    setDocumentError("");
+    try {
+      const dataUrl = await prepareDocumentDataUrl(file);
+      const uploaded = await uploadDocumentAsset(dataUrl, "client-document", client.branch || "All branches", file.name);
+      const result = await attachClientDocument(client.id, { assetId: uploaded.asset.id, title: file.name, category: "Legacy record", branch: client.branch });
+      setDocuments((current) => [result.document, ...current]);
+    } catch (error) {
+      setDocumentError(error.message || "Unable to attach the client document.");
+    } finally {
+      setDocumentBusy(false);
+    }
+  }
+
+  async function deleteClientDocument(document) {
+    if (!window.confirm(`Remove ${document.title} from this client record?`)) return;
+    setDocumentBusy(true);
+    try {
+      await removeClientDocument(client.id, document.id);
+      setDocuments((current) => current.filter((item) => item.id !== document.id));
+    } catch (error) {
+      setDocumentError(error.message || "Unable to remove the client document.");
+    } finally {
+      setDocumentBusy(false);
+    }
+  }
   const profileLabels = [client.tag, client.retention]
     .filter(Boolean)
     .filter((label, index, labels) => labels.findIndex((item) => normalize(item) === normalize(label)) === index)
@@ -10342,6 +10391,10 @@ function ClientProfileDialog({
                 <button className="secondary-button small" type="button" onClick={onAddConsent}>
                   <FileText size={16} /> Sign consent
                 </button>
+                <label className={`secondary-button small ${documentBusy ? "disabled" : ""}`}>
+                  <Upload size={16} /> {documentBusy ? "Uploading…" : "Attach PDF/DOCX"}
+                  <input className="photo-file-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={documentBusy} onChange={uploadClientDocument} />
+                </label>
                 <button className="ghost-button small" type="button" onClick={onDelete}>
                   <Trash2 size={16} /> Delete
                 </button>
@@ -10371,11 +10424,13 @@ function ClientProfileDialog({
               <RecordItem label="Current medications" value={sensitiveAllowed ? client.medications : "Restricted"} />
             </div>
             <div className="dashboard-grid compact client-profile-panels">
+              {documentError && <div className="inline-state danger"><AlertCircle size={16} /> {documentError}</div>}
               <MiniPanel icon={HeartPulse} title="Treatment history" rows={treatments.map((item) => `${item.date} · ${item.branch || "Branch not recorded"} · ${item.service} · ${item.provider || "Provider N/A"}`)} empty="No treatments yet." />
               <MiniPanel icon={CalendarDays} title="Appointments" rows={appointments.map((item) => `${item.date} ${item.time} · ${item.branch} · ${item.service} · ${item.staff || "Provider N/A"} · ${item.status}`)} empty="No appointments yet." />
               <MiniPanel icon={WalletCards} title="Payments" rows={validTransactions.map((item) => `${item.date} · ${item.branch} · ${item.invoice} · ${money.format(item.total)} · ${item.status}`)} empty="No payments yet." />
               <MiniPanel icon={Gift} title="Packages" rows={packages.map((item) => `${item.name}: ${item.used}/${item.sessions}`)} empty="No active packages." />
               <MiniPanel icon={ShieldCheck} title="Signed consent forms" rows={consents.map((item) => `${formatDateTime(item.signedAt)} · ${item.formName} ${item.formVersion} · ${item.branch} · ${item.witness || "No witness"}`)} empty="No signed consent forms." />
+              <section className="mini-panel client-document-panel"><div className="mini-panel-heading"><FileText size={18} /><strong>Attached records</strong></div>{documents.length ? <div className="client-document-list">{documents.map((document) => <article key={document.id}><a href={document.url} target="_blank" rel="noreferrer"><strong>{document.title}</strong><small>{document.category} · {formatDateTime(document.createdAt)}</small></a><button type="button" disabled={documentBusy} onClick={() => void deleteClientDocument(document)} aria-label={`Remove ${document.title}`}><Trash2 size={14} /></button></article>)}</div> : <small>No PDF or Word records attached.</small>}</section>
             </div>
           </div>
         </div>
@@ -12557,6 +12612,7 @@ function MyWorkspaceModule({ session, notify }) {
   }
 
   const { staff, attendance, events = [], appointments = [] } = workspace;
+  const personalStaffOptions = [staff];
 
   return (
     <div className="my-workspace-page">
@@ -12617,7 +12673,130 @@ function MyWorkspaceModule({ session, notify }) {
           ) : <EmptyState title="No time entries" copy="Use Time in when your shift begins." />}
         </div>
       </section>
+      <StaffFormsPanel staffOptions={personalStaffOptions} notify={notify} />
     </div>
+  );
+}
+
+function prepareDocumentDataUrl(file) {
+  const allowedTypes = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+  const allowedExtension = /\.(pdf|docx?|DOCX?)$/.test(file?.name || "");
+  if (!allowedTypes.includes(file?.type) && !allowedExtension) return Promise.reject(new Error("Choose a PDF, DOC, or DOCX document."));
+  if (file.size > 15 * 1024 * 1024) return Promise.reject(new Error("Choose a document smaller than 15 MB."));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The selected document could not be read."));
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsDataURL(file);
+  });
+}
+
+function StaffFormsPanel({ staffOptions = [], notify, applyAuditLog }) {
+  const defaultStaffId = staffOptions[0]?.id || "";
+  const defaultStaffBranch = staffOptions[0]?.branch || "";
+  const [data, setData] = useState({ forms: [], formTypes: [], canReview: false });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [reviewing, setReviewing] = useState(null);
+  const [review, setReview] = useState({ adminDetails: "", adminSignature: "", status: "Approved" });
+  const [draft, setDraft] = useState({ staffId: staffOptions[0]?.id || "", formType: "Incident Report", formDate: todayDate(), employeeDetails: "", employeeSignature: "", branch: staffOptions[0]?.branch || "" });
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await loadStaffForms();
+      setData(result);
+      setDraft((current) => ({
+        ...current,
+        formType: result.formTypes?.includes(current.formType) ? current.formType : result.formTypes?.[0] || current.formType,
+        staffId: current.staffId || defaultStaffId,
+        branch: current.branch || defaultStaffBranch,
+      }));
+    } catch (error) {
+      notify?.(error.message || "Unable to load staff forms.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [defaultStaffBranch, defaultStaffId, notify]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy("submit");
+    try {
+      const result = await submitStaffForm(draft);
+      setData((current) => ({ ...current, forms: [result.form, ...current.forms] }));
+      applyAuditLog?.(result.auditLog);
+      setDraft((current) => ({ ...current, employeeDetails: "", employeeSignature: "" }));
+      notify?.("Staff form submitted and the administrator was notified.", "success");
+    } catch (error) {
+      notify?.(error.message || "Unable to submit the staff form.", "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function submitReview(event) {
+    event.preventDefault();
+    if (!reviewing) return;
+    setBusy("review");
+    try {
+      const result = await reviewStaffForm(reviewing.id, review);
+      setData((current) => ({ ...current, forms: current.forms.map((item) => item.id === result.form.id ? result.form : item) }));
+      applyAuditLog?.(result.auditLog);
+      setReviewing(null);
+      setReview({ adminDetails: "", adminSignature: "", status: "Approved" });
+      notify?.("Staff form review saved.", "success");
+    } catch (error) {
+      notify?.(error.message || "Unable to review the staff form.", "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const selectedStaff = staffOptions.find((person) => person.id === draft.staffId) || staffOptions[0];
+
+  return (
+    <section className="surface-panel full-span staff-forms-panel">
+      <SectionHeader icon={FilePenLine} title={data.canReview ? "Employee Forms & Reviews" : "My Employee Forms"} action={`${data.forms.length} submitted`} />
+      <div className="staff-forms-layout">
+        <form className="staff-form-entry" onSubmit={submit}>
+          <h3>Fill out a form</h3>
+          <div className="form-grid">
+            {data.canReview && <label><span>Employee</span><select required value={draft.staffId} onChange={(event) => { const staffId = event.target.value; const person = staffOptions.find((item) => item.id === staffId); setDraft((current) => ({ ...current, staffId, branch: person?.branch || current.branch })); }}>{staffOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}
+            <label><span>Form</span><select required value={draft.formType} onChange={(event) => setDraft((current) => ({ ...current, formType: event.target.value }))}>{data.formTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+            <label><span>Date</span><input required type="date" value={draft.formDate} onChange={(event) => setDraft((current) => ({ ...current, formDate: event.target.value }))} /></label>
+            <label><span>Branch</span><input required value={draft.branch || selectedStaff?.branch || ""} onChange={(event) => setDraft((current) => ({ ...current, branch: event.target.value }))} /></label>
+            <label className="span-2"><span>Employee statement / request details</span><textarea required minLength="10" rows="4" value={draft.employeeDetails} onChange={(event) => setDraft((current) => ({ ...current, employeeDetails: event.target.value }))} /></label>
+            <label className="span-2"><span>Employee electronic signature</span><input required value={draft.employeeSignature} placeholder="Type full legal name" onChange={(event) => setDraft((current) => ({ ...current, employeeSignature: event.target.value }))} /></label>
+          </div>
+          <button className="primary-button full" disabled={loading || busy === "submit"}><FilePenLine size={16} /> {busy === "submit" ? "Submitting…" : "Sign and submit"}</button>
+        </form>
+        <div className="staff-form-records">
+          {loading ? <p>Loading forms…</p> : data.forms.length ? data.forms.map((form) => (
+            <article key={form.id}>
+              <div><strong>{form.formType}</strong><small>{form.staffName} · {form.formDate} · {form.branch}</small></div>
+              <StatusBadge status={form.status} />
+              <p>{form.employeeDetails}</p>
+              <small>Signed by {form.employeeSignature}</small>
+              {form.adminDetails && <div className="staff-form-admin-note"><b>Administrator response</b><span>{form.adminDetails}</span><small>{form.adminSignature}</small></div>}
+              {data.canReview && <button className="secondary-button small" type="button" onClick={() => { setReviewing(form); setReview({ adminDetails: form.adminDetails || "", adminSignature: form.adminSignature || "", status: form.status === "Submitted" ? "Under Review" : form.status }); }}><ShieldCheck size={14} /> Review</button>}
+            </article>
+          )) : <EmptyState title="No staff forms yet" copy="Submitted incident, leave, overtime, disciplinary, and evaluation forms appear here." />}
+        </div>
+      </div>
+      {reviewing && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Review staff form"><form className="modal-card" onSubmit={submitReview}>
+        <button className="modal-close" type="button" onClick={() => setReviewing(null)}><X size={18} /></button>
+        <SectionHeader icon={ShieldCheck} title={`Review ${reviewing.formType}`} action={reviewing.staffName} />
+        <div className="form-grid">
+          <label><span>Status</span><select value={review.status} onChange={(event) => setReview((current) => ({ ...current, status: event.target.value }))}>{["Under Review", "Approved", "Declined", "Closed"].map((status) => <option key={status}>{status}</option>)}</select></label>
+          <label className="span-2"><span>Administrator details / action taken</span><textarea required rows="5" value={review.adminDetails} onChange={(event) => setReview((current) => ({ ...current, adminDetails: event.target.value }))} /></label>
+          <label className="span-2"><span>Administrator electronic signature</span><input required value={review.adminSignature} placeholder="Type full legal name" onChange={(event) => setReview((current) => ({ ...current, adminSignature: event.target.value }))} /></label>
+        </div>
+        <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setReviewing(null)}>Cancel</button><button className="primary-button" disabled={busy === "review"}>{busy === "review" ? "Saving…" : "Save review"}</button></div>
+      </form></div>}
+    </section>
   );
 }
 
@@ -12966,6 +13145,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
           ]}
         />
       </div>}
+      {workspaceTab === "Active Users" && <StaffFormsPanel staffOptions={staff} notify={notify} applyAuditLog={applyAuditLog} />}
       {showInvite && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Invite member"><form className="modal-card invitation-modal" onSubmit={submitInvitation}>
         <button className="modal-close" type="button" onClick={() => { setShowInvite(false); setEditingInvitation(null); }}><X size={18} /></button>
         <SectionHeader icon={Mail} title={editingInvitation ? "Edit pending invitation" : "Invite organization member"} action={`Secure link · ${capabilities.invitationExpiryDays || 7} days`} />
@@ -14263,10 +14443,10 @@ function ModalHost({
     },
     "consent-template": {
       title: modal.payload?.id ? "Edit Consent Form Version" : "New Consent Form Version",
-      initial: { name: "Patient Consent", version: "v1", content: "", active: true, ...modal.payload, serviceIds: splitList(modal.payload?.serviceIds).join(", "), requiredFields: splitList(modal.payload?.requiredFields).join(", ") },
+      initial: { name: "Patient Consent", version: "v1", content: "", sourceDocumentAssetId: "", active: true, ...modal.payload, serviceIds: splitList(modal.payload?.serviceIds).join(", "), requiredFields: splitList(modal.payload?.requiredFields).join(", ") },
       submitLabel: "Save form template",
       onSubmit: saveConsentTemplate,
-      fields: [field("name", "Form name"), field("version", "Version"), field("serviceIds", "Related services", "multi-select", services.map((service) => ({ value: service.id, label: service.name })), "span-2", false), field("content", "Consent text", "textarea", null, "span-2"), field("requiredFields", "Additional required fields", "text", null, "span-2", false), field("active", "Active", "checkbox")],
+      fields: [field("name", "Form name"), field("version", "Version"), field("serviceIds", "Related services", "multi-select", services.map((service) => ({ value: service.id, label: service.name })), "span-2", false), { ...field("sourceDocumentAssetId", "Original clinic form document", "document", null, "span-2", false), documentCategory: "form-template" }, field("content", "Consent text", "textarea", null, "span-2"), field("requiredFields", "Additional required fields", "text", null, "span-2", false), field("active", "Active", "checkbox")],
     },
     promotion: {
       title: modal.payload?.id ? "Edit Promotion" : "New Promotion",
@@ -15006,6 +15186,7 @@ function ConsentModal({ payload = {}, clients = [], services = [], branches = []
             <section className="consent-document" aria-live="polite">
               <div><strong>{selectedTemplate?.name}</strong><span>Version {selectedTemplate?.version}</span></div>
               <p>{selectedTemplate?.content}</p>
+              {selectedTemplate?.sourceDocumentUrl && <a className="secondary-button small" href={selectedTemplate.sourceDocumentUrl} target="_blank" rel="noreferrer"><FileText size={15} /> Open original clinic form</a>}
             </section>
 
             <div className="form-grid">
@@ -15631,7 +15812,7 @@ function EntityModal({ config, onClose }) {
         {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
         <div className="form-grid">
           {config.fields.map((item) => {
-            const optionalFieldTypes = ["checkbox", "textarea", "photo", "consumables"];
+            const optionalFieldTypes = ["checkbox", "textarea", "photo", "document", "consumables"];
             const required = item.required ?? (!optionalFieldTypes.includes(item.type) && item.name !== "id");
             return (
               <FormField
@@ -15748,6 +15929,19 @@ function FormField({ field: item, form, required = false, value, onChange }) {
     reader.readAsDataURL(file);
   }
 
+  async function handleDocumentUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const dataUrl = await prepareDocumentDataUrl(file);
+      const uploaded = await uploadDocumentAsset(dataUrl, item.documentCategory || "form-template", form.branch || "All branches", file.name);
+      onChange(uploaded.asset.id);
+    } catch (error) {
+      window.alert(error.message || "The document could not be uploaded securely.");
+    }
+  }
+
   if (item.type === "checkbox") {
     return (
       <label className={wrapperClass} htmlFor={fieldId}>
@@ -15784,6 +15978,21 @@ function FormField({ field: item, form, required = false, value, onChange }) {
             ) : null}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (item.type === "document") {
+    const existingUrl = form.sourceDocumentUrl || (value ? `/api/uploads/${value}` : "");
+    return (
+      <div className={`document-field ${item.className ?? ""}`}>
+        <FieldLabel required={required}>{item.label}</FieldLabel>
+        <div className="photo-field-actions">
+          <label className="secondary-button small"><Upload size={15} /> Upload PDF/DOCX<input className="photo-file-input" id={fieldId} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleDocumentUpload} /></label>
+          {existingUrl && <a className="ghost-button small" href={existingUrl} target="_blank" rel="noreferrer"><Eye size={15} /> Open document</a>}
+          {value && <button className="ghost-button small" type="button" onClick={() => onChange("")}><Trash2 size={15} /> Remove</button>}
+        </div>
+        <small>Optional source form. Staff can open the clinic&apos;s original PDF or Word document while collecting the digital signature.</small>
       </div>
     );
   }

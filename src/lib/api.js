@@ -196,6 +196,37 @@ export function uploadImageAsset(dataUrl, category, branch, originalName = "") {
   });
 }
 
+export function uploadDocumentAsset(dataUrl, category, branch, originalName = "") {
+  return requestJson("/api/uploads", {
+    method: "POST",
+    body: JSON.stringify({ dataUrl, category, branch, originalName }),
+  });
+}
+
+export function loadClientDocuments(clientId) {
+  return requestJson(`/api/clients/${encodeURIComponent(clientId)}/documents`);
+}
+
+export function attachClientDocument(clientId, payload) {
+  return requestJson(`/api/clients/${encodeURIComponent(clientId)}/documents`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function removeClientDocument(clientId, documentId) {
+  return requestJson(`/api/clients/${encodeURIComponent(clientId)}/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" });
+}
+
+export function loadStaffForms() {
+  return requestJson("/api/forms/staff");
+}
+
+export function submitStaffForm(payload) {
+  return requestJson("/api/forms/staff", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function reviewStaffForm(id, payload) {
+  return requestJson(`/api/forms/staff/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
 export function loadMarketingMedia({ includeDeleted = false } = {}) {
   return requestJson(`/api/marketing/media${includeDeleted ? "?status=all" : ""}`);
 }

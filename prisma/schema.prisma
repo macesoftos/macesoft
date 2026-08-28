@@ -92,6 +92,7 @@ model Client {
   sales              Sale[]
   clientInvoices     ClientInvoice[]
   consentSubmissions ClientConsentSubmission[]
+  documents          ClientDocument[]
 
   @@index([fullName])
   @@index([mobile])
@@ -179,6 +180,7 @@ model StaffMember {
   payrollLines      PayrollLine[]
   payrollEarnings   PayrollCommissionEarning[]
   payrollDeductions PayrollSalaryDeduction[]
+  forms             StaffForm[]
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
 
@@ -649,18 +651,61 @@ model Promotion {
 }
 
 model ConsentFormTemplate {
-  id             String                    @id @default(cuid())
-  name           String
-  version        String
-  serviceIds     String                    @default("[]")
-  content        String                    @default("")
-  requiredFields String                    @default("[]")
-  active         Boolean                   @default(true)
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  submissions    ClientConsentSubmission[]
+  id                    String                    @id @default(cuid())
+  name                  String
+  version               String
+  serviceIds            String                    @default("[]")
+  content               String                    @default("")
+  requiredFields        String                    @default("[]")
+  active                Boolean                   @default(true)
+  sourceDocumentAssetId String?                   @unique
+  sourceDocumentAsset   UploadAsset?              @relation(fields: [sourceDocumentAssetId], references: [id], onDelete: SetNull)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  submissions           ClientConsentSubmission[]
 
   @@unique([name, version])
+}
+
+model ClientDocument {
+  id        String      @id @default(cuid())
+  clientId  String
+  client    Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assetId   String      @unique
+  asset     UploadAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title     String
+  category  String      @default("Legacy record")
+  notes     String      @default("")
+  branch    String      @default("")
+  createdAt DateTime    @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([branch, createdAt])
+}
+
+model StaffForm {
+  id                String      @id @default(cuid())
+  organizationId    String
+  staffId           String
+  staff             StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  formType          String
+  branch            String      @default("")
+  formDate          String
+  employeeDetails   String
+  employeeSignature String
+  adminDetails      String      @default("")
+  adminSignature    String      @default("")
+  status            String      @default("Submitted")
+  createdById       String      @default("")
+  reviewedById      String      @default("")
+  submittedAt       DateTime    @default(now())
+  reviewedAt        DateTime?
+  updatedAt         DateTime    @updatedAt
+
+  @@index([staffId, submittedAt])
+  @@index([organizationId, submittedAt])
+  @@index([branch, status, submittedAt])
+  @@index([formType, status])
 }
 
 model ClientConsentSubmission {
@@ -1717,11 +1762,11 @@ model AppNotification {
   module              String
   title               String
   message             String
-  recordId            String   @default("")
-  branches            String[] @default(["All branches"])
-  recipientAccountIds String[] @default([])
-  actor               String   @default("System")
-  createdAt           DateTime @default(now())
+  recordId            String        @default("")
+  branches            String[]      @default(["All branches"])
+  recipientAccountIds String[]      @default([])
+  actor               String        @default("System")
+  createdAt           DateTime      @default(now())
 
   @@index([createdAt])
   @@index([organizationId, createdAt])
@@ -1735,18 +1780,20 @@ model SystemSetting {
 }
 
 model UploadAsset {
-  id             String          @id
-  objectPath     String          @unique
-  category       String
-  branch         String
-  originalName   String          @default("")
-  mimeType       String
-  byteSize       Int
-  uploadedById   String
-  createdAt      DateTime        @default(now())
-  deletedAt      DateTime?
-  treatmentPhoto TreatmentPhoto?
-  flipbook       Flipbook?
+  id              String               @id
+  objectPath      String               @unique
+  category        String
+  branch          String
+  originalName    String               @default("")
+  mimeType        String
+  byteSize        Int
+  uploadedById    String
+  createdAt       DateTime             @default(now())
+  deletedAt       DateTime?
+  treatmentPhoto  TreatmentPhoto?
+  flipbook        Flipbook?
+  clientDocument  ClientDocument?
+  consentTemplate ConsentFormTemplate?
 
   @@index([branch])
   @@index([category])

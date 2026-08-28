@@ -382,6 +382,8 @@ const uploadCategories = {
   "branding-logo": { readModule: null, writeModule: "settings" },
   "flipbook-logo": { readModule: null, writeModule: "flipbooks" },
   "flipbook-pdf": { readModule: "flipbooks", writeModule: "flipbooks" },
+  "client-document": { readModule: "clients", writeModule: "clients" },
+  "form-template": { readModule: "settings", writeModule: "settings" },
 };
 
 function storageConfig() {
@@ -431,6 +433,33 @@ async function storeImageObject(dataUrl, category) {
     body: buffer,
   });
   if (!uploaded.ok) throw apiError("Object storage rejected the upload.", 502);
+  return { id, objectPath, category, mimeType, byteSize: buffer.length };
+}
+
+function decodeDocumentDataUrl(value) {
+  const match = clean(value).match(/^data:(application\/(?:pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) throw apiError("Upload a PDF, DOC, or DOCX document.", 415);
+  const mimeType = match[1].toLowerCase();
+  const buffer = Buffer.from(match[2].replace(/\s/g, ""), "base64");
+  const maximum = Number(process.env.MAX_DOCUMENT_UPLOAD_BYTES || 15 * 1024 * 1024);
+  if (!buffer.length || buffer.length > maximum) throw apiError("Document must be 15 MB or smaller.", 413);
+  const isPdf = mimeType === "application/pdf" && buffer.subarray(0, 5).toString("ascii") === "%PDF-";
+  const isDocx = mimeType.endsWith("wordprocessingml.document") && buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  const isDoc = mimeType === "application/msword" && buffer.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
+  if (!isPdf && !isDocx && !isDoc) throw apiError("Document content does not match its declared file type.", 415);
+  return { buffer, mimeType, extension: isPdf ? "pdf" : isDocx ? "docx" : "doc" };
+}
+
+async function storeDocumentObject(dataUrl, category) {
+  const { buffer, mimeType, extension } = decodeDocumentDataUrl(dataUrl);
+  const id = randomBytes(18).toString("base64url");
+  const objectPath = `${category}/${id}.${extension}`;
+  const uploaded = await storageRequest(objectPath, {
+    method: "POST",
+    headers: { "Content-Type": mimeType, "x-upsert": "false" },
+    body: buffer,
+  });
+  if (!uploaded.ok) throw apiError("Object storage rejected the document upload.", 502);
   return { id, objectPath, category, mimeType, byteSize: buffer.length };
 }
 
@@ -1566,7 +1595,12 @@ function serializePromotion(promotion) {
   return { ...promotion, serviceIds: parseJsonList(promotion.serviceIds), packageNames: parseJsonList(promotion.packageNames), branches: parseJsonList(promotion.branches) };
 }
 
-function normalizeConsentTemplatePayload(payload, existingId = "") {
+async function normalizeConsentTemplatePayload(payload, existingId = "") {
+  const sourceDocumentAssetId = cleanOptional(payload.sourceDocumentAssetId);
+  if (sourceDocumentAssetId) {
+    const sourceDocument = await prisma.uploadAsset.findUnique({ where: { id: sourceDocumentAssetId } });
+    if (!sourceDocument || sourceDocument.category !== "form-template") throw apiError("Choose a valid uploaded clinic form document.", 409);
+  }
   const data = {
     name: requireText(payload.name, "Consent form name"),
     version: requireText(payload.version, "Form version"),
@@ -1574,6 +1608,7 @@ function normalizeConsentTemplatePayload(payload, existingId = "") {
     content: requireText(payload.content, "Consent form content"),
     requiredFields: jsonList(payload.requiredFields),
     active: payload.active !== false,
+    sourceDocumentAssetId,
   };
   if (payload.id && !existingId) data.id = String(payload.id);
   return data;
@@ -1607,7 +1642,12 @@ async function normalizeConsentSubmissionPayload(payload, existingId = "") {
 }
 
 function serializeConsentTemplate(template) {
-  return { ...template, serviceIds: parseJsonList(template.serviceIds), requiredFields: parseJsonList(template.requiredFields) };
+  return {
+    ...template,
+    serviceIds: parseJsonList(template.serviceIds),
+    requiredFields: parseJsonList(template.requiredFields),
+    sourceDocumentUrl: template.sourceDocumentAssetId ? `/api/uploads/${template.sourceDocumentAssetId}` : "",
+  };
 }
 
 function serializeConsentSubmission(submission) {
@@ -2080,7 +2120,7 @@ const resourceConfigs = {
     orderBy: [{ name: "asc" }, { version: "desc" }],
     normalize: normalizeConsentTemplatePayload,
     serialize: serializeConsentTemplate,
-    clientSelect: { id: true, name: true, version: true, serviceIds: true, content: true, requiredFields: true, active: true },
+    clientSelect: { id: true, name: true, version: true, serviceIds: true, content: true, requiredFields: true, active: true, sourceDocumentAssetId: true },
   },
   consentSubmissions: {
     delegate: "clientConsentSubmission",
@@ -6117,7 +6157,9 @@ app.post("/api/uploads", asyncRoute(async (request, response) => {
   if (category === "flipbook-pdf") throw apiError("Upload PDFs from the Flipbooks workspace.", 400);
   const branch = requireText(request.body?.branch, "Upload branch");
   const actor = assertMutationAllowed(request, categoryAccess.writeModule, branch);
-  const stored = await storeImageObject(request.body?.dataUrl, category);
+  const stored = ["client-document", "form-template"].includes(category)
+    ? await storeDocumentObject(request.body?.dataUrl, category)
+    : await storeImageObject(request.body?.dataUrl, category);
   try {
     const asset = await prisma.uploadAsset.create({
       data: {
@@ -6132,6 +6174,178 @@ app.post("/api/uploads", asyncRoute(async (request, response) => {
     await storageRequest(stored.objectPath, { method: "DELETE" }).catch(() => {});
     throw error;
   }
+}));
+
+app.get("/api/clients/:id/documents", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "clients");
+  const client = await prisma.client.findFirst({ where: { id: clean(request.params.id), organizationId: actor.organizationId } });
+  if (!client) throw apiError("Client not found.", 404);
+  const documents = await prisma.clientDocument.findMany({
+    where: { clientId: client.id },
+    include: { asset: true },
+    orderBy: { createdAt: "desc" },
+  });
+  response.json({ documents: documents.map((document) => ({
+    id: document.id,
+    title: document.title,
+    category: document.category,
+    notes: document.notes,
+    branch: document.branch,
+    originalName: document.asset.originalName,
+    mimeType: document.asset.mimeType,
+    byteSize: document.asset.byteSize,
+    createdAt: document.createdAt,
+    url: `/api/uploads/${document.assetId}`,
+  })) });
+}));
+
+app.post("/api/clients/:id/documents", asyncRoute(async (request, response) => {
+  const actor = actorFromRequest(request);
+  const client = await prisma.client.findFirst({ where: { id: clean(request.params.id), organizationId: actor.organizationId } });
+  if (!client) throw apiError("Client not found.", 404);
+  const branch = clean(request.body?.branch) || clean(actor.branch) || client.branch;
+  assertMutationAllowed(request, "clients", branch);
+  const asset = await prisma.uploadAsset.findUnique({ where: { id: requireText(request.body?.assetId, "Uploaded document") } });
+  if (!asset || asset.category !== "client-document" || asset.uploadedById !== actor.id) throw apiError("Uploaded client document is unavailable.", 409);
+  const result = await prisma.$transaction(async (tx) => {
+    const document = await tx.clientDocument.create({
+      data: {
+        clientId: client.id,
+        assetId: asset.id,
+        title: requireText(request.body?.title || asset.originalName, "Document title"),
+        category: clean(request.body?.category) || "Legacy record",
+        notes: clean(request.body?.notes),
+        branch,
+      },
+      include: { asset: true },
+    });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Clients",
+      action: "Client document attached",
+      subjectType: "Client",
+      subjectId: client.id,
+      details: `${document.title} attached to ${client.fullName}.`,
+    });
+    return { document, auditLog };
+  });
+  response.status(201).json({
+    document: { ...result.document, url: `/api/uploads/${result.document.assetId}` },
+    auditLog: result.auditLog,
+  });
+}));
+
+app.delete("/api/clients/:clientId/documents/:documentId", asyncRoute(async (request, response) => {
+  const actor = actorFromRequest(request);
+  const document = await prisma.clientDocument.findFirst({
+    where: { id: clean(request.params.documentId), clientId: clean(request.params.clientId) },
+    include: { asset: true, client: true },
+  });
+  if (!document || document.client.organizationId !== actor.organizationId) throw apiError("Client document not found.", 404);
+  assertMutationAllowed(request, "clients", document.branch || document.client.branch);
+  if (actor.id !== document.asset.uploadedById && !canManageOrganization(actor.role)) throw apiError("Only the uploader or an organization administrator can remove this document.", 403);
+  const deleted = await storageRequest(document.asset.objectPath, { method: "DELETE" });
+  if (!deleted.ok && deleted.status !== 404) throw apiError("Object storage could not remove the document.", 502);
+  await prisma.$transaction(async (tx) => {
+    await tx.clientDocument.delete({ where: { id: document.id } });
+    await tx.uploadAsset.delete({ where: { id: document.assetId } });
+    await writeAudit(tx, request, { area: "Clients", action: "Client document removed", subjectType: "Client", subjectId: document.clientId, details: `${document.title} removed from ${document.client.fullName}.` });
+  });
+  response.status(204).end();
+}));
+
+const staffFormTypes = ["Incident Report", "Leave Request", "Overtime Authorization", "Employee Disciplinary Action", "Performance Evaluation"];
+const employeeStaffFormTypes = new Set(staffFormTypes.slice(0, 3));
+
+function canReviewStaffForms(actor) {
+  return canManageOrganization(actor.role) || (["Branch Manager", "Admin"].includes(actor.role) && moduleAllowed(actor, "staff", roleAccess));
+}
+
+function serializeStaffForm(form) {
+  return { ...form, staffName: form.staff?.name || "", staffRole: form.staff?.role || "" };
+}
+
+app.get("/api/forms/staff", asyncRoute(async (request, response) => {
+  requireAuthenticatedAccount(request);
+  const actor = actorFromRequest(request);
+  const reviewer = canReviewStaffForms(actor);
+  const ownStaffId = request.authAccount.staffId || "";
+  const where = reviewer
+    ? { organizationId: actor.organizationId, ...(actor.access?.scope === "all" ? {} : { branch: actor.access?.activeBranch?.name || actor.branch }) }
+    : { organizationId: actor.organizationId, staffId: ownStaffId || "__unlinked__" };
+  const forms = await prisma.staffForm.findMany({ where, include: { staff: true }, orderBy: { submittedAt: "desc" } });
+  response.json({ forms: forms.map(serializeStaffForm), formTypes: reviewer ? staffFormTypes : [...employeeStaffFormTypes], canReview: reviewer });
+}));
+
+app.post("/api/forms/staff", asyncRoute(async (request, response) => {
+  requireAuthenticatedAccount(request);
+  const actor = actorFromRequest(request);
+  const reviewer = canReviewStaffForms(actor);
+  const formType = requireText(request.body?.formType, "Form type");
+  if (!staffFormTypes.includes(formType) || (!reviewer && !employeeStaffFormTypes.has(formType))) throw apiError("This form type is not available to your account.", 403);
+  const staffId = reviewer && clean(request.body?.staffId) ? clean(request.body.staffId) : clean(request.authAccount.staffId);
+  if (!staffId) throw apiError("Connect this login to an employee profile before submitting a form.", 409);
+  const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
+  if (!staff) throw apiError("Employee profile not found.", 404);
+  const branch = clean(request.body?.branch) || clean(actor.access?.activeBranch?.name) || staff.branch;
+  if (!reviewer && !canAccessBranch(actor, branch)) throw apiError("You do not have access to this branch.", 403);
+  if (reviewer) assertMutationAllowed(request, "staff", branch);
+  const recipients = await notificationRecipientsForOrganization(prisma, { organizationId: actor.organizationId, branches: [branch], module: "staff" });
+  const result = await prisma.$transaction(async (tx) => {
+    const form = await tx.staffForm.create({
+      data: {
+        organizationId: actor.organizationId,
+        staffId,
+        formType,
+        branch,
+        formDate: requireText(request.body?.formDate, "Form date"),
+        employeeDetails: requireText(request.body?.employeeDetails, "Form details"),
+        employeeSignature: requireText(request.body?.employeeSignature, "Electronic signature"),
+        createdById: actor.id,
+        status: reviewer && request.body?.status === "Approved" ? "Approved" : "Submitted",
+      },
+      include: { staff: true },
+    });
+    const notification = await createAppNotification(tx, {
+      actor: actor.name,
+      branches: [branch],
+      organizationId: actor.organizationId,
+      recipientAccountIds: recipients.filter((account) => canReviewStaffForms(publicAccount(account))).map((account) => account.id),
+      message: `${staff.name} submitted ${formType}.`,
+      module: "staff",
+      recordId: form.id,
+      title: "Staff form submitted",
+    });
+    const auditLog = await writeAudit(tx, request, { area: "Staff Forms", action: "Staff form submitted", subjectType: "StaffForm", subjectId: form.id, details: `${formType} submitted for ${staff.name}.` });
+    return { form, notification, auditLog };
+  });
+  response.status(201).json({ form: serializeStaffForm(result.form), notification: result.notification, auditLog: result.auditLog });
+}));
+
+app.patch("/api/forms/staff/:id", asyncRoute(async (request, response) => {
+  requireAuthenticatedAccount(request);
+  const actor = actorFromRequest(request);
+  if (!canReviewStaffForms(actor)) throw apiError("Only an authorized administrator can review staff forms.", 403);
+  const existing = await prisma.staffForm.findFirst({ where: { id: clean(request.params.id), organizationId: actor.organizationId }, include: { staff: true } });
+  if (!existing) throw apiError("Staff form not found.", 404);
+  assertMutationAllowed(request, "staff", existing.branch);
+  const status = clean(request.body?.status) || existing.status;
+  if (!["Submitted", "Under Review", "Approved", "Declined", "Closed"].includes(status)) throw apiError("Choose a valid form status.");
+  const result = await prisma.$transaction(async (tx) => {
+    const form = await tx.staffForm.update({
+      where: { id: existing.id },
+      data: {
+        adminDetails: requireText(request.body?.adminDetails, "Administrator details"),
+        adminSignature: requireText(request.body?.adminSignature, "Administrator signature"),
+        status,
+        reviewedById: actor.id,
+        reviewedAt: new Date(),
+      },
+      include: { staff: true },
+    });
+    const auditLog = await writeAudit(tx, request, { area: "Staff Forms", action: "Staff form reviewed", subjectType: "StaffForm", subjectId: form.id, details: `${form.formType} for ${form.staff.name} marked ${status}.` });
+    return { form, auditLog };
+  });
+  response.json({ form: serializeStaffForm(result.form), auditLog: result.auditLog });
 }));
 
 app.post("/api/treatments/:id/photos", asyncRoute(async (request, response) => {
@@ -6219,7 +6433,12 @@ app.get("/api/uploads/:id", asyncRoute(async (request, response) => {
     const actor = categoryAccess.readModule
       ? assertReadAllowed(request, categoryAccess.readModule)
       : requireAuthenticatedAccount(request);
-    if (!canAccessBranch(actor, asset.branch)) throw apiError("You do not have access to this uploaded asset.", 403);
+    if (asset.category === "client-document") {
+      const linked = await prisma.clientDocument.findUnique({ where: { assetId: asset.id }, include: { client: true } });
+      if (!linked || linked.client.organizationId !== actor.organizationId) throw apiError("You do not have access to this client document.", 403);
+    } else if (!canAccessBranch(actor, asset.branch)) {
+      throw apiError("You do not have access to this uploaded asset.", 403);
+    }
   }
   const stored = await storageRequest(asset.objectPath);
   if (!stored.ok) throw apiError("Uploaded asset is unavailable.", stored.status === 404 ? 404 : 502);
