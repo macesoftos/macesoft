@@ -7673,13 +7673,22 @@ app.post("/api/public-leads", asyncRoute(async (request, response) => {
   }
 }));
 
-app.get("/api/public-registration/qr", asyncRoute(async (request, response) => {
-  const branchName = requireText(request.query.branch, "Branch");
-  const branch = await prisma.branch.findFirst({ where: { name: branchName, status: "Active" }, select: { id: true, name: true, organizationId: true } });
+async function publicRegistrationUrlForBranch(branchName) {
+  const branch = await prisma.branch.findFirst({ where: { name: requireText(branchName, "Branch"), status: "Active" }, select: { id: true, name: true, organizationId: true } });
   if (!branch) throw apiError("Registration branch is unavailable.", 404);
   await ensureWorkspaceForms(prisma, branch.organizationId);
   const form = await prisma.workspaceForm.findUnique({ where: { organizationId_type: { organizationId: branch.organizationId, type: "registration" } } });
-  const url = `${workspaceFormPublicUrl(form)}?branchId=${encodeURIComponent(branch.id)}`;
+  if (!form || form.status !== "Active") throw apiError("Client registration is unavailable for this clinic.", 404);
+  return `${workspaceFormPublicUrl(form)}?branchId=${encodeURIComponent(branch.id)}`;
+}
+
+app.get("/api/public-registration/open", asyncRoute(async (request, response) => {
+  response.redirect(302, await publicRegistrationUrlForBranch(request.query.branch));
+}));
+
+app.get("/api/public-registration/qr", asyncRoute(async (request, response) => {
+  const branchName = requireText(request.query.branch, "Branch");
+  const url = await publicRegistrationUrlForBranch(branchName);
   const svg = await QRCode.toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#1f2937", light: "#ffffff" } });
   response.type("image/svg+xml").set("Cache-Control", "public, max-age=300").send(svg);
 }));

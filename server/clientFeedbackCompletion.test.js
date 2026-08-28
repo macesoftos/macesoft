@@ -18,6 +18,13 @@ test("legacy client documents are durable records backed by secure uploads", () 
   assert.match(app, /loadClientDocuments\(client\.id\)/);
 });
 
+test("branch registration links resolve through the active private workspace form", () => {
+  assert.match(server, /app\.get\("\/api\/public-registration\/open"/);
+  assert.match(server, /publicRegistrationUrlForBranch/);
+  assert.match(app, /\/api\/public-registration\/open\?branch=/);
+  assert.doesNotMatch(app, /href=\{`\/register\?branch=/);
+});
+
 test("employee forms support the five requested workflows and administrator review", () => {
   for (const formType of ["Incident Report", "Leave Request", "Overtime Authorization", "Employee Disciplinary Action", "Performance Evaluation"]) {
     assert.match(server, new RegExp(formType));

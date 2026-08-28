@@ -264,6 +264,12 @@ try {
     roomCount: 1,
   });
   assert([201, 409].includes(createdBgcBranch.response.status), "BGC branch fixture create failed");
+  const registrationBranch = await prisma.branch.findFirst({ where: { name: "Mace BGC", status: "Active" }, select: { id: true } });
+  assert(registrationBranch?.id, "registration link smoke test could not find the active branch");
+  const registrationLink = await request("/api/public-registration/open?branch=Mace%20BGC", { redirect: "manual" });
+  assert(registrationLink.response.status === 302, "branch registration link did not redirect to the private workspace form");
+  const registrationLocation = registrationLink.response.headers.get("location") || "";
+  assert(registrationLocation.includes("/register/") && registrationLocation.includes(`branchId=${registrationBranch.id}`), "branch registration link omitted the form slug or branch ID");
 
   const createdService = await jsonRequest("/api/resources/services", {
     id: serviceId,
