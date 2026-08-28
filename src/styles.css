@@ -6813,6 +6813,10 @@ body:has(.public-lead-page-embedded) #root {
   line-height: 1.5;
 }
 
+.staff-forms-panel{grid-column:1/-1}.staff-forms-layout{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(360px,1.15fr);gap:20px}.staff-form-entry,.staff-form-records>article{border:1px solid var(--line);border-radius:16px;padding:18px;background:var(--surface)}.staff-form-entry h3{margin:0 0 14px}.staff-form-records{display:grid;gap:12px;align-content:start;max-height:720px;overflow:auto}.staff-form-records>article{display:grid;grid-template-columns:1fr auto;gap:8px 14px}.staff-form-records>article>p,.staff-form-records>article>.staff-form-admin-note,.staff-form-records>article>button{grid-column:1/-1}.staff-form-records small{color:var(--muted)}.staff-form-admin-note{display:grid;gap:5px;padding:12px;border-radius:12px;background:var(--soft)}
+.client-document-panel{padding:16px;border:1px solid var(--line);border-radius:14px}.mini-panel-heading{display:flex;align-items:center;gap:8px;margin-bottom:10px}.client-document-list{display:grid;gap:8px}.client-document-list article{display:flex;align-items:center;gap:8px;padding:9px;border-radius:10px;background:var(--soft)}.client-document-list a{display:grid;flex:1;color:inherit;text-decoration:none}.client-document-list button{border:0;background:transparent;color:var(--danger);cursor:pointer}.document-field{display:grid;gap:9px}.document-field>small{color:var(--muted)}
+@media (max-width:900px){.staff-forms-layout{grid-template-columns:1fr}}
+
 .staff-leave-layout {
   display: grid;
   grid-template-columns: minmax(320px, 0.8fr) minmax(520px, 1.2fr);
@@ -7001,6 +7005,29 @@ body:has(.public-lead-page-embedded) #root {
 
 .inventory-management-panel td.inventory-col-actions .inline-actions {
   justify-content: center;
+}
+
+.inventory-management-panel td.inventory-col-actions .inline-actions button {
+  white-space: nowrap;
+}
+
+@media (min-width: 761px) and (max-width: 1400px) {
+  .inventory-management-panel .inventory-col-photo { width: 10%; }
+  .inventory-management-panel .inventory-col-item { width: 18%; }
+
+  .inventory-management-panel td.inventory-col-actions .inline-actions {
+    gap: 6px;
+  }
+
+  .inventory-management-panel td.inventory-col-actions .inline-actions button {
+    width: var(--touch-target);
+    padding: 0;
+    gap: 0;
+  }
+
+  .inventory-management-panel .inventory-action-label {
+    display: none;
+  }
 }
 
 @media (max-width: 760px) {

@@ -593,24 +593,29 @@ try {
   const davaoReceptionist = branchHeaders("Receptionist", "Mace Davao");
   const bgcReceptionist = branchHeaders("Receptionist", "Mace BGC");
   const invalidAllBranchesReceptionist = branchHeaders("Receptionist", "All branches");
-  const blockedDavaoClients = await request("/api/resources/clients", { headers: davaoReceptionist });
-  const blockedBgcClients = await request("/api/resources/clients", { headers: bgcReceptionist });
-  assert(blockedDavaoClients.response.status === 403, "POS-only Davao user could open the Clients module API");
-  assert(blockedBgcClients.response.status === 403, "POS-only BGC user could open the Clients module API");
+  const davaoClientDirectory = await request("/api/resources/clients", { headers: davaoReceptionist });
+  const bgcClientDirectory = await request("/api/resources/clients", { headers: bgcReceptionist });
+  assert(davaoClientDirectory.response.ok, "Davao receptionist could not open the unified Clients directory");
+  assert(bgcClientDirectory.response.ok, "BGC receptionist could not open the unified Clients directory");
+  assert(davaoClientDirectory.payload.some((client) => client.id === clientId) && davaoClientDirectory.payload.some((client) => client.id === bgcClientId), "Davao receptionist did not receive the unified client directory");
+  assert(bgcClientDirectory.payload.some((client) => client.id === clientId) && bgcClientDirectory.payload.some((client) => client.id === bgcClientId), "BGC receptionist did not receive the unified client directory");
+  const blockedReceptionistExpenses = await request("/api/resources/expenses", { headers: davaoReceptionist });
+  assert(blockedReceptionistExpenses.response.status === 403, "Receptionist could open an owner-only Expenses API");
   const davaoPos = await request("/api/bootstrap", { headers: davaoReceptionist });
   const bgcPos = await request("/api/bootstrap", { headers: bgcReceptionist });
   assert(davaoPos.response.ok && davaoPos.payload.clients.some((client) => client.id === clientId), "Davao POS did not include its own customer selector data");
   assert(davaoPos.payload.clients.some((client) => client.id === bgcClientId), "Davao POS did not include the unified BGC customer selector data");
   assert(bgcPos.response.ok && bgcPos.payload.clients.some((client) => client.id === bgcClientId), "BGC POS did not include its own customer selector data");
   assert(bgcPos.payload.clients.some((client) => client.id === clientId), "BGC POS did not include the unified Davao customer selector data");
-  assert(!Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === clientId), "medicalNotes"), "POS bootstrap exposed clinical client fields");
-  assert(!Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === bgcClientId), "medicalNotes"), "Unified POS selector exposed cross-branch clinical client fields");
+  assert(Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === clientId), "medicalNotes"), "Receptionist client access omitted the complete local client profile");
+  assert(Object.hasOwn(davaoPos.payload.clients.find((client) => client.id === bgcClientId), "medicalNotes"), "Unified receptionist client access omitted the complete cross-branch client profile");
 
   const crossBranchUpdate = await jsonRequestAs(`/api/resources/clients/${bgcClientId}`, {
     ...createdBgcClient.payload.record,
-    fullName: "Cross-branch update must fail",
+    fullName: "Automated BGC Smoke Client Updated From Davao",
   }, davaoReceptionist, { method: "PUT" });
-  assert(crossBranchUpdate.response.status === 403, "Davao user could update a BGC client");
+  assert(crossBranchUpdate.response.ok, "Davao receptionist could not update a client visiting from BGC");
+  assert(crossBranchUpdate.payload.record?.branch === "Mace BGC", "cross-branch client update changed the registration branch");
   const invalidAllBranchesList = await request("/api/bootstrap", { headers: invalidAllBranchesReceptionist });
   assert(invalidAllBranchesList.response.ok && invalidAllBranchesList.payload.clients.length === 0, "an operational All branches account received client records");
 
@@ -833,6 +838,24 @@ try {
   assert(payrollStaff.payload.record.employmentStatus === "Probationary" && payrollStaff.payload.record.birthDate === "1994-06-15", "staff employment status or birth date was not saved");
   assert(payrollStaff.payload.record.address === "Davao City" && payrollStaff.payload.record.emergencyPhone === "09171234567", "staff address or emergency contact was not saved");
   assert(payrollStaff.payload.record.branches.includes("Mace Davao") && payrollStaff.payload.record.branches.includes("Mace BGC"), "staff multi-branch assignment was not saved");
+  const submittedStaffForm = await jsonRequest("/api/forms/staff", {
+    staffId: payrollStaffId,
+    formType: "Incident Report",
+    formDate: posCalendarDate(),
+    branch: "Mace Davao",
+    employeeDetails: "Integration smoke incident details.",
+    employeeSignature: payrollStaffName,
+  });
+  assert(submittedStaffForm.response.status === 201 && submittedStaffForm.payload.form.status === "Submitted", "staff form submission failed");
+  const staffFormId = submittedStaffForm.payload.form.id;
+  const listedStaffForms = await request("/api/forms/staff", { headers: ownerHeaders });
+  assert(listedStaffForms.response.ok && listedStaffForms.payload.forms.some((form) => form.id === staffFormId), "staff form list omitted the submitted form");
+  const reviewedStaffForm = await jsonRequest(`/api/forms/staff/${staffFormId}`, {
+    adminDetails: "Integration smoke administrator review.",
+    adminSignature: "CI Test Owner",
+    status: "Closed",
+  }, { method: "PATCH" });
+  assert(reviewedStaffForm.response.ok && reviewedStaffForm.payload.form.status === "Closed", "staff form administrator review failed");
   const payrollSwapStaffId = `st-payroll-swap-${suffix}`;
   const payrollSwapStaffName = `Payroll Swap Nurse ${suffix}`;
   const payrollSwapStaff = await jsonRequest("/api/resources/staff", {
@@ -1405,6 +1428,7 @@ try {
   await prisma.faceTrackAttendanceRecord.deleteMany({ where: { staffId: payrollStaffId } });
   await prisma.payrollScheduleEntry.deleteMany({ where: { staffId: { in: [payrollStaffId, payrollSwapStaffId] } } });
   await prisma.payrollEmployeeProfile.deleteMany({ where: { staffId: payrollStaffId } });
+  await prisma.staffForm.deleteMany({ where: { id: staffFormId } });
   await request(`/api/resources/transactions/${payrollSaleId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/transactions/${payrollPackageSaleId}`, { method: "DELETE", headers: ownerHeaders });
   await request(`/api/resources/packages/${payrollPackageId}`, { method: "DELETE", headers: ownerHeaders });

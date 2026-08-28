@@ -76,6 +76,14 @@ model Client {
   balance            Float                     @default(0)
   packageBalance     String                    @default("None")
   giftBalance        Float                     @default(0)
+  storeCredit        Float                     @default(0)
+  serviceCredit      Float                     @default(0)
+  pastMedicalHistory String                    @default("")
+  aestheticHistory   String                    @default("")
+  familyHistory      String                    @default("")
+  surgicalHistory    String                    @default("")
+  obstetricHistory   String                    @default("")
+  medications        String                    @default("")
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
   appointments       Appointment[]
@@ -84,6 +92,7 @@ model Client {
   sales              Sale[]
   clientInvoices     ClientInvoice[]
   consentSubmissions ClientConsentSubmission[]
+  documents          ClientDocument[]
 
   @@index([fullName])
   @@index([mobile])
@@ -171,6 +180,7 @@ model StaffMember {
   payrollLines      PayrollLine[]
   payrollEarnings   PayrollCommissionEarning[]
   payrollDeductions PayrollSalaryDeduction[]
+  forms             StaffForm[]
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
 
@@ -504,33 +514,37 @@ model FaceTrackKioskChallenge {
 }
 
 model Service {
-  id                      String                     @id @default(cuid())
-  name                    String
-  category                String
-  serviceType             String                     @default("Regular Service")
-  duration                Int                        @default(60)
-  price                   Float                      @default(0)
-  priceModel              String                     @default("Fixed price")
-  priceUnit               String                     @default("")
-  packageSessions         Int                        @default(0)
-  packagePrice            Float                      @default(0)
-  serviceValue            Float                      @default(0)
-  recommendedIntervalDays Int                        @default(0)
-  commission              String                     @default("")
-  consumables             String                     @default("[]")
-  branches                String                     @default("[]")
-  staff                   String                     @default("[]")
-  room                    String                     @default("")
-  active                  Boolean                    @default(true)
-  pos                     Boolean                    @default(true)
-  description             String                     @default("")
-  contraindications       String                     @default("")
-  aftercare               String                     @default("")
-  createdAt               DateTime                   @default(now())
-  updatedAt               DateTime                   @updatedAt
-  appointments            Appointment[]
-  commissionRules         CommissionRule[]
-  payrollEarnings         PayrollCommissionEarning[]
+  id                       String                     @id @default(cuid())
+  name                     String
+  category                 String
+  serviceType              String                     @default("Regular Service")
+  duration                 Int                        @default(60)
+  price                    Float                      @default(0)
+  priceModel               String                     @default("Fixed price")
+  priceUnit                String                     @default("")
+  packageSessions          Int                        @default(0)
+  packagePrice             Float                      @default(0)
+  serviceValue             Float                      @default(0)
+  recommendedIntervalDays  Int                        @default(0)
+  recommendedIntervalValue Int                        @default(0)
+  recommendedIntervalUnit  String                     @default("Days")
+  maintenanceIntervalValue Int                        @default(0)
+  maintenanceIntervalUnit  String                     @default("Days")
+  commission               String                     @default("")
+  consumables              String                     @default("[]")
+  branches                 String                     @default("[]")
+  staff                    String                     @default("[]")
+  room                     String                     @default("")
+  active                   Boolean                    @default(true)
+  pos                      Boolean                    @default(true)
+  description              String                     @default("")
+  contraindications        String                     @default("")
+  aftercare                String                     @default("")
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  appointments             Appointment[]
+  commissionRules          CommissionRule[]
+  payrollEarnings          PayrollCommissionEarning[]
 
   @@index([category])
   @@index([active])
@@ -606,6 +620,8 @@ model Treatment {
   outcome            String           @default("")
   satisfaction       String           @default("")
   photos             Int              @default(0)
+  sourceSaleId       String           @default("")
+  sourceSaleItemId   String?          @unique
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   photoLinks         TreatmentPhoto[]
@@ -613,6 +629,7 @@ model Treatment {
   @@index([clientId])
   @@index([branch])
   @@index([date])
+  @@index([sourceSaleId])
 }
 
 model Promotion {
@@ -634,18 +651,61 @@ model Promotion {
 }
 
 model ConsentFormTemplate {
-  id             String                    @id @default(cuid())
-  name           String
-  version        String
-  serviceIds     String                    @default("[]")
-  content        String                    @default("")
-  requiredFields String                    @default("[]")
-  active         Boolean                   @default(true)
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  submissions    ClientConsentSubmission[]
+  id                    String                    @id @default(cuid())
+  name                  String
+  version               String
+  serviceIds            String                    @default("[]")
+  content               String                    @default("")
+  requiredFields        String                    @default("[]")
+  active                Boolean                   @default(true)
+  sourceDocumentAssetId String?                   @unique
+  sourceDocumentAsset   UploadAsset?              @relation(fields: [sourceDocumentAssetId], references: [id], onDelete: SetNull)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  submissions           ClientConsentSubmission[]
 
   @@unique([name, version])
+}
+
+model ClientDocument {
+  id        String      @id @default(cuid())
+  clientId  String
+  client    Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assetId   String      @unique
+  asset     UploadAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title     String
+  category  String      @default("Legacy record")
+  notes     String      @default("")
+  branch    String      @default("")
+  createdAt DateTime    @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([branch, createdAt])
+}
+
+model StaffForm {
+  id                String      @id @default(cuid())
+  organizationId    String
+  staffId           String
+  staff             StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  formType          String
+  branch            String      @default("")
+  formDate          String
+  employeeDetails   String
+  employeeSignature String
+  adminDetails      String      @default("")
+  adminSignature    String      @default("")
+  status            String      @default("Submitted")
+  createdById       String      @default("")
+  reviewedById      String      @default("")
+  submittedAt       DateTime    @default(now())
+  reviewedAt        DateTime?
+  updatedAt         DateTime    @updatedAt
+
+  @@index([staffId, submittedAt])
+  @@index([organizationId, submittedAt])
+  @@index([branch, status, submittedAt])
+  @@index([formType, status])
 }
 
 model ClientConsentSubmission {
@@ -684,27 +744,28 @@ model TreatmentPhoto {
 }
 
 model InventoryItem {
-  id        String   @id @default(cuid())
-  item      String
-  sku       String   @default("")
-  brand     String   @default("")
-  category  String   @default("")
-  type      String   @default("Consumable")
-  unit      String   @default("")
-  packQty   Int      @default(1)
-  beginning Float    @default(0)
-  stock     Float    @default(0)
-  branch    String   @default("")
-  location  String   @default("")
-  reorder   Float    @default(0)
-  expiry    String   @default("")
-  batch     String   @default("")
-  supplier  String   @default("")
-  cost      Float    @default(0)
-  price     Float    @default(0)
-  image     String   @default("")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  item       String
+  sku        String   @default("")
+  brand      String   @default("")
+  category   String   @default("")
+  type       String   @default("Consumable")
+  unit       String   @default("")
+  packQty    Int      @default(1)
+  beginning  Float    @default(0)
+  stock      Float    @default(0)
+  branch     String   @default("")
+  location   String   @default("")
+  reorder    Float    @default(0)
+  expiry     String   @default("")
+  batch      String   @default("")
+  supplier   String   @default("")
+  directions String   @default("")
+  cost       Float    @default(0)
+  price      Float    @default(0)
+  image      String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([sku])
   @@index([branch])
@@ -725,6 +786,8 @@ model InventoryMovement {
   checkNumber String   @default("")
   unit        String   @default("")
   notes       String   @default("")
+  expiry      String   @default("")
+  batch       String   @default("")
   createdAt   DateTime @default(now())
 
   @@index([date])
@@ -750,6 +813,10 @@ model Sale {
   leadId            String                     @default("")
   appointmentId     String?                    @unique
   notes             String                     @default("")
+  room              String                     @default("")
+  arrivalTime       String                     @default("")
+  checkoutTime      String                     @default("")
+  imported          Boolean                    @default(false)
   testMode          Boolean                    @default(false)
   enteredAt         DateTime                   @default(now())
   items             SaleItem[]
@@ -1025,6 +1092,9 @@ model GiftCertificate {
   serviceId      String   @default("")
   service        String   @default("")
   issueDate      String   @default("")
+  issueType      String   @default("Client Gift")
+  company        String   @default("")
+  event          String   @default("")
   branch         String   @default("All branches")
   balance        Float    @default(0)
   expires        String   @default("")
@@ -1052,6 +1122,8 @@ model PosCart {
   manualDiscountTargetKey String   @default("")
   saleDate                String   @default("")
   testMode                Boolean  @default(false)
+  room                    String   @default("")
+  arrivalTime             String   @default("")
   createdById             String   @default("")
   createdBy               String   @default("")
   createdAt               DateTime @default(now())
@@ -1690,11 +1762,11 @@ model AppNotification {
   module              String
   title               String
   message             String
-  recordId            String   @default("")
-  branches            String[] @default(["All branches"])
-  recipientAccountIds String[] @default([])
-  actor               String   @default("System")
-  createdAt           DateTime @default(now())
+  recordId            String        @default("")
+  branches            String[]      @default(["All branches"])
+  recipientAccountIds String[]      @default([])
+  actor               String        @default("System")
+  createdAt           DateTime      @default(now())
 
   @@index([createdAt])
   @@index([organizationId, createdAt])
@@ -1708,18 +1780,20 @@ model SystemSetting {
 }
 
 model UploadAsset {
-  id             String          @id
-  objectPath     String          @unique
-  category       String
-  branch         String
-  originalName   String          @default("")
-  mimeType       String
-  byteSize       Int
-  uploadedById   String
-  createdAt      DateTime        @default(now())
-  deletedAt      DateTime?
-  treatmentPhoto TreatmentPhoto?
-  flipbook       Flipbook?
+  id              String               @id
+  objectPath      String               @unique
+  category        String
+  branch          String
+  originalName    String               @default("")
+  mimeType        String
+  byteSize        Int
+  uploadedById    String
+  createdAt       DateTime             @default(now())
+  deletedAt       DateTime?
+  treatmentPhoto  TreatmentPhoto?
+  flipbook        Flipbook?
+  clientDocument  ClientDocument?
+  consentTemplate ConsentFormTemplate?
 
   @@index([branch])
   @@index([category])
