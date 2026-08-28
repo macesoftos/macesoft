@@ -6270,7 +6270,7 @@ app.get("/api/forms/staff", asyncRoute(async (request, response) => {
   const reviewer = canReviewStaffForms(actor);
   const ownStaffId = request.authAccount.staffId || "";
   const where = reviewer
-    ? { organizationId: actor.organizationId, ...(actor.access?.scope === "all" ? {} : { branch: actor.access?.activeBranch?.name || actor.branch }) }
+    ? { organizationId: actor.organizationId, ...((hasOrganizationWideAccess(actor) || actor.access?.scope === "all") ? {} : { branch: actor.access?.activeBranch?.name || actor.branch }) }
     : { organizationId: actor.organizationId, staffId: ownStaffId || "__unlinked__" };
   const forms = await prisma.staffForm.findMany({ where, include: { staff: true }, orderBy: { submittedAt: "desc" } });
   response.json({ forms: forms.map(serializeStaffForm), formTypes: reviewer ? staffFormTypes : [...employeeStaffFormTypes], canReview: reviewer });
