@@ -782,6 +782,10 @@ function formatScheduleTime(minutes) {
   return `${hours % 12 || 12}:${String(mins).padStart(2, "0")} ${period}`;
 }
 
+function formatTimeInput(minutes) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
 function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
   return leftStart < rightEnd && rightStart < leftEnd;
 }
@@ -7737,6 +7741,42 @@ app.post("/api/public-registration", asyncRoute(async (request, response) => {
   response.status(existing ? 200 : 201).json({ submitted: true, clientId: result.client.id, updated: Boolean(existing) });
 }));
 
+app.get("/api/public-bookings/availability", asyncRoute(async (request, response) => {
+  const form = await publicWorkspaceForm(request.query.workspaceSlug, "booking");
+  const selectedBranch = branchFromWorkspaceForm(form, request.query.branchId, request.query.branch, "booking");
+  const date = requireText(request.query.date, "Appointment date");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw apiError("Choose a valid appointment date.");
+  const service = await prisma.service.findFirst({ where: { id: requireText(request.query.serviceId, "Service"), active: true } });
+  if (!service || !parseJsonList(service.branches).includes(selectedBranch.name)) {
+    throw apiError("Selected service is not offered at this branch.", 409);
+  }
+
+  const duration = Math.max(15, Number(service.duration || 60));
+  const operatingHours = operatingHoursForDate(selectedBranch, date);
+  if (operatingHours.closed) return response.json({ unavailableTimes: [], availableTimes: [] });
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      organizationId: form.organizationId,
+      branchId: selectedBranch.id,
+      date,
+      status: { in: databaseActiveAppointmentStatuses },
+    },
+    select: { time: true, duration: true, serviceId: true },
+  });
+  const occupiedRanges = await Promise.all(appointments.map(async (appointment) => {
+    const start = parseTimeToMinutes(appointment.time);
+    return { start, end: start + await appointmentDurationFor(appointment) };
+  }));
+  const availableTimes = [];
+  const unavailableTimes = [];
+  for (let start = operatingHours.open; start + duration <= operatingHours.close; start += 30) {
+    const value = formatTimeInput(start);
+    const blocked = occupiedRanges.some((range) => rangesOverlap(start, start + duration, range.start, range.end));
+    (blocked ? unavailableTimes : availableTimes).push(value);
+  }
+  response.json({ availableTimes, unavailableTimes });
+}));
+
 app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   const booking = normalizePublicBookingRequest(request.body ?? {});
   if (!("mobile" in booking)) {
@@ -7750,7 +7790,7 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
   }
   const form = await publicWorkspaceForm(request.body?.workspaceSlug, "booking");
   const selectedBranch = branchFromWorkspaceForm(form, request.body?.branchId, booking.branch, "booking");
-  const branch = await prisma.branch.findUnique({ where: { id: selectedBranch.id }, include: { rooms: true } });
+  const branch = await prisma.branch.findUnique({ where: { id: selectedBranch.id } });
   const serviceBranches = parseJsonList(service.branches);
   if (!serviceBranches.includes(branch.name)) {
     throw apiError("Selected service is not offered at this branch.", 409);
@@ -7774,13 +7814,6 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
         throw apiError("Preferred service provider is unavailable for this service and branch.", 409);
       }
     }
-    const staffCapacity = staffCandidates.filter((staffMember) =>
-      staffMember.branch === booking.branch || parseJsonList(staffMember.branches).includes(booking.branch)).length;
-    const roomCapacity = activeRoomRecords(branch.rooms).length;
-    const physicalCapacity = roomCapacity + Number(branch.couches || 0);
-    const capacitySignals = [staffCapacity, physicalCapacity].filter((value) => value > 0);
-    const unassignedCapacity = capacitySignals.length ? Math.min(...capacitySignals) : 1;
-
     const appointmentData = {
       date: booking.date,
       time: booking.time,
@@ -7801,7 +7834,7 @@ app.post("/api/public-bookings", asyncRoute(async (request, response) => {
       publicBookingKey,
     };
     appointmentData.duration = await appointmentDurationFor(appointmentData, tx);
-    await assertAppointmentSlotAvailable(appointmentData, "", { database: tx, unassignedCapacity });
+    await assertAppointmentSlotAvailable(appointmentData, "", { database: tx, unassignedCapacity: 1 });
 
     const lead = await tx.lead.create({
       data: {

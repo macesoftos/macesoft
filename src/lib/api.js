@@ -637,6 +637,11 @@ export function submitPublicBooking(payload) {
   });
 }
 
+export function loadPublicBookingAvailability(payload) {
+  const query = new URLSearchParams(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+  return requestJson(`/api/public-bookings/availability?${query}`);
+}
+
 export function loadPublicLeadConfig(workspaceSlug) {
   const query = new URLSearchParams({ workspace: String(workspaceSlug || "") });
   return requestJson(`/api/public-leads/config?${query}`);

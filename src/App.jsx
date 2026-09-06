@@ -128,6 +128,7 @@ import {
   loadPayrollOverview,
   loadMarketingMedia,
   loadPublicLeadConfig,
+  loadPublicBookingAvailability,
   loadInvitations,
   loadOrganizationAccounts,
   linkStaffAccount,
@@ -4671,6 +4672,9 @@ function PublicAppointmentBookingForm({ config, loadingConfig, workspaceSlug = "
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(null);
+  const [unavailableTimes, setUnavailableTimes] = useState([]);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityVersion, setAvailabilityVersion] = useState(0);
 
   const availableServices = useMemo(() => config.services.filter((service) => {
     const serviceBranches = Array.isArray(service.branches) ? service.branches : [];
@@ -4691,10 +4695,35 @@ function PublicAppointmentBookingForm({ config, loadingConfig, workspaceSlug = "
     if (window.closed) return [];
     const options = [];
     for (let minutes = window.open; minutes + duration <= window.close; minutes += 30) {
-      options.push({ value: formatTimeInput(minutes), label: formatScheduleTime(minutes) });
+      const value = formatTimeInput(minutes);
+      if (!unavailableTimes.includes(value)) options.push({ value, label: formatScheduleTime(minutes) });
     }
     return options;
-  }, [form.date, selectedBranch, selectedService?.duration]);
+  }, [form.date, selectedBranch, selectedService?.duration, unavailableTimes]);
+
+  useEffect(() => {
+    const branchId = config.branches.find((branch) => branch.name === form.branch)?.id || "";
+    if (!workspaceSlug || !branchId || !form.serviceId || !form.date) {
+      setUnavailableTimes([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    loadPublicBookingAvailability({ workspaceSlug, branchId, serviceId: form.serviceId, date: form.date })
+      .then((result) => {
+        if (!cancelled) setUnavailableTimes(Array.isArray(result.unavailableTimes) ? result.unavailableTimes : []);
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setUnavailableTimes([]);
+          setError(loadError.message || "Appointment availability could not be loaded.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAvailabilityLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [availabilityVersion, config.branches, form.branch, form.date, form.serviceId, workspaceSlug]);
 
   useEffect(() => {
     const defaultBranch = form.branch || config.branches[0]?.name || "";
@@ -4749,6 +4778,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig, workspaceSlug = "
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (submitError) {
       setError(submitError.message || "We could not request this appointment. Please try another time.");
+      setAvailabilityVersion((current) => current + 1);
     } finally {
       setSaving(false);
     }
@@ -4806,9 +4836,9 @@ function PublicAppointmentBookingForm({ config, loadingConfig, workspaceSlug = "
         <label><span>Clinic branch *</span><select disabled={loadingConfig || !config.branches.length} value={form.branch} onChange={(event) => chooseBranch(event.target.value)} required>{config.branches.map((branch) => <option key={branch.id} value={branch.name}>{branch.name}</option>)}</select></label>
         <label><span>Service *</span><select disabled={loadingConfig || !availableServices.length} value={form.serviceId} onChange={(event) => updateField("serviceId", event.target.value)} required>{availableServices.map((service) => <option key={service.id} value={service.id}>{service.name} - {servicePriceLabel(service)}</option>)}</select></label>
         <label><span>Preferred date *</span><input type="date" min={todayDate()} value={form.date} onChange={(event) => updateField("date", event.target.value)} required /></label>
-        <label><span>Preferred time *</span><select disabled={!timeOptions.length} value={form.time} onChange={(event) => updateField("time", event.target.value)} required>{timeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+        <label><span>Preferred time *</span><select disabled={availabilityLoading || !timeOptions.length} value={form.time} onChange={(event) => updateField("time", event.target.value)} required>{timeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         <label className="span-2"><span>Preferred service provider</span><select value={form.preferredStaff} onChange={(event) => updateField("preferredStaff", event.target.value)}><option>Any available</option>{availableProviders.map((person) => <option key={person.id} value={person.name}>{person.name} · {person.role}</option>)}</select></label>
-        <small className="span-2 public-lead-contact-help">Available request times follow the selected branch&apos;s operating hours. 12:00 noon remains bookable.</small>
+        <small className="span-2 public-lead-contact-help">{availabilityLoading ? "Checking live appointment availability…" : timeOptions.length ? "Only currently available times are shown. A selected time is reserved when your request is accepted." : "No appointment times are available for this date. Please choose another day."}</small>
 
         <label className="span-2"><span>Concern or notes</span><textarea rows={4} maxLength={1000} value={form.concern} onChange={(event) => updateField("concern", event.target.value)} placeholder="Tell us what you would like to address during your visit." /></label>
         <label className="checkbox-field span-2"><input type="checkbox" checked={form.marketingConsent} onChange={(event) => updateField("marketingConsent", event.target.checked)} /><span>I&apos;d also like to receive occasional clinic care updates and offers.</span></label>
@@ -4816,7 +4846,7 @@ function PublicAppointmentBookingForm({ config, loadingConfig, workspaceSlug = "
         <label className="public-lead-honeypot" aria-hidden="true"><span>Clinic website</span><input tabIndex={-1} autoComplete="off" value={form.clinicWebsite} onChange={(event) => updateField("clinicWebsite", event.target.value)} /></label>
       </div>
 
-      <button className="primary-button full public-lead-submit" type="submit" disabled={saving || loadingConfig || !form.fullName.trim() || !form.mobile.trim() || !form.branch || !form.serviceId || !form.date || !form.time || !form.privacyConsent}>
+      <button className="primary-button full public-lead-submit" type="submit" disabled={saving || loadingConfig || availabilityLoading || !form.fullName.trim() || !form.mobile.trim() || !form.branch || !form.serviceId || !form.date || !form.time || !form.privacyConsent}>
         <CalendarDays size={17} /> {saving ? "Requesting appointment..." : "Request appointment"}
       </button>
       <p className="public-lead-footnote"><ShieldCheck size={14} /> Your request will appear in MACE Appointments as Pending Confirmation.</p>
