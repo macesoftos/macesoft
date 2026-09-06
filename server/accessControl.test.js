@@ -24,6 +24,7 @@ test("only explicitly public API methods and paths bypass session authentication
   assert.equal(isPublicApiRequest("POST", "/api/auth/reset-password"), true);
   assert.equal(isPublicApiRequest("GET", "/api/health/ready"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public-leads/config"), true);
+  assert.equal(isPublicApiRequest("GET", "/api/public-bookings/availability?workspaceSlug=clinic-booking"), true);
   assert.equal(isPublicApiRequest("POST", "/api/public-leads"), true);
   assert.equal(isPublicApiRequest("GET", "/api/public-leads"), false);
   assert.equal(isPublicApiRequest("POST", "/api/public-bookings"), true);

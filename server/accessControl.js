@@ -9,6 +9,7 @@ const PUBLIC_API_RULES = [
   ["POST", /^\/api\/invitations\/accept\/[^/]+$/],
   ["GET", /^\/api\/health(?:\/(?:live|ready))?$/],
   ["GET", /^\/api\/public-leads\/config$/],
+  ["GET", /^\/api\/public-bookings\/availability$/],
   ["POST", /^\/api\/public-leads$/],
   ["POST", /^\/api\/public-bookings$/],
   ["GET", /^\/api\/public-registration\/open$/],

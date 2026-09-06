@@ -18,6 +18,15 @@ test("the public booking client posts to the anonymous booking endpoint", () => 
   assert.match(apiSource, /method: "POST"/);
 });
 
+test("the public booking form loads live availability and the server reserves one branch slot atomically", () => {
+  assert.match(apiSource, /\/api\/public-bookings\/availability/);
+  assert.match(appSource, /loadPublicBookingAvailability\(/);
+  assert.match(serverSource, /app\.get\("\/api\/public-bookings\/availability"/);
+  assert.match(serverSource, /unavailableTimes/);
+  assert.match(serverSource, /unassignedCapacity: 1/);
+  assert.match(serverSource, /pg_advisory_xact_lock/);
+});
+
 test("a public booking creates an appointment linked to a lead and notifies Appointments", () => {
   assert.match(serverSource, /app\.post\("\/api\/public-bookings"/);
   assert.match(serverSource, /tx\.appointment\.create\(\{ data: \{ \.\.\.appointmentData, leadId: lead\.id \} \}\)/);
