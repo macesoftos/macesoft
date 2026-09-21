@@ -2313,6 +2313,22 @@ function App() {
     notify("Inventory transferred between branches.");
   }
 
+  async function navigateFromNotification(notification) {
+    setActiveModule(notification.module);
+    if (notification.module !== "clients" || !notification.recordId || !sessionModules.includes("clients")) return;
+
+    setSelectedClientId(notification.recordId);
+    setGlobalSearch(notification.recordId);
+    if (clients.some((client) => client.id === notification.recordId)) return;
+
+    try {
+      const latestClients = await listResourceRecords("clients");
+      if (Array.isArray(latestClients)) setClients(latestClients);
+    } catch (error) {
+      notify(error.message || "Unable to load the new client registration.", "error");
+    }
+  }
+
   async function importSales(records) {
     const result = await importHistoricalSales(records);
     for (const sale of result.sales ?? []) upsertById(setTransactions, sale);
@@ -3151,7 +3167,7 @@ function App() {
                 loading={notificationsLoading}
                 notifications={notificationFeed.notifications}
                 onMarkAllRead={markAllNotificationsAsRead}
-                onNavigate={setActiveModule}
+                onNavigate={navigateFromNotification}
                 onRefresh={refreshNotifications}
                 unreadCount={notificationFeed.unreadCount}
               />
@@ -4148,7 +4164,7 @@ function NotificationCenter({ loading, notifications, onMarkAllRead, onNavigate,
 
   function openNotification(notification) {
     setOpen(false);
-    onNavigate(notification.module);
+    void onNavigate(notification);
   }
 
   return (
