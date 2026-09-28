@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { productionConfigErrors } from "./productionConfig.js";
+
+const serverSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
+
+test("the production server defaults to Hostinger's required port", () => {
+  assert.match(serverSource, /process\.env\.PORT \|\| process\.env\.API_PORT \|\| 3000/);
+});
 
 test("development configuration remains lightweight", () => {
   assert.deepEqual(productionConfigErrors({ NODE_ENV: "development" }), []);
