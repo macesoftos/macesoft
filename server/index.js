@@ -143,7 +143,7 @@ const app = express();
 // Hostinger's managed Express runtime proxies requests to port 3000. Keep
 // API_PORT available for local development, but use the hosting-compatible
 // port when neither variable is supplied by the runtime.
-const port = Number(process.env.PORT || process.env.API_PORT || 3000);
+const port = Number(process.env.API_PORT || process.env.PORT || 3000);
 const allowedOrigins = clean(process.env.APP_ORIGIN)
   .split(",")
   .map((origin) => origin.trim())

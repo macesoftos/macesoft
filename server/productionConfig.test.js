@@ -6,7 +6,7 @@ import { productionConfigErrors } from "./productionConfig.js";
 const serverSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
 
 test("the production server defaults to Hostinger's required port", () => {
-  assert.match(serverSource, /process\.env\.PORT \|\| process\.env\.API_PORT \|\| 3000/);
+  assert.match(serverSource, /process\.env\.API_PORT \|\| process\.env\.PORT \|\| 3000/);
 });
 
 test("development configuration remains lightweight", () => {
