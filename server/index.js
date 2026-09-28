@@ -1703,6 +1703,7 @@ function serializeSale(sale) {
   return {
     ...sale,
     payments: parseJsonList(sale.payments),
+    appointmentIds: parseJsonList(sale.appointmentIds),
     items: sale.items ?? [],
   };
 }
@@ -2176,7 +2177,7 @@ const resourceConfigs = {
     branchField: "branch",
     reportSelect: {
       id: true, invoice: true, date: true, time: true, client: true, branch: true, staff: true,
-      total: true, payments: true, status: true, testMode: true, room: true,
+      total: true, payments: true, status: true, testMode: true, room: true, appointmentId: true, appointmentIds: true,
       items: { select: { id: true, name: true, type: true, qty: true, price: true, provider: true } },
     },
   },
@@ -4333,22 +4334,40 @@ async function calculateCheckout(draft, { actor, branch }) {
   }
   const transactionDiscountAmount = resolvedManualDiscount ? manualDiscountAmount : savedDiscountAmount;
   const requestedDepositCredit = numberValue(draft.depositCredit, "Deposit credit", { min: 0 });
-  const appointmentId = clean(draft.appointmentId);
+  const appointmentIds = [...new Set(
+    (Array.isArray(draft.appointmentIds) ? draft.appointmentIds : [draft.appointmentId])
+      .map(clean)
+      .filter(Boolean),
+  )];
   let depositCredit = 0;
   let creditedAppointmentId = null;
   let creditedAppointmentUpdatedAt = null;
-  if (appointmentId) {
-    const appointment = await prisma.appointment.findFirst({ where: { id: appointmentId, branch } });
-    if (!appointment || !clientId || appointment.clientId !== clientId) {
-      throw apiError("The appointment deposit does not belong to the selected client and branch.", 403);
+  let appointmentVersions = [];
+  if (appointmentIds.length) {
+    if (!clientId) throw apiError("Select the client linked to this visit before checkout.", 403);
+    const visitAppointments = await prisma.appointment.findMany({
+      where: { id: { in: appointmentIds }, branch, clientId },
+    });
+    if (visitAppointments.length !== appointmentIds.length) {
+      throw apiError("One or more visit services do not belong to the selected client and branch.", 403);
     }
-    const matchesService = items.length === 1 && items[0].type === "Service" && items[0].sourceId === appointment.serviceId;
-    if (!matchesService) throw apiError("An appointment deposit can only be applied to its booked service.", 409);
-    depositCredit = Math.min(Number(appointment.deposit || 0), subtotal);
-    creditedAppointmentId = depositCredit > 0 ? appointment.id : null;
-    creditedAppointmentUpdatedAt = creditedAppointmentId ? appointment.updatedAt : null;
+    for (const appointment of visitAppointments) {
+      const matchingLine = items.find((item) => item.lineKey === `appointment-${appointment.id}`);
+      if (!matchingLine || matchingLine.type !== "Service" || matchingLine.sourceId !== appointment.serviceId) {
+        throw apiError(`${appointment.service} must remain linked to its booked visit service.`, 409);
+      }
+      depositCredit += Math.min(Number(appointment.deposit || 0), matchingLine.price * matchingLine.qty);
+    }
+    appointmentVersions = visitAppointments.map((appointment) => ({ id: appointment.id, updatedAt: appointment.updatedAt }));
+    if (appointmentIds.length === 1 && depositCredit > 0) {
+      creditedAppointmentId = appointmentIds[0];
+      creditedAppointmentUpdatedAt = appointmentVersions[0].updatedAt;
+    }
+    if (Math.abs(requestedDepositCredit - depositCredit) > 0.009) {
+      throw apiError("The visit deposits changed. Review the checkout total and try again.", 409);
+    }
   } else if (requestedDepositCredit > 0) {
-    throw apiError("Select the appointment that owns this deposit credit.", 409);
+    throw apiError("Select the appointments that own this deposit credit.", 409);
   }
   const totalDiscount = Math.min(transactionDiscountAmount + depositCredit + promotionDiscount, subtotal);
 
@@ -4359,6 +4378,8 @@ async function calculateCheckout(draft, { actor, branch }) {
     manualDiscount: resolvedManualDiscount,
     transactionDiscountAmount,
     depositCredit,
+    appointmentIds,
+    appointmentVersions,
     appointmentId: creditedAppointmentId,
     appointmentUpdatedAt: creditedAppointmentUpdatedAt,
     discountAmount: totalDiscount,
@@ -8894,14 +8915,28 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
-    if (checkout.appointmentId && !testMode) {
-      const existingDepositSale = await tx.sale.findUnique({ where: { appointmentId: checkout.appointmentId } });
-      if (existingDepositSale) throw apiError("This appointment deposit was already applied to another sale.", 409);
-      const currentAppointment = await tx.appointment.findFirst({
-        where: { id: checkout.appointmentId, branch, clientId: clean(draft.clientId), updatedAt: checkout.appointmentUpdatedAt },
-        select: { id: true },
+    if (checkout.appointmentIds.length && !testMode) {
+      const visitSales = await tx.sale.findMany({
+        where: {
+          status: { not: "Void" },
+          OR: [
+            { appointmentId: { in: checkout.appointmentIds } },
+            { appointmentIds: { not: "[]" } },
+          ],
+        },
+        select: { appointmentId: true, appointmentIds: true },
       });
-      if (!currentAppointment) throw apiError("The appointment changed during checkout. Review its deposit and try again.", 409);
+      const alreadyCheckedOut = new Set(visitSales.flatMap((sale) => [sale.appointmentId, ...parseJsonList(sale.appointmentIds)].filter(Boolean)));
+      if (checkout.appointmentIds.some((id) => alreadyCheckedOut.has(id))) {
+        throw apiError("One or more visit services were already applied to another sale.", 409);
+      }
+      for (const appointment of checkout.appointmentVersions) {
+        const currentAppointment = await tx.appointment.findFirst({
+          where: { id: appointment.id, branch, clientId: clean(draft.clientId), updatedAt: appointment.updatedAt },
+          select: { id: true },
+        });
+        if (!currentAppointment) throw apiError("The visit changed during checkout. Review its services and deposits, then try again.", 409);
+      }
     }
     if (checkout.discount && !testMode) {
       const claimedDiscount = await tx.discount.updateMany({
@@ -9026,6 +9061,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         payments: JSON.stringify(normalizedPayments),
         status: testMode ? "Test" : paidAmount >= checkout.total ? "Paid" : paidAmount > 0 ? "Partially Paid" : "Unpaid",
         appointmentId: testMode ? null : checkout.appointmentId,
+        appointmentIds: testMode ? "[]" : jsonText(checkout.appointmentIds, []),
         notes: clean(paymentData.notes || draft.notes),
         room: clean(draft.room),
         arrivalTime: clean(draft.arrivalTime),

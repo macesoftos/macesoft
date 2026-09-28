@@ -574,6 +574,10 @@ function appointmentDateInRange(appointment, { from, to }) {
 
 function transactionMatchesAppointment(transaction, appointment) {
   if (transaction.status === "Void") return false;
+  const linkedAppointmentIds = Array.isArray(transaction.appointmentIds) ? transaction.appointmentIds : [];
+  if (linkedAppointmentIds.length || transaction.appointmentId) {
+    return linkedAppointmentIds.includes(appointment.id) || transaction.appointmentId === appointment.id;
+  }
   const sameClient = normalize(transaction.client) === normalize(appointment.client);
   const sameBranch = !appointment.branch || normalize(transaction.branch) === normalize(appointment.branch);
   const hasService = (transaction.items ?? []).some((item) => normalize(item.name) === normalize(appointment.service));
@@ -592,6 +596,55 @@ function appointmentPaymentSummary(appointment, services, transactions) {
   const due = Math.max(0, price - applied);
   const status = price <= 0 ? "No charge" : due <= 0 ? "Paid" : deposit > 0 || posted > 0 ? "Partial" : "Unpaid";
   return { price, deposit, posted, applied, due, status };
+}
+
+function appointmentsForVisit(appointment, appointments) {
+  if (!appointment) return [];
+  const clientKey = appointment.clientId || normalize(appointment.client);
+  return appointments
+    .filter((item) => (item.clientId || normalize(item.client)) === clientKey)
+    .filter((item) => item.date === appointment.date && item.branch === appointment.branch)
+    .filter((item) => !["Cancelled", "No Show"].includes(canonicalAppointmentStatus(item.status)))
+    .sort((left, right) => parseTimeToMinutes(left.time) - parseTimeToMinutes(right.time));
+}
+
+function paymentDraftForVisit(appointment, appointments, services, transactions) {
+  const visitAppointments = appointmentsForVisit(appointment, appointments)
+    .filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
+  const cart = visitAppointments.map((item) => {
+    const service = serviceForAppointment(item, services);
+    return {
+      key: `appointment-${item.id}`,
+      type: "Service",
+      serviceId: service?.id || item.serviceId,
+      name: service?.name || item.service,
+      qty: 1,
+      price: appointmentServicePrice(item, services),
+      provider: item.staff || "N/A",
+    };
+  });
+  const subtotal = cart.reduce((sum, item) => sum + Number(item.price || 0), 0);
+  const depositCredit = visitAppointments.reduce(
+    (sum, item) => sum + Math.min(Number(item.deposit || 0), appointmentServicePrice(item, services)),
+    0,
+  );
+  const providers = [...new Set(cart.map((item) => item.provider).filter((provider) => provider && provider !== "N/A"))];
+  return {
+    appointmentId: visitAppointments.length === 1 ? visitAppointments[0].id : "",
+    appointmentIds: visitAppointments.map((item) => item.id),
+    clientId: appointment.clientId,
+    clientName: appointment.client,
+    branch: appointment.branch,
+    room: [...new Set(visitAppointments.map((item) => item.room).filter(Boolean))].join(", "),
+    staff: providers.length === 1 ? providers[0] : providers.length > 1 ? "Multiple providers" : "",
+    cart,
+    subtotal,
+    discount: null,
+    discountAmount: depositCredit,
+    depositCredit,
+    total: Math.max(0, subtotal - depositCredit),
+    notes: `Combined visit checkout for ${visitAppointments.length} service${visitAppointments.length === 1 ? "" : "s"}. Recorded deposit credit: ${money.format(depositCredit)}.`,
+  };
 }
 
 function appointmentTimelineStyle(appointment, services) {
@@ -2235,6 +2288,26 @@ function App() {
     }
   }
 
+  function deleteService(service) {
+    askConfirm({
+      title: "Delete service permanently?",
+      copy: `${service.name} will be removed from the service catalog. Existing appointments, sales, and treatment history will keep their recorded service details.`,
+      actionLabel: "Delete service",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await deleteResourceRecord("services", service.id);
+            removeById(setServices, service.id);
+            addAudit("Service deleted", `${service.name} removed from the service catalog.`, "Services");
+            notify("Service deleted.");
+          } catch (error) {
+            notify(error.message || "Unable to delete the service. Deactivate it if existing records still depend on it.", "error");
+          }
+        })();
+      },
+    });
+  }
+
   async function saveInventory(values) {
     const record = {
       ...values,
@@ -2551,24 +2624,14 @@ function App() {
   }
 
   async function saveStaff(values) {
-    const existingStaff = values.id ? staff.find((item) => item.id === values.id) : null;
-    if (existingStaff && existingStaff.branch !== values.branch) {
-      const approved = await new Promise((resolve) => {
-        askConfirm({
-          title: `Change ${existingStaff.name}'s primary branch?`,
-          copy: `${values.branch} will become the employee's primary branch. Other assigned branches remain available, and historical records keep their original branch.`,
-          actionLabel: "Change primary branch",
-          onConfirm: () => resolve(true),
-          onCancel: () => resolve(false),
-        });
-      });
-      if (!approved) return;
-    }
+    const assignedBranches = splitList(values.branches);
+    const branch = assignedBranches[0] || values.branch || defaultClinicBranch;
     const record = {
       ...values,
       id: values.id || createId("st"),
+      branch,
       commissionRate: Number(values.commissionRate || 0),
-      branches: splitList(values.branches).length ? splitList(values.branches) : [values.branch],
+      branches: assignedBranches.length ? assignedBranches : [branch],
     };
     const result = await saveResourceRecord("staff", record, { existing: Boolean(values.id) });
     upsertById(setStaff, result.record);
@@ -3374,6 +3437,7 @@ function App() {
               services={services}
               openModal={openModal}
               toggleService={toggleService}
+              deleteService={deleteService}
               globalSearch={globalSearch}
             />
           )}
@@ -6210,6 +6274,17 @@ function POSModule({
         ? `Automatic promotion · ${money.format(promotionDiscountAmount)}`
         : "No discount";
   const client = clients.find((item) => item.id === clientId);
+  const cartProviders = [...new Set(
+    cart
+      .filter((item) => item.type === "Service")
+      .map((item) => item.provider)
+      .filter((provider) => provider && provider !== "N/A"),
+  )];
+  const saleStaffName = cartProviders.length === 1
+    ? cartProviders[0]
+    : cartProviders.length > 1
+      ? "Multiple providers"
+      : "Unassigned";
   const todaysTransactions = transactions.filter((transaction) => transaction.date === todayDate());
   const transactionSummaryRows = todaysTransactions.length ? todaysTransactions : transactions;
   const todaysTransactionTotal = todaysTransactions.reduce((sum, transaction) => transaction.status === "Void" || transaction.testMode ? sum : sum + Number(transaction.total || 0), 0);
@@ -6427,7 +6502,7 @@ function POSModule({
           branch,
           room,
           arrivalTime,
-          staff: staffName,
+          staff: saleStaffName,
           cart,
           subtotal,
           discount,
@@ -6468,7 +6543,7 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, setCart, staffName, subtotal, testMode, total]);
+  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, saleStaffName, setCart, subtotal, testMode, total]);
 
   function createPaymentDraft(patch = {}) {
     return {
@@ -6478,7 +6553,7 @@ function POSModule({
       branch,
       room,
       arrivalTime,
-      staff: staffName,
+      staff: saleStaffName,
       cart,
       subtotal,
       discount,
@@ -6523,7 +6598,7 @@ function POSModule({
       time: new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
       client: client?.fullName ?? "Walk-in",
       branch,
-      staff: staffName || "Unassigned",
+      staff: saleStaffName,
       room,
       arrivalTime,
       items: cart.map((item) => ({
@@ -6861,11 +6936,11 @@ function POSModule({
             className="invoice-context-button"
             type="button"
             onClick={() => setIsSaleContextOpen(true)}
-            title="Select client, branch, and staff"
+            title="Select client, branch, and visit details"
           >
             <div className="invoice-context-copy">
               <h2>{client?.fullName ?? "Walk-in"}</h2>
-              <span>{branch} / {staffName || "Unassigned"}</span>
+              <span>{branch} / {cartProviders.length ? `${cartProviders.length} assigned provider${cartProviders.length === 1 ? "" : "s"}` : "Assign providers per service"}</span>
             </div>
             <ChevronDown size={16} aria-hidden="true" />
           </button>
@@ -7208,13 +7283,6 @@ function POSModule({
                 <span>Select Branch</span>
                 <input value={branch} readOnly aria-readonly="true" />
                 {branchRecords.length > 1 && <small>Use the branch selector at the top of POS to change branches.</small>}
-              </label>
-              <label className="stacked-field">
-                <span>Select Staff</span>
-                <select value={staffName} onChange={(event) => setStaffName(event.target.value)}>
-                  {!staffAtBranch.length && <option value="">No staff currently clocked in</option>}
-                  {staffAtBranch.map((person) => <option key={person.id}>{person.name}</option>)}
-                </select>
               </label>
               <label className="stacked-field">
                 <span>Assigned room / couch</span>
@@ -7602,10 +7670,12 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
     .filter((appointment) => roomFilter === "All rooms" || appointment.room === roomFilter)
     .filter((appointment) => normalize(`${appointment.client} ${appointment.service} ${appointment.staff} ${appointment.room}`).includes(normalize(globalSearch)))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
-
-  function transactionFor(appointment) {
-    return transactions.find((transaction) => transaction.date === appointment.date && transaction.client === appointment.client);
-  }
+  const visitCards = Object.values(cards.reduce((groups, appointment) => {
+    const key = `${appointment.clientId || normalize(appointment.client)}|${appointment.date}|${appointment.branch}`;
+    groups[key] = groups[key] || { key, appointment, appointments: [] };
+    groups[key].appointments.push(appointment);
+    return groups;
+  }, {}));
 
   return (
     <section className="module-grid card-view-page">
@@ -7646,32 +7716,35 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
       </section>
 
       {viewMode === "grid" ? (
-        <section className="full-span card-view-grid" aria-label={`${cards.length} service cards in grid view`}>
-          {cards.map((appointment) => {
-            const transaction = transactionFor(appointment);
+        <section className="full-span card-view-grid" aria-label={`${visitCards.length} client visits in grid view`}>
+          {visitCards.map((visit) => {
+            const appointment = visit.appointment;
             const start = parseTimeToMinutes(appointment.time);
-            const duration = appointmentDurationMinutes(appointment, services);
-            const end = start + duration;
+            const end = Math.max(...visit.appointments.map((item) => parseTimeToMinutes(item.time) + appointmentDurationMinutes(item, services)));
             const status = canonicalAppointmentStatus(appointment.status);
+            const serviceNames = visit.appointments.map((item) => item.service).join(" · ");
+            const providerNames = [...new Set(visit.appointments.map((item) => item.staff).filter(Boolean))].join(", ");
+            const roomNames = [...new Set(visit.appointments.map((item) => item.room).filter(Boolean))].join(", ");
+            const applied = visit.appointments.reduce((sum, item) => sum + appointmentPaymentSummary(item, services, transactions).applied, 0);
             return (
-              <article className={`service-flow-card ${statusClass(status)}`} key={appointment.id}>
+              <article className={`service-flow-card ${statusClass(status)}`} key={visit.key}>
                 <header className="service-card-heading">
                   <span className="service-card-avatar" aria-hidden="true">{initialsFor(appointment.client)}</span>
-                  <span className="service-card-client"><strong>{appointment.client}</strong><small>{appointment.service}</small></span>
+                  <span className="service-card-client"><strong>{appointment.client}</strong><small>{serviceNames}</small></span>
                   <time dateTime={`${appointment.date}T${appointment.time}`}>{formatScheduleTime(start)} – {formatScheduleTime(end)}</time>
                 </header>
                 <dl className="service-card-facts">
-                  <div><dt>Staff</dt><dd>{appointment.staff || "Unassigned"}</dd></div>
-                  <div><dt>Room</dt><dd>{appointment.room || "Unassigned"}</dd></div>
-                  <div><dt>Paid</dt><dd>{transaction ? money.format(transaction.total) : money.format(appointment.deposit)}</dd></div>
+                  <div><dt>Staff</dt><dd>{providerNames || "Unassigned"}</dd></div>
+                  <div><dt>Room</dt><dd>{roomNames || "Unassigned"}</dd></div>
+                  <div><dt>Paid</dt><dd>{money.format(applied)}</dd></div>
                 </dl>
                 <footer className="service-card-footer">
                   <StatusBadge status={status} />
                   {canManageAppointments ? (
                     <div className="card-actions">
                       <button type="button" onClick={() => onOpenAppointment(appointment)} title={`View ${appointment.client}'s card`}><Eye size={15} aria-hidden="true" /> View</button>
-                      <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`}><UserCheck size={15} aria-hidden="true" /> Arrive</button>
-                      <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`}><Check size={15} aria-hidden="true" /> Done</button>
+                      <button type="button" onClick={() => visit.appointments.forEach((item) => updateStatus(item.id, "Arrived"))} title={`Mark ${appointment.client} as arrived`}><UserCheck size={15} aria-hidden="true" /> Arrive</button>
+                      <button type="button" onClick={() => visit.appointments.forEach((item) => updateStatus(item.id, "Completed"))} title={`Mark ${appointment.client}'s visit as completed`}><Check size={15} aria-hidden="true" /> Done</button>
                     </div>
                   ) : (
                     <span className="card-view-read-only compact"><LockKeyhole size={14} aria-hidden="true" /> View only</span>
@@ -7680,10 +7753,10 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
               </article>
             );
           })}
-          {!cards.length && <div className="surface-panel card-view-empty"><EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." /></div>}
+          {!visitCards.length && <div className="surface-panel card-view-empty"><EmptyState title="No client visits" copy="Change the date, staff, room, or search filter." /></div>}
         </section>
       ) : (
-      <section className="surface-panel full-span card-view-list-shell" aria-label={`${cards.length} service cards in list view`}>
+      <section className="surface-panel full-span card-view-list-shell" aria-label={`${visitCards.length} client visits in list view`}>
         <table className="card-view-list-table">
           <thead>
             <tr>
@@ -7696,25 +7769,28 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
             </tr>
           </thead>
           <tbody>
-            {cards.map((appointment, index) => {
+            {visitCards.map((visit, index) => {
+              const appointment = visit.appointment;
               const start = parseTimeToMinutes(appointment.time);
-              const duration = appointmentDurationMinutes(appointment, services);
-              const end = start + duration;
+              const end = Math.max(...visit.appointments.map((item) => parseTimeToMinutes(item.time) + appointmentDurationMinutes(item, services)));
               const status = canonicalAppointmentStatus(appointment.status);
+              const serviceNames = visit.appointments.map((item) => item.service).join(" · ");
+              const providerNames = [...new Set(visit.appointments.map((item) => item.staff).filter(Boolean))].join(", ");
+              const roomNames = [...new Set(visit.appointments.map((item) => item.room).filter(Boolean))].join(", ");
               return (
-                <tr key={appointment.id}>
+                <tr key={visit.key}>
                   <td>
                     <div className="card-view-client-cell">
                       <span className={`card-view-list-avatar tone-${index % 5}`} aria-hidden="true">{initialsFor(appointment.client)}</span>
                       <span>
                         <strong>{appointment.client}</strong>
-                        <small>{appointment.service}</small>
+                        <small>{serviceNames}</small>
                       </span>
                     </div>
                   </td>
                   <td><time dateTime={`${appointment.date}T${appointment.time}`}>{formatScheduleTime(start)} – {formatScheduleTime(end)}</time></td>
-                  <td>{appointment.staff || "Unassigned"}</td>
-                  <td>{appointment.room || "Unassigned"}</td>
+                  <td>{providerNames || "Unassigned"}</td>
+                  <td>{roomNames || "Unassigned"}</td>
                   <td><StatusBadge status={status} /></td>
                   <td>
                     {canManageAppointments ? (
@@ -7722,10 +7798,10 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
                         <button type="button" onClick={() => onOpenAppointment(appointment)} title={`View ${appointment.client}'s card`} aria-label={`View ${appointment.client}'s card`}>
                           <Eye size={16} aria-hidden="true" />
                         </button>
-                        <button type="button" onClick={() => updateStatus(appointment.id, "Arrived")} title={`Mark ${appointment.client} as arrived`} aria-label={`Mark ${appointment.client} as arrived`}>
+                        <button type="button" onClick={() => visit.appointments.forEach((item) => updateStatus(item.id, "Arrived"))} title={`Mark ${appointment.client} as arrived`} aria-label={`Mark ${appointment.client} as arrived`}>
                           <UserCheck size={16} aria-hidden="true" />
                         </button>
-                        <button type="button" onClick={() => updateStatus(appointment.id, "Completed")} title={`Mark ${appointment.client}'s service as completed`} aria-label={`Mark ${appointment.client}'s service as completed`}>
+                        <button type="button" onClick={() => visit.appointments.forEach((item) => updateStatus(item.id, "Completed"))} title={`Mark ${appointment.client}'s visit as completed`} aria-label={`Mark ${appointment.client}'s visit as completed`}>
                           <Check size={16} aria-hidden="true" />
                         </button>
                       </div>
@@ -7736,7 +7812,7 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
                 </tr>
               );
             })}
-            {!cards.length && (
+            {!visitCards.length && (
               <tr>
                 <td className="card-view-list-empty" colSpan="6">
                   <EmptyState title="No service cards" copy="Change the date, staff, room, or search filter." />
@@ -7749,7 +7825,7 @@ function CardViewModule({ appointments, services, transactions, staff, branchRec
       )}
 
       <footer className="surface-panel full-span card-view-note">
-        <span><AlertCircle size={19} aria-hidden="true" /> Cards represent {date === todayDate() ? "today's" : "the selected date's"} saved appointments. Switch between list and grid, or filter by staff, room, or date.</span>
+        <span><AlertCircle size={19} aria-hidden="true" /> Each card groups {date === todayDate() ? "today's" : "the selected date's"} services into one client visit. Open the client to review every service and check out once.</span>
         <button className="ghost-button" type="button" onClick={onOpenRoomView}><LayoutGrid size={16} aria-hidden="true" /> View Room View</button>
       </footer>
     </section>
@@ -8405,32 +8481,7 @@ function LegacyAppointmentsModule({
   }, {});
 
   function paymentDraftForAppointment(appointment) {
-    const service = serviceForAppointment(appointment, services);
-    const price = appointmentServicePrice(appointment, services);
-    const depositCredit = Math.min(Number(appointment.deposit || 0), price);
-    return {
-      appointmentId: appointment.id,
-      clientId: appointment.clientId,
-      clientName: appointment.client,
-      branch: appointment.branch,
-      staff: appointment.staff,
-      cart: [
-        {
-          key: `appointment-${appointment.id}`,
-          type: "Service",
-          serviceId: service?.id || appointment.serviceId,
-          name: service?.name || appointment.service,
-          qty: 1,
-          price,
-        },
-      ],
-      subtotal: price,
-      discount: null,
-      discountAmount: depositCredit,
-      depositCredit,
-      total: Math.max(0, price - depositCredit),
-      notes: `Payment for appointment ${appointment.id}. Recorded deposit credit: ${money.format(depositCredit)}.`,
-    };
+    return paymentDraftForVisit(appointment, appointments, services, transactions);
   }
 
   function receiptForAppointment(appointment) {
@@ -8826,6 +8877,7 @@ function LegacyAppointmentsModule({
 
       <AppointmentDetailsDrawer
         appointment={selectedAppointment}
+        appointments={appointments}
         client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null}
         services={services}
         transactions={transactions}
@@ -9367,23 +9419,7 @@ function AppointmentsModule({
   }
 
   function paymentDraftForAppointment(appointment) {
-    const service = serviceForAppointment(appointment, services);
-    const price = appointmentServicePrice(appointment, services);
-    const depositCredit = Math.min(Number(appointment.deposit || 0), price);
-    return {
-      appointmentId: appointment.id,
-      clientId: appointment.clientId,
-      clientName: appointment.client,
-      branch: appointment.branch,
-      staff: appointment.staff,
-      cart: [{ key: `appointment-${appointment.id}`, type: "Service", serviceId: service?.id || appointment.serviceId, name: service?.name || appointment.service, qty: 1, price }],
-      subtotal: price,
-      discount: null,
-      discountAmount: depositCredit,
-      depositCredit,
-      total: Math.max(0, price - depositCredit),
-      notes: `Payment for appointment ${appointment.id}. Recorded deposit credit: ${money.format(depositCredit)}.`,
-    };
+    return paymentDraftForVisit(appointment, appointments, services, transactions);
   }
 
   function receiptForAppointment(appointment) {
@@ -9461,6 +9497,7 @@ function AppointmentsModule({
         <AppointmentDetailsDrawer
           standalone
           appointment={selectedAppointment}
+          appointments={appointments}
           staffLabel={appointmentStaffLabel(selectedAppointment)}
           staff={staff}
           client={detailClient}
@@ -9660,7 +9697,7 @@ function AppointmentsModule({
 
       {contextMenu && <div className="appointment-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} role="menu"><button type="button" onClick={() => { openAppointmentDetails(contextMenu.appointment); setContextMenu(null); }}><Eye size={15} /> View details</button><button type="button" onClick={() => openModal("appointment", contextMenu.appointment)}><Edit3 size={15} /> Edit appointment</button><button type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Checked In")}><UserCheck size={15} /> Check in</button><button type="button" onClick={() => openPayment(paymentDraftForAppointment(contextMenu.appointment))}><CreditCard size={15} /> Collect payment</button><button className="danger" type="button" onClick={() => updateStatus(contextMenu.appointment.id, "Cancelled")}><X size={15} /> Cancel appointment</button></div>}
 
-      <AppointmentDetailsDrawer appointment={selectedAppointment} staffLabel={selectedAppointment ? appointmentStaffLabel(selectedAppointment) : ""} staff={staff} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onAssign={(appointment, staffName) => onUpdateAppointment({ ...appointment, staff: staffName || "Any available" }, { silent: true })} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
+      <AppointmentDetailsDrawer appointment={selectedAppointment} appointments={appointments} staffLabel={selectedAppointment ? appointmentStaffLabel(selectedAppointment) : ""} staff={staff} client={selectedAppointment ? clients.find((item) => item.id === selectedAppointment.clientId || item.fullName === selectedAppointment.client) : null} services={services} transactions={transactions} auditLogs={auditLogs} treatments={treatments} packages={packages} onClose={() => setSelectedId("")} onEdit={(appointment) => openModal("appointment", appointment)} onStatus={updateStatus} onAssign={(appointment, staffName) => onUpdateAppointment({ ...appointment, staff: staffName || "Any available" }, { silent: true })} onPayment={(appointment) => openPayment(paymentDraftForAppointment(appointment))} onPrint={(appointment) => onPrintReceipt(receiptForAppointment(appointment))} onReminder={(appointment) => prepareReminder(appointment, "SMS")} onEmail={(appointment) => prepareReminder(appointment, "Email")} />
 
       <div className="appointment-data-toggle"><button className="secondary-button" type="button" onClick={() => setShowDataTable((value) => !value)}><FileText size={16} /> {showDataTable ? "Hide data table" : "Show data table"}</button></div>
       {showDataTable && <div className="surface-panel appointment-data-panel"><SectionHeader icon={FileText} title="Appointment Data" action={`${displayedRows.length} records`} /><SmartTable rows={displayedRows} globalSearch={globalSearch} columns={[{ key: "id", label: "Booking ID" }, { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "client", label: "Client" }, { key: "service", label: "Service" }, { key: "staff", label: "Doctor / Staff", render: appointmentStaffLabel }, { key: "room", label: "Room" }, { key: "duration", label: "Duration", render: (row) => `${appointmentDurationMinutes(row, services)} min` }, { key: "payment", label: "Payment", render: (row) => appointmentPaymentSummary(row, services, transactions).status }, { key: "status", label: "Status", render: (row) => <StatusBadge status={canonicalAppointmentStatus(row.status)} /> }]} /></div>}
@@ -9671,6 +9708,7 @@ function AppointmentsModule({
 function AppointmentDetailsDrawer({
   standalone = false,
   appointment,
+  appointments = [],
   staffLabel,
   staff = [],
   client,
@@ -9706,6 +9744,12 @@ function AppointmentDetailsDrawer({
   if (!appointment) return null;
   const service = serviceForAppointment(appointment, services);
   const payment = appointmentPaymentSummary(appointment, services, transactions);
+  const visitAppointments = appointmentsForVisit(appointment, appointments.length ? appointments : [appointment]);
+  const visitPaymentRows = visitAppointments.map((item) => ({
+    appointment: item,
+    payment: appointmentPaymentSummary(item, services, transactions),
+  }));
+  const visitTotalDue = visitPaymentRows.reduce((sum, item) => sum + item.payment.due, 0);
   const status = canonicalAppointmentStatus(appointment.status);
   const transitions = appointmentStatusTransitions[status] ?? [];
   const standardTransitions = transitions.filter((value) => value !== "Cancelled");
@@ -9870,9 +9914,13 @@ function AppointmentDetailsDrawer({
           </details>
 
           <details className="appointment-disclosure">
-            <summary><span><CalendarDays size={17} /><span><strong>Visit details</strong><small>Schedule and assigned resources</small></span></span><ChevronDown size={17} /></summary>
+            <summary><span><CalendarDays size={17} /><span><strong>Visit details</strong><small>{visitAppointments.length} service{visitAppointments.length === 1 ? "" : "s"} in this visit</small></span></span><ChevronDown size={17} /></summary>
             <div className="appointment-disclosure-content appointment-detail-rows">
-              <AppointmentDetailRow label="Service" value={appointment.service} />
+              <AppointmentContentGroup
+                title="Services in this visit"
+                rows={visitPaymentRows.map(({ appointment: item, payment: itemPayment }) => `${item.service} · ${item.staff || "Provider not assigned"} · ${money.format(itemPayment.due)} due`)}
+                empty="No services linked to this visit."
+              />
               <AppointmentDetailRow label="Date and time" value={`${formatDate(appointment.date)} · ${appointmentTime}`} />
               <AppointmentDetailRow label="Appointment duration" value={recordedDuration ? `${recordedDuration} minutes` : ""} />
               <AppointmentDetailRow label="Doctor / Staff" value={staffLabel || "Not assigned"} />
@@ -9926,12 +9974,12 @@ function AppointmentDetailsDrawer({
 
       <footer className="appointment-details-footer">
         <div className="appointment-footer-main-actions">
-          {payment.due > 0 ? (
-            <button className="primary-button" type="button" onClick={() => onPayment(appointment)}><CreditCard size={16} /> Collect {money.format(payment.due)}</button>
+          {visitTotalDue > 0 ? (
+            <button className="primary-button" type="button" onClick={() => onPayment(appointment)}><CreditCard size={16} /> Checkout visit · {money.format(visitTotalDue)}</button>
           ) : (
             <button className="primary-button" type="button" onClick={() => onEdit(appointment)}><Edit3 size={16} /> Edit appointment</button>
           )}
-          {payment.due > 0 ? (
+          {visitTotalDue > 0 ? (
             <button className="secondary-button" type="button" onClick={() => onEdit(appointment)}><Edit3 size={16} /> Edit appointment</button>
           ) : (
             <button className="secondary-button" type="button" onClick={() => onReminder(appointment)}><Send size={16} /> Send reminder</button>
@@ -10994,7 +11042,7 @@ function TreatmentRecordPage({ record, client, followUpDue, onEdit, onUploadPhot
   );
 }
 
-function ServicesModule({ services, openModal, toggleService, globalSearch }) {
+function ServicesModule({ services, openModal, toggleService, deleteService, globalSearch }) {
   const [category, setCategory] = useState("All");
   const [catalogView, setCatalogView] = useState("list");
   const normalizedServiceQuery = globalSearch.trim().toLowerCase();
@@ -11049,6 +11097,7 @@ function ServicesModule({ services, openModal, toggleService, globalSearch }) {
               <div className="inline-actions">
                 <button type="button" onClick={() => openModal("service", service)}><Edit3 size={15} /> Edit</button>
                 <button type="button" onClick={() => toggleService(service.id)}>{service.active ? "Deactivate" : "Activate"}</button>
+                <button className="danger" type="button" onClick={() => deleteService(service)}><Trash2 size={15} /> Delete</button>
               </div>
             </article>
           ))}
@@ -15091,7 +15140,6 @@ function ModalHost({
         field("photo", "Employee photo", "photo", null, "span-2"),
         field("name", "Name"),
         field("role", "Role", "select", Object.keys(roleAccess)),
-        field("branch", "Primary branch", "select", branchOptions),
         field("branches", "Assigned branches", "multi-select", branchOptions),
         field("schedule", "Schedule"),
         field("commissionType", "Commission type", "suggest", ["Percentage per service", "Fixed amount per service", "Tiered commission", "Doctor rate", "Skin care", "Device care", "No commission / N/A"]),

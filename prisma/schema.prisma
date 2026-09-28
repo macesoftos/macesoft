@@ -812,6 +812,7 @@ model Sale {
   status            String                     @default("Paid")
   leadId            String                     @default("")
   appointmentId     String?                    @unique
+  appointmentIds    String                     @default("[]")
   notes             String                     @default("")
   room              String                     @default("")
   arrivalTime       String                     @default("")

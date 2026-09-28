@@ -1,0 +1,1 @@
+ALTER TABLE "Sale" ADD COLUMN "appointmentIds" TEXT NOT NULL DEFAULT '[]';
