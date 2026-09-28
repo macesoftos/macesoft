@@ -106,6 +106,7 @@ import {
   updateBranchRecord,
   addLeadActivity,
   bookLeadAppointment,
+  bulkDeleteClientRecords,
   completePosCheckout,
   createPosCart,
   convertLeadToClient,
@@ -148,6 +149,7 @@ import {
   revokeInvitation,
   inspectInvitation,
   importInventoryCsvRecords,
+  importClientRecords,
   importHistoricalSales,
   transferInventoryStock,
   scheduleLeadFollowUp,
@@ -2143,36 +2145,35 @@ function App() {
   }
 
   async function importClients(records) {
-    let saved = 0;
-    let failed = 0;
+    const result = await importClientRecords(records);
+    (result.records || []).forEach((record) => upsertById(setClients, record));
+    applyAuditLog(result.auditLog);
+    const summary = `${result.created || 0} created, ${result.updated || 0} updated`;
+    notify(result.skipped ? `${summary}, ${result.skipped} skipped.` : `${summary}.`, result.skipped ? "warning" : "success");
+  }
 
-    for (const values of records) {
-      const isExisting = Boolean(values.id && clients.some((client) => client.id === values.id));
-      const record = {
-        ...values,
-        id: values.id || createId("cl"),
-        balance: Number(values.balance || 0),
-        giftBalance: Number(values.giftBalance || 0),
-        storeCredit: Number(values.storeCredit || 0),
-        serviceCredit: Number(values.serviceCredit || 0),
-        marketingOptIn: Boolean(values.marketingOptIn),
-      };
-
-      try {
-        const result = await saveResourceRecord("clients", record, { existing: isExisting });
-        upsertById(setClients, result.record);
-        applyAuditLog(result.auditLog);
-        saved += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-
-    if (failed > 0) {
-      notify(`${saved} client${saved === 1 ? "" : "s"} imported, ${failed} failed.`, "warning");
-    } else {
-      notify(`${saved} client${saved === 1 ? "" : "s"} imported.`);
-    }
+  function bulkDeleteClients(ids) {
+    askConfirm({
+      title: `Delete ${ids.length} client profile${ids.length === 1 ? "" : "s"}?`,
+      copy: "The selected profiles will be removed. Transaction, treatment, and appointment history will remain; profiles with signed consent records will be retained.",
+      actionLabel: "Delete selected",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            const result = await bulkDeleteClientRecords(ids);
+            const deleted = new Set(result.deletedIds || []);
+            setClients((current) => current.filter((client) => !deleted.has(client.id)));
+            setSelectedClientId((current) => deleted.has(current) ? "" : current);
+            applyAuditLog(result.auditLog);
+            notify(result.blocked?.length
+              ? `${deleted.size} deleted; ${result.blocked.length} retained because signed consent records exist.`
+              : `${deleted.size} client profile${deleted.size === 1 ? "" : "s"} deleted.`, result.blocked?.length ? "warning" : "success");
+          } catch (error) {
+            notify(error.message || "Unable to delete the selected clients.", "error");
+          }
+        })();
+      },
+    });
   }
 
   function deleteClient(client) {
@@ -2610,7 +2611,7 @@ function App() {
     upsertById(setPackages, result.record);
     applyAuditLog(result.auditLog);
     closeModal();
-    notify("Package saved.");
+    notify(record.creditType === "Service Credit" ? "Service credit saved." : "Package saved.");
   }
 
   async function saveGiftCertificate(values) {
@@ -3345,6 +3346,7 @@ function App() {
               packages={scopedPackages}
               openModal={openModal}
               importClients={importClients}
+              bulkDeleteClients={bulkDeleteClients}
               importInputRef={clientImportInputRef}
               deleteClient={deleteClient}
               sensitiveAllowed={sensitiveAllowed}
@@ -5942,6 +5944,12 @@ function RolePanel({ panel }) {
   );
 }
 
+function formatPosClientLabel(item) {
+  return item
+    ? `${item.fullName}${item.mobile ? ` · ${item.mobile}` : item.email ? ` · ${item.email}` : ` · ${item.id}`}`
+    : "Walk-in / Anonymous";
+}
+
 function POSModule({
   clients,
   services,
@@ -5971,6 +5979,7 @@ function POSModule({
   settings,
 }) {
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  const [clientSearch, setClientSearch] = useState(() => formatPosClientLabel(clients[0]));
   const [branch, setBranch] = useState(branchScope === "All branches" ? branchRecords.find((item) => item.status === "Active")?.name || "" : branchScope);
   const [staffName, setStaffName] = useState(staff[0]?.name ?? "");
   const [discountId, setDiscountId] = useState("");
@@ -6007,6 +6016,14 @@ function POSModule({
     () => posCarts.filter((openCart) => openCart.branch === branch),
     [branch, posCarts],
   );
+  const posClientOptions = useMemo(
+    () => clients.map((item) => ({ id: item.id, label: formatPosClientLabel(item), client: item })),
+    [clients],
+  );
+
+  useEffect(() => {
+    setClientSearch(formatPosClientLabel(clients.find((item) => item.id === clientId)));
+  }, [clientId, clients]);
   const activeOpenCart = posCarts.find((openCart) => openCart.id === activeCartId);
   const selectedBranchRecord = branchRecords.find((item) => item.name === branch);
   const roomOptions = useMemo(() => [
@@ -6196,10 +6213,14 @@ function POSModule({
   const todaysTransactions = transactions.filter((transaction) => transaction.date === todayDate());
   const transactionSummaryRows = todaysTransactions.length ? todaysTransactions : transactions;
   const todaysTransactionTotal = todaysTransactions.reduce((sum, transaction) => transaction.status === "Void" || transaction.testMode ? sum : sum + Number(transaction.total || 0), 0);
-  const staffAtBranch = staff.filter((person) => {
-    const assignedBranches = splitList(person.branches);
-    return person.branch === branch || assignedBranches.includes(branch) || person.branch === "All branches";
-  });
+  const staffAtBranch = useMemo(() => staff.filter((person) => {
+    return person.status !== "Inactive" && person.clockedIn && person.attendanceBranch === branch;
+  }), [branch, staff]);
+
+  useEffect(() => {
+    if (staffAtBranch.some((person) => person.name === staffName)) return;
+    setStaffName(staffAtBranch[0]?.name || "");
+  }, [branch, staffAtBranch, staffName]);
 
   function providersForCartItem(item) {
     if (item.type !== "Service") return ["N/A"];
@@ -6300,6 +6321,24 @@ function POSModule({
     }
   }
 
+  function updateClientSearch(value) {
+    setClientSearch(value);
+    const normalizedValue = normalize(value);
+    if (normalizedValue === "walk-in / anonymous" || normalizedValue === "walk in / anonymous") {
+      if (clientId) void openCartForClient("");
+      return;
+    }
+    const match = posClientOptions.find((option) => (
+      normalize(option.label) === normalizedValue
+      || normalize(option.client.fullName) === normalizedValue
+      || normalize(option.client.mobile) === normalizedValue
+      || normalize(option.client.email) === normalizedValue
+      || normalize(option.client.id) === normalizedValue
+    ));
+    if (match && match.id !== clientId) void openCartForClient(match.id);
+    if (!normalizedValue && clientId) void openCartForClient("");
+  }
+
   async function addPosCartItem(item) {
     let openCart = activeOpenCart;
     if (!openCart) openCart = await openCartForClient(clientId);
@@ -6385,7 +6424,6 @@ function POSModule({
           clientId,
           clientName: client?.fullName ?? "Walk-in",
           storeCredit: Number(client?.storeCredit || 0),
-          serviceCredit: Number(client?.serviceCredit || 0),
           branch,
           room,
           arrivalTime,
@@ -6430,14 +6468,13 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.serviceCredit, client?.storeCredit, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, setCart, staffName, subtotal, testMode, total]);
+  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, setCart, staffName, subtotal, testMode, total]);
 
   function createPaymentDraft(patch = {}) {
     return {
       clientId,
       clientName: client?.fullName ?? "Walk-in",
       storeCredit: Number(client?.storeCredit || 0),
-      serviceCredit: Number(client?.serviceCredit || 0),
       branch,
       room,
       arrivalTime,
@@ -7153,12 +7190,19 @@ function POSModule({
             <div className="pos-context-fields">
               <label className="stacked-field">
                 <span>Select client</span>
-                <select ref={saleClientRef} value={clientId} onChange={(event) => void openCartForClient(event.target.value)}>
-                  <option value="">Walk-in / Anonymous</option>
-                  {clients.map((item) => (
-                    <option key={item.id} value={item.id}>{item.fullName}</option>
-                  ))}
-                </select>
+                <input
+                  ref={saleClientRef}
+                  type="search"
+                  list="pos-client-options"
+                  value={clientSearch}
+                  placeholder="Search name, mobile, email, or client ID"
+                  onChange={(event) => updateClientSearch(event.target.value)}
+                  onBlur={() => setClientSearch(formatPosClientLabel(clients.find((item) => item.id === clientId)))}
+                />
+                <datalist id="pos-client-options">
+                  <option value="Walk-in / Anonymous" />
+                  {posClientOptions.map((option) => <option key={option.id} value={option.label} />)}
+                </datalist>
               </label>
               <label className="stacked-field">
                 <span>Select Branch</span>
@@ -7168,6 +7212,7 @@ function POSModule({
               <label className="stacked-field">
                 <span>Select Staff</span>
                 <select value={staffName} onChange={(event) => setStaffName(event.target.value)}>
+                  {!staffAtBranch.length && <option value="">No staff currently clocked in</option>}
                   {staffAtBranch.map((person) => <option key={person.id}>{person.name}</option>)}
                 </select>
               </label>
@@ -9933,6 +9978,7 @@ function ClientsModule({
   consentSubmissions = [],
   openModal,
   importClients,
+  bulkDeleteClients,
   importInputRef,
   deleteClient,
   sensitiveAllowed,
@@ -10112,33 +10158,85 @@ function ClientsModule({
     if (!file) return;
 
     try {
-      const rows = parseCsvRows(await file.text());
+      let rows;
+      if (file.name.toLowerCase().endsWith(".xlsx")) {
+        const { default: readXlsxFile } = await import("read-excel-file/browser");
+        rows = await readXlsxFile(file);
+      } else {
+        rows = parseCsvRows(await file.text());
+      }
       if (rows.length < 2) {
-        notify("The CSV does not contain any client rows.", "warning");
+        notify("The file does not contain any client rows.", "warning");
         return;
       }
 
       const headerKeys = rows[0].map((heading) => normalize(heading).replace(/[^a-z0-9]+/g, ""));
+      const firstValue = (values, aliases) => aliases.map((alias) => values[alias]).find((value) => value !== undefined && value !== null && String(value).trim() !== "") ?? "";
+      const textValue = (values, aliases) => String(firstValue(values, aliases) ?? "").trim();
+      const numberValue = (values, aliases) => Number(String(firstValue(values, aliases) || "0").replace(/[^0-9.-]+/g, "")) || 0;
+      const booleanValue = (values, aliases) => {
+        const value = normalize(firstValue(values, aliases));
+        return ["true", "yes", "y", "1", "checked", "consented", "opted in"].includes(value);
+      };
+      const dateValue = (values, aliases) => {
+        const value = firstValue(values, aliases);
+        if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+        const text = String(value ?? "").trim();
+        if (!text) return "";
+        const parsed = new Date(text);
+        return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
+      };
       const records = rows.slice(1).map((row) => {
         const values = Object.fromEntries(headerKeys.map((key, index) => [key, row[index] ?? ""]));
-        const fullName = values.name || values.fullname || values.client;
+        const firstName = textValue(values, ["firstname", "givenname"]);
+        const middleName = textValue(values, ["middlename", "middleinitial"]);
+        const lastName = textValue(values, ["lastname", "surname", "familyname"]);
+        const fullName = textValue(values, ["fullname", "name", "client", "clientname", "patientname"])
+          || [firstName, middleName, lastName].filter(Boolean).join(" ");
         if (!fullName) return null;
         return {
-          id: values.clientid || values.id || "",
+          id: textValue(values, ["clientid", "patientid", "id"]),
           fullName,
-          mobile: values.mobile || values.phone || "",
-          email: values.email || "",
-          branch: values.branch || directoryBranches[1] || "All branches",
-          tag: values.type || values.tag || "New",
-          retention: values.retention || (normalize(values.type) === "new" ? "New" : "Returning"),
-          lastVisit: values.lastvisit || "",
-          nextVisit: values.nextvisit || "",
-          balance: Number(String(values.balance || "0").replace(/[^0-9.-]+/g, "")) || 0,
-          packageBalance: values.package || values.packagebalance || "None",
-          consentStatus: values.consentstatus || "Pending",
-          source: values.source || "Import",
-          marketingOptIn: false,
-          giftBalance: 0,
+          firstName,
+          middleName,
+          lastName,
+          mobile: textValue(values, ["mobile", "mobilenumber", "phone", "phonenumber", "contactnumber", "contactno"]),
+          email: textValue(values, ["email", "emailaddress"]),
+          gender: textValue(values, ["gender", "sex"]),
+          birthday: dateValue(values, ["birthday", "birthdate", "dateofbirth", "dob"]),
+          street: textValue(values, ["street", "streetaddress", "addressline1"]),
+          barangay: textValue(values, ["barangay", "village", "district"]),
+          city: textValue(values, ["city", "municipality"]),
+          province: textValue(values, ["province", "state", "region"]),
+          address: textValue(values, ["address", "fulladdress"]),
+          civilStatus: textValue(values, ["civilstatus", "maritalstatus"]),
+          occupation: textValue(values, ["occupation", "job", "profession"]),
+          emergencyName: textValue(values, ["emergencyname", "emergencycontact", "contactperson", "emergencycontactname"]),
+          emergencyPhone: textValue(values, ["emergencyphone", "emergencynumber", "emergencycontactnumber"]),
+          branch: textValue(values, ["branch", "location", "clinicbranch"]) || directoryBranches[1] || "All branches",
+          branchesVisited: textValue(values, ["branchesvisited", "visitedbranches"]),
+          tag: textValue(values, ["type", "clienttype", "tag"]) || "New",
+          retention: textValue(values, ["retention", "clientstatus"]) || (normalize(values.type) === "new" ? "New" : "Returning"),
+          lastVisit: dateValue(values, ["lastvisit", "lastappointment", "lasttreatment"]),
+          nextVisit: dateValue(values, ["nextvisit", "nextappointment", "followupdate"]),
+          balance: numberValue(values, ["balance", "outstandingbalance", "amountdue"]),
+          storeCredit: numberValue(values, ["clientcredit", "storecredit"]),
+          packageBalance: textValue(values, ["package", "packagebalance", "activepackage"]) || "None",
+          consentStatus: textValue(values, ["consentstatus", "consent", "privacyconsent"]) || "Pending",
+          source: textValue(values, ["source", "leadsource", "howdidyouhearaboutus"] ) || "Import",
+          referral: textValue(values, ["referral", "referredby", "referrer"]),
+          medicalNotes: textValue(values, ["medicalnotes", "medicalconcerns", "healthnotes"]),
+          allergies: textValue(values, ["allergies", "knownallergies"]),
+          contraindications: textValue(values, ["contraindications"]),
+          skinConcerns: textValue(values, ["skinconcerns", "concerns"]),
+          treatmentGoals: textValue(values, ["treatmentgoals", "goals"]),
+          pastMedicalHistory: textValue(values, ["pastmedicalhistory", "medicalhistory"]),
+          aestheticHistory: textValue(values, ["aesthetichistory", "treatmenthistory"]),
+          familyHistory: textValue(values, ["familyhistory"]),
+          surgicalHistory: textValue(values, ["surgicalhistory"]),
+          obstetricHistory: textValue(values, ["obstetrichistory"]),
+          medications: textValue(values, ["medications", "currentmedications"]),
+          marketingOptIn: booleanValue(values, ["marketingoptin", "marketingconsent", "subscribed"]),
         };
       }).filter(Boolean);
 
@@ -10148,7 +10246,7 @@ function ClientsModule({
       }
       await importClients(records);
     } catch (error) {
-      notify(error.message || "Unable to import that CSV file.", "error");
+      notify(error.message || "Unable to import that client file.", "error");
     }
   }
 
@@ -10168,6 +10266,7 @@ function ClientsModule({
           onClose={onCloseDetail}
           onEdit={() => openModal("client", profileClient)}
           onAddTreatment={() => openModal("treatment", { clientId: profileClient.id })}
+          onAddServiceCredit={() => openModal("service-credit", { clientId: profileClient.id })}
           onAddConsent={() => openModal("consent", { clientId: profileClient.id, branch: profileClient.branch, templateId: consentTemplates.find((item) => item.active)?.id || "" })}
           onDelete={() => deleteClient(profileClient)}
         />
@@ -10188,10 +10287,15 @@ function ClientsModule({
               ref={importInputRef}
               className="client-import-input"
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={handleClientImport}
               tabIndex={-1}
             />
+            {selectedClientIds.size > 0 && (
+              <button className="danger-button" type="button" onClick={() => bulkDeleteClients([...selectedClientIds])}>
+                <Trash2 size={16} /> Delete selected ({selectedClientIds.size})
+              </button>
+            )}
             <div className="segmented-control clients-view-toggle" aria-label="Client directory view">
               <button className={safeDirectoryView === "list" ? "active" : ""} type="button" onClick={() => setDirectoryView("list")}>
                 <List size={16} aria-hidden="true" /> List
@@ -10327,6 +10431,10 @@ function ClientsModule({
             setProfileClientId(null);
             openModal("treatment", { clientId: profileClient.id });
           }}
+          onAddServiceCredit={() => {
+            setProfileClientId(null);
+            openModal("service-credit", { clientId: profileClient.id });
+          }}
           onAddConsent={() => openModal("consent", { clientId: profileClient.id, branch: profileClient.branch, templateId: consentTemplates.find((item) => item.active)?.id || "" })}
           onDelete={() => {
             setProfileClientId(null);
@@ -10351,6 +10459,7 @@ function ClientProfileDialog({
   onClose,
   onEdit,
   onAddTreatment,
+  onAddServiceCredit,
   onAddConsent,
   onDelete,
 }) {
@@ -10434,6 +10543,9 @@ function ClientProfileDialog({
                 <button className="secondary-button small" type="button" onClick={onAddTreatment}>
                   <HeartPulse size={16} /> Add treatment
                 </button>
+                <button className="secondary-button small" type="button" onClick={onAddServiceCredit}>
+                  <Gift size={16} /> Add service credit
+                </button>
                 <button className="secondary-button small" type="button" onClick={onAddConsent}>
                   <FileText size={16} /> Sign consent
                 </button>
@@ -10452,7 +10564,7 @@ function ClientProfileDialog({
               <RecordItem label="Branches visited" value={branchesVisited.join(", ")} />
               <RecordItem label="Total spent since first visit" value={money.format(totalSpent)} />
               <RecordItem label="Client credit" value={money.format(client.storeCredit || 0)} />
-              <RecordItem label="Service credit" value={money.format(client.serviceCredit || 0)} />
+              <RecordItem label="Service credits" value={`${packages.filter((item) => item.creditType === "Service Credit" && item.status === "Active").reduce((sum, item) => sum + Math.max(0, Number(item.sessions || 0) - Number(item.used || 0)), 0)} session(s)`} />
               <RecordItem label="Date of birth / age" value={client.birthday ? `${formatDate(client.birthday)}${age === null ? "" : ` · ${age} years old`}` : "Not recorded"} />
               <RecordItem label="Civil status" value={client.civilStatus} />
               <RecordItem label="Address" value={[client.street, client.barangay, client.city, client.province].filter(Boolean).join(", ") || client.address} />
@@ -10474,7 +10586,7 @@ function ClientProfileDialog({
               <MiniPanel icon={HeartPulse} title="Treatment history" rows={treatments.map((item) => `${item.date} · ${item.branch || "Branch not recorded"} · ${item.service} · ${item.provider || "Provider N/A"}`)} empty="No treatments yet." />
               <MiniPanel icon={CalendarDays} title="Appointments" rows={appointments.map((item) => `${item.date} ${item.time} · ${item.branch} · ${item.service} · ${item.staff || "Provider N/A"} · ${item.status}`)} empty="No appointments yet." />
               <MiniPanel icon={WalletCards} title="Payments" rows={validTransactions.map((item) => `${item.date} · ${item.branch} · ${item.invoice} · ${money.format(item.total)} · ${item.status}`)} empty="No payments yet." />
-              <MiniPanel icon={Gift} title="Packages" rows={packages.map((item) => `${item.name}: ${item.used}/${item.sessions}`)} empty="No active packages." />
+              <MiniPanel icon={Gift} title="Packages & service credits" rows={packages.map((item) => `${item.creditType === "Service Credit" ? "Service credit" : "Package"} · ${item.name}: ${item.used}/${item.sessions}`)} empty="No active packages or service credits." />
               <MiniPanel icon={ShieldCheck} title="Signed consent forms" rows={consents.map((item) => `${formatDateTime(item.signedAt)} · ${item.formName} ${item.formVersion} · ${item.branch} · ${item.witness || "No witness"}`)} empty="No signed consent forms." />
               <section className="mini-panel client-document-panel"><div className="mini-panel-heading"><FileText size={18} /><strong>Attached records</strong></div>{documents.length ? <div className="client-document-list">{documents.map((document) => <article key={document.id}><a href={document.url} target="_blank" rel="noreferrer"><strong>{document.title}</strong><small>{document.category} · {formatDateTime(document.createdAt)}</small></a><button type="button" disabled={documentBusy} onClick={() => void deleteClientDocument(document)} aria-label={`Remove ${document.title}`}><Trash2 size={14} /></button></article>)}</div> : <small>No PDF or Word records attached.</small>}</section>
             </div>
@@ -11104,11 +11216,12 @@ function PackagesModule({ packages, giftCertificates = [], clients, openModal, g
   return (
     <section className="module-grid two">
       <div className="surface-panel wide">
-        <SectionHeader icon={Gift} title="Packages and Sessions" action={`${visiblePackages.length} packages`} />
+        <SectionHeader icon={Gift} title="Packages and Service Credits" action={`${visiblePackages.length} records`} />
+        <button className="primary-button small" type="button" onClick={() => openModal("service-credit")}><Plus size={16} /> Issue service credit</button>
         <div className="package-list">
           {visiblePackages.map((pkg) => (
             <article className="package-card" key={pkg.id}>
-              <strong>{pkg.name}</strong>
+              <strong>{pkg.name} · {pkg.creditType === "Service Credit" ? "Service credit" : "Package"}</strong>
               <span>{pkg.client}</span>
               <div className="session-meter">
                 <span style={{ width: `${Math.max(8, (Number(pkg.used) / Number(pkg.sessions)) * 100)}%` }} />
@@ -11120,7 +11233,7 @@ function PackagesModule({ packages, giftCertificates = [], clients, openModal, g
                 <div>
                   {(pkg.paymentHistory || []).slice(-3).map((entry, index) => <span key={`payment-${index}`}>{formatDate(entry.date)} · {money.format(entry.amount)} · {entry.method || "Payment"}</span>)}
                   {(pkg.sessionHistory || []).slice(-3).map((entry, index) => <span key={`session-${index}`}>{formatDate(entry.date)} · {entry.sessions > 0 ? "+" : ""}{entry.sessions} session · {entry.branch || pkg.branch}{entry.service ? ` · ${entry.service}` : ""}{entry.provider ? ` · ${entry.provider}` : ""}{entry.notes ? ` · ${entry.notes}` : ""}</span>)}
-                  {!pkg.paymentHistory?.length && !pkg.sessionHistory?.length && <span>No package activity recorded yet.</span>}
+                  {!pkg.paymentHistory?.length && !pkg.sessionHistory?.length && <span>No session activity recorded yet.</span>}
                 </div>
               </details>
               <div className="inline-actions">
@@ -11128,7 +11241,7 @@ function PackagesModule({ packages, giftCertificates = [], clients, openModal, g
                 {Number(pkg.outstandingBalance ?? Math.max(0, Number(pkg.price || 0) - Number(pkg.amountPaid || 0))) > 0 && (
                   <button type="button" onClick={() => openModal("package-payment", pkg)}><HandCoins size={15} /> Record installment</button>
                 )}
-                <button type="button" onClick={() => openModal("package", pkg)}><Edit3 size={15} /> Edit</button>
+                <button type="button" onClick={() => openModal(pkg.creditType === "Service Credit" ? "service-credit" : "package", pkg)}><Edit3 size={15} /> Edit</button>
               </div>
             </article>
           ))}
@@ -13714,6 +13827,16 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   const activeTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode
     && (reportBranch === "All branches" || transaction.branch === reportBranch)
     && (reportStaff === "All staff" || transaction.staff === reportStaff));
+  const activeExpenses = expenses.filter((expense) => reportBranch === "All branches" || expense.branch === reportBranch);
+  const reportStaffRows = useMemo(() => staff.filter((person) => reportBranch === "All branches"
+    || person.branch === reportBranch
+    || splitList(person.branches).includes(reportBranch)
+    || person.branch === "All branches"), [reportBranch, staff]);
+
+  useEffect(() => {
+    if (reportStaff === "All staff" || reportStaffRows.some((person) => person.name === reportStaff)) return;
+    setReportStaff("All staff");
+  }, [reportStaff, reportStaffRows]);
   const months = Array.from({ length: 12 }, (_, index) => `${currentYear}-${String(index + 1).padStart(2, "0")}`);
 
   const dailyTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode
@@ -13722,7 +13845,12 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
     && (reportStaff === "All staff" || transaction.staff === reportStaff));
   const dailySalesRows = dailyTransactions.map((transaction) => ({
     ...transaction,
-    itemsSummary: (transaction.items || []).map((item) => `${item.name} × ${item.qty || 1}`).join(", "),
+    itemsSummary: (transaction.items || []).map((item) => {
+      const quantity = Number(item.qty || 1);
+      const unitPrice = Number(item.price || 0);
+      const provider = item.provider && item.provider !== "N/A" ? ` · ${item.provider}` : "";
+      return `${item.name} × ${quantity} @ ${money.format(unitPrice)} = ${money.format(unitPrice * quantity)}${provider}`;
+    }).join(" · "),
     paymentsSummary: (transaction.payments || []).map((payment) => `${payment.method}: ${money.format(payment.amount || 0)}`).join(" · ") || transaction.status,
   }));
   const tenderSummaryRows = Object.values(dailyTransactions.flatMap((transaction) => transaction.payments || []).reduce((map, payment) => {
@@ -13782,7 +13910,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   });
 
   const expenseRows = Object.values(
-    expenses.reduce((map, expense) => {
+    activeExpenses.filter((expense) => !reportMonth || expense.date?.startsWith(reportMonth)).reduce((map, expense) => {
       const current = map[expense.category] ?? { id: expense.category, category: expense.category, count: 0, amount: 0, approved: 0 };
       current.count += 1;
       current.amount += Number(expense.amount || 0);
@@ -13794,11 +13922,11 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
 
   const netProfitRows = months.map((month) => {
     const sales = activeTransactions.filter((transaction) => transaction.date?.startsWith(month)).reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
-    const operatingExpenses = expenses.filter((expense) => expense.date?.startsWith(month)).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+    const operatingExpenses = activeExpenses.filter((expense) => expense.date?.startsWith(month)).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     return { id: month, month, sales, expenses: operatingExpenses, netProfit: sales - operatingExpenses };
   });
 
-  const commissionRows = staff.map((person) => {
+  const commissionRows = reportStaffRows.map((person) => {
     const staffSales = activeTransactions.filter((transaction) => transaction.staff === person.name && (!reportMonth || transaction.date?.startsWith(reportMonth)));
     const sales = staffSales.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
     const rate = Number(person.commissionRate || 0);
@@ -13813,7 +13941,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
     };
   });
 
-  const inventoryRows = inventory.map((item) => ({
+  const inventoryRows = inventory.filter((item) => reportBranch === "All branches" || item.branch === reportBranch).map((item) => ({
     ...item,
     balance: Number(item.stock || 0) - Number(item.beginning || 0),
     status: stockStatus(item),
@@ -13822,7 +13950,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   const reportRows = [
     { name: "Reports - Daily Sales", value: money.format(stats.revenueToday), owner: "Cashier", export: "PDF / CSV" },
     { name: "Reports - Annual Sales", value: money.format(annualSalesRows.reduce((sum, row) => sum + row.sales, 0)), owner: "Owner", export: "Excel / CSV" },
-    { name: "Reports - Expenses", value: money.format(expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)), owner: "Owner", export: "PDF" },
+    { name: "Reports - Expenses", value: money.format(activeExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)), owner: "Owner", export: "PDF" },
     { name: "Reports - Monthly Net Profit", value: money.format(stats.netProfit), owner: "Owner", export: "PDF" },
     { name: "Reports - Staff Commission", value: `${staff.length} staff`, owner: "Branch Manager", export: "Excel" },
     { name: "Reports - Product Inventory", value: `${inventory.length} items`, owner: "Inventory Staff", export: "CSV" },
@@ -13926,7 +14054,8 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
             { key: "invoice", label: "Invoice" },
             { key: "time", label: "Time" },
             { key: "client", label: "Client" },
-            { key: "itemsSummary", label: "Product / service" },
+            { key: "branch", label: "Branch" },
+            { key: "itemsSummary", label: "Product / service and price" },
             { key: "staff", label: "Staff" },
             { key: "room", label: "Room / couch" },
             { key: "paymentsSummary", label: "Mode of payment" },
@@ -13954,7 +14083,7 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
         <div className="report-filters">
           <label><span>Date range</span><input type="month" value={reportMonth} onChange={(event) => setReportMonth(event.target.value)} /></label>
           <label><span>Branch</span><select value={reportBranch} onChange={(event) => setReportBranch(event.target.value)}><option>All branches</option>{branchRecords.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
-          <label><span>Staff</span><select value={reportStaff} onChange={(event) => setReportStaff(event.target.value)}><option>All staff</option>{staff.map((person) => <option key={person.id}>{person.name}</option>)}</select></label>
+          <label><span>Staff</span><select value={reportStaff} onChange={(event) => setReportStaff(event.target.value)}><option>All staff</option>{reportStaffRows.map((person) => <option key={person.id}>{person.name}</option>)}</select></label>
           {canImportSales && <><input ref={importSalesRef} type="file" accept=".csv,text/csv" hidden onChange={handleHistoricalSalesFile} /><button className="secondary-button small" type="button" disabled={importing} onClick={() => importSalesRef.current?.click()}><Upload size={16} /> {importing ? "Importing..." : "Import past sales"}</button></>}
           <button className="secondary-button small" type="button" onClick={() => window.print()}><Printer size={16} /> Print</button>
         </div>
@@ -14633,7 +14762,6 @@ function ModalHost({
         field("skinConcerns", "Skin concerns"),
         field("treatmentGoals", "Treatment goals"),
         field("storeCredit", "Client credit", "number", null, "", false),
-        field("serviceCredit", "Service credit", "number", null, "", false),
         field("medicalNotes", "Medical notes", "textarea", null, "span-2"),
         field("pastMedicalHistory", "Past medical history", "textarea", null, "span-2", false),
         field("aestheticHistory", "Aesthetic history", "textarea", null, "span-2", false),
@@ -15017,7 +15145,7 @@ function ModalHost({
     },
     package: {
       title: modal.payload?.id ? "Edit Package" : "Sell Package",
-      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, sessions: 6, used: 0, branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload, expires: "" },
+      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, creditType: "Package", sessions: 6, used: 0, branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload, expires: "" },
       submitLabel: "Save package",
       onSubmit: savePackage,
       fields: [
@@ -15032,6 +15160,39 @@ function ModalHost({
         field("price", "Price", "number"),
         field("amountPaid", "Amount paid", "number"),
         field("nextPayment", "Next expected payment", "date", null, "", false),
+        field("serviceValue", "Service value per session", "number", null, "", false),
+      ],
+    },
+    "service-credit": {
+      title: modal.payload?.id ? "Edit Service Credit" : "Issue Service Credit",
+      initial: {
+        name: services.find((service) => service.serviceType !== "Package")?.name || services[0]?.name || "Service credit",
+        clientId: clients[0]?.id,
+        creditType: "Service Credit",
+        sessions: 1,
+        used: 0,
+        branch: "All branches",
+        transferable: true,
+        status: "Active",
+        price: 0,
+        amountPaid: 0,
+        purchaseDate: todayDate(),
+        nextPayment: "",
+        serviceValue: 0,
+        ...modal.payload,
+        expires: "",
+      },
+      submitLabel: "Save service credit",
+      onSubmit: savePackage,
+      fields: [
+        field("name", "Credited service", "select", services.filter((service) => service.serviceType !== "Package").map((service) => service.name)),
+        field("clientId", "Client", "select", clientOptions),
+        field("sessions", "Sessions credited", "number"),
+        field("used", "Sessions used", "number"),
+        field("purchaseDate", "Issue date", "date"),
+        field("branch", "Redeemable branch", "select", ["All branches", ...recordBranchOptions]),
+        field("transferable", "Cross-branch redemption", "checkbox"),
+        field("status", "Status", "select", ["Active", "Pending", "Completed"]),
         field("serviceValue", "Service value per session", "number", null, "", false),
       ],
     },
@@ -15307,13 +15468,19 @@ function AccountSecurityModal({ account, onClose, onChangePassword }) {
 
 function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [], paymentMethods = ["Cash", "Package"], onClose, onSubmit }) {
   const firstMethod = paymentMethods[0] || "Cash";
-  const splitSecondMethod = paymentMethods.find((method) => method !== firstMethod && method !== "Package") || firstMethod;
+  const splitSecondMethod = paymentMethods.find((method) => method !== firstMethod && !["Package", "Service Credit"].includes(method)) || firstMethod;
   const packagePurchaseLines = (draft.cart || []).filter((item) => item.type === "Service" && item.serviceType === "Package");
   const packageServiceLines = (draft.cart || []).filter((item) => item.type === "Service");
   const packageLineAmount = (item) => {
     const gross = Number(item?.price || 0) * Number(item?.qty || 1);
     return Number(draft.subtotal || 0) > 0
       ? Math.round((((gross / Number(draft.subtotal)) * Number(draft.total || 0)) + Number.EPSILON) * 100) / 100
+      : 0;
+  };
+  const sessionLineAmount = (item) => {
+    const unitPrice = Number(item?.price || 0);
+    return Number(draft.subtotal || 0) > 0
+      ? Math.round((((unitPrice / Number(draft.subtotal)) * Number(draft.total || 0)) + Number.EPSILON) * 100) / 100
       : 0;
   };
   const [payments, setPayments] = useState(() => {
@@ -15355,7 +15522,15 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     && (!certificate.expires || certificate.expires >= today)
     && branchAccepts(certificate.branch));
   const usablePackages = packages.filter((pkg) =>
-    pkg.status === "Active"
+    (pkg.creditType || "Package") === "Package"
+    && pkg.status === "Active"
+    && Number(pkg.used || 0) < Number(pkg.sessions || 0)
+    && (!pkg.expires || pkg.expires >= today)
+    && (pkg.transferable || branchAccepts(pkg.branch))
+    && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
+  const usableServiceCredits = packages.filter((pkg) =>
+    pkg.creditType === "Service Credit"
+    && pkg.status === "Active"
     && Number(pkg.used || 0) < Number(pkg.sessions || 0)
     && (!pkg.expires || pkg.expires >= today)
     && (pkg.transferable || branchAccepts(pkg.branch))
@@ -15366,10 +15541,9 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
   });
   const tenderIncomplete = payments.some((payment) =>
     (payment.method === "Gift Certificate" && !payment.giftCertificateId)
-    || (payment.method === "Package" && (!payment.packageId || !payment.packageLineKey))
+    || (["Package", "Service Credit"].includes(payment.method) && (!payment.packageId || !payment.packageLineKey))
     || (payment.method === "Salary Deduction" && !payment.employeeId)
-    || (payment.method === "Client Credit" && (!draft.clientId || Number(payment.amount || 0) > Number(draft.storeCredit || 0)))
-    || (payment.method === "Service Credit" && (!draft.clientId || Number(payment.amount || 0) > Number(draft.serviceCredit || 0))));
+    || (payment.method === "Client Credit" && (!draft.clientId || Number(payment.amount || 0) > Number(draft.storeCredit || 0))));
   const canPost = payments.some((payment) => Number(payment.amount) > 0) && !tenderIncomplete && !packageAllocationInvalid;
 
   function updatePayment(index, patch) {
@@ -15395,11 +15569,24 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
 
   function choosePackage(index, packageId) {
     const assignedLineKeys = new Set(payments.map((payment, itemIndex) => itemIndex === index ? "" : payment.packageLineKey).filter(Boolean));
-    const nextLine = packageServiceLines.find((item) => !assignedLineKeys.has(item.key)) || packageServiceLines[0];
+    const selectedCredit = packages.find((item) => item.id === packageId);
+    const eligibleLines = selectedCredit?.creditType === "Service Credit"
+      ? packageServiceLines.filter((item) => normalize(item.name) === normalize(selectedCredit.name))
+      : packageServiceLines;
+    const currentLine = eligibleLines.find((item) => item.key === payments[index]?.packageLineKey && !assignedLineKeys.has(item.key));
+    const nextLine = currentLine || eligibleLines.find((item) => !assignedLineKeys.has(item.key)) || eligibleLines[0];
     updatePayment(index, {
       packageId: packageId || undefined,
-      packageLineKey: packageId ? (payments[index]?.packageLineKey || nextLine?.key) : undefined,
-      ...(packageId ? { amount: remainingBesides(index) } : {}),
+      packageLineKey: packageId ? nextLine?.key : undefined,
+      ...(packageId && nextLine ? { amount: Math.min(sessionLineAmount(nextLine), remainingBesides(index)) } : {}),
+    });
+  }
+
+  function choosePackageLine(index, packageLineKey) {
+    const line = packageServiceLines.find((item) => item.key === packageLineKey);
+    updatePayment(index, {
+      packageLineKey: packageLineKey || undefined,
+      ...(line ? { amount: Math.min(sessionLineAmount(line), remainingBesides(index)) } : {}),
     });
   }
 
@@ -15513,7 +15700,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                   ))}
                 </select>
               )}
-              {payment.method === "Package" && (
+              {["Package", "Service Credit"].includes(payment.method) && (
                 <div className="payment-package-allocation">
                   <select
                     className="payment-tender-select"
@@ -15521,8 +15708,8 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                     value={payment.packageId || ""}
                     onChange={(event) => choosePackage(index, event.target.value)}
                   >
-                    <option value="">Select client package (1 session)...</option>
-                    {usablePackages.map((pkg) => (
+                    <option value="">Select client {payment.method.toLowerCase()} (1 session)...</option>
+                    {(payment.method === "Service Credit" ? usableServiceCredits : usablePackages).map((pkg) => (
                       <option key={pkg.id} value={pkg.id}>
                         {pkg.name} - {Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left
                       </option>
@@ -15532,11 +15719,15 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                     className="payment-tender-select"
                     aria-label={`Payment ${index + 1} package service`}
                     value={payment.packageLineKey || ""}
-                    onChange={(event) => updatePayment(index, { packageLineKey: event.target.value || undefined })}
+                    onChange={(event) => choosePackageLine(index, event.target.value)}
                   >
                     <option value="">Select service session covered...</option>
-                    {packageServiceLines.map((line) => {
-                      const assignedElsewhere = payments.some((entry, itemIndex) => itemIndex !== index && entry.method === "Package" && entry.packageLineKey === line.key);
+                    {packageServiceLines.filter((line) => {
+                      if (payment.method !== "Service Credit") return true;
+                      const selectedCredit = usableServiceCredits.find((item) => item.id === payment.packageId);
+                      return !selectedCredit || normalize(line.name) === normalize(selectedCredit.name);
+                    }).map((line) => {
+                      const assignedElsewhere = payments.some((entry, itemIndex) => itemIndex !== index && ["Package", "Service Credit"].includes(entry.method) && entry.packageLineKey === line.key);
                       return <option key={line.key} value={line.key} disabled={assignedElsewhere}>{line.name}{line.provider && line.provider !== "N/A" ? ` · ${line.provider}` : ""}</option>;
                     })}
                   </select>
@@ -15551,22 +15742,22 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
               {payment.method === "Client Credit" && (
                 <span className="payment-tender-hint">Available client credit: {money.format(draft.storeCredit || 0)}{!draft.clientId ? " · Select a registered client first." : ""}</span>
               )}
-              {payment.method === "Service Credit" && (
-                <span className="payment-tender-hint">Available service credit: {money.format(draft.serviceCredit || 0)}{!draft.clientId ? " · Select a registered client first." : ""}</span>
-              )}
               {payment.method === "Gift Certificate" && !usableCertificates.length && (
                 <span className="payment-tender-hint">No active gift certificates for this branch.</span>
               )}
               {payment.method === "Package" && !usablePackages.length && (
                 <span className="payment-tender-hint">No active packages for this client at this branch.</span>
               )}
-              {payment.method === "Package" && !packageServiceLines.length && (
+              {payment.method === "Service Credit" && !usableServiceCredits.length && (
+                <span className="payment-tender-hint">No active service-session credits for this client at this branch.</span>
+              )}
+              {["Package", "Service Credit"].includes(payment.method) && !packageServiceLines.length && (
                 <span className="payment-tender-hint">Add the service covered by this package before checkout.</span>
               )}
             </div>
           ))}
         </div>
-        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: paymentMethods.find((method) => method !== "Package") || firstMethod, amount: 0, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) }])}>
+        <button className="secondary-button small" type="button" onClick={() => setPayments((current) => [...current, { method: paymentMethods.find((method) => !["Package", "Service Credit"].includes(method)) || firstMethod, amount: 0, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) }])}>
           <Plus size={16} /> Add split payment
         </button>
         {packageInstallments.length > 0 && (
@@ -15601,7 +15792,6 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
             <select value={creditChangeType} onChange={(event) => setCreditChangeType(event.target.value)}>
               <option value="">Cash change</option>
               <option value="Client Credit">Add to client credit</option>
-              <option value="Service Credit">Add to service credit</option>
             </select>
           </label>
         )}
@@ -15668,7 +15858,10 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
   ];
   const availableStaff = staff.filter((person) => {
     const assignedBranches = Array.isArray(person.branches) ? person.branches : splitList(person.branches);
-    return person.branch === form.branch || assignedBranches.includes(form.branch) || person.branch === "All branches" || !person.branch;
+    const assignedToBranch = person.branch === form.branch || assignedBranches.includes(form.branch) || person.branch === "All branches" || !person.branch;
+    if (!assignedToBranch || person.status === "Inactive") return false;
+    if (form.date === todayDate()) return person.clockedIn && person.attendanceBranch === form.branch;
+    return true;
   });
   const patient = clients.find((client) => client.id === form.clientId);
   const patientPackages = packages.filter((item) => item.clientId === form.clientId || item.client === patient?.fullName);

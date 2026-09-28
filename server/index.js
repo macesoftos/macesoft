@@ -1412,6 +1412,7 @@ async function normalizePackagePayload(payload, existingId = "") {
     name: requireText(payload.name, "Package name"),
     clientId,
     client: clean(client?.fullName) || requireText(payload.client, "Client"),
+    creditType: clean(payload.creditType) === "Service Credit" ? "Service Credit" : "Package",
     sessions,
     used,
     expires: "",
@@ -1956,6 +1957,7 @@ const resourceConfigs = {
     directTenant: true,
     directTenantOrganizationWide: true,
     posSelect: { id: true, fullName: true, mobile: true, branch: true, branchesVisited: true, storeCredit: true, serviceCredit: true },
+    reportSelect: { id: true, retention: true, branch: true },
   },
   appointments: {
     delegate: "appointment",
@@ -1969,6 +1971,7 @@ const resourceConfigs = {
     branchField: "branch",
     relatedClient: true,
     directTenant: true,
+    reportSelect: { id: true, date: true, branch: true, staff: true },
   },
   services: {
     delegate: "service",
@@ -2000,6 +2003,7 @@ const resourceConfigs = {
       id: true, item: true, sku: true, brand: true, category: true, type: true,
       stock: true, branch: true, price: true, image: true, directions: true,
     },
+    reportSelect: { id: true, item: true, branch: true, beginning: true, stock: true, reorder: true },
   },
   treatments: {
     delegate: "treatment",
@@ -2029,7 +2033,7 @@ const resourceConfigs = {
     relatedClient: true,
     allowLegacyOrganizationScope: true,
     posSelect: {
-      id: true, name: true, clientId: true, client: true, sessions: true, used: true,
+      id: true, name: true, clientId: true, client: true, creditType: true, sessions: true, used: true,
       expires: true, branch: true, transferable: true, status: true, price: true,
       amountPaid: true, nextPayment: true, purchaseDate: true, serviceValue: true,
       paymentHistory: true, sessionHistory: true,
@@ -2084,7 +2088,9 @@ const resourceConfigs = {
     beforeWrite: validateLinkedStaffIdentity,
     afterWrite: syncStaffBranchAssignment,
     branchField: "branch",
+    multiBranchAssignments: true,
     posSelect: { id: true, name: true, role: true, branch: true, branches: true, status: true },
+    reportSelect: { id: true, name: true, role: true, branch: true, branches: true, commissionRate: true, status: true },
   },
   expenses: {
     delegate: "expense",
@@ -2094,6 +2100,7 @@ const resourceConfigs = {
     orderBy: [{ date: "desc" }],
     normalize: normalizeExpensePayload,
     branchField: "branch",
+    reportSelect: { id: true, date: true, name: true, category: true, branch: true, amount: true, status: true },
   },
   discounts: {
     delegate: "discount",
@@ -2167,6 +2174,11 @@ const resourceConfigs = {
     readOnly: true,
     serialize: serializeSale,
     branchField: "branch",
+    reportSelect: {
+      id: true, invoice: true, date: true, time: true, client: true, branch: true, staff: true,
+      total: true, payments: true, status: true, testMode: true, room: true,
+      items: { select: { id: true, name: true, type: true, qty: true, price: true, provider: true } },
+    },
   },
   auditLogs: {
     delegate: "auditLog",
@@ -2202,7 +2214,8 @@ async function listResource(resource, actor = null) {
   const directModuleAllowed = !actor || moduleAllowed(actor, config.module, roleAccess);
   const posSupportAllowed = Boolean(actor && config.posSelect && moduleAllowed(actor, "pos", roleAccess));
   const clientSupportAllowed = Boolean(actor && config.clientSelect && moduleAllowed(actor, "clients", roleAccess));
-  if (!directModuleAllowed && !posSupportAllowed && !clientSupportAllowed) return [];
+  const reportSupportAllowed = Boolean(actor && config.reportSelect && moduleAllowed(actor, "reports", roleAccess));
+  if (!directModuleAllowed && !posSupportAllowed && !clientSupportAllowed && !reportSupportAllowed) return [];
   let where = {};
   if (actor) {
     if (config.directTenant) {
@@ -2213,6 +2226,8 @@ async function listResource(resource, actor = null) {
           ? { organizationId: actor.organizationId }
           : { organizationId: actor.organizationId, branchId: actor.access?.activeBranchId || "__none__" };
       }
+    } else if (config.unifiedClientAccess && reportSupportAllowed && !directModuleAllowed && !posSupportAllowed) {
+      where = branchWhere(actor, config.branchField || "branch");
     } else if (config.unifiedClientAccess) {
       if (!hasOrganizationWideAccess(actor) && !hasValidBranchAssignment(actor)) {
         where = { id: "__none__" };
@@ -2220,6 +2235,9 @@ async function listResource(resource, actor = null) {
         const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
         where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
       }
+    } else if (config.multiBranchAssignments) {
+      const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
+      where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
     } else if (config.branchField) where = branchWhere(actor, config.branchField);
     if (config.branchField && config.allowLegacyOrganizationScope && actor.access?.scope === "branch") {
       where = { OR: [where, { [config.branchField]: "All branches" }] };
@@ -2239,10 +2257,20 @@ async function listResource(resource, actor = null) {
   const query = { where, orderBy: config.orderBy };
   if (!directModuleAllowed && posSupportAllowed) query.select = config.posSelect;
   else if (!directModuleAllowed && clientSupportAllowed) query.select = config.clientSelect;
+  else if (!directModuleAllowed && reportSupportAllowed) query.select = config.reportSelect;
   else if (config.include) query.include = config.include;
   const rows = await prisma[config.delegate].findMany(query);
 
-  const scopedRows = actor && config.serviceBranches ? filterServiceBranches(rows, actor) : rows;
+  let scopedRows = actor && config.serviceBranches ? filterServiceBranches(rows, actor) : rows;
+  if (actor && config.multiBranchAssignments) {
+    const allowedBranches = actor.access?.scope === "all"
+      ? new Set(actor.access?.branches?.map((branch) => branch.name).filter(Boolean) || [])
+      : new Set([clean(actor.access?.activeBranch?.name || actor.branch)].filter(Boolean));
+    scopedRows = scopedRows.filter((row) => {
+      const assignments = new Set([clean(row.branch), ...parseJsonList(row.branches)]);
+      return assignments.has("All branches") || [...allowedBranches].some((branch) => assignments.has(branch));
+    });
+  }
   return config.serialize ? scopedRows.map(config.serialize) : scopedRows;
 }
 
@@ -4020,6 +4048,7 @@ async function buildBootstrapPayload(actor) {
     leadIntegrations,
     webhookEvents,
     posCarts,
+    activeAttendance,
   ] = await Promise.all([
     listResource("clients", actor),
     listResource("appointments", actor),
@@ -4053,7 +4082,29 @@ async function buildBootstrapPayload(actor) {
     moduleAllowed(actor, "pos", roleAccess)
       ? prisma.posCart.findMany({ where: branchWhere(actor), orderBy: [{ updatedAt: "desc" }], take: 100 })
       : [],
+    (moduleAllowed(actor, "pos", roleAccess) || moduleAllowed(actor, "appointments", roleAccess))
+      ? prisma.faceTrackAttendanceRecord.findMany({
+        where: { ...branchWhere(actor), timeOut: null, status: "OPEN" },
+        orderBy: [{ timeIn: "desc" }],
+        select: { staffId: true, branch: true, timeIn: true, workDate: true },
+      })
+      : [],
   ]);
+
+  const activeAttendanceByStaff = new Map();
+  activeAttendance.forEach((record) => {
+    if (!activeAttendanceByStaff.has(record.staffId)) activeAttendanceByStaff.set(record.staffId, record);
+  });
+  const staffWithLiveAttendance = staff.map((person) => {
+    const attendance = activeAttendanceByStaff.get(person.id);
+    return {
+      ...person,
+      clockedIn: Boolean(attendance),
+      attendanceBranch: attendance?.branch || "",
+      attendanceTimeIn: attendance?.timeIn || null,
+      attendanceWorkDate: attendance?.workDate || "",
+    };
+  });
 
   return {
     clients,
@@ -4065,7 +4116,7 @@ async function buildBootstrapPayload(actor) {
     packages,
     giftCertificates,
     leads,
-    staff,
+    staff: staffWithLiveAttendance,
     expenses,
     discounts,
     promotions,
@@ -7386,6 +7437,90 @@ app.post("/api/clients", asyncRoute(async (request, response) => {
   response.status(201).json(client);
 }));
 
+app.post("/api/clients/import", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "clients");
+  const records = Array.isArray(request.body?.records) ? request.body.records : [];
+  if (!records.length) throw apiError("Add at least one client row to import.");
+  if (records.length > 2_000) throw apiError("Import client files in batches of 2,000 rows or fewer.", 413);
+
+  const existingClients = await listResource("clients", actor);
+  const maps = {
+    id: new Map(existingClients.map((client) => [clean(client.id), client])),
+    email: new Map(existingClients.filter((client) => clean(client.email)).map((client) => [clean(client.email).toLowerCase(), client])),
+    mobile: new Map(existingClients.filter((client) => clean(client.mobile)).map((client) => [clean(client.mobile).replace(/\D/g, ""), client])),
+    identity: new Map(existingClients.map((client) => [`${clean(client.fullName).toLowerCase()}|${clean(client.birthday)}`, client])),
+  };
+  const imported = [];
+  let created = 0;
+  let updated = 0;
+
+  const result = await prisma.$transaction(async (tx) => {
+    for (const rawRecord of records) {
+      const raw = rawRecord && typeof rawRecord === "object" ? rawRecord : {};
+      const fullName = clean(raw.fullName || raw.name || [raw.firstName, raw.middleName, raw.lastName].filter(Boolean).join(" "));
+      if (!fullName) continue;
+      const mobileKey = clean(raw.mobile || raw.phone).replace(/\D/g, "");
+      const emailKey = clean(raw.email).toLowerCase();
+      const identityKey = `${fullName.toLowerCase()}|${clean(raw.birthday || raw.birthdate)}`;
+      const existing = maps.id.get(clean(raw.id))
+        || (emailKey && maps.email.get(emailKey))
+        || (mobileKey.length >= 7 && maps.mobile.get(mobileKey))
+        || maps.identity.get(identityKey);
+      const merged = existing ? { ...existing } : {};
+      Object.entries({ ...raw, fullName }).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") merged[key] = value;
+      });
+      if (!existing) delete merged.id;
+      const data = normalizeClientPayload(branchScopedPayload(request, merged, resourceConfigs.clients), existing?.id || "");
+      assertMutationAllowed(request, "clients", data.branch);
+      const saved = existing
+        ? await tx.client.update({ where: { id: existing.id }, data: stripMeta(data) })
+        : await tx.client.create({ data: stripMeta(data) });
+      imported.push(serializeClient(saved));
+      if (existing) updated += 1;
+      else created += 1;
+      maps.id.set(saved.id, saved);
+      if (clean(saved.email)) maps.email.set(clean(saved.email).toLowerCase(), saved);
+      if (clean(saved.mobile)) maps.mobile.set(clean(saved.mobile).replace(/\D/g, ""), saved);
+      maps.identity.set(`${clean(saved.fullName).toLowerCase()}|${clean(saved.birthday)}`, saved);
+    }
+    const auditLog = await writeAudit(tx, request, {
+      area: "Client Records",
+      action: "Clients imported",
+      details: `${created} client(s) created and ${updated} client(s) updated from an import file.`,
+    });
+    return { auditLog };
+  });
+
+  response.status(201).json({ records: imported, created, updated, skipped: records.length - imported.length, auditLog: result.auditLog });
+}));
+
+app.post("/api/clients/bulk-delete", asyncRoute(async (request, response) => {
+  const ids = [...new Set((Array.isArray(request.body?.ids) ? request.body.ids : []).map(clean).filter(Boolean))];
+  if (!ids.length) throw apiError("Select at least one client to delete.");
+  if (ids.length > 1_000) throw apiError("Delete clients in batches of 1,000 or fewer.", 413);
+  const clients = await prisma.client.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true, branch: true } });
+  clients.forEach((client) => assertMutationAllowed(request, "clients", client.branch));
+  const protectedRows = await prisma.clientConsentSubmission.findMany({
+    where: { clientId: { in: clients.map((client) => client.id) } },
+    distinct: ["clientId"],
+    select: { clientId: true },
+  });
+  const protectedIds = new Set(protectedRows.map((row) => row.clientId));
+  const deletedIds = clients.map((client) => client.id).filter((id) => !protectedIds.has(id));
+  const blocked = clients.filter((client) => protectedIds.has(client.id)).map((client) => ({ id: client.id, name: client.fullName, reason: "Signed consent records must be retained." }));
+  const result = await prisma.$transaction(async (tx) => {
+    if (deletedIds.length) await tx.client.deleteMany({ where: { id: { in: deletedIds } } });
+    const auditLog = await writeAudit(tx, request, {
+      area: "Client Records",
+      action: "Clients bulk deleted",
+      details: `${deletedIds.length} client profile(s) deleted; ${blocked.length} retained because of signed consent records.`,
+    });
+    return { auditLog };
+  });
+  response.json({ deletedIds, blocked, auditLog: result.auditLog });
+}));
+
 app.put("/api/clients/:id", asyncRoute(async (request, response) => {
   const id = String(request.params.id);
   const existing = await prisma.client.findUnique({ where: { id } });
@@ -8390,7 +8525,7 @@ app.post("/api/transactions/:id/void", asyncRoute(async (request, response) => {
       const client = await tx.client.findUnique({ where: { id: sale.clientId } });
       if (client) {
         const usedStoreCredit = salePayments.filter((payment) => payment.method === "Client Credit").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-        const usedServiceCredit = salePayments.filter((payment) => payment.method === "Service Credit").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+        const usedServiceCredit = salePayments.filter((payment) => payment.method === "Service Credit" && !payment.packageId).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
         const creditedStoreChange = salePayments.filter((payment) => payment.changeCreditType === "Client Credit").reduce((sum, payment) => sum + Number(payment.changeCreditAmount || 0), 0);
         const creditedServiceChange = salePayments.filter((payment) => payment.changeCreditType === "Service Credit").reduce((sum, payment) => sum + Number(payment.changeCreditAmount || 0), 0);
         const nextStoreCredit = Number(client.storeCredit || 0) + usedStoreCredit - creditedStoreChange;
@@ -8647,17 +8782,17 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     if (payment.method === "Gift Certificate" && !payment.giftCertificateId) {
       throw apiError("Select the gift certificate used for this payment.");
     }
-    if (payment.method === "Package" && !payment.packageId) {
-      throw apiError("Select the client package used for this payment.");
+    if (["Package", "Service Credit"].includes(payment.method) && !payment.packageId) {
+      throw apiError(`Select the client ${payment.method.toLowerCase()} used for this payment.`);
     }
     if (payment.giftCertificateId && payment.method !== "Gift Certificate") {
       throw apiError("Gift certificate identifiers can only be used with Gift Certificate payments.");
     }
-    if (payment.packageId && payment.method !== "Package") {
-      throw apiError("Package identifiers can only be used with Package payments.");
+    if (payment.packageId && !["Package", "Service Credit"].includes(payment.method)) {
+      throw apiError("Session-credit identifiers can only be used with Package or Service Credit payments.");
     }
-    if (payment.packageLineKey && payment.method !== "Package") {
-      throw apiError("Package service links can only be used with Package payments.");
+    if (payment.packageLineKey && !["Package", "Service Credit"].includes(payment.method)) {
+      throw apiError("Session-credit service links can only be used with Package or Service Credit payments.");
     }
     if (payment.method === "Salary Deduction" && !payment.employeeId) {
       throw apiError("Select the employee linked to the salary deduction.");
@@ -8683,11 +8818,17 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   const checkoutServiceLines = new Map(checkout.items.filter((item) => item.type === "Service").map((item) => [item.lineKey, item]));
   const packageLineUsage = new Map();
   for (const payment of normalizedPayments) {
-    if (payment.method !== "Package") continue;
+    if (!["Package", "Service Credit"].includes(payment.method)) continue;
     const packageLineKey = clean(payment.packageLineKey) || (checkoutServiceLines.size === 1 ? checkoutServiceLines.keys().next().value : "");
     if (!packageLineKey) throw apiError("Select the service covered by this package payment.");
     const coveredLine = checkoutServiceLines.get(packageLineKey);
     if (!coveredLine) throw apiError("The selected package must cover a service in this transaction.", 409);
+    const coveredSessionAmount = checkout.subtotal > 0
+      ? Math.round((((Number(coveredLine.price || 0) / checkout.subtotal) * checkout.total) + Number.EPSILON) * 100) / 100
+      : 0;
+    if (Math.abs(payment.amount - coveredSessionAmount) > 0.009) {
+      throw apiError(`${coveredLine.name} session credit must cover ${coveredSessionAmount}.`, 409);
+    }
     const usedSessions = (packageLineUsage.get(packageLineKey) || 0) + 1;
     if (usedSessions > Math.max(1, Number(coveredLine.qty || 1))) {
       throw apiError(`${coveredLine.name} does not have another session line available for this package payment.`, 409);
@@ -8704,7 +8845,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
   }
   const paidAmount = normalizedPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const changeAmount = Math.max(0, paidAmount - checkout.total);
-  const creditChangeType = ["Client Credit", "Service Credit"].includes(clean(paymentData.creditChangeType)) ? clean(paymentData.creditChangeType) : "";
+  const creditChangeType = clean(paymentData.creditChangeType) === "Client Credit" ? "Client Credit" : "";
   if (changeAmount > 0 && creditChangeType && normalizedPayments[0]) {
     normalizedPayments[0].changeCreditType = creditChangeType;
     normalizedPayments[0].changeCreditAmount = changeAmount;
@@ -8821,6 +8962,13 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       const pkg = await tx.clinicPackage.findUnique({ where: { id: packageId } });
       assertPackageRedeemable(pkg, { branch });
       assertPackageOwnedByClient(pkg, draft.clientId);
+      const requestedCreditType = redemptionPayments[0]?.method === "Service Credit" ? "Service Credit" : "Package";
+      if ((pkg.creditType || "Package") !== requestedCreditType) {
+        throw apiError(`${pkg.name} is not valid for the selected ${requestedCreditType.toLowerCase()} tender.`, 409);
+      }
+      if (requestedCreditType === "Service Credit" && redemptionPayments.some((payment) => clean(payment.packageServiceName) !== clean(pkg.name))) {
+        throw apiError(`${pkg.name} service credit can only be applied to that service.`, 409);
+      }
       if (Number(pkg.used || 0) + sessions > Number(pkg.sessions || 0)) {
         throw apiError(`Package ${pkg.name} only has ${Number(pkg.sessions || 0) - Number(pkg.used || 0)} session(s) left.`, 409);
       }
@@ -8850,7 +8998,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
     }
 
     for (const payment of operationalPayments) {
-      const creditField = payment.method === "Client Credit" ? "storeCredit" : payment.method === "Service Credit" ? "serviceCredit" : "";
+      const creditField = payment.method === "Client Credit" ? "storeCredit" : "";
       if (!creditField) continue;
       if (!checkout.client) throw apiError(`Select a registered client before using ${payment.method}.`);
       const debited = await tx.client.updateMany({
@@ -8955,6 +9103,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
             name: item.name,
             clientId: checkout.client.id,
             client: checkout.client.fullName,
+            creditType: "Package",
             sessions,
             used: 0,
             expires: "",
@@ -9046,7 +9195,6 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
           lastVisit: saleDate,
           balance: { increment: outstandingAmount },
           ...(creditChangeType === "Client Credit" && changeAmount > 0 ? { storeCredit: { increment: changeAmount } } : {}),
-          ...(creditChangeType === "Service Credit" && changeAmount > 0 ? { serviceCredit: { increment: changeAmount } } : {}),
         },
       });
     }

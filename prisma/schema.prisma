@@ -1062,6 +1062,7 @@ model ClinicPackage {
   clientId       String?
   clientRecord   Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   client         String
+  creditType     String   @default("Package")
   sessions       Int      @default(0)
   used           Int      @default(0)
   expires        String   @default("")
@@ -1080,6 +1081,7 @@ model ClinicPackage {
   updatedAt      DateTime @updatedAt
 
   @@index([clientId])
+  @@index([creditType])
   @@index([status])
   @@index([sourceSaleId])
 }

@@ -59,6 +59,13 @@ const actionDefinitions = {
     modal: "package",
     requiredModules: ["packages"],
   },
+  serviceCredit: {
+    id: "service-credit",
+    label: "Issue service credit",
+    icon: "package",
+    modal: "service-credit",
+    requiredModules: ["packages"],
+  },
   staff: {
     id: "staff",
     label: "New staff member",
@@ -171,7 +178,7 @@ export const globalActionsByModule = {
   "room-view": ["appointment", "room"],
   treatments: ["treatment"],
   services: ["service"],
-  packages: ["package"],
+  packages: ["package", "serviceCredit"],
   staff: ["invite", "staff", "staffUsersExport", "staffProfilesExport"],
   branches: ["invite", "branch"],
   inventory: ["inventory", "inventoryReceive", "inventoryImport", "inventoryExport"],

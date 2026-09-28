@@ -1,4 +1,5 @@
 import test from "node:test";
+import { roleAccess } from "../src/data.js";
 import assert from "node:assert/strict";
 import {
   accountMatchesStaffIdentity,
@@ -75,8 +76,16 @@ test("module and branch access enforce least privilege", () => {
   assert.equal(canAccessBranch(receptionist, ""), false);
 });
 
+test("investors receive reports-only access within their assigned branch scope", () => {
+  const investor = { role: "Investor", branch: "Mace Davao" };
+  assert.equal(moduleAllowed(investor, "reports", roleAccess), true);
+  assert.equal(moduleAllowed(investor, "pos", roleAccess), false);
+  assert.equal(moduleAllowed(investor, "clients", roleAccess), false);
+  assert.deepEqual(branchWhere(investor), { branch: "Mace Davao" });
+});
+
 test("protected API families resolve to their required workspace modules", () => {
-  assert.equal(requiredModuleForApiRequest("/api/bootstrap"), "pos");
+  assert.equal(requiredModuleForApiRequest("/api/bootstrap"), "");
   assert.equal(requiredModuleForApiRequest("/api/me/active-branch"), "pos");
   assert.equal(requiredModuleForApiRequest("/api/me/workspace"), "my-workspace");
   assert.equal(requiredModuleForApiRequest("/api/settings"), "settings");

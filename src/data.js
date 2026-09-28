@@ -26,6 +26,7 @@ export const roleAccess = {
   Owner: ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
   "Business Owner": ["my-workspace", "overview", "applications", "facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages", "leads", "sms", "flipbooks", "staff", "branches", "expenses", "payroll", "reports", "booking", "settings", "support"],
   "Branch Manager": ["pos", "staff", "facetrack-attendance"],
+  Investor: ["reports"],
   Receptionist: ["facetrack-attendance", "pos", "card-view", "staff-view", "room-view", "appointments", "clients", "treatments", "services", "inventory", "packages"],
   Cashier: ["pos"],
   Doctor: ["pos"],

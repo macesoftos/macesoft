@@ -74,6 +74,13 @@ test("rejects an ambiguous kiosk face match", () => {
   ], Array(128).fill(0.101), 0.5), /ambiguous/);
 });
 
+test("daily branch assignment accepts primary and additional staff branches", () => {
+  assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: "[]" }, "BGC"), true);
+  assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: '["Makati", "Alabang"]' }, "Makati"), true);
+  assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: "Makati, Alabang" }, "Alabang"), true);
+  assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: '["Makati"]' }, "Cebu"), false);
+});
+
 test("attendance is restricted to one registered office device per branch", () => {
   const source = readFileSync(new URL("./facetrackAttendance.js", import.meta.url), "utf8");
   const attendancePage = readFileSync(new URL("../src/facetrack/FaceTrackAttendance.jsx", import.meta.url), "utf8");
@@ -84,5 +91,6 @@ test("attendance is restricted to one registered office device per branch", () =
   assert.match(source, /already has an active attendance iPad/);
   assert.match(migration, /CREATE UNIQUE INDEX "FaceTrackKioskDevice_one_active_per_branch_key"/);
   assert.match(migration, /WHERE "active" = true/);
-  assert.match(source, /staff: \{ branch: device\.branch/);
+  assert.match(source, /staffAssignedToBranch\(profile\.staff, device\.branch\)/);
+  assert.match(source, /branch: device\.branch/);
 });

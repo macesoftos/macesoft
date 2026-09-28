@@ -623,6 +623,20 @@ export function deleteResourceRecord(resource, id) {
   });
 }
 
+export function importClientRecords(records) {
+  return requestJson("/api/clients/import", {
+    method: "POST",
+    body: JSON.stringify({ records }),
+  });
+}
+
+export function bulkDeleteClientRecords(ids) {
+  return requestJson("/api/clients/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export function saveSettingsRecord(settings) {
   return requestJson("/api/settings", {
     method: "PUT",
