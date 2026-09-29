@@ -4,6 +4,11 @@ import { readFileSync } from "node:fs";
 import { productionConfigErrors } from "./productionConfig.js";
 
 const serverSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+test("the package remains compatible with Hostinger's CommonJS process wrapper", () => {
+  assert.notEqual(packageJson.type, "module");
+});
 
 test("the production server defaults to Hostinger's required port", () => {
   assert.match(serverSource, /process\.env\.API_PORT \|\| process\.env\.PORT \|\| 3000/);
