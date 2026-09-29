@@ -146,7 +146,7 @@ function getAdjacentSpreadStart(currentPage, direction, singlePage, totalPages) 
   return currentPage <= 2 ? 1 : Math.max(2, currentPage - 2);
 }
 
-const MAX_PDF_BYTES = 30 * 1024 * 1024;
+const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const workspaceNav = [
   { label: "Overview", path: "/flipbooks/overview", icon: BookOpen },
   { label: "My Flipbooks", path: "/flipbooks", icon: FileText },
@@ -894,7 +894,7 @@ function CreateFlipbook({ navigate, notify }) {
       return;
     }
     if (nextFile.size > MAX_PDF_BYTES) {
-      setError("PDF must be 30 MB or smaller.");
+      setError("PDF must be 100 MB or smaller.");
       return;
     }
     setProcessing(true);

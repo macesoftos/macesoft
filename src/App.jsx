@@ -15193,7 +15193,7 @@ function ModalHost({
     },
     package: {
       title: modal.payload?.id ? "Edit Package" : "Sell Package",
-      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, creditType: "Package", sessions: 6, used: 0, branch: defaultRecordBranch, transferable: false, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload, expires: "" },
+      initial: { name: "Glow Maintenance Plan", clientId: clients[0]?.id, creditType: "Package", sessions: 6, used: 0, branch: "All branches", transferable: true, status: "Active", price: 0, amountPaid: 0, purchaseDate: todayDate(), nextPayment: "", serviceValue: 0, ...modal.payload, expires: "" },
       submitLabel: "Save package",
       onSubmit: savePackage,
       fields: [

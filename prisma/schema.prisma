@@ -1068,7 +1068,7 @@ model ClinicPackage {
   used           Int      @default(0)
   expires        String   @default("")
   branch         String   @default("All branches")
-  transferable   Boolean  @default(false)
+  transferable   Boolean  @default(true)
   status         String   @default("Active")
   price          Float    @default(0)
   amountPaid     Float    @default(0)

@@ -18,6 +18,12 @@ test("legacy client documents are durable records backed by secure uploads", () 
   assert.match(app, /loadClientDocuments\(client\.id\)/);
 });
 
+test("new and existing client packages remain usable across branches", () => {
+  assert.match(app, /branch:\s*"All branches",\s*transferable:\s*true/);
+  assert.match(server, /branch:\s*"All branches",\s*transferable:\s*true/);
+  assert.match(schema, /transferable\s+Boolean\s+@default\(true\)/);
+});
+
 test("branch registration links resolve through the active private workspace form", () => {
   assert.match(server, /app\.get\("\/api\/public-registration\/open"/);
   assert.match(server, /publicRegistrationUrlForBranch/);
