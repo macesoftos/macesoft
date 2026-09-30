@@ -72,6 +72,11 @@
   overflow: visible;
 }
 
+.pos-catalog-panel.pos-catalog-wide {
+  grid-column: 1 / -1;
+  min-height: auto;
+}
+
 .pos-checkout-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
@@ -1525,6 +1530,151 @@
 .pos-checkout-panel .cart-row > button {
   width: 40px;
   height: 40px;
+}
+
+.pos-visits-workspace {
+  display: grid;
+  gap: 18px;
+  padding: 18px 20px 24px;
+}
+
+.pos-visits-toolbar,
+.pos-visit-detail-header,
+.pos-visit-card > span:first-child,
+.pos-client-credit-summary > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pos-visits-toolbar > div {
+  display: grid;
+  gap: 4px;
+}
+
+.pos-visits-toolbar span,
+.pos-visit-card small,
+.pos-visit-detail span,
+.pos-visit-services span,
+.pos-visit-services small {
+  color: var(--text-muted, #6b7280);
+}
+
+.pos-visits-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, .86fr) minmax(320px, 1.14fr);
+  gap: 18px;
+  min-height: 430px;
+}
+
+.pos-visit-card-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.pos-visit-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 15px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  color: inherit;
+  text-align: left;
+}
+
+.pos-visit-card:hover,
+.pos-visit-card.selected {
+  border-color: #a1724a;
+  box-shadow: 0 0 0 2px rgba(161, 114, 74, .1);
+}
+
+.pos-visit-card small,
+.pos-visit-meta > span,
+.pos-credit-match-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-visit-detail {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 16px;
+  background: var(--surface, #fff);
+}
+
+.pos-visit-detail h3 {
+  margin: 3px 0 0;
+  font-size: 1.4rem;
+}
+
+.pos-visit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.pos-visit-services {
+  display: grid;
+  gap: 10px;
+}
+
+.pos-visit-services article {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.pos-visit-services article > div {
+  display: grid;
+  gap: 3px;
+}
+
+.pos-visit-services article > div:last-child {
+  text-align: right;
+}
+
+.pos-client-credit-summary {
+  display: grid;
+  gap: 8px;
+  margin: 0 18px 18px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(67, 122, 89, .08);
+  color: #315f43;
+  font-size: .82rem;
+}
+
+.pos-credit-match-note {
+  margin-top: 6px;
+  color: #315f43 !important;
+}
+
+.pos-new-client-button {
+  align-self: end;
+}
+
+@media (max-width: 900px) {
+  .pos-visits-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pos-visits-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .checkout-summary-card {

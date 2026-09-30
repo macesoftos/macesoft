@@ -3137,16 +3137,38 @@ async function afterTreatmentWrite(tx, request, record, _data, previous) {
 async function afterPackageWrite(tx, request, record, _data, previous) {
   const previousPaid = Number(previous?.amountPaid || 0);
   const difference = Number(record.amountPaid || 0) - previousPaid;
-  if (difference === 0) return;
-  const history = parseJsonList(record.paymentHistory);
-  history.push({
-    date: record.purchaseDate || new Date().toISOString().slice(0, 10),
-    amount: difference,
-    method: "Recorded payment",
-    receivedBy: actorFromRequest(request).name,
-    note: difference > 0 ? "Package payment received" : "Package payment correction",
-  });
-  await tx.clinicPackage.update({ where: { id: record.id }, data: { paymentHistory: jsonText(history, []) } });
+  if (difference !== 0) {
+    const history = parseJsonList(record.paymentHistory);
+    history.push({
+      date: record.purchaseDate || new Date().toISOString().slice(0, 10),
+      amount: difference,
+      method: "Recorded payment",
+      receivedBy: actorFromRequest(request).name,
+      note: difference > 0 ? "Package payment received" : "Package payment correction",
+    });
+    await tx.clinicPackage.update({ where: { id: record.id }, data: { paymentHistory: jsonText(history, []) } });
+  }
+  if (record.creditType === "Service Credit" && record.clientId) {
+    const previousBalance = Math.max(0, Number(previous?.sessions || 0) - Number(previous?.used || 0));
+    const nextBalance = Math.max(0, Number(record.sessions || 0) - Number(record.used || 0));
+    const balanceChange = nextBalance - previousBalance;
+    if (balanceChange !== 0) {
+      const actor = actorFromRequest(request);
+      await tx.clientCreditLedger.create({ data: {
+        clientId: record.clientId,
+        creditType: "Service Credit",
+        direction: balanceChange > 0 ? "Added" : "Used",
+        amount: Math.abs(balanceChange),
+        balanceAfter: nextBalance,
+        reason: previous ? "Manual service-credit adjustment" : `Issued ${record.name}`,
+        branch: record.branch || actor.branch,
+        actorName: actor.name,
+        actorRole: actor.role,
+        sourceType: "ClinicPackage",
+        sourceId: record.id,
+      } });
+    }
+  }
 }
 
 async function assertAppointmentStatusTransition(data, existingId = "") {
@@ -7454,16 +7476,38 @@ app.get("/api/clients", asyncRoute(async (request, response) => {
   response.json(await listResource("clients", actor));
 }));
 
+app.get("/api/clients/:id/credit-ledger", asyncRoute(async (request, response) => {
+  assertReadAllowed(request, "clients");
+  const client = await prisma.client.findUnique({ where: { id: String(request.params.id) }, select: { id: true } });
+  if (!client) throw apiError("Client not found.", 404);
+  const entries = await prisma.clientCreditLedger.findMany({ where: { clientId: client.id }, orderBy: [{ createdAt: "desc" }] });
+  response.json({ entries });
+}));
+
 app.post("/api/clients", asyncRoute(async (request, response) => {
   const data = await attachDirectTenantFields(request, resourceConfigs.clients, normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients)));
   assertMutationAllowed(request, "clients", data.branch);
-  const client = await prisma.client.create({ data });
+  const openingCredit = Number(data.storeCredit || 0);
+  const openingCreditActor = actorFromRequest(request);
+  if (openingCredit > 0 && !canManageOrganization(openingCreditActor.role)) throw apiError("Only an Owner or Super Admin can add opening client credit.", 403);
+  if (openingCredit > 0 && !clean(request.body?.creditAdjustmentReason)) throw apiError("Enter a reason for the opening client credit.");
+  const client = await prisma.$transaction(async (tx) => {
+    const created = await tx.client.create({ data });
+    if (Number(created.storeCredit || 0) > 0) {
+      const actor = actorFromRequest(request);
+      await tx.clientCreditLedger.create({ data: { clientId: created.id, creditType: "Client Credit", direction: "Added", amount: Number(created.storeCredit), balanceAfter: Number(created.storeCredit), reason: clean(request.body?.creditAdjustmentReason) || "Opening client credit", branch: created.branch || actor.branch, actorName: actor.name, actorRole: actor.role, sourceType: "Client", sourceId: created.id } });
+    }
+    return created;
+  });
   response.status(201).json(client);
 }));
 
 app.post("/api/clients/import", asyncRoute(async (request, response) => {
   const actor = assertReadAllowed(request, "clients");
+  if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can import clients.", 403);
   const records = Array.isArray(request.body?.records) ? request.body.records : [];
+  const duplicateAction = clean(request.body?.duplicateAction) === "skip" ? "skip" : "merge";
+  const batchLabel = clean(request.body?.batchLabel) || `Client import ${new Date().toISOString()}`;
   if (!records.length) throw apiError("Add at least one client row to import.");
   if (records.length > 2_000) throw apiError("Import client files in batches of 2,000 rows or fewer.", 413);
 
@@ -7477,8 +7521,19 @@ app.post("/api/clients/import", asyncRoute(async (request, response) => {
   const imported = [];
   let created = 0;
   let updated = 0;
+  let duplicateSkipped = 0;
+  let importBatch = null;
 
   const result = await prisma.$transaction(async (tx) => {
+    importBatch = await tx.clientImportBatch.create({ data: {
+      organizationId: actor.organizationId,
+      label: batchLabel,
+      actorName: actor.name,
+      actorRole: actor.role,
+    } });
+    const createdClientIds = [];
+    const updatedSnapshots = [];
+    const snapshottedIds = new Set();
     for (const rawRecord of records) {
       const raw = rawRecord && typeof rawRecord === "object" ? rawRecord : {};
       const fullName = clean(raw.fullName || raw.name || [raw.firstName, raw.middleName, raw.lastName].filter(Boolean).join(" "));
@@ -7490,6 +7545,14 @@ app.post("/api/clients/import", asyncRoute(async (request, response) => {
         || (emailKey && maps.email.get(emailKey))
         || (mobileKey.length >= 7 && maps.mobile.get(mobileKey))
         || maps.identity.get(identityKey);
+      if (existing && duplicateAction === "skip") {
+        duplicateSkipped += 1;
+        continue;
+      }
+      if (existing && !snapshottedIds.has(existing.id)) {
+        updatedSnapshots.push(existing);
+        snapshottedIds.add(existing.id);
+      }
       const merged = existing ? { ...existing } : {};
       Object.entries({ ...raw, fullName }).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== "") merged[key] = value;
@@ -7500,26 +7563,82 @@ app.post("/api/clients/import", asyncRoute(async (request, response) => {
       const saved = existing
         ? await tx.client.update({ where: { id: existing.id }, data: stripMeta(data) })
         : await tx.client.create({ data: stripMeta(data) });
+      const previousCredit = Number(existing?.storeCredit || 0);
+      const importedCredit = Number(saved.storeCredit || 0);
+      if (previousCredit !== importedCredit) {
+        await tx.clientCreditLedger.create({ data: {
+          clientId: saved.id,
+          creditType: "Client Credit",
+          direction: importedCredit > previousCredit ? "Added" : "Used",
+          amount: Math.abs(importedCredit - previousCredit),
+          balanceAfter: importedCredit,
+          reason: `${batchLabel} opening or merged balance`,
+          branch: saved.branch || actor.branch,
+          actorName: actor.name,
+          actorRole: actor.role,
+          sourceType: "Import",
+          sourceId: importBatch.id,
+        } });
+      }
       imported.push(serializeClient(saved));
       if (existing) updated += 1;
-      else created += 1;
+      else {
+        created += 1;
+        createdClientIds.push(saved.id);
+      }
       maps.id.set(saved.id, saved);
       if (clean(saved.email)) maps.email.set(clean(saved.email).toLowerCase(), saved);
       if (clean(saved.mobile)) maps.mobile.set(clean(saved.mobile).replace(/\D/g, ""), saved);
       maps.identity.set(`${clean(saved.fullName).toLowerCase()}|${clean(saved.birthday)}`, saved);
     }
+    importBatch = await tx.clientImportBatch.update({ where: { id: importBatch.id }, data: {
+      createdClientIds: jsonText(createdClientIds, []),
+      updatedSnapshots: JSON.stringify(updatedSnapshots),
+    } });
     const auditLog = await writeAudit(tx, request, {
       area: "Client Records",
       action: "Clients imported",
-      details: `${created} client(s) created and ${updated} client(s) updated from an import file.`,
+      details: `${batchLabel}: ${created} client(s) created, ${updated} merged, and ${duplicateSkipped} duplicate(s) skipped.`,
     });
     return { auditLog };
   });
 
-  response.status(201).json({ records: imported, created, updated, skipped: records.length - imported.length, auditLog: result.auditLog });
+  response.status(201).json({ records: imported, created, updated, duplicateSkipped, skipped: records.length - imported.length, batchLabel, batch: importBatch, auditLog: result.auditLog });
+}));
+
+app.post("/api/clients/import-batches/:id/rollback", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "clients");
+  if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can roll back a client import.", 403);
+  const batch = await prisma.clientImportBatch.findFirst({ where: { id: String(request.params.id), organizationId: actor.organizationId } });
+  if (!batch) throw apiError("Client import batch not found.", 404);
+  if (batch.status === "Rolled Back") throw apiError("This client import was already rolled back.", 409);
+  const createdIds = parseJsonList(batch.createdClientIds);
+  const snapshots = parseJsonList(batch.updatedSnapshots);
+  const result = await prisma.$transaction(async (tx) => {
+    if (createdIds.length) await tx.client.deleteMany({ where: { id: { in: createdIds }, organizationId: actor.organizationId } });
+    const restored = [];
+    for (const snapshot of snapshots) {
+      const current = await tx.client.findFirst({ where: { id: clean(snapshot.id), organizationId: actor.organizationId } });
+      if (!current) continue;
+      const data = normalizeClientPayload(snapshot, current.id);
+      const saved = await tx.client.update({ where: { id: current.id }, data: stripMeta(data) });
+      const change = Number(saved.storeCredit || 0) - Number(current.storeCredit || 0);
+      if (change !== 0) await tx.clientCreditLedger.create({ data: {
+        clientId: saved.id, creditType: "Client Credit", direction: change > 0 ? "Added" : "Used", amount: Math.abs(change), balanceAfter: Number(saved.storeCredit || 0),
+        reason: `Rollback of ${batch.label}`, branch: saved.branch || actor.branch, actorName: actor.name, actorRole: actor.role, sourceType: "ImportRollback", sourceId: batch.id,
+      } });
+      restored.push(serializeClient(saved));
+    }
+    const rolledBackBatch = await tx.clientImportBatch.update({ where: { id: batch.id }, data: { status: "Rolled Back", rolledBackAt: new Date() } });
+    const auditLog = await writeAudit(tx, request, { area: "Client Records", action: "Client import rolled back", details: `${batch.label}: ${createdIds.length} created client(s) removed and ${restored.length} merged client(s) restored.` });
+    return { restored, rolledBackBatch, auditLog };
+  });
+  response.json({ ...result, deletedIds: createdIds });
 }));
 
 app.post("/api/clients/bulk-delete", asyncRoute(async (request, response) => {
+  const actor = assertReadAllowed(request, "clients");
+  if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can bulk delete clients.", 403);
   const ids = [...new Set((Array.isArray(request.body?.ids) ? request.body.ids : []).map(clean).filter(Boolean))];
   if (!ids.length) throw apiError("Select at least one client to delete.");
   if (ids.length > 1_000) throw apiError("Delete clients in batches of 1,000 or fewer.", 413);
@@ -7552,7 +7671,19 @@ app.put("/api/clients/:id", asyncRoute(async (request, response) => {
   assertMutationAllowed(request, "clients", existing.branch);
   const data = await attachDirectTenantFields(request, resourceConfigs.clients, normalizeClientPayload(branchScopedPayload(request, request.body, resourceConfigs.clients), id));
   assertMutationAllowed(request, "clients", data.branch);
-  const client = await prisma.client.update({ where: { id }, data });
+  const creditChanged = Number(existing.storeCredit || 0) !== Number(data.storeCredit || 0);
+  const reason = clean(request.body?.creditAdjustmentReason);
+  const actor = actorFromRequest(request);
+  if (creditChanged && !canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can adjust client credit manually.", 403);
+  if (creditChanged && !reason) throw apiError("Enter a reason for the client-credit adjustment.");
+  const client = await prisma.$transaction(async (tx) => {
+    const updated = await tx.client.update({ where: { id }, data });
+    if (creditChanged) {
+      const change = Number(updated.storeCredit || 0) - Number(existing.storeCredit || 0);
+      await tx.clientCreditLedger.create({ data: { clientId: updated.id, creditType: "Client Credit", direction: change > 0 ? "Added" : "Used", amount: Math.abs(change), balanceAfter: Number(updated.storeCredit || 0), reason, branch: updated.branch || actor.branch, actorName: actor.name, actorRole: actor.role, sourceType: "Manual", sourceId: updated.id } });
+    }
+    return updated;
+  });
   response.json(client);
 }));
 
@@ -7581,10 +7712,23 @@ app.post("/api/resources/:resource", asyncRoute(async (request, response) => {
   await assertResourceMutationAllowed(request, config, data);
   if (request.params.resource === "staff") assertStaffAccessMutation(request, data);
   if (config.beforeWrite) await config.beforeWrite(data);
+  if (request.params.resource === "clients" && Number(data.storeCredit || 0) > 0) {
+    const actor = actorFromRequest(request);
+    if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can add opening client credit.", 403);
+    if (!clean(request.body?.creditAdjustmentReason)) throw apiError("Enter a reason for the opening client credit.");
+  }
 
   const result = await prisma.$transaction(async (tx) => {
     const record = await tx[config.delegate].create({ data: stripMeta(data) });
     if (config.afterWrite) await config.afterWrite(tx, request, record, data, null);
+    if (request.params.resource === "clients" && Number(record.storeCredit || 0) > 0) {
+      const actor = actorFromRequest(request);
+      await tx.clientCreditLedger.create({ data: {
+        clientId: record.id, creditType: "Client Credit", direction: "Added", amount: Number(record.storeCredit), balanceAfter: Number(record.storeCredit),
+        reason: clean(request.body?.creditAdjustmentReason) || "Opening client credit", branch: record.branch || actor.branch,
+        actorName: actor.name, actorRole: actor.role, sourceType: "Client", sourceId: record.id,
+      } });
+    }
     const auditLog = await writeAudit(tx, request, {
       area: config.area,
       action: `${config.area} created`,
@@ -7635,11 +7779,26 @@ app.put("/api/resources/:resource/:id", asyncRoute(async (request, response) => 
     }
   }
   if (config.beforeWrite) await config.beforeWrite(data, id);
+  const clientCreditChanged = request.params.resource === "clients" && Number(existing.storeCredit || 0) !== Number(data.storeCredit || 0);
+  const creditAdjustmentReason = clean(request.body?.creditAdjustmentReason);
+  if (clientCreditChanged) {
+    const actor = actorFromRequest(request);
+    if (!canManageOrganization(actor.role)) throw apiError("Only an Owner or Super Admin can adjust client credit manually.", 403);
+    if (!creditAdjustmentReason) throw apiError("Enter a reason for the client-credit adjustment.");
+  }
 
   const result = await prisma.$transaction(async (tx) => {
     const previous = config.afterWrite ? existing : null;
     const record = await tx[config.delegate].update({ where: { id }, data: stripMeta(data) });
     if (config.afterWrite) await config.afterWrite(tx, request, record, data, previous);
+    if (clientCreditChanged) {
+      const actor = actorFromRequest(request);
+      const change = Number(record.storeCredit || 0) - Number(existing.storeCredit || 0);
+      await tx.clientCreditLedger.create({ data: {
+        clientId: record.id, creditType: "Client Credit", direction: change > 0 ? "Added" : "Used", amount: Math.abs(change), balanceAfter: Number(record.storeCredit || 0),
+        reason: creditAdjustmentReason, branch: record.branch || actor.branch, actorName: actor.name, actorRole: actor.role, sourceType: "Manual", sourceId: record.id,
+      } });
+    }
     const auditLog = await writeAudit(tx, request, {
       area: config.area,
       action: `${config.area} updated`,
@@ -9032,9 +9191,25 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       if (Number(settled.used || 0) >= Number(settled.sessions || 0)) {
         settled = await tx.clinicPackage.update({ where: { id: packageId }, data: { status: "Completed" } });
       }
+      if (requestedCreditType === "Service Credit") {
+        await tx.clientCreditLedger.create({ data: {
+          clientId: pkg.clientId,
+          creditType: "Service Credit",
+          direction: "Used",
+          amount: sessions,
+          balanceAfter: Math.max(0, Number(settled.sessions || 0) - Number(settled.used || 0)),
+          reason: `Redeemed for ${redemptionPayments.map((payment) => payment.packageServiceName).filter(Boolean).join(", ") || pkg.name}`,
+          branch,
+          actorName: actor.name,
+          actorRole: actor.role,
+          sourceType: "Sale",
+          sourceId: clean(draft.posCartId) || packageId,
+        } });
+      }
       settledPackages.push(settled);
     }
 
+    let runningClientCredit = Number(checkout.client?.storeCredit || 0);
     for (const payment of operationalPayments) {
       const creditField = payment.method === "Client Credit" ? "storeCredit" : "";
       if (!creditField) continue;
@@ -9044,6 +9219,20 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
         data: { [creditField]: { decrement: payment.amount } },
       });
       if (debited.count !== 1) throw apiError(`${payment.method} balance is insufficient. Refresh the client profile and try again.`, 409);
+      runningClientCredit -= Number(payment.amount || 0);
+      await tx.clientCreditLedger.create({ data: {
+        clientId: checkout.client.id,
+        creditType: "Client Credit",
+        direction: "Used",
+        amount: Number(payment.amount || 0),
+        balanceAfter: Math.max(0, runningClientCredit),
+        reason: "Applied to POS checkout",
+        branch,
+        actorName: actor.name,
+        actorRole: actor.role,
+        sourceType: "POS",
+        sourceId: clean(payment.referenceNumber),
+      } });
     }
 
     const saleCount = await tx.sale.count();
@@ -9236,6 +9425,21 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
           ...(creditChangeType === "Client Credit" && changeAmount > 0 ? { storeCredit: { increment: changeAmount } } : {}),
         },
       });
+      if (creditChangeType === "Client Credit" && changeAmount > 0) {
+        await tx.clientCreditLedger.create({ data: {
+          clientId: checkout.client.id,
+          creditType: "Client Credit",
+          direction: "Added",
+          amount: changeAmount,
+          balanceAfter: Number(updatedClient.storeCredit || 0),
+          reason: `Change from ${sale.invoice}`,
+          branch,
+          actorName: actor.name,
+          actorRole: actor.role,
+          sourceType: "Sale",
+          sourceId: sale.id,
+        } });
+      }
     }
     const posCartId = clean(draft.posCartId);
     if (posCartId) {

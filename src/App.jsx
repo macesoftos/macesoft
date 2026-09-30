@@ -107,6 +107,7 @@ import {
   addLeadActivity,
   bookLeadAppointment,
   bulkDeleteClientRecords,
+  rollbackClientImportBatch,
   completePosCheckout,
   createPosCart,
   convertLeadToClient,
@@ -123,6 +124,7 @@ import {
   submitStaffForm,
   reviewStaffForm,
   loadClientDocuments,
+  loadClientCreditLedger,
   attachClientDocument,
   removeClientDocument,
   loadNotifications,
@@ -2197,12 +2199,30 @@ function App() {
     notify(isExisting ? "Client updated." : "Client added.");
   }
 
-  async function importClients(records) {
-    const result = await importClientRecords(records);
+  async function importClients(records, options = {}) {
+    const result = await importClientRecords(records, options);
     (result.records || []).forEach((record) => upsertById(setClients, record));
     applyAuditLog(result.auditLog);
     const summary = `${result.created || 0} created, ${result.updated || 0} updated`;
     notify(result.skipped ? `${summary}, ${result.skipped} skipped.` : `${summary}.`, result.skipped ? "warning" : "success");
+    return result;
+  }
+
+  async function rollbackClientImport(batchId) {
+    const result = await rollbackClientImportBatch(batchId);
+    const deleted = new Set(result.deletedIds || []);
+    setClients((current) => {
+      const retained = current.filter((client) => !deleted.has(client.id));
+      (result.restored || []).forEach((record) => {
+        const index = retained.findIndex((client) => client.id === record.id);
+        if (index >= 0) retained[index] = record;
+        else retained.push(record);
+      });
+      return [...retained];
+    });
+    applyAuditLog(result.auditLog);
+    notify("Client import batch rolled back.");
+    return result;
   }
 
   function bulkDeleteClients(ids) {
@@ -3302,6 +3322,8 @@ function App() {
           {activeModule === "pos" && (
             <POSModule
               clients={clients}
+              appointments={appointments}
+              packages={packages}
               services={services}
               inventory={inventory}
               staff={staff}
@@ -3326,6 +3348,7 @@ function App() {
               posCarts={posCarts}
               saveOpenCart={saveOpenPosCart}
               notify={notify}
+              canAdministerClients={canManageOrganization(session.role)}
               settings={settings}
             />
           )}
@@ -3395,7 +3418,7 @@ function App() {
           {activeModule === "clients" && (
             <ClientsModule
               detailClientId={activeRecordRoute?.moduleId === "clients" ? activeRecordRoute.recordId : ""}
-              clients={scopedClients}
+              clients={clients}
               selectedClient={selectedClient}
               selectedClientId={selectedClientId}
               setSelectedClientId={(id) => {
@@ -3406,9 +3429,10 @@ function App() {
               treatments={scopedTreatments}
               appointments={scopedAppointments}
               transactions={scopedTransactions}
-              packages={scopedPackages}
+              packages={packages}
               openModal={openModal}
               importClients={importClients}
+              rollbackClientImport={rollbackClientImport}
               bulkDeleteClients={bulkDeleteClients}
               importInputRef={clientImportInputRef}
               deleteClient={deleteClient}
@@ -6016,6 +6040,8 @@ function formatPosClientLabel(item) {
 
 function POSModule({
   clients,
+  appointments = [],
+  packages = [],
   services,
   inventory,
   staff,
@@ -6040,6 +6066,7 @@ function POSModule({
   posCarts = [],
   saveOpenCart,
   notify,
+  canAdministerClients = false,
   settings,
 }) {
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
@@ -6058,7 +6085,9 @@ function POSModule({
   const [testMode, setTestMode] = useState(false);
   const [activeCartId, setActiveCartId] = useState("");
   const [catalogTab, setCatalogTab] = useState("Services");
-  const [posScreen, setPosScreen] = useState("Checkout");
+  const [posScreen, setPosScreen] = useState("Today's visits");
+  const [selectedVisitKey, setSelectedVisitKey] = useState("");
+  const [visitContext, setVisitContext] = useState(null);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [catalogPage, setCatalogPage] = useState(1);
@@ -6075,7 +6104,7 @@ function POSModule({
   const canUseTestMode = isAdmin(sessionRole);
   const canApprovePosAdjustments = canManageOrganization(sessionRole);
   const posPaymentOptions = useMemo(() => posQuickPaymentOptions(settings), [settings]);
-  const posScreens = canManagePosCatalog ? ["Checkout", "Service Prices"] : ["Checkout"];
+  const posScreens = canManagePosCatalog ? ["Today's visits", "Checkout", "Service Prices"] : ["Today's visits", "Checkout"];
   const openCartsForBranch = useMemo(
     () => posCarts.filter((openCart) => openCart.branch === branch),
     [branch, posCarts],
@@ -6165,9 +6194,7 @@ function POSModule({
   }, [activeOpenCart, arrivalTime, branch, cart, clientId, clients, discountId, manualDiscountScope, manualDiscountTargetKey, manualDiscountType, manualDiscountValue, notify, room, saleDate, saveOpenCart, staffName, testMode]);
 
   useEffect(() => {
-    if (!canManagePosCatalog && posScreen !== "Checkout") {
-      setPosScreen("Checkout");
-    }
+    if (!canManagePosCatalog && posScreen === "Service Prices") setPosScreen("Today's visits");
   }, [canManagePosCatalog, posScreen]);
 
   const retailItems = useMemo(() => inventory.filter((item) => item.type === "Retail"), [inventory]);
@@ -6265,7 +6292,8 @@ function POSModule({
     return sum + Math.round(best);
   }, 0);
   const discountAmount = Math.min(subtotal, transactionDiscountAmount + promotionDiscountAmount);
-  const total = Math.max(0, subtotal - discountAmount);
+  const depositCredit = Math.min(Math.max(0, Number(visitContext?.depositCredit || 0)), Math.max(0, subtotal - discountAmount));
+  const total = Math.max(0, subtotal - discountAmount - depositCredit);
   const discountPanelSummary = manualDiscount
     ? `${manualDiscount.type === "Percentage" ? `${manualDiscount.value || 0}%` : money.format(manualDiscount.value || 0)}${manualDiscount.scope === "Service" ? ` on ${manualDiscountTargetItem?.name || "selected service"}` : " on entire transaction"}`
     : discount
@@ -6291,6 +6319,33 @@ function POSModule({
   const staffAtBranch = useMemo(() => staff.filter((person) => {
     return person.status !== "Inactive" && person.clockedIn && person.attendanceBranch === branch;
   }), [branch, staff]);
+  const todaysVisitCards = useMemo(() => {
+    const seen = new Set();
+    return appointments
+      .filter((appointment) => appointment.date === todayDate() && appointment.branch === branch)
+      .filter((appointment) => !["Cancelled", "No Show"].includes(canonicalAppointmentStatus(appointment.status)))
+      .sort((left, right) => parseTimeToMinutes(left.time) - parseTimeToMinutes(right.time))
+      .reduce((cards, appointment) => {
+        const key = `${appointment.clientId || normalize(appointment.client)}|${appointment.date}|${appointment.branch}`;
+        if (seen.has(key)) return cards;
+        seen.add(key);
+        const visitAppointments = appointmentsForVisit(appointment, appointments);
+        const unpaidAppointments = visitAppointments.filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
+        cards.push({
+          key,
+          appointment,
+          appointments: visitAppointments,
+          unpaidAppointments,
+          checkedOut: unpaidAppointments.length === 0,
+        });
+        return cards;
+      }, []);
+  }, [appointments, branch, services, transactions]);
+  const selectedVisit = todaysVisitCards.find((visit) => visit.key === selectedVisitKey) || todaysVisitCards[0] || null;
+  const clientCredits = useMemo(() => packages.filter((pkg) => {
+    if (!clientId || (pkg.clientId !== clientId && normalize(pkg.client) !== normalize(client?.fullName))) return false;
+    return pkg.status === "Active" && Number(pkg.used || 0) < Number(pkg.sessions || 0) && (!pkg.expires || pkg.expires >= todayDate());
+  }), [client?.fullName, clientId, packages]);
 
   useEffect(() => {
     if (staffAtBranch.some((person) => person.name === staffName)) return;
@@ -6421,6 +6476,43 @@ function POSModule({
     addCartItem(item);
   }
 
+  async function loadVisitCheckout(visit) {
+    if (!visit?.appointment) return;
+    const draft = paymentDraftForVisit(visit.appointment, appointments, services, transactions);
+    if (!draft.cart.length) {
+      notify("This visit has already been checked out.", "warning");
+      return;
+    }
+    const openCart = await openCartForClient(visit.appointment.clientId || "");
+    if (!openCart) return;
+    setClientId(visit.appointment.clientId || "");
+    setCart(draft.cart.map((item) => ({
+      ...item,
+      category: services.find((service) => service.id === item.serviceId)?.category || "Appointment",
+      packageName: visit.appointments.find((appointment) => appointment.id === item.key.replace("appointment-", ""))?.packageName || "",
+    })));
+    setRoom(draft.room || visit.appointment.room || "");
+    setArrivalTime(visit.appointment.arrivalTime || visit.appointment.time || "");
+    setSaleDate(visit.appointment.date || todayDate());
+    setVisitContext({
+      appointmentId: draft.appointmentId,
+      appointmentIds: draft.appointmentIds,
+      depositCredit: draft.depositCredit,
+      notes: draft.notes,
+    });
+    setCheckoutStep("review");
+    setPosScreen("Checkout");
+  }
+
+  async function startWalkIn() {
+    await openCartForClient("");
+    setVisitContext(null);
+    setCart([]);
+    setCheckoutStep("review");
+    setPosScreen("Checkout");
+    setIsSaleContextOpen(true);
+  }
+
   useEffect(() => {
     setCatalogPage(1);
   }, [catalogQuery, catalogTab, categoryFilter]);
@@ -6508,14 +6600,17 @@ function POSModule({
           discount,
           manualDiscount,
           discountAmount,
+          depositCredit,
           total,
-          notes: "",
-          paymentMethod: option.method,
-          paymentLabel: option.label,
-          splitPayment: option.split,
+          notes: visitContext?.notes || "",
+          appointmentId: visitContext?.appointmentId || "",
+          appointmentIds: visitContext?.appointmentIds || [],
           posCartId: activeCartId,
           saleDate,
           testMode,
+          paymentMethod: option.method,
+          paymentLabel: option.label,
+          splitPayment: option.split,
         });
         return;
       }
@@ -6543,7 +6638,7 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, saleStaffName, setCart, subtotal, testMode, total]);
+  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, depositCredit, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, saleStaffName, setCart, subtotal, testMode, total, visitContext]);
 
   function createPaymentDraft(patch = {}) {
     return {
@@ -6559,8 +6654,11 @@ function POSModule({
       discount,
       manualDiscount,
       discountAmount,
+      depositCredit,
       total,
-      notes: "",
+      notes: visitContext?.notes || "",
+      appointmentId: visitContext?.appointmentId || "",
+      appointmentIds: visitContext?.appointmentIds || [],
       posCartId: activeCartId,
       saleDate,
       testMode,
@@ -6712,11 +6810,11 @@ function POSModule({
 
   return (
     <section className="module-grid pos-layout">
-      <div className="surface-panel wide pos-catalog-panel">
+      <div className={`surface-panel wide pos-catalog-panel${posScreen === "Checkout" ? "" : " pos-catalog-wide"}`}>
         <div className="pos-header">
           <div>
-            <h2>{posScreen === "Checkout" ? "Build checkout" : "Service prices"}</h2>
-            <span>{posScreen === "Checkout" ? `${catalogCount} ${catalogTab.toLowerCase()} available` : "Add services directly to the POS catalog"}</span>
+            <h2>{posScreen === "Today's visits" ? "Today's active clients" : posScreen === "Checkout" ? "Build checkout" : "Service prices"}</h2>
+            <span>{posScreen === "Today's visits" ? `${todaysVisitCards.length} visit${todaysVisitCards.length === 1 ? "" : "s"} at ${branch}` : posScreen === "Checkout" ? `${catalogCount} ${catalogTab.toLowerCase()} available` : "Add services directly to the POS catalog"}</span>
           </div>
           <div className="pos-header-actions">
             <div className="segmented-control pos-screen-tabs" role="tablist" aria-label="POS screen">
@@ -6764,7 +6862,39 @@ function POSModule({
           </div>
         )}
 
-        {posScreen === "Checkout" ? (
+        {posScreen === "Today's visits" ? (
+          <div className="pos-visits-workspace">
+            <div className="pos-visits-toolbar">
+              <div><strong>{formatDate(todayDate())}</strong><span>Select a client visit to review every service before checkout.</span></div>
+              <button className="primary-button" type="button" onClick={startWalkIn}><Plus size={17} /> Walk-in sale</button>
+            </div>
+            <div className="pos-visits-grid">
+              <div className="pos-visit-card-list" role="list" aria-label="Today's client visits">
+                {todaysVisitCards.map((visit) => (
+                  <button className={`pos-visit-card${selectedVisit?.key === visit.key ? " selected" : ""}`} type="button" key={visit.key} onClick={() => setSelectedVisitKey(visit.key)}>
+                    <span><strong>{visit.appointment.client}</strong><StatusBadge status={visit.checkedOut ? "Paid" : canonicalAppointmentStatus(visit.appointment.status)} /></span>
+                    <small><Clock size={14} /> {formatScheduleTime(parseTimeToMinutes(visit.appointment.time))} · {visit.appointments.length} service{visit.appointments.length === 1 ? "" : "s"}</small>
+                    <small><Home size={14} /> {visit.appointments.map((item) => item.room).filter(Boolean).join(", ") || "Room not assigned"}</small>
+                  </button>
+                ))}
+                {!todaysVisitCards.length && <EmptyState title="No active visits today" copy="Use Walk-in sale for an unscheduled client." />}
+              </div>
+              {selectedVisit && (
+                <aside className="pos-visit-detail">
+                  <div className="pos-visit-detail-header"><div><span className="eyebrow">Visit checkout</span><h3>{selectedVisit.appointment.client}</h3></div><StatusBadge status={selectedVisit.checkedOut ? "Paid" : canonicalAppointmentStatus(selectedVisit.appointment.status)} /></div>
+                  <div className="pos-visit-meta"><span><Home size={15} /> {selectedVisit.appointments.map((item) => item.room).filter(Boolean).join(", ") || "Room not assigned"}</span><span><Clock size={15} /> Arrival {selectedVisit.appointment.arrivalTime || selectedVisit.appointment.time}</span></div>
+                  <div className="pos-visit-services">
+                    {selectedVisit.appointments.map((appointment) => {
+                      const payment = appointmentPaymentSummary(appointment, services, transactions);
+                      return <article key={appointment.id}><div><strong>{appointment.service}</strong><span>{appointment.staff || "Provider unassigned"}</span></div><div><b>{money.format(payment.due)}</b><small>{payment.status}</small></div></article>;
+                    })}
+                  </div>
+                  <button className="primary-button full" type="button" disabled={selectedVisit.checkedOut} onClick={() => loadVisitCheckout(selectedVisit)}><ReceiptText size={17} /> {selectedVisit.checkedOut ? "Visit checked out" : "Proceed to checkout"}</button>
+                </aside>
+              )}
+            </div>
+          </div>
+        ) : posScreen === "Checkout" ? (
           <>
             <div className="pos-shortcut-bar" aria-label="POS keyboard shortcuts">
               <span><kbd>F2</kbd> Search</span>
@@ -6930,7 +7060,7 @@ function POSModule({
         )}
       </div>
 
-      <div className="surface-panel checkout-panel pos-checkout-panel">
+      {posScreen === "Checkout" && <div className="surface-panel checkout-panel pos-checkout-panel">
         <div className="invoice-header">
           <button
             className="invoice-context-button"
@@ -6982,6 +7112,7 @@ function POSModule({
                     </select>
                   </label>
                 )}
+                {item.type === "Service" && item.packageName && <small className="pos-credit-match-note"><Gift size={13} /> Package: {item.packageName}</small>}
                 {item.type === "Service" && serviceUsesFinalPrice(item) && (
                   <label className="cart-final-price-input">
                     <span>{item.priceModel === "Starts at" ? "Final price" : "Price after consultation"}</span>
@@ -7172,6 +7303,7 @@ function POSModule({
               <strong>-{money.format(discountAmount)}</strong>
             </div>
             {promotionDiscountAmount > 0 && <div><span>Automatic promotion</span><strong>-{money.format(promotionDiscountAmount)}</strong></div>}
+            {depositCredit > 0 && <div><span>Appointment deposit</span><strong>-{money.format(depositCredit)}</strong></div>}
             <div className="due-row">
               <span>Total</span>
               <strong>{money.format(total)}</strong>
@@ -7211,7 +7343,8 @@ function POSModule({
             </>
           )}
         </div>
-      </div>
+        {clientId && clientCredits.length > 0 && <div className="pos-client-credit-summary"><strong>Available package / service credits</strong>{clientCredits.map((credit) => <span key={credit.id}>{credit.name}<b>{Number(credit.sessions || 0) - Number(credit.used || 0)} left</b></span>)}</div>}
+      </div>}
 
       <div className="surface-panel full-span pos-history-panel">
         <SectionHeader icon={ReceiptText} title="POS Summarized Transactions for the Day" action={money.format(todaysTransactionTotal)} />
@@ -7279,6 +7412,7 @@ function POSModule({
                   {posClientOptions.map((option) => <option key={option.id} value={option.label} />)}
                 </datalist>
               </label>
+              <button className="secondary-button pos-new-client-button" type="button" onClick={() => { setIsSaleContextOpen(false); openModal("client"); }}><Plus size={16} /> New client</button>
               <label className="stacked-field">
                 <span>Select Branch</span>
                 <input value={branch} readOnly aria-readonly="true" />
@@ -10013,6 +10147,79 @@ function AppointmentContentGroup({ title, rows, empty }) {
   );
 }
 
+const clientImportFieldDefinitions = [
+  ["fullName", "Full name", ["fullname", "name", "client", "clientname", "patientname"]],
+  ["firstName", "First name", ["firstname", "givenname"]],
+  ["middleName", "Middle name", ["middlename", "middleinitial"]],
+  ["lastName", "Last name", ["lastname", "surname", "familyname"]],
+  ["mobile", "Mobile", ["mobile", "mobilenumber", "phone", "phonenumber", "contactnumber", "contactno"]],
+  ["email", "Email", ["email", "emailaddress"]],
+  ["gender", "Gender", ["gender", "sex"]],
+  ["birthday", "Birthday", ["birthday", "birthdate", "dateofbirth", "dob"], "date"],
+  ["street", "Street", ["street", "streetaddress", "addressline1"]],
+  ["barangay", "Barangay", ["barangay", "village", "district"]],
+  ["city", "City", ["city", "municipality"]],
+  ["province", "Province", ["province", "state", "region"]],
+  ["address", "Full address", ["address", "fulladdress"]],
+  ["civilStatus", "Civil status", ["civilstatus", "maritalstatus"]],
+  ["occupation", "Occupation", ["occupation", "job", "profession"]],
+  ["emergencyName", "Emergency contact", ["emergencyname", "emergencycontact", "contactperson", "emergencycontactname"]],
+  ["emergencyPhone", "Emergency phone", ["emergencyphone", "emergencynumber", "emergencycontactnumber"]],
+  ["branch", "Branch", ["branch", "location", "clinicbranch"]],
+  ["branchesVisited", "Branches visited", ["branchesvisited", "visitedbranches"]],
+  ["tag", "Client type / tag", ["type", "clienttype", "tag"]],
+  ["retention", "Retention", ["retention", "clientstatus"]],
+  ["lastVisit", "Last visit", ["lastvisit", "lastappointment", "lasttreatment"], "date"],
+  ["nextVisit", "Next visit", ["nextvisit", "nextappointment", "followupdate"], "date"],
+  ["balance", "Outstanding balance", ["balance", "outstandingbalance", "amountdue"], "number"],
+  ["storeCredit", "Client credit", ["clientcredit", "storecredit"], "number"],
+  ["packageBalance", "Package balance", ["package", "packagebalance", "activepackage"]],
+  ["consentStatus", "Consent status", ["consentstatus", "consent", "privacyconsent"]],
+  ["source", "Source", ["source", "leadsource", "howdidyouhearaboutus"]],
+  ["referral", "Referral", ["referral", "referredby", "referrer"]],
+  ["medicalNotes", "Medical notes", ["medicalnotes", "medicalconcerns", "healthnotes"]],
+  ["allergies", "Allergies", ["allergies", "knownallergies"]],
+  ["contraindications", "Contraindications", ["contraindications"]],
+  ["skinConcerns", "Skin concerns", ["skinconcerns", "concerns"]],
+  ["treatmentGoals", "Treatment goals", ["treatmentgoals", "goals"]],
+  ["pastMedicalHistory", "Past medical history", ["pastmedicalhistory", "medicalhistory"]],
+  ["aestheticHistory", "Aesthetic history", ["aesthetichistory", "treatmenthistory"]],
+  ["familyHistory", "Family history", ["familyhistory"]],
+  ["surgicalHistory", "Surgical history", ["surgicalhistory"]],
+  ["obstetricHistory", "Obstetric history", ["obstetrichistory"]],
+  ["medications", "Medications", ["medications", "currentmedications"]],
+  ["marketingOptIn", "Marketing opt-in", ["marketingoptin", "marketingconsent", "subscribed"], "boolean"],
+];
+
+function normalizedImportHeader(value) {
+  return normalize(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function mappedClientImportRecords(draft, defaultBranch) {
+  if (!draft) return [];
+  return draft.rows.map((source, rowIndex) => {
+    const record = { _rowNumber: rowIndex + 2 };
+    clientImportFieldDefinitions.forEach(([fieldName, , , type]) => {
+      const sourceKey = draft.mapping[fieldName];
+      if (!sourceKey) return;
+      const raw = source.values[sourceKey];
+      if (type === "number") record[fieldName] = Number(String(raw || "0").replace(/[^0-9.-]+/g, "")) || 0;
+      else if (type === "boolean") record[fieldName] = ["true", "yes", "y", "1", "checked", "consented", "opted in"].includes(normalize(raw));
+      else if (type === "date" && raw) {
+        const parsed = raw instanceof Date ? raw : new Date(String(raw));
+        record[fieldName] = Number.isNaN(parsed.getTime()) ? String(raw).trim() : parsed.toISOString().slice(0, 10);
+      } else record[fieldName] = String(raw ?? "").trim();
+    });
+    record.fullName = record.fullName || [record.firstName, record.middleName, record.lastName].filter(Boolean).join(" ");
+    record.branch = record.branch || defaultBranch || "All branches";
+    record.tag = record.tag || "New";
+    record.retention = record.retention || "Returning";
+    record.consentStatus = record.consentStatus || "Pending";
+    record.source = record.source || "Import";
+    return record;
+  });
+}
+
 function ClientsModule({
   detailClientId = "",
   clients,
@@ -10026,6 +10233,7 @@ function ClientsModule({
   consentSubmissions = [],
   openModal,
   importClients,
+  rollbackClientImport,
   bulkDeleteClients,
   importInputRef,
   deleteClient,
@@ -10041,6 +10249,9 @@ function ClientsModule({
   const [directoryPage, setDirectoryPage] = useState(1);
   const [selectedClientIds, setSelectedClientIds] = useState(() => new Set());
   const [profileClientId, setProfileClientId] = useState(null);
+  const [clientImportDraft, setClientImportDraft] = useState(null);
+  const [importingClients, setImportingClients] = useState(false);
+  const [lastClientImportBatch, setLastClientImportBatch] = useState(null);
   const profileClient = clients.find((client) => client.id === (detailClientId || profileClientId));
   const profileTreatments = treatments.filter((item) => item.clientId === profileClient?.id);
   const profileAppointments = appointments.filter((item) => item.clientId === profileClient?.id);
@@ -10191,6 +10402,10 @@ function ClientsModule({
     });
   }
 
+  function selectAllMatchingClients() {
+    setSelectedClientIds(new Set(filteredClients.map((client) => client.id)));
+  }
+
   function toggleClientSelection(clientId) {
     setSelectedClientIds((current) => {
       const next = new Set(current);
@@ -10201,100 +10416,75 @@ function ClientsModule({
   }
 
   async function handleClientImport(event) {
-    const file = event.target.files?.[0];
+    const files = [...(event.target.files || [])];
     event.target.value = "";
-    if (!file) return;
+    if (!files.length) return;
+    if (!canAdministerClients) return notify("Only an Owner or Super Admin can import clients.", "error");
 
     try {
-      let rows;
-      if (file.name.toLowerCase().endsWith(".xlsx")) {
-        const { default: readXlsxFile } = await import("read-excel-file/browser");
-        rows = await readXlsxFile(file);
-      } else {
-        rows = parseCsvRows(await file.text());
+      const tabularFiles = files.filter((file) => /\.(csv|xlsx)$/i.test(file.name));
+      const pdfFiles = files.filter((file) => /\.pdf$/i.test(file.name));
+      const parsedSources = [];
+      const headersByKey = new Map();
+      for (const file of tabularFiles) {
+        let rows;
+        if (file.name.toLowerCase().endsWith(".xlsx")) {
+          const { default: readXlsxFile } = await import("read-excel-file/browser");
+          rows = await readXlsxFile(file);
+        } else rows = parseCsvRows(await file.text());
+        if (!rows?.length) continue;
+        const headers = rows[0].map((heading) => ({ label: String(heading || "").trim(), key: normalizedImportHeader(heading) }));
+        headers.forEach((header) => { if (header.key && !headersByKey.has(header.key)) headersByKey.set(header.key, header.label || header.key); });
+        rows.slice(1).forEach((row) => parsedSources.push({ fileName: file.name, values: Object.fromEntries(headers.map((header, index) => [header.key, row[index] ?? ""])) }));
       }
-      if (rows.length < 2) {
+      if (!parsedSources.length) {
         notify("The file does not contain any client rows.", "warning");
         return;
       }
-
-      const headerKeys = rows[0].map((heading) => normalize(heading).replace(/[^a-z0-9]+/g, ""));
-      const firstValue = (values, aliases) => aliases.map((alias) => values[alias]).find((value) => value !== undefined && value !== null && String(value).trim() !== "") ?? "";
-      const textValue = (values, aliases) => String(firstValue(values, aliases) ?? "").trim();
-      const numberValue = (values, aliases) => Number(String(firstValue(values, aliases) || "0").replace(/[^0-9.-]+/g, "")) || 0;
-      const booleanValue = (values, aliases) => {
-        const value = normalize(firstValue(values, aliases));
-        return ["true", "yes", "y", "1", "checked", "consented", "opted in"].includes(value);
-      };
-      const dateValue = (values, aliases) => {
-        const value = firstValue(values, aliases);
-        if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-        const text = String(value ?? "").trim();
-        if (!text) return "";
-        const parsed = new Date(text);
-        return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
-      };
-      const records = rows.slice(1).map((row) => {
-        const values = Object.fromEntries(headerKeys.map((key, index) => [key, row[index] ?? ""]));
-        const firstName = textValue(values, ["firstname", "givenname"]);
-        const middleName = textValue(values, ["middlename", "middleinitial"]);
-        const lastName = textValue(values, ["lastname", "surname", "familyname"]);
-        const fullName = textValue(values, ["fullname", "name", "client", "clientname", "patientname"])
-          || [firstName, middleName, lastName].filter(Boolean).join(" ");
-        if (!fullName) return null;
-        return {
-          id: textValue(values, ["clientid", "patientid", "id"]),
-          fullName,
-          firstName,
-          middleName,
-          lastName,
-          mobile: textValue(values, ["mobile", "mobilenumber", "phone", "phonenumber", "contactnumber", "contactno"]),
-          email: textValue(values, ["email", "emailaddress"]),
-          gender: textValue(values, ["gender", "sex"]),
-          birthday: dateValue(values, ["birthday", "birthdate", "dateofbirth", "dob"]),
-          street: textValue(values, ["street", "streetaddress", "addressline1"]),
-          barangay: textValue(values, ["barangay", "village", "district"]),
-          city: textValue(values, ["city", "municipality"]),
-          province: textValue(values, ["province", "state", "region"]),
-          address: textValue(values, ["address", "fulladdress"]),
-          civilStatus: textValue(values, ["civilstatus", "maritalstatus"]),
-          occupation: textValue(values, ["occupation", "job", "profession"]),
-          emergencyName: textValue(values, ["emergencyname", "emergencycontact", "contactperson", "emergencycontactname"]),
-          emergencyPhone: textValue(values, ["emergencyphone", "emergencynumber", "emergencycontactnumber"]),
-          branch: textValue(values, ["branch", "location", "clinicbranch"]) || directoryBranches[1] || "All branches",
-          branchesVisited: textValue(values, ["branchesvisited", "visitedbranches"]),
-          tag: textValue(values, ["type", "clienttype", "tag"]) || "New",
-          retention: textValue(values, ["retention", "clientstatus"]) || (normalize(values.type) === "new" ? "New" : "Returning"),
-          lastVisit: dateValue(values, ["lastvisit", "lastappointment", "lasttreatment"]),
-          nextVisit: dateValue(values, ["nextvisit", "nextappointment", "followupdate"]),
-          balance: numberValue(values, ["balance", "outstandingbalance", "amountdue"]),
-          storeCredit: numberValue(values, ["clientcredit", "storecredit"]),
-          packageBalance: textValue(values, ["package", "packagebalance", "activepackage"]) || "None",
-          consentStatus: textValue(values, ["consentstatus", "consent", "privacyconsent"]) || "Pending",
-          source: textValue(values, ["source", "leadsource", "howdidyouhearaboutus"] ) || "Import",
-          referral: textValue(values, ["referral", "referredby", "referrer"]),
-          medicalNotes: textValue(values, ["medicalnotes", "medicalconcerns", "healthnotes"]),
-          allergies: textValue(values, ["allergies", "knownallergies"]),
-          contraindications: textValue(values, ["contraindications"]),
-          skinConcerns: textValue(values, ["skinconcerns", "concerns"]),
-          treatmentGoals: textValue(values, ["treatmentgoals", "goals"]),
-          pastMedicalHistory: textValue(values, ["pastmedicalhistory", "medicalhistory"]),
-          aestheticHistory: textValue(values, ["aesthetichistory", "treatmenthistory"]),
-          familyHistory: textValue(values, ["familyhistory"]),
-          surgicalHistory: textValue(values, ["surgicalhistory"]),
-          obstetricHistory: textValue(values, ["obstetrichistory"]),
-          medications: textValue(values, ["medications", "currentmedications"]),
-          marketingOptIn: booleanValue(values, ["marketingoptin", "marketingconsent", "subscribed"]),
-        };
-      }).filter(Boolean);
-
-      if (!records.length) {
-        notify("No valid clients were found. Include a Name or Full Name column.", "warning");
-        return;
-      }
-      await importClients(records);
+      const headerKeys = [...headersByKey.keys()];
+      const mapping = Object.fromEntries(clientImportFieldDefinitions.map(([fieldName, , aliases]) => [fieldName, aliases.find((alias) => headerKeys.includes(alias)) || ""]));
+      setClientImportDraft({
+        rows: parsedSources,
+        headers: headerKeys.map((key) => ({ key, label: headersByKey.get(key) })),
+        mapping,
+        duplicateAction: "merge",
+        pdfFiles,
+        fileNames: files.map((file) => file.name),
+      });
     } catch (error) {
       notify(error.message || "Unable to import that client file.", "error");
+    }
+  }
+
+  async function commitClientImport() {
+    if (!clientImportDraft || importingClients) return;
+    const mapped = mappedClientImportRecords(clientImportDraft, directoryBranches[1]);
+    const valid = mapped.filter((record) => record.fullName);
+    if (!valid.length) return notify("Map Full name, or map first and last name, before importing.", "warning");
+    setImportingClients(true);
+    try {
+      const result = await importClients(valid.map(({ _rowNumber, ...record }) => record), {
+        duplicateAction: clientImportDraft.duplicateAction,
+        batchLabel: `Client import: ${clientImportDraft.fileNames.join(", ")}`,
+      });
+      setLastClientImportBatch(result.batch || null);
+      let attached = 0;
+      const candidateClients = [...(result.records || []), ...clients];
+      for (const file of clientImportDraft.pdfFiles) {
+        const fileKey = normalizedImportHeader(file.name.replace(/\.pdf$/i, ""));
+        const match = candidateClients.find((candidate) => fileKey.includes(normalizedImportHeader(candidate.fullName)) || normalizedImportHeader(candidate.fullName).includes(fileKey));
+        if (!match) continue;
+        const dataUrl = await prepareDocumentDataUrl(file);
+        const uploaded = await uploadDocumentAsset(dataUrl, "client-document", match.branch || "All branches", file.name);
+        await attachClientDocument(match.id, { assetId: uploaded.asset.id, title: file.name, category: "JotForm import", branch: match.branch });
+        attached += 1;
+      }
+      if (clientImportDraft.pdfFiles.length) notify(`${attached} of ${clientImportDraft.pdfFiles.length} PDF submission(s) attached by client name.`, attached === clientImportDraft.pdfFiles.length ? "success" : "warning");
+      setClientImportDraft(null);
+    } catch (error) {
+      notify(error.message || "Unable to import these clients.", "error");
+    } finally {
+      setImportingClients(false);
     }
   }
 
@@ -10335,15 +10525,18 @@ function ClientsModule({
               ref={importInputRef}
               className="client-import-input"
               type="file"
-              accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              multiple
+              disabled={!canAdministerClients}
+              accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.pdf,application/pdf"
               onChange={handleClientImport}
               tabIndex={-1}
             />
-            {selectedClientIds.size > 0 && (
+            {canAdministerClients && selectedClientIds.size > 0 && (
               <button className="danger-button" type="button" onClick={() => bulkDeleteClients([...selectedClientIds])}>
                 <Trash2 size={16} /> Delete selected ({selectedClientIds.size})
               </button>
             )}
+            {canAdministerClients && filteredClients.length > visibleClients.length && <button className="secondary-button" type="button" onClick={selectAllMatchingClients}><Check size={16} /> Select all {filteredClients.length.toLocaleString()} matching</button>}
             <div className="segmented-control clients-view-toggle" aria-label="Client directory view">
               <button className={safeDirectoryView === "list" ? "active" : ""} type="button" onClick={() => setDirectoryView("list")}>
                 <List size={16} aria-hidden="true" /> List
@@ -10354,6 +10547,8 @@ function ClientsModule({
             </div>
           </div>
         </div>
+
+        {lastClientImportBatch?.status !== "Rolled Back" && <div className="inline-state success client-import-rollback-banner"><Check size={17} /><span><strong>Latest import completed.</strong> {lastClientImportBatch.label}</span><button className="secondary-button small" type="button" onClick={async () => { try { const result = await rollbackClientImport(lastClientImportBatch.id); setLastClientImportBatch(result.rolledBackBatch); } catch (error) { notify(error.message || "Unable to roll back this import.", "error"); } }}>Roll back entire batch</button></div>}
 
         <div className="inventory-kpi-grid clients-kpi-grid" aria-label="Client key performance indicators">
           {clientKpis.map(({ label, value, note, icon: Icon, tone }) => (
@@ -10374,7 +10569,7 @@ function ClientsModule({
               <thead>
                 <tr>
                   <th className="clients-check-column">
-                    <input type="checkbox" aria-label="Select visible clients" checked={allVisibleSelected} onChange={toggleVisibleSelection} />
+                    <input type="checkbox" aria-label="Select visible clients" checked={allVisibleSelected} onChange={toggleVisibleSelection} disabled={!canAdministerClients} />
                   </th>
                   <th>Client</th>
                   <th>Client ID</th>
@@ -10391,7 +10586,7 @@ function ClientsModule({
                   return (
                     <tr className={selectedClientId === client.id ? "is-current" : ""} key={client.id}>
                       <td className="clients-check-column" data-label="Select">
-                        <input type="checkbox" aria-label={`Select ${client.fullName}`} checked={selectedClientIds.has(client.id)} onChange={() => toggleClientSelection(client.id)} />
+                        <input type="checkbox" aria-label={`Select ${client.fullName}`} checked={selectedClientIds.has(client.id)} onChange={() => toggleClientSelection(client.id)} disabled={!canAdministerClients} />
                       </td>
                       <td data-label="Client">
                         <button className="clients-table-person" type="button" onClick={() => openClientProfile(client)}>
@@ -10491,6 +10686,43 @@ function ClientsModule({
         />
       )}
 
+      {clientImportDraft && (() => {
+        const previewRecords = mappedClientImportRecords(clientImportDraft, directoryBranches[1]);
+        const invalidRows = previewRecords.filter((record) => !record.fullName);
+        const duplicateRows = previewRecords.filter((record) => clients.some((client) => {
+          const sameMobile = record.mobile && normalize(client.mobile).replace(/\D/g, "") === normalize(record.mobile).replace(/\D/g, "");
+          const sameIdentity = normalize(client.fullName) === normalize(record.fullName) && (!record.birthday || client.birthday === record.birthday);
+          return sameMobile || sameIdentity;
+        }));
+        return (
+          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Map client import columns">
+            <div className="modal-card client-import-mapping-modal">
+              <button className="modal-close" type="button" onClick={() => setClientImportDraft(null)} aria-label="Close client import"><X size={18} /></button>
+              <ModalHeader icon={Upload} title="Map and preview client import" action={`${clientImportDraft.rows.length} rows`} />
+              <p className="section-copy">Confirm which source column belongs to each ClinicOS field. Nothing is saved until you approve the preview.</p>
+              <div className="client-import-summary">
+                <RecordPill label="Files" value={clientImportDraft.fileNames.length} />
+                <RecordPill label="Valid rows" value={previewRecords.length - invalidRows.length} />
+                <RecordPill label="Duplicates" value={duplicateRows.length} />
+                <RecordPill label="PDF forms" value={clientImportDraft.pdfFiles.length} />
+              </div>
+              <details className="client-import-mapping" open>
+                <summary>Column mapping</summary>
+                <div className="client-import-mapping-grid">
+                  {clientImportFieldDefinitions.map(([fieldName, label]) => (
+                    <label className="stacked-field" key={fieldName}><span>{label}{fieldName === "fullName" ? " *" : ""}</span><select value={clientImportDraft.mapping[fieldName] || ""} onChange={(event) => setClientImportDraft((current) => ({ ...current, mapping: { ...current.mapping, [fieldName]: event.target.value } }))}><option value="">Do not import</option>{clientImportDraft.headers.map((header) => <option value={header.key} key={header.key}>{header.label}</option>)}</select></label>
+                  ))}
+                </div>
+              </details>
+              <label className="stacked-field"><span>When a duplicate name + mobile / birthday is found</span><select value={clientImportDraft.duplicateAction} onChange={(event) => setClientImportDraft((current) => ({ ...current, duplicateAction: event.target.value }))}><option value="merge">Merge non-empty imported fields</option><option value="skip">Skip the existing client</option></select></label>
+              {invalidRows.length > 0 && <div className="inline-state error"><AlertCircle size={17} /> {invalidRows.length} row(s) are missing a mapped client name and will be skipped.</div>}
+              <div className="client-import-preview-table"><table><thead><tr><th>Source row</th><th>Name</th><th>Mobile</th><th>Birthday</th><th>Branch</th><th>Result</th></tr></thead><tbody>{previewRecords.slice(0, 8).map((record) => { const duplicate = duplicateRows.includes(record); return <tr key={record._rowNumber}><td>{record._rowNumber}</td><td>{record.fullName || "Missing name"}</td><td>{record.mobile || "—"}</td><td>{record.birthday || "—"}</td><td>{record.branch}</td><td><StatusBadge status={!record.fullName ? "Error" : duplicate ? "Duplicate" : "Ready"} /></td></tr>; })}</tbody></table></div>
+              <div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setClientImportDraft(null)} disabled={importingClients}>Cancel</button><button className="primary-button" type="button" onClick={commitClientImport} disabled={importingClients || previewRecords.length === invalidRows.length}><Check size={17} /> {importingClients ? "Importing..." : `Import ${previewRecords.length - invalidRows.length} clients`}</button></div>
+            </div>
+          </div>
+        );
+      })()}
+
     </section>
   );
 }
@@ -10512,6 +10744,7 @@ function ClientProfileDialog({
   onDelete,
 }) {
   const [documents, setDocuments] = useState([]);
+  const [creditLedger, setCreditLedger] = useState([]);
   const [documentBusy, setDocumentBusy] = useState(false);
   const [documentError, setDocumentError] = useState("");
   useEffect(() => {
@@ -10519,6 +10752,13 @@ function ClientProfileDialog({
     loadClientDocuments(client.id)
       .then((result) => { if (active) setDocuments(result.documents || []); })
       .catch((error) => { if (active) setDocumentError(error.message || "Unable to load client documents."); });
+    return () => { active = false; };
+  }, [client.id]);
+  useEffect(() => {
+    let active = true;
+    loadClientCreditLedger(client.id)
+      .then((result) => { if (active) setCreditLedger(result.entries || []); })
+      .catch(() => { if (active) setCreditLedger([]); });
     return () => { active = false; };
   }, [client.id]);
 
@@ -10634,7 +10874,9 @@ function ClientProfileDialog({
               <MiniPanel icon={HeartPulse} title="Treatment history" rows={treatments.map((item) => `${item.date} · ${item.branch || "Branch not recorded"} · ${item.service} · ${item.provider || "Provider N/A"}`)} empty="No treatments yet." />
               <MiniPanel icon={CalendarDays} title="Appointments" rows={appointments.map((item) => `${item.date} ${item.time} · ${item.branch} · ${item.service} · ${item.staff || "Provider N/A"} · ${item.status}`)} empty="No appointments yet." />
               <MiniPanel icon={WalletCards} title="Payments" rows={validTransactions.map((item) => `${item.date} · ${item.branch} · ${item.invoice} · ${money.format(item.total)} · ${item.status}`)} empty="No payments yet." />
+              <MiniPanel icon={ShoppingBag} title="Product purchase history" rows={validTransactions.flatMap((transaction) => (transaction.items || []).filter((item) => item.type === "Product").map((item) => `${transaction.date} · ${transaction.branch} · ${item.name} × ${item.qty || 1} · ${money.format(Number(item.price || 0) * Number(item.qty || 1))} · ${transaction.invoice}`))} empty="No product purchases yet." />
               <MiniPanel icon={Gift} title="Packages & service credits" rows={packages.map((item) => `${item.creditType === "Service Credit" ? "Service credit" : "Package"} · ${item.name}: ${item.used}/${item.sessions}`)} empty="No active packages or service credits." />
+              <MiniPanel icon={WalletCards} title="Credit ledger" rows={creditLedger.map((entry) => `${formatDateTime(entry.createdAt)} · ${entry.creditType} ${entry.direction.toLowerCase()} ${entry.creditType === "Service Credit" ? `${entry.amount} session(s)` : money.format(entry.amount)} · balance ${entry.creditType === "Service Credit" ? entry.balanceAfter : money.format(entry.balanceAfter)} · ${entry.actorName} · ${entry.branch || "All branches"} · ${entry.reason}`)} empty="No credit changes recorded." />
               <MiniPanel icon={ShieldCheck} title="Signed consent forms" rows={consents.map((item) => `${formatDateTime(item.signedAt)} · ${item.formName} ${item.formVersion} · ${item.branch} · ${item.witness || "No witness"}`)} empty="No signed consent forms." />
               <section className="mini-panel client-document-panel"><div className="mini-panel-heading"><FileText size={18} /><strong>Attached records</strong></div>{documents.length ? <div className="client-document-list">{documents.map((document) => <article key={document.id}><a href={document.url} target="_blank" rel="noreferrer"><strong>{document.title}</strong><small>{document.category} · {formatDateTime(document.createdAt)}</small></a><button type="button" disabled={documentBusy} onClick={() => void deleteClientDocument(document)} aria-label={`Remove ${document.title}`}><Trash2 size={14} /></button></article>)}</div> : <small>No PDF or Word records attached.</small>}</section>
             </div>
@@ -13239,7 +13481,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
       { key: "id", label: "Employee ID" },
       { key: "name", label: "Name" },
       { key: "role", label: "Role" },
-      { key: "branch", label: "Primary Branch" },
+            { key: "branch", label: "Assigned branches", render: (row) => [...new Set([row.branch, ...splitList(row.branches)].filter(Boolean))].join(", ") },
       { key: "branches", label: "Assigned Branches", exportValue: (person) => splitList(person.branches).join(", ") },
       { key: "schedule", label: "Schedule" },
       { key: "status", label: "Status" },
@@ -13863,19 +14105,43 @@ function ExpensesModule({ expenses, openModal, globalSearch }) {
   );
 }
 
+const historicalSalesFieldDefinitions = [
+  ["date", "Sale date", ["date", "saledate", "transactiondate"]], ["invoice", "Invoice", ["invoice", "invoiceno", "referenceno"]],
+  ["branch", "Branch", ["branch", "location"]], ["client", "Client", ["client", "clientname", "clientsname", "patient"]],
+  ["item", "Product / service", ["productservice", "item", "service", "product"]], ["type", "Type", ["type", "category"]],
+  ["qty", "Quantity", ["quantity", "qty"]], ["serviceValue", "Unit price", ["servicevalue", "price", "unitprice"]],
+  ["totalPaid", "Total paid", ["totalpaid", "total", "amount"]], ["paymentMethod", "Payment method", ["paymentmethod", "modeofpayment", "tender"]],
+  ["provider", "Service provider", ["serviceprovider", "provider", "staff"]], ["room", "Room / couch", ["assignedroom", "room", "couch"]],
+  ["arrivalTime", "Arrival time", ["arrivaltime", "arrival"]], ["checkoutTime", "Checkout time", ["checkouttime", "time"]], ["notes", "Notes", ["notes", "remarks"]],
+];
+
+function mappedHistoricalSalesRows(draft) {
+  return draft.rows.map((row, index) => Object.fromEntries([
+    ...historicalSalesFieldDefinitions.map(([field]) => [field, row.values[draft.mapping[field]] ?? ""]),
+    ["_rowNumber", index + 2],
+  ]));
+}
+
 function ReportsModule({ stats, transactions, expenses, appointments, inventory, staff, clients, branchRecords = [], globalSearch, onImportSales, canImportSales = false }) {
   const reportTabs = ["Daily Sales", "Annual Sales", "Expenses", "Monthly Net Profit", "Staff Commission", "Product Inventory"];
   const [reportView, setReportView] = useState("Daily Sales");
   const [reportMonth, setReportMonth] = useState(todayDate().slice(0, 7));
   const [reportBranch, setReportBranch] = useState("All branches");
   const [reportStaff, setReportStaff] = useState("All staff");
-  const [dailyReportDate, setDailyReportDate] = useState(todayDate());
+  const [reportService, setReportService] = useState("All services");
+  const [dailyReportFrom, setDailyReportFrom] = useState(todayDate());
+  const [dailyReportTo, setDailyReportTo] = useState(todayDate());
   const [importing, setImporting] = useState(false);
+  const [salesImportDraft, setSalesImportDraft] = useState(null);
   const importSalesRef = useRef(null);
   const currentYear = todayDate().slice(0, 4);
+  const reportServiceOptions = useMemo(() => ["All services", ...new Set(transactions.flatMap((transaction) => (transaction.items || []).filter((item) => item.type === "Service").map((item) => item.name)).filter(Boolean))].sort(), [transactions]);
+  const transactionMatchesReportStaff = (transaction) => reportStaff === "All staff" || transaction.staff === reportStaff || (transaction.items || []).some((item) => item.provider === reportStaff);
+  const transactionMatchesReportService = (transaction) => reportService === "All services" || (transaction.items || []).some((item) => item.type === "Service" && item.name === reportService);
   const activeTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode
     && (reportBranch === "All branches" || transaction.branch === reportBranch)
-    && (reportStaff === "All staff" || transaction.staff === reportStaff));
+    && transactionMatchesReportStaff(transaction)
+    && transactionMatchesReportService(transaction));
   const activeExpenses = expenses.filter((expense) => reportBranch === "All branches" || expense.branch === reportBranch);
   const reportStaffRows = useMemo(() => staff.filter((person) => reportBranch === "All branches"
     || person.branch === reportBranch
@@ -13889,18 +14155,32 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   const months = Array.from({ length: 12 }, (_, index) => `${currentYear}-${String(index + 1).padStart(2, "0")}`);
 
   const dailyTransactions = transactions.filter((transaction) => transaction.status !== "Void" && !transaction.testMode
-    && transaction.date === dailyReportDate
+    && (!dailyReportFrom || transaction.date >= dailyReportFrom)
+    && (!dailyReportTo || transaction.date <= dailyReportTo)
     && (reportBranch === "All branches" || transaction.branch === reportBranch)
-    && (reportStaff === "All staff" || transaction.staff === reportStaff));
-  const dailySalesRows = dailyTransactions.map((transaction) => ({
-    ...transaction,
-    itemsSummary: (transaction.items || []).map((item) => {
-      const quantity = Number(item.qty || 1);
-      const unitPrice = Number(item.price || 0);
-      const provider = item.provider && item.provider !== "N/A" ? ` · ${item.provider}` : "";
-      return `${item.name} × ${quantity} @ ${money.format(unitPrice)} = ${money.format(unitPrice * quantity)}${provider}`;
-    }).join(" · "),
-    paymentsSummary: (transaction.payments || []).map((payment) => `${payment.method}: ${money.format(payment.amount || 0)}`).join(" · ") || transaction.status,
+    && transactionMatchesReportStaff(transaction)
+    && transactionMatchesReportService(transaction));
+  const dailySalesRows = dailyTransactions.flatMap((transaction) => (transaction.items || []).filter((item) => reportService === "All services" || item.name === reportService).map((item, index) => {
+    const quantity = Number(item.qty || 1);
+    const unitPrice = Number(item.price || 0);
+    const lineDiscount = Number(item.discount || 0);
+    return {
+      id: `${transaction.id}-${item.id || index}`,
+      invoice: transaction.invoice,
+      date: transaction.date,
+      time: transaction.time,
+      client: transaction.client,
+      branch: transaction.branch,
+      item: item.name,
+      itemType: item.type,
+      quantity,
+      provider: item.provider && item.provider !== "N/A" ? item.provider : "Unassigned",
+      unitPrice,
+      lineDiscount,
+      lineTotal: Math.max(0, unitPrice * quantity - lineDiscount),
+      paymentsSummary: (transaction.payments || []).map((payment) => `${payment.method}: ${money.format(payment.amount || 0)}`).join(" · ") || transaction.status,
+      transactionTotal: Number(transaction.total || 0),
+    };
   }));
   const tenderSummaryRows = Object.values(dailyTransactions.flatMap((transaction) => transaction.payments || []).reduce((map, payment) => {
     const method = payment.method || "Unspecified";
@@ -13916,31 +14196,30 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
     if (!file) return;
     setImporting(true);
     try {
-      const rows = parseCsvRows(await file.text());
+      let rows;
+      if (file.name.toLowerCase().endsWith(".xlsx")) {
+        const { default: readXlsxFile } = await import("read-excel-file/browser");
+        rows = await readXlsxFile(file);
+      } else rows = parseCsvRows(await file.text());
       if (rows.length < 2) throw new Error("The CSV has no sales rows.");
-      const keys = rows[0].map((header) => normalize(header).replace(/[^a-z0-9]/g, ""));
-      const value = (record, aliases) => {
-        const index = aliases.map((alias) => keys.indexOf(alias)).find((position) => position >= 0);
-        return index >= 0 ? record[index] : "";
-      };
-      const records = rows.slice(1).map((record) => ({
-        date: value(record, ["date", "saledate", "transactiondate"]),
-        invoice: value(record, ["invoice", "invoiceno", "referenceno"]),
-        branch: value(record, ["branch", "location"]),
-        client: value(record, ["client", "clientname", "clientsname", "patient"]),
-        item: value(record, ["productservice", "item", "service", "product"]),
-        type: value(record, ["type", "category"]),
-        qty: value(record, ["quantity", "qty"]) || 1,
-        serviceValue: value(record, ["servicevalue", "price", "unitprice"]),
-        totalPaid: value(record, ["totalpaid", "total", "amount"]),
-        paymentMethod: value(record, ["paymentmethod", "modeofpayment", "tender"]),
-        provider: value(record, ["serviceprovider", "provider", "staff"]),
-        room: value(record, ["assignedroom", "room", "couch"]),
-        arrivalTime: value(record, ["arrivaltime", "arrival"]),
-        checkoutTime: value(record, ["checkouttime", "time"]),
-        notes: value(record, ["notes", "remarks"]),
-      }));
-      await onImportSales(records);
+      const headers = rows[0].map((header) => ({ label: String(header || ""), key: normalizedImportHeader(header) })).filter((header) => header.key);
+      const keys = headers.map((header) => header.key);
+      const mapping = Object.fromEntries(historicalSalesFieldDefinitions.map(([field, , aliases]) => [field, aliases.find((alias) => keys.includes(alias)) || ""]));
+      setSalesImportDraft({ fileName: file.name, headers, mapping, rows: rows.slice(1).map((row) => ({ values: Object.fromEntries(headers.map((header, index) => [header.key, row[index] ?? ""])) })) });
+    } catch (error) {
+      window.alert(error.message || "Unable to import historical sales.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function commitHistoricalSalesImport() {
+    const records = mappedHistoricalSalesRows(salesImportDraft).filter((record) => record.date && record.client && record.item);
+    if (!records.length) return window.alert("Map Sale date, Client, and Product / service before importing.");
+    setImporting(true);
+    try {
+      await onImportSales(records.map(({ _rowNumber, ...record }) => record));
+      setSalesImportDraft(null);
     } catch (error) {
       window.alert(error.message || "Unable to import historical sales.");
     } finally {
@@ -13976,8 +14255,8 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
   });
 
   const commissionRows = reportStaffRows.map((person) => {
-    const staffSales = activeTransactions.filter((transaction) => transaction.staff === person.name && (!reportMonth || transaction.date?.startsWith(reportMonth)));
-    const sales = staffSales.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0);
+    const staffSales = activeTransactions.filter((transaction) => (!reportMonth || transaction.date?.startsWith(reportMonth)));
+    const sales = staffSales.reduce((sum, transaction) => sum + (transaction.items || []).filter((item) => item.provider === person.name).reduce((lineSum, item) => lineSum + Math.max(0, Number(item.price || 0) * Number(item.qty || 1) - Number(item.discount || 0)), 0), 0);
     const rate = Number(person.commissionRate || 0);
     return {
       id: person.id,
@@ -14092,7 +14371,8 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
     return (
       <>
         <div className="report-filters report-daily-filter">
-          <label><span>Daily sales date</span><input type="date" max={todayDate()} value={dailyReportDate} onChange={(event) => setDailyReportDate(event.target.value)} /></label>
+          <label><span>From</span><input type="date" max={dailyReportTo || todayDate()} value={dailyReportFrom} onChange={(event) => setDailyReportFrom(event.target.value)} /></label>
+          <label><span>To</span><input type="date" min={dailyReportFrom} max={todayDate()} value={dailyReportTo} onChange={(event) => setDailyReportTo(event.target.value)} /></label>
           <strong>{money.format(dailyTransactions.reduce((sum, transaction) => sum + Number(transaction.total || 0), 0))} total</strong>
         </div>
         <SmartTable
@@ -14101,14 +14381,18 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
           emptyTitle="No posted sales for this date"
           columns={[
             { key: "invoice", label: "Invoice" },
+            { key: "date", label: "Date" },
             { key: "time", label: "Time" },
             { key: "client", label: "Client" },
             { key: "branch", label: "Branch" },
-            { key: "itemsSummary", label: "Product / service and price" },
-            { key: "staff", label: "Staff" },
-            { key: "room", label: "Room / couch" },
+            { key: "item", label: "Product / service" },
+            { key: "quantity", label: "Qty" },
+            { key: "provider", label: "Provider" },
+            { key: "unitPrice", label: "Unit price", render: (row) => money.format(row.unitPrice), exportValue: (row) => row.unitPrice },
+            { key: "lineDiscount", label: "Line discount", render: (row) => money.format(row.lineDiscount), exportValue: (row) => row.lineDiscount },
+            { key: "lineTotal", label: "Line total", render: (row) => money.format(row.lineTotal), exportValue: (row) => row.lineTotal },
             { key: "paymentsSummary", label: "Mode of payment" },
-            { key: "total", label: "Total", render: (row) => money.format(row.total) },
+            { key: "transactionTotal", label: "Transaction total", render: (row) => money.format(row.transactionTotal), exportValue: (row) => row.transactionTotal },
           ]}
         />
         <SectionHeader icon={CreditCard} title="Tender Summary" action={`${tenderSummaryRows.length} methods`} />
@@ -14133,7 +14417,8 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
           <label><span>Date range</span><input type="month" value={reportMonth} onChange={(event) => setReportMonth(event.target.value)} /></label>
           <label><span>Branch</span><select value={reportBranch} onChange={(event) => setReportBranch(event.target.value)}><option>All branches</option>{branchRecords.map((branch) => <option key={branch.id}>{branch.name}</option>)}</select></label>
           <label><span>Staff</span><select value={reportStaff} onChange={(event) => setReportStaff(event.target.value)}><option>All staff</option>{reportStaffRows.map((person) => <option key={person.id}>{person.name}</option>)}</select></label>
-          {canImportSales && <><input ref={importSalesRef} type="file" accept=".csv,text/csv" hidden onChange={handleHistoricalSalesFile} /><button className="secondary-button small" type="button" disabled={importing} onClick={() => importSalesRef.current?.click()}><Upload size={16} /> {importing ? "Importing..." : "Import past sales"}</button></>}
+          <label><span>Service</span><select value={reportService} onChange={(event) => setReportService(event.target.value)}>{reportServiceOptions.map((service) => <option key={service}>{service}</option>)}</select></label>
+          {canImportSales && <><input ref={importSalesRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={handleHistoricalSalesFile} /><button className="secondary-button small" type="button" disabled={importing} onClick={() => importSalesRef.current?.click()}><Upload size={16} /> {importing ? "Importing..." : "Import past sales"}</button></>}
           <button className="secondary-button small" type="button" onClick={() => window.print()}><Printer size={16} /> Print</button>
         </div>
         <div className="segmented-control report-tabs" role="tablist" aria-label="Report type">
@@ -14166,6 +14451,11 @@ function ReportsModule({ stats, transactions, expenses, appointments, inventory,
           <RecordPill label="Returning clients" value={clients.filter((client) => client.retention === "Returning").length} />
         </div>
       </div>
+      {salesImportDraft && (() => {
+        const preview = mappedHistoricalSalesRows(salesImportDraft);
+        const valid = preview.filter((row) => row.date && row.client && row.item);
+        return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Map historical sales columns"><div className="modal-card client-import-mapping-modal"><button className="modal-close" type="button" onClick={() => setSalesImportDraft(null)}><X size={18} /></button><ModalHeader icon={Upload} title="Map and preview past sales" action={salesImportDraft.fileName} /><p className="section-copy">Imported rows are marked as historical sales and do not reduce today&apos;s inventory.</p><div className="client-import-mapping-grid">{historicalSalesFieldDefinitions.map(([field, label]) => <label className="stacked-field" key={field}><span>{label}{["date", "client", "item"].includes(field) ? " *" : ""}</span><select value={salesImportDraft.mapping[field] || ""} onChange={(event) => setSalesImportDraft((current) => ({ ...current, mapping: { ...current.mapping, [field]: event.target.value } }))}><option value="">Do not import</option>{salesImportDraft.headers.map((header) => <option value={header.key} key={header.key}>{header.label}</option>)}</select></label>)}</div><div className="client-import-preview-table"><table><thead><tr><th>Row</th><th>Date</th><th>Client</th><th>Item</th><th>Provider</th><th>Total</th><th>Result</th></tr></thead><tbody>{preview.slice(0, 8).map((row) => <tr key={row._rowNumber}><td>{row._rowNumber}</td><td>{String(row.date)}</td><td>{String(row.client)}</td><td>{String(row.item)}</td><td>{String(row.provider || "—")}</td><td>{String(row.totalPaid || row.serviceValue || "—")}</td><td><StatusBadge status={row.date && row.client && row.item ? "Ready" : "Error"} /></td></tr>)}</tbody></table></div><div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setSalesImportDraft(null)} disabled={importing}>Cancel</button><button className="primary-button" type="button" onClick={commitHistoricalSalesImport} disabled={importing || !valid.length}><Check size={17} /> {importing ? "Importing..." : `Import ${valid.length} rows`}</button></div></div></div>;
+      })()}
     </section>
   );
 }
@@ -14775,6 +15065,7 @@ function ModalHost({
         giftBalance: 0,
         storeCredit: 0,
         serviceCredit: 0,
+        creditAdjustmentReason: "",
         pastMedicalHistory: "",
         aestheticHistory: "",
         familyHistory: "",
@@ -14811,6 +15102,7 @@ function ModalHost({
         field("skinConcerns", "Skin concerns"),
         field("treatmentGoals", "Treatment goals"),
         field("storeCredit", "Client credit", "number", null, "", false),
+        field("creditAdjustmentReason", "Credit adjustment reason", "textarea", null, "span-2", false),
         field("medicalNotes", "Medical notes", "textarea", null, "span-2"),
         field("pastMedicalHistory", "Past medical history", "textarea", null, "span-2", false),
         field("aestheticHistory", "Aesthetic history", "textarea", null, "span-2", false),
@@ -15531,7 +15823,65 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
       ? Math.round((((unitPrice / Number(draft.subtotal)) * Number(draft.total || 0)) + Number.EPSILON) * 100) / 100
       : 0;
   };
+  const today = todayDate();
+  const branchAccepts = (recordBranch) => !recordBranch || recordBranch === "All branches" || recordBranch === draft.branch;
+  const usableCertificates = giftCertificates.filter((certificate) =>
+    certificate.status === "Active"
+    && Number(certificate.balance || 0) > 0
+    && (!certificate.expires || certificate.expires >= today)
+    && branchAccepts(certificate.branch));
+  const usablePackages = packages.filter((pkg) =>
+    (pkg.creditType || "Package") === "Package"
+    && pkg.status === "Active"
+    && Number(pkg.used || 0) < Number(pkg.sessions || 0)
+    && (!pkg.expires || pkg.expires >= today)
+    && (pkg.transferable || branchAccepts(pkg.branch))
+    && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
+  const usableServiceCredits = packages.filter((pkg) =>
+    pkg.creditType === "Service Credit"
+    && pkg.status === "Active"
+    && Number(pkg.used || 0) < Number(pkg.sessions || 0)
+    && (!pkg.expires || pkg.expires >= today)
+    && (pkg.transferable || branchAccepts(pkg.branch))
+    && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
+  const automaticCreditPayments = (() => {
+    const rows = [];
+    const usage = new Map();
+    const available = [...usableServiceCredits, ...usablePackages];
+    packageServiceLines.forEach((line) => {
+      const unitCount = Math.max(1, Math.floor(Number(line.qty || 1)));
+      for (let unit = 0; unit < unitCount; unit += 1) {
+        const candidate = available.find((credit) => {
+          const remaining = Number(credit.sessions || 0) - Number(credit.used || 0) - Number(usage.get(credit.id) || 0);
+          if (remaining <= 0) return false;
+          if (credit.creditType === "Service Credit") return normalize(credit.name) === normalize(line.name);
+          if (line.packageName) return normalize(credit.name) === normalize(line.packageName);
+          if (normalize(credit.name) === normalize(line.name)) return true;
+          return usablePackages.length === 1;
+        });
+        if (!candidate || !paymentMethods.includes(candidate.creditType || "Package")) continue;
+        usage.set(candidate.id, Number(usage.get(candidate.id) || 0) + 1);
+        rows.push({
+          method: candidate.creditType || "Package",
+          amount: sessionLineAmount(line),
+          packageId: candidate.id,
+          packageLineKey: line.key,
+          referenceNumber: createSystemPaymentReference("PAY", draft.saleDate),
+          automatic: true,
+        });
+      }
+    });
+    return rows;
+  })();
   const [payments, setPayments] = useState(() => {
+    if (automaticCreditPayments.length) {
+      const creditTotal = automaticCreditPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      const remaining = Math.max(0, Number(draft.total || 0) - creditTotal);
+      return [
+        ...automaticCreditPayments,
+        ...(remaining > 0 ? [{ method: draft.paymentMethod || firstMethod, amount: remaining, referenceNumber: createSystemPaymentReference("PAY", draft.saleDate) }] : []),
+      ];
+    }
     if (draft.splitPayment) {
       const firstAmount = Math.floor(Number(draft.total || 0) / 2);
       return [
@@ -15562,27 +15912,6 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     return Number(installment.amountPaid || 0) < 0 || Number(installment.amountPaid || 0) > packageLineAmount(line);
   }) || Math.abs(packageAllocationTotal - requiredPackageAllocation) > 0.009;
 
-  const today = todayDate();
-  const branchAccepts = (recordBranch) => !recordBranch || recordBranch === "All branches" || recordBranch === draft.branch;
-  const usableCertificates = giftCertificates.filter((certificate) =>
-    certificate.status === "Active"
-    && Number(certificate.balance || 0) > 0
-    && (!certificate.expires || certificate.expires >= today)
-    && branchAccepts(certificate.branch));
-  const usablePackages = packages.filter((pkg) =>
-    (pkg.creditType || "Package") === "Package"
-    && pkg.status === "Active"
-    && Number(pkg.used || 0) < Number(pkg.sessions || 0)
-    && (!pkg.expires || pkg.expires >= today)
-    && (pkg.transferable || branchAccepts(pkg.branch))
-    && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
-  const usableServiceCredits = packages.filter((pkg) =>
-    pkg.creditType === "Service Credit"
-    && pkg.status === "Active"
-    && Number(pkg.used || 0) < Number(pkg.sessions || 0)
-    && (!pkg.expires || pkg.expires >= today)
-    && (pkg.transferable || branchAccepts(pkg.branch))
-    && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
   const salaryDeductionEmployees = staff.filter((person) => {
     const assigned = splitList(person.branches);
     return person.status !== "Inactive" && (person.branch === draft.branch || assigned.includes(draft.branch) || person.branch === "All branches");
@@ -15734,19 +16063,11 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                 />
               </label>
               {payment.method === "Gift Certificate" && (
-                <select
-                  className="payment-tender-select"
-                  aria-label={`Payment ${index + 1} gift certificate`}
-                  value={payment.giftCertificateId || ""}
-                  onChange={(event) => chooseCertificate(index, event.target.value)}
-                >
-                  <option value="">Select gift certificate...</option>
-                  {usableCertificates.map((certificate) => (
-                    <option key={certificate.id} value={certificate.id}>
-                      {certificate.code} - {money.format(certificate.balance)} available
-                    </option>
-                  ))}
-                </select>
+                <div className="payment-package-allocation">
+                  <input className="payment-tender-select" type="search" list={`gift-certificate-codes-${index}`} placeholder="Enter or scan certificate code" aria-label={`Payment ${index + 1} gift certificate code`} onChange={(event) => { const certificate = usableCertificates.find((item) => normalize(item.code) === normalize(event.target.value)); if (certificate) chooseCertificate(index, certificate.id); }} />
+                  <datalist id={`gift-certificate-codes-${index}`}>{usableCertificates.map((certificate) => <option key={certificate.id} value={certificate.code}>{money.format(certificate.balance)} available</option>)}</datalist>
+                  <select className="payment-tender-select" aria-label={`Payment ${index + 1} gift certificate`} value={payment.giftCertificateId || ""} onChange={(event) => chooseCertificate(index, event.target.value)}><option value="">Select gift certificate...</option>{usableCertificates.map((certificate) => <option key={certificate.id} value={certificate.id}>{certificate.code} - {money.format(certificate.balance)} available</option>)}</select>
+                </div>
               )}
               {["Package", "Service Credit"].includes(payment.method) && (
                 <div className="payment-package-allocation">
@@ -15798,6 +16119,9 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
               )}
               {payment.method === "Service Credit" && !usableServiceCredits.length && (
                 <span className="payment-tender-hint">No active service-session credits for this client at this branch.</span>
+              )}
+              {payment.automatic && ["Package", "Service Credit"].includes(payment.method) && (
+                <span className="payment-tender-hint">Applied automatically from the client&apos;s available {payment.method.toLowerCase()} balance. You can change it before posting.</span>
               )}
               {["Package", "Service Credit"].includes(payment.method) && !packageServiceLines.length && (
                 <span className="payment-tender-hint">Add the service covered by this package before checkout.</span>

@@ -540,6 +540,10 @@ export function loadClients() {
   return requestJson("/api/clients");
 }
 
+export function loadClientCreditLedger(clientId) {
+  return requestJson(`/api/clients/${encodeURIComponent(clientId)}/credit-ledger`);
+}
+
 export function saveClientRecord(client, { existing = false } = {}) {
   const id = encodeURIComponent(client.id);
   return requestJson(existing ? `/api/clients/${id}` : "/api/clients", {
@@ -623,10 +627,10 @@ export function deleteResourceRecord(resource, id) {
   });
 }
 
-export function importClientRecords(records) {
+export function importClientRecords(records, options = {}) {
   return requestJson("/api/clients/import", {
     method: "POST",
-    body: JSON.stringify({ records }),
+    body: JSON.stringify({ records, ...options }),
   });
 }
 
@@ -635,6 +639,10 @@ export function bulkDeleteClientRecords(ids) {
     method: "POST",
     body: JSON.stringify({ ids }),
   });
+}
+
+export function rollbackClientImportBatch(id) {
+  return requestJson(`/api/clients/import-batches/${encodeURIComponent(id)}/rollback`, { method: "POST" });
 }
 
 export function saveSettingsRecord(settings) {

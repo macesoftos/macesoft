@@ -26,6 +26,7 @@ model Organization {
   clientInvoices     ClientInvoice[]
   appNotifications   AppNotification[]
   invoicePayments    InvoicePayment[]
+  clientImportBatches ClientImportBatch[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 }
@@ -93,6 +94,7 @@ model Client {
   clientInvoices     ClientInvoice[]
   consentSubmissions ClientConsentSubmission[]
   documents          ClientDocument[]
+  creditLedger       ClientCreditLedger[]
 
   @@index([fullName])
   @@index([mobile])
@@ -100,6 +102,44 @@ model Client {
   @@index([organizationId, createdAt])
   @@index([branchId, createdAt])
   @@index([workspaceFormId])
+}
+
+model ClientCreditLedger {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  creditType   String   @default("Client Credit")
+  direction    String
+  amount       Float
+  balanceAfter Float
+  reason       String
+  branch       String   @default("")
+  actorName    String
+  actorRole    String
+  sourceType   String   @default("Manual")
+  sourceId     String   @default("")
+  createdAt    DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([creditType, createdAt])
+  @@index([branch, createdAt])
+}
+
+model ClientImportBatch {
+  id               String        @id @default(cuid())
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  label             String
+  actorName         String
+  actorRole         String
+  createdClientIds  String        @default("[]")
+  updatedSnapshots  String        @default("[]")
+  status            String        @default("Completed")
+  rolledBackAt      DateTime?
+  createdAt         DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt])
 }
 
 model Branch {
