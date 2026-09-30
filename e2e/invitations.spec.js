@@ -133,10 +133,10 @@ test("owner invitation form exposes authorized roles, concrete branches, and res
     organizationManager: true,
     canInviteManagers: true,
     invitationExpiryDays: 7,
-    roles: ["Owner", "Super Admin", "Branch Manager", "Employee"],
-    roleModules: Object.fromEntries(["Owner", "Super Admin", "Branch Manager", "Employee"].map((role) => [role, roleAccess[role]])),
+    roles: ["Owner", "Super Admin", "Branch Manager", "Investor", "Employee"],
+    roleModules: Object.fromEntries(["Owner", "Super Admin", "Branch Manager", "Investor", "Employee"].map((role) => [role, roleAccess[role]])),
     permissions: [{ id: "staff.invite", label: "Invite employees" }, { id: "staff.invite_managers", label: "Invite branch managers" }],
-    branches: [{ id: branch.id, name: branch.name, enabledModules: branch.enabledModules }],
+    branches: [{ id: branch.id, name: branch.name, enabledModules: [...branch.enabledModules, "reports"] }],
   };
   await mockWorkspace(page, ownerSession(), capabilities);
   await page.goto("/staff");
@@ -147,6 +147,10 @@ test("owner invitation form exposes authorized roles, concrete branches, and res
   await expect(dialog.getByLabel("Last name")).toBeVisible();
   await expect(dialog.getByRole("group", { name: "Branch assignment" }).getByText(branch.name)).toBeVisible();
   await expect(dialog.getByRole("group", { name: "Modules" }).getByText("POS", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Role").selectOption("Investor");
+  await expect(dialog.getByRole("group", { name: "Modules" }).getByText("Reports", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("group", { name: "Modules" }).getByText("POS", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("Investors receive branch-scoped Reports access without POS.")).toBeVisible();
   await dialog.getByLabel("Role").selectOption("Super Admin");
   await expect(dialog.getByText(/No “All Branches” assignment will be stored/)).toBeVisible();
   await expect(dialog.getByText(/grants organization-wide access/)).toBeVisible();
