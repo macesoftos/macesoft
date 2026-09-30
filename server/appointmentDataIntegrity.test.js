@@ -52,7 +52,8 @@ test("card view groups a client's daily services into one visit checkout", () =>
 test("POS assigns providers per service without a sale-level staff selector", () => {
   assert.doesNotMatch(posSource, />Select Staff</);
   assert.match(posSource, /className="cart-provider-select"/);
-  assert.match(posSource, /attendanceBranch === branch/);
+  assert.match(posSource, /isClockedInAtBranch\(person, branch\)/);
+  assert.match(posSource, /No eligible staff are clocked in at \{branch\}/);
   assert.match(posSource, /staff: saleStaffName/);
 });
 

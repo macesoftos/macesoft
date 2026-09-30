@@ -9250,10 +9250,16 @@ td,
 .cart-provider-select {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
   font-size: 0.72rem;
   color: var(--ink-muted, #75695f);
+}
+
+.cart-provider-select small {
+  flex-basis: 100%;
+  line-height: 1.35;
 }
 
 .cart-provider-select select {

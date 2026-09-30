@@ -75,6 +75,7 @@ import {
   serviceCategories,
 } from "./data";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
+import { eligiblePosProviders, isClockedInAtBranch } from "./lib/posProviders.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
 import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
@@ -3435,6 +3436,7 @@ function App() {
               rollbackClientImport={rollbackClientImport}
               bulkDeleteClients={bulkDeleteClients}
               importInputRef={clientImportInputRef}
+              canAdministerClients={canManageOrganization(session.role)}
               deleteClient={deleteClient}
               sensitiveAllowed={sensitiveAllowed}
               globalSearch={globalSearch}
@@ -6316,9 +6318,10 @@ function POSModule({
   const todaysTransactions = transactions.filter((transaction) => transaction.date === todayDate());
   const transactionSummaryRows = todaysTransactions.length ? todaysTransactions : transactions;
   const todaysTransactionTotal = todaysTransactions.reduce((sum, transaction) => transaction.status === "Void" || transaction.testMode ? sum : sum + Number(transaction.total || 0), 0);
-  const staffAtBranch = useMemo(() => staff.filter((person) => {
-    return person.status !== "Inactive" && person.clockedIn && person.attendanceBranch === branch;
-  }), [branch, staff]);
+  const staffAtBranch = useMemo(
+    () => staff.filter((person) => isClockedInAtBranch(person, branch)),
+    [branch, staff],
+  );
   const todaysVisitCards = useMemo(() => {
     const seen = new Set();
     return appointments
@@ -6355,9 +6358,7 @@ function POSModule({
   function providersForCartItem(item) {
     if (item.type !== "Service") return ["N/A"];
     const service = services.find((entry) => entry.id === item.serviceId);
-    const allowedRoles = splitList(service?.staff);
-    const providers = staffAtBranch.filter((person) => !allowedRoles.length || allowedRoles.includes(person.role) || allowedRoles.includes("All staff"));
-    return ["N/A", ...providers.map((person) => person.name)];
+    return ["N/A", ...eligiblePosProviders(staffAtBranch, service).map((person) => person.name)];
   }
 
   async function persistActiveCart() {
@@ -7112,6 +7113,7 @@ function POSModule({
                     <select value={item.provider || "N/A"} onChange={(event) => setCart((current) => current.map((entry) => entry.key === item.key ? { ...entry, provider: event.target.value } : entry))}>
                       {providersForCartItem(item).map((provider) => <option key={provider}>{provider}</option>)}
                     </select>
+                    {providersForCartItem(item).length === 1 && <small>No eligible staff are clocked in at {branch}.</small>}
                   </label>
                 )}
                 {item.type === "Service" && item.packageName && <small className="pos-credit-match-note"><Gift size={13} /> Package: {item.packageName}</small>}

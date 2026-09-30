@@ -24,6 +24,13 @@ test("new and existing client packages remain usable across branches", () => {
   assert.match(schema, /transferable\s+Boolean\s+@default\(true\)/);
 });
 
+test("organization administrators can access client import and bulk tools", () => {
+  assert.match(app, /<ClientsModule[\s\S]*?canAdministerClients=\{canManageOrganization\(session\.role\)\}/);
+  assert.match(app, /disabled=\{!canAdministerClients\}/);
+  assert.match(app, /Map and preview client import/);
+  assert.match(app, /Roll back entire batch/);
+});
+
 test("branch registration links resolve through the active private workspace form", () => {
   assert.match(server, /app\.get\("\/api\/public-registration\/open"/);
   assert.match(server, /publicRegistrationUrlForBranch/);

@@ -108,10 +108,44 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await gotoAuthenticatedWorkspace(page, "/clients");
   await expect(page).toHaveURL(/\/clients$/);
   await expect(page.locator(".app-shell > .sidebar")).toHaveCount(0);
+  const clientImportInput = page.locator(".client-import-input");
+  await expect(clientImportInput).toBeEnabled();
+  await expect(page.getByLabel("Select visible clients")).toBeEnabled();
+  await clientImportInput.setInputFiles({
+    name: "client-import-preview.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Full name,Mobile,Branch\nRelease Preview Client,09170000002,Mace Davao\n"),
+  });
+  const clientImportDialog = page.getByRole("dialog", { name: "Map client import columns" });
+  await expect(clientImportDialog).toBeVisible();
+  await expect(clientImportDialog.getByText("Map and preview client import", { exact: true })).toBeVisible();
+  await expect(clientImportDialog.getByText("Release Preview Client", { exact: true })).toBeVisible();
+  await clientImportDialog.getByRole("button", { name: "Close client import" }).click();
   await createTrigger.click();
   await expect(createMenu.getByRole("menuitem", { name: "New client" })).toBeVisible();
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toHaveCount(0);
   await page.keyboard.press("Escape");
+
+  await gotoAuthenticatedWorkspace(page, "/reports");
+  const historicalSalesInput = page.locator('input[type="file"][accept*="text/csv"]');
+  await expect(page.getByRole("button", { name: "Import past sales" })).toBeEnabled();
+  await historicalSalesInput.setInputFiles({
+    name: "historical-sales-preview.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Date,Client,Item,Branch,Total Paid\n2026-01-15,Walk-in,Release Preview Service,Mace Davao,1500\n"),
+  });
+  const historicalImportDialog = page.getByRole("dialog", { name: "Map historical sales columns" });
+  await expect(historicalImportDialog).toBeVisible();
+  await expect(historicalImportDialog.getByText("Map and preview past sales", { exact: true })).toBeVisible();
+  await expect(historicalImportDialog.getByText("Release Preview Service", { exact: true })).toBeVisible();
+  await historicalImportDialog.getByRole("button", { name: "Cancel" }).click();
+
+  await gotoAuthenticatedWorkspace(page, "/packages");
+  await page.getByRole("button", { name: "Issue service credit" }).click();
+  const serviceCreditDialog = page.getByRole("dialog", { name: "Issue Service Credit" });
+  await expect(serviceCreditDialog.getByLabel("Redeemable branch, required")).toHaveValue("All branches");
+  await expect(serviceCreditDialog.getByLabel("Cross-branch redemption")).toBeChecked();
+  await serviceCreditDialog.getByRole("button", { name: "Cancel" }).click();
 
   await gotoAuthenticatedWorkspace(page, "/card-view");
   await expect(page).toHaveURL(/\/card-view$/);
