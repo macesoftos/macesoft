@@ -1359,11 +1359,13 @@
 
 .pos-top-reveal-zone {
   position: fixed;
-  inset: 0 0 auto;
+  inset: 0 auto auto 50%;
   z-index: 85;
+  width: min(180px, 30vw);
   height: 24px;
   background: transparent;
   outline: none;
+  transform: translateX(-50%);
 }
 
 .pos-top-reveal-zone::after {
@@ -1426,6 +1428,7 @@
 
 @media (pointer: coarse) {
   .pos-top-reveal-zone {
+    width: min(220px, 60vw);
     height: 38px;
   }
 
