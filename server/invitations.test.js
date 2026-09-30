@@ -15,6 +15,7 @@ import {
   canManageInvitation,
   invitationScopeWhere,
   normalizeEmail,
+  roleRequiresPosAccess,
   sanitizeInvitationMessage,
 } from "./invitations.js";
 
@@ -116,6 +117,13 @@ test("branch roles expose POS only except delegated administration surfaces", ()
   assert.deepEqual(roleAccess.Cashier, ["pos"]);
   assert.deepEqual(roleAccess.Admin, ["pos", "staff", "facetrack-attendance"]);
   assert.deepEqual(roleAccess["Branch Manager"], ["pos", "staff", "facetrack-attendance"]);
+});
+
+test("reports-only investors do not inherit the branch POS requirement", () => {
+  assert.equal(roleRequiresPosAccess("Investor", roleAccess), false);
+  assert.equal(roleRequiresPosAccess("Receptionist", roleAccess), true);
+  assert.equal(roleRequiresPosAccess("Employee", roleAccess), true);
+  assert.deepEqual(assertRequestedModules(owner, "Investor", ["reports"], [{ ...davao, modules: [{ moduleId: "reports", enabled: true }] }], roleAccess), ["reports"]);
 });
 
 test("email and optional messages are normalized without executable markup", () => {

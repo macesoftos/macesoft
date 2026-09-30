@@ -44,6 +44,10 @@ export function isBranchManager(role) {
   return BRANCH_MANAGER_ROLES.includes(String(role || ""));
 }
 
+export function roleRequiresPosAccess(role, roleAccess) {
+  return !canManageOrganization(role) && (roleAccess?.[role] || []).includes("pos");
+}
+
 export function canInviteUsers(actor) {
   if (canManageOrganization(actor?.role)) return true;
   return isBranchManager(actor?.role) && actorPermissions(actor).includes("staff.invite");

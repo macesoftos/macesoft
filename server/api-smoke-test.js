@@ -544,6 +544,28 @@ try {
   });
   assert(expirationAudit, "invitation expiration audit record was not created");
 
+  const investorEmail = `invite-investor-${suffix}@release-test.invalid`;
+  invitationSmokeEmails.push(investorEmail);
+  const investorInvitation = await jsonRequestAs("/api/invitations", {
+    ...invitationPayload,
+    firstName: "Investor",
+    email: investorEmail,
+    position: "Test Investor",
+    role: "Investor",
+    modules: ["reports"],
+    permissions: [],
+    message: "Reports-only investor invitation smoke test",
+  }, invitationHeaders);
+  assert(
+    investorInvitation.response.status === 201,
+    `reports-only investor invitation failed (${investorInvitation.response.status}: ${investorInvitation.payload?.error || "unknown error"})`,
+  );
+  assert(investorInvitation.payload.invitation.role === "Investor", "investor invitation did not retain its role");
+  assert(
+    investorInvitation.payload.invitation.modules.length === 1 && investorInvitation.payload.invitation.modules.includes("reports"),
+    "investor invitation was not restricted to Reports",
+  );
+
   const createdClient = await jsonRequest("/api/resources/clients", {
     id: clientId,
     fullName: "Automated Smoke Client",

@@ -118,6 +118,7 @@ import {
   invitationScopeWhere,
   isBranchManager,
   normalizeEmail,
+  roleRequiresPosAccess,
   sanitizeInvitationMessage,
   uniqueStrings,
 } from "./invitations.js";
@@ -4650,7 +4651,7 @@ async function normalizeInvitationInput(actor, payload, current = null) {
     ? [...new Set([...requestedPermissions, ...BRANCH_ADMIN_REQUIRED_PERMISSIONS])]
     : requestedPermissions);
   const modules = assertRequestedModules(actor, role, payload?.modules ?? (current ? parseJsonList(current.modules) : undefined), branches, roleAccess);
-  if (!canManageOrganization(role) && !modules.includes("pos")) {
+  if (roleRequiresPosAccess(role, roleAccess) && !modules.includes("pos")) {
     throw apiError("Branch users must retain POS access.", 400);
   }
   return {
@@ -5576,7 +5577,7 @@ app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
     return stored && parseJsonList(stored).length ? parseJsonList(stored) : undefined;
   })();
   const modules = assertRequestedModules(actor, nextRole, requestedModules, branches, roleAccess);
-  if (!canManageOrganization(nextRole) && !modules.includes("pos")) {
+  if (roleRequiresPosAccess(nextRole, roleAccess) && !modules.includes("pos")) {
     throw apiError("Branch users must retain POS access.", 400);
   }
   const primaryBranch = branches[0] || null;
