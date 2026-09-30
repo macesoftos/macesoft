@@ -16561,7 +16561,13 @@ function FormField({ field: item, form, required = false, value, onChange }) {
   if (item.type === "checkbox") {
     return (
       <label className={wrapperClass} htmlFor={fieldId}>
-        <input id={fieldId} type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />
+        <input
+          id={fieldId}
+          type="checkbox"
+          aria-label={item.label}
+          checked={Boolean(value)}
+          onChange={(event) => onChange(event.target.checked)}
+        />
         <FormLabel>{item.label}</FormLabel>
       </label>
     );
@@ -16738,9 +16744,9 @@ function FormField({ field: item, form, required = false, value, onChange }) {
     <label className={wrapperClass} htmlFor={fieldId}>
       <FieldLabel required={required}>{item.label}</FieldLabel>
       {item.type === "textarea" ? (
-        <textarea id={fieldId} value={value ?? ""} onChange={(event) => onChange(event.target.value)} required={required} />
+        <textarea id={fieldId} aria-label={item.label} value={value ?? ""} onChange={(event) => onChange(event.target.value)} required={required} />
       ) : item.type === "select" ? (
-        <select id={fieldId} value={value ?? ""} onChange={(event) => onChange(event.target.value)} required={required}>
+        <select id={fieldId} aria-label={item.label} value={value ?? ""} onChange={(event) => onChange(event.target.value)} required={required}>
           {required && value === "" && <option value="" disabled>Select {item.label.toLowerCase()}</option>}
           {(item.options ?? []).map((option) => {
             const value = typeof option === "string" ? option : option.value;
@@ -16753,6 +16759,7 @@ function FormField({ field: item, form, required = false, value, onChange }) {
           <input
             id={fieldId}
             type={inputType}
+            aria-label={item.label}
             inputMode={inputMode}
             autoComplete={autoComplete}
             list={hasSuggestions ? suggestionListId : undefined}
