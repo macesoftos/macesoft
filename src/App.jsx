@@ -16421,7 +16421,7 @@ function EntityModal({ config, onClose }) {
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={config.title}>
       <form className="modal-card" onSubmit={submit}>
         <button className="modal-close" type="button" onClick={onClose} aria-label="Close form"><X size={18} /></button>
         <ModalHeader icon={Edit3} title={config.title} action="Record details" />
