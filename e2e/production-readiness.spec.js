@@ -425,6 +425,21 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await page.keyboard.press("Alt+P");
   await expect(page.getByRole("heading", { name: "Today's active clients" })).toBeVisible();
+  const visitsHeaderBox = await page.locator(".pos-workspace-header").boundingBox();
+  const visitsActionsBox = await page.locator(".pos-header-actions").boundingBox();
+  expect(visitsHeaderBox).not.toBeNull();
+  expect(visitsActionsBox).not.toBeNull();
+  await page.getByRole("button", { name: "Checkout", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Build checkout" })).toBeVisible();
+  const checkoutHeaderBox = await page.locator(".pos-workspace-header").boundingBox();
+  const checkoutActionsBox = await page.locator(".pos-header-actions").boundingBox();
+  expect(Math.abs(checkoutHeaderBox.x - visitsHeaderBox.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(checkoutHeaderBox.width - visitsHeaderBox.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(checkoutActionsBox.x - visitsActionsBox.x)).toBeLessThanOrEqual(2);
+  await page.getByRole("button", { name: "Service Prices", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Service prices" })).toBeVisible();
+  const pricesActionsBox = await page.locator(".pos-header-actions").boundingBox();
+  expect(Math.abs(pricesActionsBox.x - visitsActionsBox.x)).toBeLessThanOrEqual(2);
   await page.getByRole("button", { name: "Checkout", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Build checkout" })).toBeVisible();
   await expect(page.getByText("Open client carts", { exact: true })).toHaveCount(0);

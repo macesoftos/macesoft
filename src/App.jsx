@@ -6810,7 +6810,7 @@ function POSModule({
 
   return (
     <section className="module-grid pos-layout">
-      <div className={`surface-panel wide pos-catalog-panel${posScreen === "Checkout" ? "" : " pos-catalog-wide"}`}>
+      <div className="surface-panel wide pos-workspace-header">
         <div className="pos-header">
           <div>
             <h2>{posScreen === "Today's visits" ? "Today's active clients" : posScreen === "Checkout" ? "Build checkout" : "Service prices"}</h2>
@@ -6853,7 +6853,9 @@ function POSModule({
             </button>
           </div>
         </div>
+      </div>
 
+      <div className={`surface-panel wide pos-catalog-panel${posScreen === "Checkout" ? "" : " pos-catalog-wide"}`}>
         {posScreen === "Checkout" && (testMode || saleDate !== todayDate()) && (
           <div className={`pos-ledger-mode-banner ${testMode ? "test" : "historical"}`} role="status">
             <AlertCircle size={17} />
@@ -7346,7 +7348,7 @@ function POSModule({
         {clientId && clientCredits.length > 0 && <div className="pos-client-credit-summary"><strong>Available package / service credits</strong>{clientCredits.map((credit) => <span key={credit.id}>{credit.name}<b>{Number(credit.sessions || 0) - Number(credit.used || 0)} left</b></span>)}</div>}
       </div>}
 
-      <div className="surface-panel full-span pos-history-panel">
+      <div className={`surface-panel full-span pos-history-panel${posScreen === "Checkout" ? " pos-history-checkout" : ""}`}>
         <SectionHeader icon={ReceiptText} title="POS Summarized Transactions for the Day" action={money.format(todaysTransactionTotal)} />
         <SmartTable
           rows={transactionSummaryRows}
