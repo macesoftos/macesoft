@@ -433,9 +433,27 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await expect(page.getByRole("heading", { name: "Build checkout" })).toBeVisible();
   const checkoutHeaderBox = await page.locator(".pos-workspace-header").boundingBox();
   const checkoutActionsBox = await page.locator(".pos-header-actions").boundingBox();
+  const workspaceGap = await page.locator(".pos-layout").evaluate((element) => getComputedStyle(element).gap);
   expect(Math.abs(checkoutHeaderBox.x - visitsHeaderBox.x)).toBeLessThanOrEqual(2);
   expect(Math.abs(checkoutHeaderBox.width - visitsHeaderBox.width)).toBeLessThanOrEqual(2);
   expect(Math.abs(checkoutActionsBox.x - visitsActionsBox.x)).toBeLessThanOrEqual(2);
+  expect(workspaceGap).toBe("18px");
+
+  const cartListBox = await page.locator(".pos-checkout-panel .cart-list").boundingBox();
+  const emptyCartBox = await page.locator(".pos-checkout-panel .cart-list > .empty-state").boundingBox();
+  expect(cartListBox).not.toBeNull();
+  expect(emptyCartBox).not.toBeNull();
+  expect(Math.abs((emptyCartBox.y + emptyCartBox.height / 2) - (cartListBox.y + cartListBox.height / 2))).toBeLessThanOrEqual(2);
+
+  await page.evaluate(() => window.scrollTo(0, Math.min(480, document.documentElement.scrollHeight - window.innerHeight)));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  const stickyHeaderBox = await page.locator(".pos-workspace-header").boundingBox();
+  const stickyCheckoutBox = await page.locator(".pos-checkout-panel").boundingBox();
+  expect(stickyHeaderBox).not.toBeNull();
+  expect(stickyCheckoutBox).not.toBeNull();
+  expect(stickyCheckoutBox.y).toBeGreaterThanOrEqual(stickyHeaderBox.y + stickyHeaderBox.height + 16);
+  await page.evaluate(() => window.scrollTo(0, 0));
+
   await page.getByRole("button", { name: "Service Prices", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Service prices" })).toBeVisible();
   const pricesActionsBox = await page.locator(".pos-header-actions").boundingBox();

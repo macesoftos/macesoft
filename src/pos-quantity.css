@@ -48,7 +48,7 @@
 .pos-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.48fr) minmax(360px, 0.82fr);
-  gap: 18px;
+  gap: var(--pos-workspace-gap, 18px);
   align-items: start;
 }
 
@@ -85,7 +85,7 @@
 .pos-catalog-panel {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - var(--sticky-content-top) - var(--pos-workspace-header-height) - 18px);
+  min-height: calc(100dvh - var(--sticky-content-top) - var(--pos-workspace-header-height) - var(--pos-workspace-gap, 18px));
   overflow: visible;
 }
 
@@ -97,7 +97,7 @@
 .pos-checkout-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
-  height: calc(100dvh - var(--sticky-content-top) - var(--pos-workspace-header-height) - 18px);
+  height: calc(100dvh - var(--sticky-content-top) - var(--pos-workspace-header-height) - var(--pos-workspace-gap, 18px));
   min-height: 620px;
   overflow: hidden;
 }
@@ -105,7 +105,7 @@
 .pos-header,
 .invoice-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 18px;
@@ -572,6 +572,13 @@
   padding: 14px 18px;
 }
 
+.pos-checkout-panel .cart-list > .empty-state:only-child {
+  min-height: 0;
+  height: 100%;
+  align-content: center;
+  padding: 24px 12px;
+}
+
 .pos-checkout-panel .cart-row {
   min-height: 74px;
   grid-template-columns: minmax(0, 1fr) auto auto 32px;
@@ -834,7 +841,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .pos-header-actions .pos-test-checkout-button.active {
@@ -850,6 +857,7 @@
 .pos-screen-tabs button {
   min-height: 40px;
   border-radius: 6px;
+  white-space: nowrap;
 }
 
 .pos-service-setup {
@@ -1040,7 +1048,7 @@
   overflow-x: hidden;
   overflow-y: hidden;
   position: sticky;
-  top: var(--sticky-content-top);
+  top: calc(var(--sticky-content-top) + var(--pos-workspace-header-height) + var(--pos-workspace-gap, 18px));
   z-index: 12;
 }
 
@@ -1084,6 +1092,7 @@
 
 .pos-page-shell .pos-layout {
   grid-template-columns: minmax(0, 1.78fr) minmax(420px, 0.78fr);
+  gap: var(--pos-workspace-gap, 18px);
 }
 
 .pos-page-shell .pos-service-grid {
@@ -1092,7 +1101,7 @@
 
 .pos-page-shell .pos-checkout-panel {
   align-self: start;
-  top: var(--sticky-content-top);
+  top: calc(var(--sticky-content-top) + var(--pos-workspace-header-height) + var(--pos-workspace-gap, 18px));
 }
 
 @media (max-width: 1180px) {
@@ -1359,7 +1368,8 @@
 
 .pos-page-shell {
   --sticky-content-top: 0px;
-  --pos-workspace-header-height: 93px;
+  --pos-workspace-header-height: 95px;
+  --pos-workspace-gap: 18px;
   overscroll-behavior-y: contain;
 }
 

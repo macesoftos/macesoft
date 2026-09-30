@@ -2457,7 +2457,7 @@ button:active {
     .pos-page-shell .pos-checkout-panel {
       position: sticky;
       top: var(--sticky-content-top);
-      height: calc(100dvh - var(--sticky-content-top) - var(--pos-workspace-header-height) - 18px);
+      height: calc(100dvh - var(--sticky-content-top) - var(--pos-workspace-header-height) - var(--pos-workspace-gap, 18px));
       min-height: 540px;
     }
 
