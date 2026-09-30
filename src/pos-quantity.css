@@ -1405,10 +1405,7 @@
   visibility: hidden;
 }
 
-.pos-top-reveal-zone:hover + .pos-top-chrome,
-.pos-page-shell .pos-top-chrome.is-revealed,
-.pos-page-shell .pos-top-chrome:hover,
-.pos-page-shell .pos-top-chrome:focus-within {
+.pos-page-shell .pos-top-chrome.is-revealed {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
