@@ -1,6 +1,8 @@
 import { test, expect } from "playwright/test";
 import { verifyMarketingBuilder } from "./marketing-builder-workflow.js";
 
+test.describe.configure({ retries: 0 });
+
 const ownerEmail = process.env.BOOTSTRAP_OWNER_EMAIL;
 const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD;
 
@@ -24,7 +26,7 @@ test("anonymous users cannot read clinic data", async ({ request }) => {
 });
 
 test("an authenticated owner can open a scoped workspace and sign out", async ({ page }) => {
-  test.setTimeout(420_000);
+  test.setTimeout(240_000);
   await page.goto("/");
   await page.getByLabel("Email").fill(ownerEmail);
   await page.getByLabel("Password").fill(ownerPassword);
