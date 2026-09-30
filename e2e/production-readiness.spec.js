@@ -143,7 +143,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await gotoAuthenticatedWorkspace(page, "/packages");
   await page.getByRole("button", { name: "Issue service credit" }).click();
   const serviceCreditDialog = page.getByRole("dialog", { name: "Issue Service Credit" });
-  await expect(serviceCreditDialog.getByLabel("Redeemable branch, required")).toHaveValue("All branches");
+  await expect(serviceCreditDialog.getByLabel("Redeemable branch", { exact: false })).toHaveValue("All branches");
   await expect(serviceCreditDialog.getByLabel("Cross-branch redemption")).toBeChecked();
   await serviceCreditDialog.getByRole("button", { name: "Cancel" }).click();
 
