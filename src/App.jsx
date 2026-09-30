@@ -10237,6 +10237,7 @@ function ClientsModule({
   bulkDeleteClients,
   importInputRef,
   deleteClient,
+  canAdministerClients = false,
   sensitiveAllowed,
   globalSearch,
   notify,
