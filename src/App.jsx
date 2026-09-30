@@ -10549,7 +10549,7 @@ function ClientsModule({
           </div>
         </div>
 
-        {lastClientImportBatch?.status !== "Rolled Back" && <div className="inline-state success client-import-rollback-banner"><Check size={17} /><span><strong>Latest import completed.</strong> {lastClientImportBatch.label}</span><button className="secondary-button small" type="button" onClick={async () => { try { const result = await rollbackClientImport(lastClientImportBatch.id); setLastClientImportBatch(result.rolledBackBatch); } catch (error) { notify(error.message || "Unable to roll back this import.", "error"); } }}>Roll back entire batch</button></div>}
+        {lastClientImportBatch && lastClientImportBatch.status !== "Rolled Back" && <div className="inline-state success client-import-rollback-banner"><Check size={17} /><span><strong>Latest import completed.</strong> {lastClientImportBatch.label}</span><button className="secondary-button small" type="button" onClick={async () => { try { const result = await rollbackClientImport(lastClientImportBatch.id); setLastClientImportBatch(result.rolledBackBatch); } catch (error) { notify(error.message || "Unable to roll back this import.", "error"); } }}>Roll back entire batch</button></div>}
 
         <div className="inventory-kpi-grid clients-kpi-grid" aria-label="Client key performance indicators">
           {clientKpis.map(({ label, value, note, icon: Icon, tone }) => (
