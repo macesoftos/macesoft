@@ -7086,7 +7086,7 @@ function POSModule({
             <Printer size={18} aria-hidden="true" />
           </button>
         </div>
-        <div className="cart-list">
+        <div className={`cart-list${cart.length ? "" : " is-empty"}`}>
           {cart.map((item, index) => {
             const unitPriced = item.type === "Service" && item.priceModel === "Per unit";
             const unitLabel = servicePriceUnitLabel(item);

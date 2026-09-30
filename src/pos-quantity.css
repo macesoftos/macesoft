@@ -572,9 +572,12 @@
   padding: 14px 18px;
 }
 
-.pos-checkout-panel .cart-list > .empty-state:only-child {
+.pos-checkout-panel .cart-list.is-empty {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.pos-checkout-panel .cart-list.is-empty > .empty-state {
   min-height: 0;
-  height: 100%;
   align-content: center;
   padding: 24px 12px;
 }
