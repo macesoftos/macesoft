@@ -232,6 +232,58 @@ try {
     const deletedMarketingImage = await jsonRequest("/api/marketing/media/permanent", { ids: [marketingAssetId] }, { method: "DELETE" });
     assert(deletedMarketingImage.response.ok && deletedMarketingImage.payload.count === 1, "marketing image was not permanently removed");
     await request(`/api/uploads/${encodeURIComponent(privateAssetId)}`, { method: "DELETE", headers: ownerHeaders });
+
+    const flipbookBranch = bootstrap.payload.branches.find((branch) => branch.name === "Mace Davao");
+    assert(flipbookBranch?.id, "flipbook upload smoke test could not find Mace Davao");
+    const flipbookAccessHeaders = { ...ownerHeaders, "X-Mace-Branch-Id": flipbookBranch.id };
+    const flipbookUploadHeaders = (title) => ({
+      ...flipbookAccessHeaders,
+      "Content-Type": "application/pdf",
+      "X-Flipbook-Title": encodeURIComponent(title),
+      "X-Flipbook-Description": encodeURIComponent("Synthetic release verification with no client data."),
+      "X-Flipbook-Pages": "1",
+    });
+    const validFlipbookPdf = Buffer.from("%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF");
+    const invalidFlipbook = await request("/api/flipbooks", {
+      method: "POST",
+      headers: flipbookUploadHeaders("Invalid Flipbook Smoke"),
+      body: Buffer.from("not a pdf"),
+    });
+    assert(invalidFlipbook.response.status === 415 && /valid PDF/i.test(invalidFlipbook.payload?.error || ""), "invalid flipbook PDF was not rejected clearly");
+    const damagedFlipbook = await request("/api/flipbooks", {
+      method: "POST",
+      headers: flipbookUploadHeaders("Damaged Flipbook Smoke"),
+      body: Buffer.from("%PDF-1.7\nmissing completion marker"),
+    });
+    assert(damagedFlipbook.response.status === 415 && /incomplete or damaged/i.test(damagedFlipbook.payload?.error || ""), "damaged flipbook PDF was not rejected clearly");
+    const storageFailureFlipbook = await request("/api/flipbooks", {
+      method: "POST",
+      headers: flipbookUploadHeaders("Storage Failure Flipbook Smoke"),
+      body: Buffer.from("%PDF-1.7\n% MACE_STORAGE_FAILURE_SMOKE\n%%EOF"),
+    });
+    assert(storageFailureFlipbook.response.status === 502 && /storage rejected/i.test(storageFailureFlipbook.payload?.error || ""), "flipbook storage failure was not reported clearly");
+    assert(await prisma.flipbook.count({ where: { title: "Storage Failure Flipbook Smoke" } }) === 0, "failed flipbook storage created a database record");
+
+    const createdFlipbook = await request("/api/flipbooks", {
+      method: "POST",
+      headers: flipbookUploadHeaders("Release Flipbook Smoke"),
+      body: validFlipbookPdf,
+    });
+    assert(createdFlipbook.response.status === 201, `flipbook PDF upload failed (${createdFlipbook.response.status}: ${createdFlipbook.payload?.error || "unknown error"})`);
+    const flipbookId = createdFlipbook.payload.flipbook.id;
+    assert(createdFlipbook.payload.flipbook.status === "Draft" && createdFlipbook.payload.flipbook.pageCount === 1, "uploaded flipbook metadata was not persisted");
+    const storedFlipbook = await prisma.flipbook.findUnique({ where: { id: flipbookId }, include: { asset: true } });
+    assert(storedFlipbook?.asset?.objectPath.startsWith("flipbook-pdf/"), "uploaded flipbook was not linked to object storage");
+    const listedFlipbooks = await request("/api/flipbooks", { headers: flipbookAccessHeaders });
+    assert(listedFlipbooks.response.ok && listedFlipbooks.payload.flipbooks.some((book) => book.id === flipbookId), "uploaded flipbook did not survive a fresh list request");
+    const storedFlipbookFile = await fetch(`${baseUrl}/api/flipbooks/${encodeURIComponent(flipbookId)}/file`, { headers: flipbookAccessHeaders });
+    assert(storedFlipbookFile.status === 200 && storedFlipbookFile.headers.get("content-type") === "application/pdf", "stored flipbook PDF was not retrievable");
+    assert(Buffer.from(await storedFlipbookFile.arrayBuffer()).equals(validFlipbookPdf), "retrieved flipbook PDF differed from the uploaded file");
+    const movedFlipbook = await request(`/api/flipbooks/${encodeURIComponent(flipbookId)}`, { method: "DELETE", headers: flipbookAccessHeaders });
+    assert(movedFlipbook.response.ok && movedFlipbook.payload.flipbook.deletedAt, "flipbook could not be moved to Deleted");
+    const permanentlyDeletedFlipbook = await request(`/api/flipbooks/${encodeURIComponent(flipbookId)}/permanent`, { method: "DELETE", headers: flipbookAccessHeaders });
+    assert(permanentlyDeletedFlipbook.response.status === 204, "flipbook PDF was not removed from storage");
+    assert(await prisma.uploadAsset.count({ where: { id: storedFlipbook.assetId } }) === 0, "permanently deleted flipbook left its storage record behind");
   }
 
   const unauthorized = await request("/api/resources/clients", {

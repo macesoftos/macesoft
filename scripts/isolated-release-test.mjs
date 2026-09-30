@@ -25,7 +25,12 @@ const isolatedStorageServer = createServer((request, response) => {
     const chunks = [];
     request.on("data", (chunk) => chunks.push(chunk));
     request.on("end", () => {
-      isolatedStorageObjects.set(key, { body: Buffer.concat(chunks), contentType: request.headers["content-type"] || "application/octet-stream" });
+      const body = Buffer.concat(chunks);
+      if (body.includes(Buffer.from("MACE_STORAGE_FAILURE_SMOKE"))) {
+        response.writeHead(503, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Synthetic storage outage" }));
+        return;
+      }
+      isolatedStorageObjects.set(key, { body, contentType: request.headers["content-type"] || "application/octet-stream" });
       response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ Key: key }));
     });
     return;
