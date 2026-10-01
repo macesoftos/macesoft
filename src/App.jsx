@@ -2135,6 +2135,7 @@ function App() {
       duration: Number(values.duration || service?.duration || 60),
       appointmentType: values.appointmentType || "Treatment",
       bookingSource: values.bookingSource || "Staff entry",
+      contactMobile: values.contactMobile || "",
       insurance: values.insurance || "",
       tags: values.tags || "",
       packageName: values.packageName || "",
@@ -2176,7 +2177,7 @@ function App() {
     }
   }
 
-  async function saveClient(values, { keepModal = false } = {}) {
+  async function saveClient(values) {
     const isExisting = Boolean(values.id);
     const fullName = [values.firstName, values.middleName, values.lastName].filter(Boolean).join(" ").trim() || values.fullName;
     const address = [values.street, values.barangay, values.city, values.province].filter(Boolean).join(", ") || values.address;
@@ -2198,9 +2199,8 @@ function App() {
     upsertById(setClients, result.record);
     setSelectedClientId(result.record.id);
     applyAuditLog(result.auditLog);
-    if (!keepModal) closeModal();
+    closeModal();
     notify(isExisting ? "Client updated." : "Client added.");
-    return result.record;
   }
 
   async function importClients(records, options = {}) {
@@ -10046,7 +10046,7 @@ function AppointmentDetailsDrawer({
             <summary><span><PhoneCall size={17} /><span><strong>Patient information</strong><small>Contact details</small></span></span><ChevronDown size={17} /></summary>
             <div className="appointment-disclosure-content">
               <div className="appointment-detail-rows">
-                <AppointmentDetailRow label="Mobile number" value={client?.mobile || "Not recorded"} />
+                <AppointmentDetailRow label="Mobile number" value={appointment.contactMobile || client?.mobile || "Not recorded"} />
                 <AppointmentDetailRow label="Email address" value={client?.email || "Not recorded"} />
               </div>
               <details className="appointment-more-details">
@@ -14928,7 +14928,6 @@ function ModalHost({
         packages={packages}
         onClose={closeModal}
         onSubmit={saveAppointment}
-        onCreateClient={(values) => saveClient(values, { keepModal: true })}
       />
     );
   }
@@ -16211,11 +16210,13 @@ function field(name, label, type = "text", options = null, className = "", requi
   return { name, label, type, options, className, required };
 }
 
-function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit, onCreateClient }) {
+function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit }) {
   const [form, setForm] = useState({
     date: todayDate(),
     time: "",
     clientId: "",
+    clientName: payload?.client || "",
+    contactMobile: clients.find((client) => client.id === payload?.clientId)?.mobile || "",
     serviceId: "",
     branch: branchScope !== "All branches" ? branchScope : "",
     room: "",
@@ -16238,10 +16239,10 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showTimezoneSelect, setShowTimezoneSelect] = useState(false);
-  const [showNewClient, setShowNewClient] = useState(false);
-  const [newClient, setNewClient] = useState({ fullName: "", mobile: "" });
-  const [addingClient, setAddingClient] = useState(false);
-  const [newClientError, setNewClientError] = useState("");
+  const [clientEntry, setClientEntry] = useState(() => {
+    const client = clients.find((item) => item.id === payload?.clientId);
+    return client ? `${client.fullName}${client.mobile ? ` · ${client.mobile}` : ""}` : payload?.clientName || payload?.client || "";
+  });
   const selectedService = services.find((item) => item.id === form.serviceId);
   const selectedBranch = branches.find((item) => item.name === form.branch);
   const availableClients = clients;
@@ -16303,11 +16304,25 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
     }));
   }
 
+  function updateClientEntry(value) {
+    setClientEntry(value);
+    const exact = availableClients.find((client) => `${client.fullName}${client.mobile ? ` · ${client.mobile}` : ""}` === value);
+    const nameMatches = availableClients.filter((client) => normalize(client.fullName) === normalize(value));
+    const match = exact || (nameMatches.length === 1 ? nameMatches[0] : null);
+    setForm((current) => ({
+      ...current,
+      clientId: match?.id || "",
+      clientName: match?.fullName || value.trim(),
+      contactMobile: match?.mobile ?? (current.clientId ? "" : current.contactMobile),
+    }));
+  }
+
   async function submit(event, status = form.status) {
     event.preventDefault();
-    const required = [["clientId", "Client"], ["serviceId", "Service"], ["date", "Date"], ["time", "Time"], ["branch", "Branch"], ["staff", "Staff"], ["room", "Room"]];
+    const required = [["clientName", "Client name"], ["serviceId", "Service"], ["date", "Date"], ["time", "Time"], ["branch", "Branch"], ["staff", "Staff"], ["room", "Room"]];
     const missing = required.find(([name]) => !form[name]);
     if (missing) return setError(`${missing[1]} is required.`);
+    if (form.bookingSource === "Phone call" && !form.contactMobile.trim()) return setError("Enter the caller's mobile number for a phone booking.");
     const start = parseTimeToMinutes(form.time);
     const selectedStaff = form.staff === "Any available"
       ? availableStaff.find((person) => staffIsFree(person, start))?.name
@@ -16321,24 +16336,6 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
     catch (submitError) { setError(submitError?.message || "Unable to save this appointment."); setSaving(false); }
   }
 
-  async function addPhoneClient() {
-    if (!form.branch) return setNewClientError("Select a branch before adding the caller.");
-    if (!newClient.fullName.trim() || !newClient.mobile.trim()) return setNewClientError("Enter the caller's name and mobile number.");
-    setAddingClient(true);
-    setNewClientError("");
-    try {
-      const client = await onCreateClient({ fullName: newClient.fullName.trim(), mobile: newClient.mobile.trim(), branch: form.branch, source: "Phone call" });
-      update("clientId", client.id);
-      setShowNewClient(false);
-      setNewClient({ fullName: "", mobile: "" });
-      update("bookingSource", "Phone call");
-    } catch (clientError) {
-      setNewClientError(clientError?.message || "Unable to add the caller.");
-    } finally {
-      setAddingClient(false);
-    }
-  }
-
   return (
     <div className="modal-backdrop appointment-modal-backdrop" role="dialog" aria-modal="true" aria-label={payload?.id ? "Edit appointment" : "New appointment"}>
       <form className="appointment-booking-drawer" onSubmit={(event) => submit(event, "Pending Confirmation")}>
@@ -16349,12 +16346,11 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
         <div className="appointment-booking-body">
           {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
           <section className="booking-form-section"><div className="booking-step">1</div><div className="booking-section-content"><h3>Client and service</h3>
-            <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">{form.branch ? "Search or select a client" : "Select a branch first"}</option>{availableClients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
-            <button className="booking-add-client-toggle" type="button" onClick={() => setShowNewClient((current) => !current)}>{showNewClient ? "Cancel new client" : "Phone booking from a new client? Add caller"}</button>
-            {showNewClient && <div className="booking-add-client"><div className="booking-two-column"><label className="stacked-field"><span>Caller name <RequiredMark /></span><input value={newClient.fullName} onChange={(event) => setNewClient((current) => ({ ...current, fullName: event.target.value }))} /></label><label className="stacked-field"><span>Mobile number <RequiredMark /></span><input type="tel" value={newClient.mobile} onChange={(event) => setNewClient((current) => ({ ...current, mobile: event.target.value }))} /></label></div>{newClientError && <small className="field-error">{newClientError}</small>}<button className="secondary-button" type="button" disabled={addingClient} onClick={addPhoneClient}>{addingClient ? "Adding caller..." : "Add caller to clients"}</button></div>}
+            <label className="stacked-field"><span>Client name <RequiredMark /></span><input aria-label="Client name, required" list="appointment-client-options" autoComplete="off" value={clientEntry} onChange={(event) => updateClientEntry(event.target.value)} placeholder="Type a name or choose an existing client" /><datalist id="appointment-client-options">{availableClients.map((client) => <option key={client.id} value={`${client.fullName}${client.mobile ? ` · ${client.mobile}` : ""}`} />)}</datalist><small>Type a new caller's name directly, or choose an existing client from the suggestions.</small></label>
+            <label className="stacked-field"><span>Mobile number</span><input aria-label="Client mobile number" type="tel" value={form.contactMobile} onChange={(event) => update("contactMobile", event.target.value)} placeholder="Required for phone bookings" /></label>
             <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">{form.branch ? "Select a service" : "Select a branch first"}</option>{availableServices.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
             <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
-            <label className="stacked-field"><span>Booking source</span><select value={form.bookingSource} onChange={(event) => update("bookingSource", event.target.value)}>{["Staff entry", "Phone call", "At reception", "Online booking", "Other"].map((source) => <option key={source}>{source}</option>)}</select><small>For a phone booking, select the caller above and choose Phone call.</small></label>
+            <label className="stacked-field"><span>Booking source</span><select value={form.bookingSource} onChange={(event) => update("bookingSource", event.target.value)}>{["Staff entry", "Phone call", "At reception", "Online booking", "Other"].map((source) => <option key={source}>{source}</option>)}</select><small>Choose Phone call when this appointment was booked over the phone.</small></label>
             {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{servicePriceLabel(selectedService)}</strong></div>}
             {patientPackages.length > 0 && <label className="stacked-field"><span>Package / membership</span><select value={form.packageName} onChange={(event) => update("packageName", event.target.value)}><option value="">Pay per visit</option>{patientPackages.map((item) => <option value={item.name} key={item.id}>{item.name} · {item.remaining ?? item.balance ?? 0} remaining</option>)}</select></label>}
           </div></section>

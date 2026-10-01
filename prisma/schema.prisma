@@ -612,6 +612,7 @@ model Appointment {
   duration         Int            @default(0)
   appointmentType  String         @default("Treatment")
   bookingSource    String         @default("Staff entry")
+  contactMobile    String         @default("")
   insurance        String         @default("")
   tags             String         @default("")
   packageName      String         @default("")

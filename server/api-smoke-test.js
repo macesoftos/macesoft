@@ -297,6 +297,7 @@ try {
   const clientId = `cl-smoke-${suffix}`;
   const bgcClientId = `cl-smoke-bgc-${suffix}`;
   const appointmentId = `ap-smoke-${suffix}`;
+  const phoneAppointmentId = `ap-phone-smoke-${suffix}`;
   const treatmentId = `tr-smoke-${suffix}`;
   const serviceId = `svc-smoke-${suffix}`;
   const variablePriceServiceId = `svc-variable-${suffix}`;
@@ -753,6 +754,26 @@ try {
     appointment.response.status === 201,
     `appointment create failed (${appointment.response.status}: ${appointment.payload?.error || "unknown error"})`,
   );
+
+  const phoneAppointment = await jsonRequest("/api/resources/appointments", {
+    id: phoneAppointmentId,
+    date: appointmentDate,
+    time: "14:30",
+    client: `Phone Caller ${suffix}`,
+    contactMobile: "09171234567",
+    bookingSource: "Phone call",
+    serviceId,
+    branch: "Mace Davao",
+    room: "Room 1",
+    staff: "Dr. Mace",
+    status: "Pending",
+    deposit: 0,
+  });
+  assert(phoneAppointment.response.status === 201, `manual phone appointment create failed (${phoneAppointment.response.status}: ${phoneAppointment.payload?.error || "unknown error"})`);
+  assert(phoneAppointment.payload.record.client === `Phone Caller ${suffix}`, "manual caller name was not saved");
+  assert(phoneAppointment.payload.record.clientId == null, "manual caller was unexpectedly linked to a client profile");
+  assert(phoneAppointment.payload.record.contactMobile === "09171234567", "manual caller mobile was not saved");
+  assert(phoneAppointment.payload.record.bookingSource === "Phone call", "phone booking source was not saved");
 
   const conflict = await jsonRequest("/api/resources/appointments", {
     id: `ap-conflict-${suffix}`,
@@ -1498,6 +1519,10 @@ try {
   });
 
   await request(`/api/resources/appointments/${appointmentId}`, {
+    method: "DELETE",
+    headers: ownerHeaders,
+  });
+  await request(`/api/resources/appointments/${phoneAppointmentId}`, {
     method: "DELETE",
     headers: ownerHeaders,
   });

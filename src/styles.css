@@ -2296,9 +2296,6 @@ img { max-width: 100%; }
 .booking-step { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent, #71513b); color: #fff; font-size: 13px; font-weight: 800; }
 .booking-section-content { display: grid; gap: 12px; min-width: 0; }
 .booking-section-content h3 { margin: 3px 0 2px; font-size: 16px; }
-.booking-add-client-toggle { justify-self: start; padding: 0; border: 0; background: transparent; color: var(--accent, #71513b); font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
-.booking-add-client { display: grid; gap: 10px; padding: 12px; border: 1px solid #e3d8cb; border-radius: 8px; background: #faf7f3; }
-.booking-add-client > button { justify-self: start; }
 .booking-two-column { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 14px; }
 .booking-service-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 .booking-two-column label:last-child:nth-child(3) { grid-column: 1 / -1; }
