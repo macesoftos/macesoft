@@ -103,8 +103,8 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await createTrigger.click();
   await newAppointmentAction.click();
   await expect(page.getByRole("dialog", { name: "New appointment" })).toBeVisible();
-  await page.getByRole("textbox", { name: "Client name, required" }).fill("Phone Caller Test");
-  await expect(page.getByRole("textbox", { name: "Client name, required" })).toHaveValue("Phone Caller Test");
+  await page.getByLabel("Client name, required").fill("Phone Caller Test");
+  await expect(page.getByLabel("Client name, required")).toHaveValue("Phone Caller Test");
   await page.getByRole("textbox", { name: "Client mobile number" }).fill("09171234567");
   await page.getByLabel("Booking source").selectOption("Phone call");
   await expect(page.getByLabel("Staff, required").locator("option", { hasText: "First available" })).toHaveCount(1);
