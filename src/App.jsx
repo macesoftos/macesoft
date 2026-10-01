@@ -76,6 +76,7 @@ import {
 } from "./data";
 import { canManageOrganization, isAdmin, isBusinessOwner } from "./organizationRoles.js";
 import { eligiblePosProviders, isClockedInAtBranch } from "./lib/posProviders.js";
+import { groupTodayPosVisits } from "./lib/posVisits.js";
 import { navItems, navSections } from "./config/sidebar.jsx";
 import { getGlobalCreateActions } from "./config/globalActions.js";
 import GlobalCreateMenu from "./components/GlobalCreateMenu.jsx";
@@ -576,7 +577,7 @@ function appointmentDateInRange(appointment, { from, to }) {
 }
 
 function transactionMatchesAppointment(transaction, appointment) {
-  if (transaction.status === "Void") return false;
+  if (transaction.status === "Void" || transaction.testMode) return false;
   const linkedAppointmentIds = Array.isArray(transaction.appointmentIds) ? transaction.appointmentIds : [];
   if (linkedAppointmentIds.length || transaction.appointmentId) {
     return linkedAppointmentIds.includes(appointment.id) || transaction.appointmentId === appointment.id;
@@ -2133,6 +2134,7 @@ function App() {
       staff: values.staff,
       duration: Number(values.duration || service?.duration || 60),
       appointmentType: values.appointmentType || "Treatment",
+      bookingSource: values.bookingSource || "Staff entry",
       insurance: values.insurance || "",
       tags: values.tags || "",
       packageName: values.packageName || "",
@@ -2174,7 +2176,7 @@ function App() {
     }
   }
 
-  async function saveClient(values) {
+  async function saveClient(values, { keepModal = false } = {}) {
     const isExisting = Boolean(values.id);
     const fullName = [values.firstName, values.middleName, values.lastName].filter(Boolean).join(" ").trim() || values.fullName;
     const address = [values.street, values.barangay, values.city, values.province].filter(Boolean).join(", ") || values.address;
@@ -2196,8 +2198,9 @@ function App() {
     upsertById(setClients, result.record);
     setSelectedClientId(result.record.id);
     applyAuditLog(result.auditLog);
-    closeModal();
+    if (!keepModal) closeModal();
     notify(isExisting ? "Client updated." : "Client added.");
+    return result.record;
   }
 
   async function importClients(records, options = {}) {
@@ -6323,28 +6326,28 @@ function POSModule({
     [branch, staff],
   );
   const todaysVisitCards = useMemo(() => {
-    const seen = new Set();
-    return appointments
-      .filter((appointment) => appointment.date === todayDate() && appointment.branch === branch)
+    const activeAppointments = appointments
       .filter((appointment) => !["Cancelled", "No Show"].includes(canonicalAppointmentStatus(appointment.status)))
-      .sort((left, right) => parseTimeToMinutes(left.time) - parseTimeToMinutes(right.time))
-      .reduce((cards, appointment) => {
-        const key = `${appointment.clientId || normalize(appointment.client)}|${appointment.date}|${appointment.branch}`;
-        if (seen.has(key)) return cards;
-        seen.add(key);
-        const visitAppointments = appointmentsForVisit(appointment, appointments);
-        const unpaidAppointments = visitAppointments.filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
-        cards.push({
-          key,
-          appointment,
-          appointments: visitAppointments,
-          unpaidAppointments,
-          checkedOut: unpaidAppointments.length === 0,
-        });
-        return cards;
-      }, []);
+      .sort((left, right) => parseTimeToMinutes(left.time) - parseTimeToMinutes(right.time));
+    return groupTodayPosVisits(activeAppointments, transactions, todayDate(), branch)
+      .map((visit) => {
+        const unpaidAppointments = visit.appointments.filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
+        return { ...visit, unpaidAppointments, checkedOut: visit.appointments.length > 0 && unpaidAppointments.length === 0 };
+      });
   }, [appointments, branch, services, transactions]);
   const selectedVisit = todaysVisitCards.find((visit) => visit.key === selectedVisitKey) || todaysVisitCards[0] || null;
+  const visitStatus = (visit) => visit.appointment
+    ? (visit.checkedOut ? "Paid" : canonicalAppointmentStatus(visit.appointment.status))
+    : (visit.transactions[0]?.testMode ? "Test" : visit.transactions[0]?.status || "Paid");
+  const visitRooms = (visit) => [...new Set([...visit.appointments, ...visit.transactions].map((item) => item.room).filter(Boolean))].join(", ") || "Room not assigned";
+  const visitTime = (visit) => {
+    const time = visit.appointment?.time || visit.transactions[0]?.time;
+    return time ? formatScheduleTime(parseTimeToMinutes(time)) : "Time not recorded";
+  };
+  const visitActivity = (visit) => [
+    visit.appointments.length ? `${visit.appointments.length} booked service${visit.appointments.length === 1 ? "" : "s"}` : "",
+    visit.transactions.length ? `${visit.transactions.length} POS transaction${visit.transactions.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" · ");
   const clientCredits = useMemo(() => packages.filter((pkg) => {
     if (!clientId || (pkg.clientId !== clientId && normalize(pkg.client) !== normalize(client?.fullName))) return false;
     return pkg.status === "Active" && Number(pkg.used || 0) < Number(pkg.sessions || 0) && (!pkg.expires || pkg.expires >= todayDate());
@@ -6875,24 +6878,34 @@ function POSModule({
               <div className="pos-visit-card-list" role="list" aria-label="Today's client visits">
                 {todaysVisitCards.map((visit) => (
                   <button className={`pos-visit-card${selectedVisit?.key === visit.key ? " selected" : ""}`} type="button" key={visit.key} onClick={() => setSelectedVisitKey(visit.key)}>
-                    <span><strong>{visit.appointment.client}</strong><StatusBadge status={visit.checkedOut ? "Paid" : canonicalAppointmentStatus(visit.appointment.status)} /></span>
-                    <small><Clock size={14} /> {formatScheduleTime(parseTimeToMinutes(visit.appointment.time))} · {visit.appointments.length} service{visit.appointments.length === 1 ? "" : "s"}</small>
-                    <small><Home size={14} /> {visit.appointments.map((item) => item.room).filter(Boolean).join(", ") || "Room not assigned"}</small>
+                    <span><strong>{visit.client}</strong><StatusBadge status={visitStatus(visit)} /></span>
+                    <small><Clock size={14} /> {visitTime(visit)} · {visitActivity(visit)}</small>
+                    <small><Home size={14} /> {visitRooms(visit)}</small>
                   </button>
                 ))}
-                {!todaysVisitCards.length && <EmptyState title="No active visits today" copy="Use Walk-in sale for an unscheduled client." />}
+                {!todaysVisitCards.length && <EmptyState title="No visits or POS transactions today" copy="Use Walk-in sale for an unscheduled client." />}
               </div>
               {selectedVisit && (
                 <aside className="pos-visit-detail">
-                  <div className="pos-visit-detail-header"><div><span className="eyebrow">Visit checkout</span><h3>{selectedVisit.appointment.client}</h3></div><StatusBadge status={selectedVisit.checkedOut ? "Paid" : canonicalAppointmentStatus(selectedVisit.appointment.status)} /></div>
-                  <div className="pos-visit-meta"><span><Home size={15} /> {selectedVisit.appointments.map((item) => item.room).filter(Boolean).join(", ") || "Room not assigned"}</span><span><Clock size={15} /> Arrival {selectedVisit.appointment.arrivalTime || selectedVisit.appointment.time}</span></div>
+                  <div className="pos-visit-detail-header"><div><span className="eyebrow">Visit and POS activity</span><h3>{selectedVisit.client}</h3></div><StatusBadge status={visitStatus(selectedVisit)} /></div>
+                  <div className="pos-visit-meta"><span><Home size={15} /> {visitRooms(selectedVisit)}</span><span><Clock size={15} /> {selectedVisit.appointment ? `Arrival ${selectedVisit.appointment.arrivalTime || selectedVisit.appointment.time}` : `POS ${visitTime(selectedVisit)}`}</span></div>
                   <div className="pos-visit-services">
                     {selectedVisit.appointments.map((appointment) => {
                       const payment = appointmentPaymentSummary(appointment, services, transactions);
                       return <article key={appointment.id}><div><strong>{appointment.service}</strong><span>{appointment.staff || "Provider unassigned"}</span></div><div><b>{money.format(payment.due)}</b><small>{payment.status}</small></div></article>;
                     })}
+                    {selectedVisit.transactions.map((transaction) => (
+                      <article key={transaction.id}>
+                        <div>
+                          <strong>{transaction.invoice || "POS transaction"}</strong>
+                          <span>{(transaction.items || []).map((item) => `${item.name}${Number(item.qty || 1) > 1 ? ` × ${item.qty}` : ""}`).join(", ") || "POS sale"}</span>
+                          <small>{transaction.testMode ? "Test transaction" : transaction.status || "Recorded"} · {transaction.time || "Time not recorded"}</small>
+                        </div>
+                        <div><b>{money.format(transaction.total || 0)}</b><button type="button" className="pos-visit-receipt-button" onClick={() => onPrintReceipt(transaction)}><Printer size={14} /> Receipt</button></div>
+                      </article>
+                    ))}
                   </div>
-                  <button className="primary-button full" type="button" disabled={selectedVisit.checkedOut} onClick={() => loadVisitCheckout(selectedVisit)}><ReceiptText size={17} /> {selectedVisit.checkedOut ? "Visit checked out" : "Proceed to checkout"}</button>
+                  {selectedVisit.appointment && <button className="primary-button full" type="button" disabled={selectedVisit.checkedOut} onClick={() => loadVisitCheckout(selectedVisit)}><ReceiptText size={17} /> {selectedVisit.checkedOut ? "Visit checked out" : "Proceed to checkout"}</button>}
                 </aside>
               )}
             </div>
@@ -10041,6 +10054,7 @@ function AppointmentDetailsDrawer({
                 <div className="appointment-detail-rows">
                   <AppointmentDetailRow label="Birthday" value={client?.birthday || client?.dob || "Not recorded"} />
                   <AppointmentDetailRow label="Patient type" value={appointment.appointmentType} />
+                  <AppointmentDetailRow label="Booking source" value={appointment.bookingSource || "Staff entry"} />
                   <AppointmentDetailRow label="Timezone" value={appointment.timezone} />
                   <AppointmentDetailRow label="Insurance" value={appointment.insurance} />
                   <AppointmentDetailRow label="Tags" value={appointment.tags || client?.tag} />
@@ -14914,6 +14928,7 @@ function ModalHost({
         packages={packages}
         onClose={closeModal}
         onSubmit={saveAppointment}
+        onCreateClient={(values) => saveClient(values, { keepModal: true })}
       />
     );
   }
@@ -16196,7 +16211,7 @@ function field(name, label, type = "text", options = null, className = "", requi
   return { name, label, type, options, className, required };
 }
 
-function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit }) {
+function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit, onCreateClient }) {
   const [form, setForm] = useState({
     date: todayDate(),
     time: "",
@@ -16207,6 +16222,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
     staff: "",
     duration: 60,
     appointmentType: "Treatment",
+    bookingSource: "Staff entry",
     insurance: "",
     tags: "",
     packageName: "",
@@ -16222,6 +16238,10 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showTimezoneSelect, setShowTimezoneSelect] = useState(false);
+  const [showNewClient, setShowNewClient] = useState(false);
+  const [newClient, setNewClient] = useState({ fullName: "", mobile: "" });
+  const [addingClient, setAddingClient] = useState(false);
+  const [newClientError, setNewClientError] = useState("");
   const selectedService = services.find((item) => item.id === form.serviceId);
   const selectedBranch = branches.find((item) => item.name === form.branch);
   const availableClients = clients;
@@ -16233,16 +16253,24 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
     ...(selectedBranch?.rooms || uniqueRoomsFromBranches()),
     ...Array.from({ length: Number(selectedBranch?.couches || 0) }, (_, index) => `Couch ${index + 1}`),
   ];
-  const availableStaff = staff.filter((person) => {
+  const availableStaff = useMemo(() => staff.filter((person) => {
     const assignedBranches = Array.isArray(person.branches) ? person.branches : splitList(person.branches);
     const assignedToBranch = person.branch === form.branch || assignedBranches.includes(form.branch) || person.branch === "All branches" || !person.branch;
-    if (!assignedToBranch || person.status === "Inactive") return false;
-    if (form.date === todayDate()) return person.clockedIn && person.attendanceBranch === form.branch;
-    return true;
-  });
+    if (!assignedToBranch || ["inactive", "on leave", "off duty", "unavailable"].some((status) => String(person.status || "").toLowerCase().includes(status))) return false;
+    const allowedRoles = splitList(selectedService?.staff);
+    return !allowedRoles.length || allowedRoles.includes("All staff") || allowedRoles.includes(person.role);
+  }), [form.branch, selectedService?.staff, staff]);
   const patient = clients.find((client) => client.id === form.clientId);
   const patientPackages = packages.filter((item) => item.clientId === form.clientId || item.client === patient?.fullName);
   const duration = Math.max(15, Number(form.duration || selectedService?.duration || 60));
+  const staffIsFree = useCallback((person, start) => {
+    const end = start + duration;
+    return !appointments.some((appointment) => {
+      if (appointment.id === form.id || appointment.date !== form.date || appointment.branch !== form.branch || !isActiveAppointmentStatus(appointment.status) || appointment.staff !== person.name) return false;
+      const appointmentStart = parseTimeToMinutes(appointment.time);
+      return start < appointmentStart + appointmentDurationMinutes(appointment, services) && end > appointmentStart;
+    });
+  }, [appointments, duration, form.branch, form.date, form.id, services]);
   const availableSlots = useMemo(() => {
     if (!form.date) return [];
     const operatingWindow = branchOperatingWindow(selectedBranch, form.date);
@@ -16250,26 +16278,28 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
     const slots = [];
     for (let start = operatingWindow.open; start + duration <= operatingWindow.close; start += 15) {
       const end = start + duration;
-      const conflicts = appointments.some((appointment) => {
+      const roomConflict = appointments.some((appointment) => {
         if (appointment.id === form.id || appointment.date !== form.date || !isActiveAppointmentStatus(appointment.status)) return false;
         if (form.branch && appointment.branch !== form.branch) return false;
-        const resourceConflict = (form.staff && appointment.staff === form.staff) || (form.room && appointment.room === form.room);
-        if (!resourceConflict) return false;
+        if (!form.room || appointment.room !== form.room) return false;
         const appointmentStart = parseTimeToMinutes(appointment.time);
         const appointmentEnd = appointmentStart + appointmentDurationMinutes(appointment, services);
         return start < appointmentEnd && end > appointmentStart;
       });
-      if (!conflicts) slots.push(formatTimeInput(start));
+      const staffAvailable = form.staff === "Any available"
+        ? availableStaff.some((person) => staffIsFree(person, start))
+        : availableStaff.some((person) => person.name === form.staff && staffIsFree(person, start));
+      if (!roomConflict && staffAvailable) slots.push(formatTimeInput(start));
     }
     return slots;
-  }, [appointments, duration, form.branch, form.date, form.id, form.room, form.staff, selectedBranch, services]);
+  }, [appointments, availableStaff, duration, form.branch, form.date, form.id, form.room, form.staff, selectedBranch, services, staffIsFree]);
 
   function update(name, value) {
     setForm((current) => ({
       ...current,
       [name]: value,
       ...(name === "branch" ? { room: "", staff: "", packageName: "" } : {}),
-      ...(name === "serviceId" ? { duration: Number(services.find((item) => item.id === value)?.duration || current.duration || 60) } : {}),
+      ...(name === "serviceId" ? { duration: Number(services.find((item) => item.id === value)?.duration || current.duration || 60), staff: "" } : {}),
     }));
   }
 
@@ -16278,10 +16308,35 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
     const required = [["clientId", "Client"], ["serviceId", "Service"], ["date", "Date"], ["time", "Time"], ["branch", "Branch"], ["staff", "Staff"], ["room", "Room"]];
     const missing = required.find(([name]) => !form[name]);
     if (missing) return setError(`${missing[1]} is required.`);
+    const start = parseTimeToMinutes(form.time);
+    const selectedStaff = form.staff === "Any available"
+      ? availableStaff.find((person) => staffIsFree(person, start))?.name
+      : form.staff;
+    if (!selectedStaff) return setError("No staff is available at this time. Choose another time or branch.");
+    const staffMember = availableStaff.find((person) => person.name === selectedStaff);
+    if (!staffMember || !staffIsFree(staffMember, start)) return setError("Selected staff is unavailable at this time. Choose another staff member or time.");
     setSaving(true);
     setError("");
-    try { await Promise.resolve(onSubmit({ ...form, status })); }
+    try { await Promise.resolve(onSubmit({ ...form, staff: selectedStaff, status })); }
     catch (submitError) { setError(submitError?.message || "Unable to save this appointment."); setSaving(false); }
+  }
+
+  async function addPhoneClient() {
+    if (!form.branch) return setNewClientError("Select a branch before adding the caller.");
+    if (!newClient.fullName.trim() || !newClient.mobile.trim()) return setNewClientError("Enter the caller's name and mobile number.");
+    setAddingClient(true);
+    setNewClientError("");
+    try {
+      const client = await onCreateClient({ fullName: newClient.fullName.trim(), mobile: newClient.mobile.trim(), branch: form.branch, source: "Phone call" });
+      update("clientId", client.id);
+      setShowNewClient(false);
+      setNewClient({ fullName: "", mobile: "" });
+      update("bookingSource", "Phone call");
+    } catch (clientError) {
+      setNewClientError(clientError?.message || "Unable to add the caller.");
+    } finally {
+      setAddingClient(false);
+    }
   }
 
   return (
@@ -16295,8 +16350,11 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
           {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
           <section className="booking-form-section"><div className="booking-step">1</div><div className="booking-section-content"><h3>Client and service</h3>
             <label className="stacked-field"><span>Client <RequiredMark /></span><select aria-label="Client, required" value={form.clientId} onChange={(event) => update("clientId", event.target.value)}><option value="">{form.branch ? "Search or select a client" : "Select a branch first"}</option>{availableClients.map((client) => <option value={client.id} key={client.id}>{client.fullName}{client.mobile ? ` · ${client.mobile}` : ""}</option>)}</select></label>
+            <button className="booking-add-client-toggle" type="button" onClick={() => setShowNewClient((current) => !current)}>{showNewClient ? "Cancel new client" : "Phone booking from a new client? Add caller"}</button>
+            {showNewClient && <div className="booking-add-client"><div className="booking-two-column"><label className="stacked-field"><span>Caller name <RequiredMark /></span><input value={newClient.fullName} onChange={(event) => setNewClient((current) => ({ ...current, fullName: event.target.value }))} /></label><label className="stacked-field"><span>Mobile number <RequiredMark /></span><input type="tel" value={newClient.mobile} onChange={(event) => setNewClient((current) => ({ ...current, mobile: event.target.value }))} /></label></div>{newClientError && <small className="field-error">{newClientError}</small>}<button className="secondary-button" type="button" disabled={addingClient} onClick={addPhoneClient}>{addingClient ? "Adding caller..." : "Add caller to clients"}</button></div>}
             <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">{form.branch ? "Select a service" : "Select a branch first"}</option>{availableServices.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
             <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
+            <label className="stacked-field"><span>Booking source</span><select value={form.bookingSource} onChange={(event) => update("bookingSource", event.target.value)}>{["Staff entry", "Phone call", "At reception", "Online booking", "Other"].map((source) => <option key={source}>{source}</option>)}</select><small>For a phone booking, select the caller above and choose Phone call.</small></label>
             {selectedService && <div className="service-selection-summary"><Clock size={16} /><span>{selectedService.duration || 60} minutes</span><strong>{servicePriceLabel(selectedService)}</strong></div>}
             {patientPackages.length > 0 && <label className="stacked-field"><span>Package / membership</span><select value={form.packageName} onChange={(event) => update("packageName", event.target.value)}><option value="">Pay per visit</option>{patientPackages.map((item) => <option value={item.name} key={item.id}>{item.name} · {item.remaining ?? item.balance ?? 0} remaining</option>)}</select></label>}
           </div></section>
@@ -16307,7 +16365,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
             <label className="stacked-field"><span>Branch <RequiredMark /></span><select aria-label="Branch, required" value={form.branch} onChange={(event) => update("branch", event.target.value)}><option value="" disabled>Select a branch</option>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select></label>
           </div><div className="booking-timezone-row"><span><strong>Timezone:</strong> {form.timezone === "Asia/Singapore" ? "Asia/Singapore (GMT+8)" : "Asia/Manila (GMT+8)"}</span><button type="button" onClick={() => setShowTimezoneSelect((current) => !current)}>{showTimezoneSelect ? "Done" : "Change"}</button>{showTimezoneSelect && <select aria-label="Timezone" value={form.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Manila">Asia/Manila (GMT+8)</option><option value="Asia/Singapore">Asia/Singapore (GMT+8)</option></select>}</div></div></section>
           <section className="booking-form-section"><div className="booking-step">3</div><div className="booking-section-content"><h3>Staff and room</h3><div className="booking-two-column">
-            <label className="stacked-field"><span>Staff <RequiredMark /></span><select aria-label="Staff, required" value={form.staff} onChange={(event) => update("staff", event.target.value)}><option value="">Select available staff</option>{availableStaff.map((person) => <option key={person.id || person.name}>{person.name}</option>)}</select></label>
+            <label className="stacked-field"><span>Staff <RequiredMark /></span><select aria-label="Staff, required" value={form.staff} onChange={(event) => update("staff", event.target.value)}><option value="">Choose staff</option><option value="Any available">First available</option>{availableStaff.map((person) => <option key={person.id || person.name} disabled={Boolean(form.time) && !staffIsFree(person, parseTimeToMinutes(form.time))}>{person.name}</option>)}</select></label>
             <label className="stacked-field"><span>Room <RequiredMark /></span><select aria-label="Room, required" value={form.room} onChange={(event) => update("room", event.target.value)}><option value="">Select a room</option>{availableRooms.map((room) => <option key={room}>{room}</option>)}</select></label>
           </div>{form.staff && form.room && <><div className="availability-note"><Check size={16} /> Available times account for branch hours, staff, rooms/couches, and existing appointments.</div><div className="appointment-slot-picker" aria-label="Available appointment times">{availableSlots.slice(0, 20).map((slot) => <button className={form.time === slot ? "selected" : ""} type="button" key={slot} onClick={() => update("time", slot)}>{formatScheduleTime(parseTimeToMinutes(slot))}</button>)}{!availableSlots.length && <span>No conflict-free slots for these resources.</span>}</div></>}</div></section>
           <section className="booking-form-section"><div className="booking-step">4</div><div className="booking-section-content"><h3>Payment and notes</h3>

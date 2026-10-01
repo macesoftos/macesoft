@@ -1669,6 +1669,22 @@
   text-align: right;
 }
 
+.pos-visit-receipt-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #70523c;
+  cursor: pointer;
+}
+
+.pos-visit-receipt-button:hover {
+  text-decoration: underline;
+}
+
 .pos-client-credit-summary {
   display: grid;
   gap: 8px;
