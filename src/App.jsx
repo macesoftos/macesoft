@@ -16212,6 +16212,7 @@ function field(name, label, type = "text", options = null, className = "", requi
 }
 
 function AppointmentModal({ payload, clients, services, branches, branchScope, staff, appointments = [], packages = [], onClose, onSubmit }) {
+  const clientOptionLabel = (client) => `${client.fullName} · ${client.mobile || client.email || `Client ${client.id.slice(-6)}`}`;
   const [form, setForm] = useState({
     date: todayDate(),
     time: "",
@@ -16242,7 +16243,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
   const [showTimezoneSelect, setShowTimezoneSelect] = useState(false);
   const [clientEntry, setClientEntry] = useState(() => {
     const client = clients.find((item) => item.id === payload?.clientId);
-    return client ? `${client.fullName}${client.mobile ? ` · ${client.mobile}` : ""}` : payload?.clientName || payload?.client || "";
+    return client ? clientOptionLabel(client) : payload?.clientName || payload?.client || "";
   });
   const selectedService = services.find((item) => item.id === form.serviceId);
   const selectedBranch = branches.find((item) => item.name === form.branch);
@@ -16307,9 +16308,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
 
   function updateClientEntry(value) {
     setClientEntry(value);
-    const exact = availableClients.find((client) => `${client.fullName}${client.mobile ? ` · ${client.mobile}` : ""}` === value);
-    const nameMatches = availableClients.filter((client) => normalize(client.fullName) === normalize(value));
-    const match = exact || (nameMatches.length === 1 ? nameMatches[0] : null);
+    const match = availableClients.find((client) => clientOptionLabel(client) === value);
     setForm((current) => ({
       ...current,
       clientId: match?.id || "",
@@ -16347,7 +16346,7 @@ function AppointmentModal({ payload, clients, services, branches, branchScope, s
         <div className="appointment-booking-body">
           {error && <div className="inline-state error"><AlertCircle size={17} /> {error}</div>}
           <section className="booking-form-section"><div className="booking-step">1</div><div className="booking-section-content"><h3>Client and service</h3>
-            <label className="stacked-field"><span>Client name <RequiredMark /></span><input aria-label="Client name, required" list="appointment-client-options" autoComplete="off" value={clientEntry} onChange={(event) => updateClientEntry(event.target.value)} placeholder="Type a name or choose an existing client" /><datalist id="appointment-client-options">{availableClients.map((client) => <option key={client.id} value={`${client.fullName}${client.mobile ? ` · ${client.mobile}` : ""}`} />)}</datalist><small>Type a new caller's name directly, or choose an existing client from the suggestions.</small></label>
+            <label className="stacked-field"><span>Client name <RequiredMark /></span><input aria-label="Client name, required" list="appointment-client-options" autoComplete="off" value={clientEntry} onChange={(event) => updateClientEntry(event.target.value)} placeholder="Type a name or choose an existing client" /><datalist id="appointment-client-options">{availableClients.map((client) => <option key={client.id} value={clientOptionLabel(client)} />)}</datalist><small>Type a new caller's name directly, or choose an existing client from the suggestions.</small></label>
             <label className="stacked-field"><span>Mobile number</span><input aria-label="Client mobile number" type="tel" value={form.contactMobile} onChange={(event) => update("contactMobile", event.target.value)} placeholder="Required for phone bookings" /></label>
             <div className="booking-two-column booking-service-grid"><label className="stacked-field"><span>Service <RequiredMark /></span><select aria-label="Service, required" value={form.serviceId} onChange={(event) => update("serviceId", event.target.value)}><option value="">{form.branch ? "Select a service" : "Select a branch first"}</option>{availableServices.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}</select></label>
             <label className="stacked-field"><span>Appointment type</span><select value={form.appointmentType} onChange={(event) => update("appointmentType", event.target.value)}>{["Consultation", "Treatment", "Follow-up", "Check-up"].map((item) => <option key={item}>{item}</option>)}</select></label></div>
