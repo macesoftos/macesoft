@@ -4372,9 +4372,12 @@ async function calculateCheckout(draft, { actor, branch }) {
   let creditedAppointmentUpdatedAt = null;
   let appointmentVersions = [];
   if (appointmentIds.length) {
-    if (!clientId) throw apiError("Select the client linked to this visit before checkout.", 403);
+    const manualClientName = clean(draft.clientName);
+    if (!clientId && (!manualClientName || manualClientName === "Walk-in")) {
+      throw apiError("Enter the client name linked to this visit before checkout.", 403);
+    }
     const visitAppointments = await prisma.appointment.findMany({
-      where: { id: { in: appointmentIds }, branch, clientId },
+      where: { id: { in: appointmentIds }, branch, clientId: clientId || null, ...(!clientId ? { client: manualClientName } : {}) },
     });
     if (visitAppointments.length !== appointmentIds.length) {
       throw apiError("One or more visit services do not belong to the selected client and branch.", 403);
@@ -9099,7 +9102,7 @@ app.post("/api/pos/checkout", asyncRoute(async (request, response) => {
       }
       for (const appointment of checkout.appointmentVersions) {
         const currentAppointment = await tx.appointment.findFirst({
-          where: { id: appointment.id, branch, clientId: clean(draft.clientId), updatedAt: appointment.updatedAt },
+          where: { id: appointment.id, branch, clientId: clean(draft.clientId) || null, ...(!clean(draft.clientId) ? { client: clean(draft.clientName) } : {}), updatedAt: appointment.updatedAt },
           select: { id: true },
         });
         if (!currentAppointment) throw apiError("The visit changed during checkout. Review its services and deposits, then try again.", 409);

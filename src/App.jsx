@@ -6369,7 +6369,7 @@ function POSModule({
     return saveOpenCart({
       ...activeOpenCart,
       clientId,
-      client: client?.fullName || "Walk-in",
+      client: visitContext?.clientName || client?.fullName || "Walk-in",
       branch,
       staff: staffName,
       items: cart,
@@ -6499,6 +6499,7 @@ function POSModule({
     setArrivalTime(visit.appointment.arrivalTime || visit.appointment.time || "");
     setSaleDate(visit.appointment.date || todayDate());
     setVisitContext({
+      clientName: visit.appointment.client,
       appointmentId: draft.appointmentId,
       appointmentIds: draft.appointmentIds,
       depositCredit: draft.depositCredit,
@@ -6593,7 +6594,7 @@ function POSModule({
         event.preventDefault();
         openPayment({
           clientId,
-          clientName: client?.fullName ?? "Walk-in",
+          clientName: visitContext?.clientName || client?.fullName || "Walk-in",
           storeCredit: Number(client?.storeCredit || 0),
           branch,
           room,
@@ -6647,7 +6648,7 @@ function POSModule({
   function createPaymentDraft(patch = {}) {
     return {
       clientId,
-      clientName: client?.fullName ?? "Walk-in",
+      clientName: visitContext?.clientName || client?.fullName || "Walk-in",
       storeCredit: Number(client?.storeCredit || 0),
       branch,
       room,
@@ -6698,7 +6699,7 @@ function POSModule({
       invoice: "Current checkout",
       date: saleDate,
       time: new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
-      client: client?.fullName ?? "Walk-in",
+      client: visitContext?.clientName || client?.fullName || "Walk-in",
       branch,
       staff: saleStaffName,
       room,
