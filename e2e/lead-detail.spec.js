@@ -109,27 +109,19 @@ test("puts the customer inquiry and response actions first", async ({ page }) =>
   await expect(page.getByText("Attribution and related records")).toBeVisible();
 });
 
-test("reveals the navigation when the pointer reaches the left edge", async ({ page }) => {
+test("keeps standalone workspace navigation pinned while the pointer moves", async ({ page }) => {
   await page.goto("/leads");
 
-  const trigger = page.getByRole("button", { name: "Show navigation menu" });
-  const navigation = page.locator(".edge-sidebar-overlay");
-
-  await expect(trigger).toBeVisible();
-  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  const navigation = page.locator(".app-shell > .sidebar");
+  await expect(navigation).toBeVisible();
+  await expect(navigation).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Show navigation menu" })).toHaveCount(0);
 
   await page.mouse.move(400, 320);
-  await page.mouse.move(4, 320);
-  await expect(trigger).toHaveAttribute("aria-expanded", "false");
-
   await page.mouse.move(1, 320);
-  await expect(trigger).toHaveAttribute("aria-expanded", "true");
-  await expect(navigation).toHaveClass(/is-open/);
-  await expect(page.locator("#edge-primary-sidebar")).toBeInViewport();
-
-  await page.mouse.move(400, 320);
-  await expect(trigger).toHaveAttribute("aria-expanded", "false");
-  await expect(navigation).not.toHaveClass(/is-open/);
+  await page.mouse.move(900, 320);
+  await expect(navigation).toBeVisible();
+  await expect(navigation).toBeInViewport();
 });
 
 test("gives the mobile back arrow a comfortable tap target", async ({ page }) => {

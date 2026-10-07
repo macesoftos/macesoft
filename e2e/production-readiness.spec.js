@@ -71,7 +71,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
   await gotoAuthenticatedWorkspace(page, "/appointments");
   await expect(page).toHaveURL(/\/appointments$/);
   await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
-  await expect(page.locator(".app-shell > .sidebar")).toHaveCount(0);
+  await expect(page.locator(".app-shell > .sidebar")).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to applications" })).toBeVisible();
   await expect(page.getByText("Manage the clinic schedule", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Filter schedule", { exact: true })).toHaveCount(0);
@@ -112,7 +112,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await gotoAuthenticatedWorkspace(page, "/clients");
   await expect(page).toHaveURL(/\/clients$/);
-  await expect(page.locator(".app-shell > .sidebar")).toHaveCount(0);
+  await expect(page.locator(".app-shell > .sidebar")).toBeVisible();
   const clientImportInput = page.locator(".client-import-input");
   await expect(clientImportInput).toBeEnabled();
   await expect(page.getByLabel("Select visible clients")).toBeEnabled();
@@ -154,7 +154,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await gotoAuthenticatedWorkspace(page, "/card-view");
   await expect(page).toHaveURL(/\/card-view$/);
-  await expect(page.locator(".app-shell > .sidebar")).toHaveCount(0);
+  await expect(page.locator(".app-shell > .sidebar")).toBeVisible();
   await expect(page.getByLabel("Card filters")).toBeVisible();
   await expect(page.getByText("Completion rate", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Total Cards", { exact: true })).toHaveCount(0);
@@ -165,7 +165,7 @@ test("an authenticated owner can open a scoped workspace and sign out", async ({
 
   await gotoAuthenticatedWorkspace(page, "/room-view");
   await expect(page).toHaveURL(/\/room-view$/);
-  await expect(page.locator(".app-shell > .sidebar")).toHaveCount(0);
+  await expect(page.locator(".app-shell > .sidebar")).toBeVisible();
   await createTrigger.click();
   const newRoomAction = createMenu.getByRole("menuitem", { name: "New room" });
   await expect(createMenu.getByRole("menuitem", { name: "New appointment" })).toBeVisible();

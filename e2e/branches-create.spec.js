@@ -50,7 +50,7 @@ test("an organization manager can open the standalone Branches workspace", async
 
   await expect(page).toHaveURL(/\/branches$/);
   await expect(page.locator(".app-shell")).toHaveClass(/standalone-module-shell/);
-  await expect(page.locator(".app-shell > .sidebar")).toHaveCount(0);
+  await expect(page.locator(".app-shell > .sidebar")).toBeVisible();
   const backToApplications = page.getByRole("button", { name: "Back to applications" });
   await expect(backToApplications).toBeVisible();
 
