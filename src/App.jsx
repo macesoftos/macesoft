@@ -970,9 +970,7 @@ function App() {
     (dataUrl, originalName = "") => uploadImageAsset(dataUrl, "marketing-image", branchScope === "All branches" ? session?.branch || "All branches" : branchScope, originalName),
     [branchScope, session?.branch],
   );
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useStoredState("sidebar-collapsed", false);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
-  const [isEdgeSidebarOpen, setIsEdgeSidebarOpen] = useState(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [modal, setModal] = useState(null);
@@ -1331,7 +1329,6 @@ function App() {
       if (!options.keepDrawerOpen) {
         setIsSidebarDrawerOpen(false);
       }
-      setIsEdgeSidebarOpen(false);
       setIsMobileMoreOpen(false);
     },
     [session, sessionModules, setActiveModuleState],
@@ -1348,7 +1345,6 @@ function App() {
       window.requestAnimationFrame(() => window.scrollTo(0, 0));
     }
     setIsSidebarDrawerOpen(false);
-    setIsEdgeSidebarOpen(false);
     setIsMobileMoreOpen(false);
   }, [setActiveModuleState]);
 
@@ -3040,16 +3036,8 @@ function App() {
   if (!sessionModules.includes(activeModule)) {
     const blockedLabel = navItems.find((item) => item.id === activeModule)?.label || "This module";
     return (
-      <>
-        <EdgeRevealNavigation
-          activeModule={activeModule}
-          open={isEdgeSidebarOpen}
-          onClose={() => setIsEdgeSidebarOpen(false)}
-          onNavigate={setActiveModule}
-          onOpen={() => setIsEdgeSidebarOpen(true)}
-          sections={visibleNavSections}
-          session={session}
-        />
+      <div className="app-shell app-shell-with-edge-sidebar standalone-module-shell">
+        <EdgeRevealNavigation activeModule={activeModule} onNavigate={setActiveModule} onLogout={handleLogout} sections={visibleNavSections} session={session} />
         <main className="login-page module-unavailable-page">
           <section className="login-panel">
             <div className="login-card auth-loading-card">
@@ -3062,31 +3050,25 @@ function App() {
             </div>
           </section>
         </main>
-      </>
+      </div>
     );
   }
 
 
   if (isFlipbooksView) {
     return (
-      <>
-        <EdgeRevealNavigation
-          activeModule={activeModule}
-          open={isEdgeSidebarOpen}
-          onClose={() => setIsEdgeSidebarOpen(false)}
-          onNavigate={setActiveModule}
-          onOpen={() => setIsEdgeSidebarOpen(true)}
-          sections={visibleNavSections}
-          session={session}
-        />
-        <FlipbooksWorkspace
-          notify={notify}
-          onExit={() => setActiveModule("overview")}
-          onSwitchBranch={switchBranch}
-          session={session}
-        />
+      <div className="app-shell app-shell-with-edge-sidebar standalone-module-shell">
+        <EdgeRevealNavigation activeModule={activeModule} onNavigate={setActiveModule} onLogout={handleLogout} sections={visibleNavSections} session={session} />
+        <div className="workspace workspace-full standalone-module-workspace">
+          <FlipbooksWorkspace
+            notify={notify}
+            onExit={() => setActiveModule("overview")}
+            onSwitchBranch={switchBranch}
+            session={session}
+          />
+        </div>
         {toast && <Toast toast={toast} />}
-      </>
+      </div>
     );
   }
 
@@ -3107,8 +3089,7 @@ function App() {
   const showBranchSelector = canAccessAllBranches || selectableBranches.length > 1;
   const shellClassName = [
     "app-shell",
-    showSidebar ? "app-shell-with-sidebar" : "app-shell-full",
-    showSidebar && isSidebarCollapsed ? "sidebar-collapsed" : "",
+    showSidebar || showEdgeSidebar ? "app-shell-with-sidebar" : "app-shell-full",
     showSidebar && isSidebarDrawerOpen ? "sidebar-drawer-open" : "",
     isPosView ? "pos-page-shell" : "",
     isApplicationsView ? "applications-page-shell" : "",
@@ -3138,10 +3119,7 @@ function App() {
         {showEdgeSidebar && (
           <EdgeRevealNavigation
             activeModule={activeModule}
-            open={isEdgeSidebarOpen}
-            onClose={() => setIsEdgeSidebarOpen(false)}
             onNavigate={setActiveModule}
-            onOpen={() => setIsEdgeSidebarOpen(true)}
             onLogout={handleLogout}
             sections={visibleNavSections}
             session={session}
@@ -3151,18 +3129,17 @@ function App() {
         {showSidebar && (
           <SidebarNavigation
             activeModule={activeModule}
-            collapsed={isSidebarCollapsed}
+            collapsed={false}
             drawerOpen={isSidebarDrawerOpen}
             onCloseDrawer={() => setIsSidebarDrawerOpen(false)}
             onLogout={handleLogout}
             onNavigate={setActiveModule}
-            onToggleCollapsed={() => setIsSidebarCollapsed((current) => !current)}
             sections={visibleNavSections}
             session={session}
           />
         )}
 
-        <main className={`workspace ${showSidebar ? "" : "workspace-full"} ${isStandaloneWorkspaceView ? "standalone-module-workspace" : ""} ${activeModule === "clients" && activeRecordRoute?.moduleId === "clients" ? "client-profile-workspace" : ""} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
+        <main className={`workspace ${showSidebar || showEdgeSidebar ? "" : "workspace-full"} ${isStandaloneWorkspaceView ? "standalone-module-workspace" : ""} ${activeModule === "clients" && activeRecordRoute?.moduleId === "clients" ? "client-profile-workspace" : ""} ${isPosView ? "pos-workspace" : ""} ${isApplicationsView ? "applications-workspace" : ""} ${isFaceTrackView ? "facetrack-workspace" : ""} ${isMarketingView ? "marketing-workspace-host" : ""}`}>
           {isPosView && (
             <div
               aria-label="Show POS header"
@@ -3882,71 +3859,9 @@ function expiryStatus(item) {
   return expiry <= warningDate ? "Near expiry" : "Current";
 }
 
-function EdgeRevealNavigation({ activeModule, open, onClose, onNavigate, onOpen, onLogout, sections, session }) {
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const closeOutsideSidebar = (event) => {
-      const sidebar = document.getElementById("edge-primary-sidebar");
-      if (sidebar && event.clientX > sidebar.getBoundingClientRect().right) onClose();
-    };
-
-    window.addEventListener("pointermove", closeOutsideSidebar, { passive: true });
-    return () => window.removeEventListener("pointermove", closeOutsideSidebar);
-  }, [onClose, open]);
-
+function EdgeRevealNavigation({ activeModule, onNavigate, onLogout, sections, session }) {
   if (!sections.length) return null;
-
-  return (
-    <>
-      <button
-        className="edge-sidebar-trigger"
-        type="button"
-        aria-label="Show navigation menu"
-        aria-controls="edge-primary-sidebar"
-        aria-expanded={open}
-        onFocus={onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onOpen();
-          }
-          if (event.key === "Escape") onClose();
-        }}
-        onMouseEnter={onOpen}
-      />
-      <div
-        className={`edge-sidebar-overlay ${open ? "is-open" : ""}`}
-        aria-hidden={!open}
-        inert={open ? undefined : ""}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) onClose();
-        }}
-        onFocusCapture={onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onClose();
-          }
-        }}
-        onMouseEnter={onOpen}
-        onMouseLeave={onClose}
-      >
-        <SidebarNavigation
-          activeModule={activeModule}
-          collapsed={false}
-          drawerOpen={false}
-          id="edge-primary-sidebar"
-          onCloseDrawer={onClose}
-          onLogout={onLogout}
-          onNavigate={onNavigate}
-          onToggleCollapsed={onClose}
-          sections={sections}
-          session={session}
-        />
-      </div>
-    </>
-  );
+  return <SidebarNavigation activeModule={activeModule} collapsed={false} drawerOpen={false} id="edge-primary-sidebar" onLogout={onLogout} onNavigate={onNavigate} sections={sections} session={session} />;
 }
 
 function SidebarNavigation({
@@ -3957,7 +3872,6 @@ function SidebarNavigation({
   onCloseDrawer,
   onLogout,
   onNavigate,
-  onToggleCollapsed,
   sections,
   session,
 }) {
@@ -3985,15 +3899,6 @@ function SidebarNavigation({
           <div className="brand-mark">
             <img src={assets.logo} alt="MACE by Dr. Mace" />
           </div>
-          <button
-            className="sidebar-collapse-button"
-            type="button"
-            onClick={onToggleCollapsed}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRight size={18} aria-hidden="true" /> : <ChevronLeft size={18} aria-hidden="true" />}
-          </button>
         </div>
 
         <label className="sidebar-menu-search">
