@@ -13319,6 +13319,10 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
       !selected.length || selected.every((branch) => branch.enabledModules.includes(moduleId))
     ));
   }, [allowedBranches, capabilities.availableModules, capabilities.roleModules]);
+  const defaultModulesFor = useCallback((role, branchIds) => {
+    const available = new Set(moduleOptionsFor(branchIds));
+    return (capabilities.roleModules?.[role] || roleAccess[role] || []).filter((moduleId) => available.has(moduleId));
+  }, [capabilities.roleModules, moduleOptionsFor]);
   const emptyInvitation = useCallback(() => {
     const role = roles.includes("Employee") ? "Employee" : roles.find((item) => !canManageOrganization(item)) || roles[0] || "Employee";
     const branchIds = canManageOrganization(role) ? [] : [defaultBranchId].filter(Boolean);
@@ -13331,12 +13335,12 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
       department: "",
       specialty: "",
       position: "",
-      modules: moduleOptionsFor(branchIds),
+      modules: defaultModulesFor(role, branchIds),
       permissions: [],
       message: "",
       confirmOrganizationAccess: false,
     };
-  }, [defaultBranchId, moduleOptionsFor, roles]);
+  }, [defaultBranchId, defaultModulesFor, roles]);
   const [form, setForm] = useState(emptyInvitation);
 
   const refresh = useCallback(async () => {
@@ -13435,7 +13439,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
       role: account.role,
       status: account.status,
       branchIds,
-      modules: account.access?.modules || moduleOptionsFor(branchIds),
+      modules: account.access?.modules || defaultModulesFor(account.role, branchIds),
       permissions: account.access?.activeBranch?.permissions || [],
       confirmAccessChange: true,
       confirmOrganizationAccess: false,
@@ -13640,7 +13644,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
             const permissions = role === "Admin"
               ? ["staff.invite", "staff.invite_cross_branch", "staff.manage"].filter((id) => capabilities.permissions.some((permission) => permission.id === id))
               : [];
-            setForm((current) => ({ ...current, role, branchIds, modules: moduleOptionsFor(branchIds), permissions, confirmOrganizationAccess: false }));
+            setForm((current) => ({ ...current, role, branchIds, modules: defaultModulesFor(role, branchIds), permissions, confirmOrganizationAccess: false }));
           }}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
           <label><span>Department</span><input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
           <label><span>Specialty</span><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></label>
@@ -13648,7 +13652,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
             const branchIds = event.target.checked ? [...form.branchIds, branch.id] : form.branchIds.filter((id) => id !== branch.id);
             setForm((current) => ({ ...current, branchIds, modules: current.modules.filter((moduleId) => moduleOptionsFor(branchIds).includes(moduleId)) }));
           }} /><span>{branch.name}{!capabilities.canSelectBranches ? " · Assigned branch" : ""}</span></label>)}</div>}</fieldset>
-          <fieldset className="full-span invitation-options"><legend>Modules</legend><p>Select the modules this account can open. Choices follow the selected branches' enabled modules.</p><div>{moduleOptionsFor(form.branchIds).map((moduleId) => <label key={moduleId}><input type="checkbox" checked={form.modules.includes(moduleId)} onChange={(event) => setForm((current) => ({ ...current, modules: event.target.checked ? [...current.modules, moduleId] : current.modules.filter((id) => id !== moduleId) }))} /><span>{moduleLabel(moduleId)}</span></label>)}</div></fieldset>
+          <fieldset className="full-span invitation-options"><legend>Modules</legend><p>Select the modules this account can open. Choices follow the selected branches' enabled modules.</p><p>Defaults follow the selected role; you can add or remove any available module.</p><div>{moduleOptionsFor(form.branchIds).map((moduleId) => <label key={moduleId}><input type="checkbox" checked={form.modules.includes(moduleId)} onChange={(event) => setForm((current) => ({ ...current, modules: event.target.checked ? [...current.modules, moduleId] : current.modules.filter((id) => id !== moduleId) }))} /><span>{moduleLabel(moduleId)}</span></label>)}</div></fieldset>
           {capabilities.permissions?.length > 0 && <fieldset className="full-span invitation-options"><legend>Additional permissions</legend><div>{capabilities.permissions.map((permission) => <label key={permission.id}><input type="checkbox" checked={form.permissions.includes(permission.id)} onChange={(event) => setForm((current) => ({ ...current, permissions: event.target.checked ? [...current.permissions, permission.id] : current.permissions.filter((id) => id !== permission.id) }))} /><span>{permission.label}</span></label>)}</div></fieldset>}
           {canManageOrganization(form.role) && <label className="full-span confirmation-check"><input required type="checkbox" checked={form.confirmOrganizationAccess} onChange={(event) => setForm({ ...form, confirmOrganizationAccess: event.target.checked })} /><span>I understand this grants organization-wide access to all active branches.</span></label>}
           <label className="full-span"><span>Optional message</span><textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} /></label>
@@ -13667,7 +13671,7 @@ function StaffModule({ detailStaffId = "", staff, branchRecords = [], session, s
             const permissions = role === "Admin"
               ? ["staff.invite", "staff.invite_cross_branch", "staff.manage"].filter((id) => capabilities.permissions.some((permission) => permission.id === id))
               : [];
-            setAccessForm({ ...accessForm, role, branchIds, modules: moduleOptionsFor(branchIds), permissions, confirmOrganizationAccess: false });
+            setAccessForm({ ...accessForm, role, branchIds, modules: defaultModulesFor(role, branchIds), permissions, confirmOrganizationAccess: false });
           }}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
           <fieldset className="full-span invitation-options"><legend>Branch access</legend>{canManageOrganization(accessForm.role) ? <p>This role has organization-wide access without a branch assignment.</p> : <div>{allowedBranches.map((branch) => <label key={branch.id}><input type="checkbox" disabled={!capabilities.organizationManager} checked={accessForm.branchIds.includes(branch.id)} onChange={(event) => {
             const branchIds = event.target.checked ? [...accessForm.branchIds, branch.id] : accessForm.branchIds.filter((id) => id !== branch.id);
