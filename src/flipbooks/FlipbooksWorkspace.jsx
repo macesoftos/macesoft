@@ -8,6 +8,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Copy,
   Download,
   EllipsisVertical,
@@ -29,6 +30,7 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  Store,
   Trash2,
   UploadCloud,
   Users,
@@ -146,7 +148,7 @@ function getAdjacentSpreadStart(currentPage, direction, singlePage, totalPages) 
   return currentPage <= 2 ? 1 : Math.max(2, currentPage - 2);
 }
 
-const MAX_PDF_BYTES = 100 * 1024 * 1024;
+const MAX_PDF_BYTES = 30 * 1024 * 1024;
 const workspaceNav = [
   { label: "Overview", path: "/flipbooks/overview", icon: BookOpen },
   { label: "My Flipbooks", path: "/flipbooks", icon: FileText },
@@ -695,9 +697,37 @@ function FlipbookReader({
   );
 }
 
-function WorkspaceChrome({ path, navigate, children, onExit, session }) {
+function WorkspaceChrome({ path, navigate, children, onExit, onSwitchBranch, session }) {
+  const accountMenuRef = useRef(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const selected = workspaceNav.find((item) => item.path === path)?.path || (path.match(/^\/flipbooks\/[^/]+$/) ? "/flipbooks" : path);
   const initials = session?.name?.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "MA";
+  const branches = (session?.access?.branches || []).filter((branch) => branch.branchStatus === "Active");
+  const activeBranchName = session?.access?.scope === "all" ? "All branches" : session?.access?.activeBranch?.name || session?.branch || "Select a branch";
+
+  useEffect(() => {
+    if (!accountMenuOpen) return undefined;
+    function closeOnOutsideClick(event) {
+      if (!accountMenuRef.current?.contains(event.target)) {
+        setAccountMenuOpen(false);
+        setBranchMenuOpen(false);
+      }
+    }
+    function closeOnEscape(event) {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+        setBranchMenuOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [accountMenuOpen]);
+
   return (
     <div className="flipbook-workspace-shell">
       <aside className="flipbook-subnav">
@@ -711,7 +741,29 @@ function WorkspaceChrome({ path, navigate, children, onExit, session }) {
         </nav>
         <div className="flipbook-subnav-footer">
           <button className="flipbook-exit-workspace" type="button" onClick={onExit}><ArrowLeft size={16} /><span>Back to MACE</span></button>
-          <div className="flipbook-workspace-account"><span>{initials}</span><div><strong>{session?.name || "MACE User"}</strong><small>{session?.role || "Account"}</small></div></div>
+          <div className="flipbook-account-menu" ref={accountMenuRef}>
+            {accountMenuOpen && <div className="flipbook-account-popover" role="menu" aria-label="Account menu">
+              <header><span>{initials}</span><div><strong>{session?.name || "MACE User"}</strong><small>{session?.email || session?.role || "Account"}</small></div></header>
+              <button className="flipbook-account-menu-item" type="button" role="menuitem" aria-expanded={branchMenuOpen} onClick={() => setBranchMenuOpen((open) => !open)}>
+                <Store size={17} /><span><strong>Switch branch</strong><small>Current: {activeBranchName}</small></span><ChevronRight size={16} />
+              </button>
+              {branchMenuOpen && <div className="flipbook-branch-options" role="group" aria-label="Available branches">
+                {branches.map((branch) => <button className={session?.access?.activeBranchId === branch.id ? "active" : ""} type="button" role="menuitemradio" aria-checked={session?.access?.activeBranchId === branch.id} key={branch.id} onClick={() => {
+                  setAccountMenuOpen(false);
+                  setBranchMenuOpen(false);
+                  if (branch.id !== session?.access?.activeBranchId) void onSwitchBranch?.(branch.id);
+                }}>{branch.name}</button>)}
+                {!branches.length && <small>No active branches are available.</small>}
+              </div>}
+              <footer>{activeBranchName}</footer>
+            </div>}
+            <button className="flipbook-workspace-account" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => {
+              setAccountMenuOpen((open) => !open);
+              setBranchMenuOpen(false);
+            }}>
+              <span>{initials}</span><div><strong>{session?.name || "MACE User"}</strong><small>{session?.role || "Account"}</small></div><ChevronDown size={14} />
+            </button>
+          </div>
         </div>
       </aside>
       <div className="flipbook-workspace-main">{children}</div>
@@ -875,8 +927,11 @@ function ShareDialog({ book, onClose, onUpdated, notify }) {
   );
 }
 
-function CreateFlipbook({ navigate, notify }) {
+function CreateFlipbook({ navigate, notify, session }) {
   const inputRef = useRef(null);
+  const availableBranches = (session?.access?.branches || []).filter((branch) => branch.branchStatus === "Active");
+  const branchId = session?.access?.scope === "all" ? "" : session?.access?.activeBranchId || "";
+  const selectedBranch = availableBranches.find((branch) => branch.id === branchId);
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -894,7 +949,7 @@ function CreateFlipbook({ navigate, notify }) {
       return;
     }
     if (nextFile.size > MAX_PDF_BYTES) {
-      setError("PDF must be 100 MB or smaller.");
+      setError("PDF must be 30 MB or smaller.");
       return;
     }
     setProcessing(true);
@@ -914,11 +969,11 @@ function CreateFlipbook({ navigate, notify }) {
   }
 
   async function create() {
-    if (!file || !title.trim()) return;
+    if (!file || !title.trim() || !branchId) return;
     setProcessing(true);
     setError("");
     try {
-      const result = await uploadFlipbookPdf(file, { title: title.trim(), description: description.trim(), pageCount }, setProgress);
+      const result = await uploadFlipbookPdf(file, { title: title.trim(), description: description.trim(), pageCount, branchId }, setProgress);
       notify("Flipbook created as a draft.");
       navigate(`/flipbooks/${result.flipbook.id}`);
     } catch (uploadError) {
@@ -949,12 +1004,15 @@ function CreateFlipbook({ navigate, notify }) {
       {file && (
         <section className="flipbook-details-form">
           <div><span>Step 2</span><h2>Add details</h2><p>Use a clear title recipients will recognize.</p></div>
+          <div className="flipbook-selected-branch"><Store size={17} /><div><span>Upload to branch</span><strong>{selectedBranch?.name || "Choose a branch from the account menu"}</strong></div></div>
           <label className="flipbook-field"><span>Flipbook title</span><input maxLength="160" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           <label className="flipbook-field"><span>Description <small>Optional</small></span><textarea maxLength="1000" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What is this document for?" /></label>
           {processing && progress > 0 && <div className="flipbook-upload-progress"><span style={{ width: `${progress}%` }} /><small>Uploading {progress}%</small></div>}
-          <button className="flipbook-primary create-button" type="button" onClick={create} disabled={processing || !title.trim()}>{processing && progress ? `Uploading ${progress}%` : "Create Flipbook"}</button>
+          <button className="flipbook-primary create-button" type="button" onClick={create} disabled={processing || !title.trim() || !branchId || !availableBranches.length}>{processing && progress ? `Uploading ${progress}%` : "Create Flipbook"}</button>
         </section>
       )}
+      {file && !availableBranches.length && <p className="flipbook-form-error" role="alert">No active branches are available for this account.</p>}
+      {file && availableBranches.length > 0 && !branchId && <p className="flipbook-form-error" role="alert">Open your account menu at the bottom of the sidebar and choose a branch before uploading.</p>}
       {error && <p className="flipbook-form-error" role="alert">{error}</p>}
     </div>
   );
@@ -1199,7 +1257,7 @@ function FlipbookPreviewPage({ id, navigate, notify }) {
   );
 }
 
-export default function FlipbooksWorkspace({ notify, session, onExit }) {
+export default function FlipbooksWorkspace({ notify, session, onExit, onSwitchBranch }) {
   const [path, navigate] = useWorkspacePath();
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1236,7 +1294,7 @@ export default function FlipbooksWorkspace({ notify, session, onExit }) {
   if (isEditor) return <FlipbookEditor id={decodeURIComponent(editorMatch[1])} navigate={navigate} notify={notify} onListChanged={refresh} />;
 
   let content;
-  if (path === "/flipbooks/new") content = <CreateFlipbook navigate={navigate} notify={notify} />;
+  if (path === "/flipbooks/new") content = <CreateFlipbook navigate={navigate} notify={notify} session={session} />;
   else if (path === "/flipbooks/shared") content = <SharedLinksPage notify={notify} navigate={navigate} />;
   else if (path === "/flipbooks/analytics") content = <AnalyticsPage notify={notify} />;
   else if (path === "/flipbooks/deleted") content = <DeletedFlipbooksPage notify={notify} />;
@@ -1245,7 +1303,7 @@ export default function FlipbooksWorkspace({ notify, session, onExit }) {
   else content = loading ? <LoadingState label="Loading flipbooks…" /> : <div><WorkspaceHeader title="Flipbooks" copy="Create, publish and share interactive documents." action={<button className="flipbook-primary" type="button" onClick={() => navigate("/flipbooks/new")}><Plus size={17} /> New Flipbook</button>} /><FlipbooksTable books={books} navigate={navigate} onAction={action} /></div>;
 
   return (
-    <WorkspaceChrome path={path} navigate={navigate} onExit={onExit} session={session}>
+    <WorkspaceChrome path={path} navigate={navigate} onExit={onExit} onSwitchBranch={onSwitchBranch} session={session}>
       {content}
       {share && <ShareDialog book={share} onClose={() => setShare(null)} onUpdated={(next) => { setShare(next); void refresh(); }} notify={notify} />}
     </WorkspaceChrome>

@@ -3082,6 +3082,7 @@ function App() {
         <FlipbooksWorkspace
           notify={notify}
           onExit={() => setActiveModule("overview")}
+          onSwitchBranch={switchBranch}
           session={session}
         />
         {toast && <Toast toast={toast} />}
