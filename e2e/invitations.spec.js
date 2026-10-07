@@ -149,8 +149,9 @@ test("owner invitation form exposes authorized roles, concrete branches, and res
   await expect(dialog.getByRole("group", { name: "Modules" }).getByText("POS", { exact: true })).toBeVisible();
   await dialog.getByLabel("Role").selectOption("Investor");
   await expect(dialog.getByRole("group", { name: "Modules" }).getByText("Reports", { exact: true })).toBeVisible();
-  await expect(dialog.getByRole("group", { name: "Modules" }).getByText("POS", { exact: true })).toHaveCount(0);
-  await expect(dialog.getByText("Investors receive branch-scoped Reports access without POS.")).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: "POS" })).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: "POS" })).not.toBeChecked();
+  await expect(dialog.getByText("Defaults follow the selected role; you can add or remove any available module.")).toBeVisible();
   await dialog.getByLabel("Role").selectOption("Super Admin");
   await expect(dialog.getByText(/No “All Branches” assignment will be stored/)).toBeVisible();
   await expect(dialog.getByText(/grants organization-wide access/)).toBeVisible();
@@ -220,7 +221,9 @@ test("delegated Admin can select another branch when inviting a POS user", async
   await expect(secondBranchCheckbox).toBeChecked();
   const posCheckbox = dialog.getByRole("checkbox", { name: "POS" });
   await expect(posCheckbox).toBeChecked();
-  await expect(posCheckbox).toBeDisabled();
+  await expect(posCheckbox).toBeEnabled();
+  await posCheckbox.uncheck();
+  await expect(posCheckbox).not.toBeChecked();
 });
 
 test("a new recipient can review and accept a pending invitation once", async ({ page }) => {

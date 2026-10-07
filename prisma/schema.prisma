@@ -241,7 +241,7 @@ model Account {
   organization            Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   organizationWideAccess  Boolean                      @default(false)
   organizationPermissions String                       @default("[]")
-  organizationModules     String                       @default("[]")
+  organizationModules     String?
   lastBranchId            String?
   status                  String                       @default("Active")
   mustChangePassword      Boolean                      @default(true)

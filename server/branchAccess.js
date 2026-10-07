@@ -67,7 +67,8 @@ function serializeBranchAccess(branch, membership, fallbackModules) {
     modules: (() => {
       const enabled = enabledModulesForBranch(branch, fallbackModules);
       const explicit = parsePermissionList(membership?.modules);
-      return explicit.length ? explicit.filter((moduleId) => enabled.includes(moduleId)) : enabled;
+      const hasExplicitModules = membership?.modules !== null && membership?.modules !== undefined && clean(membership.modules) !== "";
+      return hasExplicitModules ? explicit.filter((moduleId) => enabled.includes(moduleId)) : enabled;
     })(),
     isPrimary: Boolean(membership?.isPrimary),
   };
@@ -79,8 +80,9 @@ export function resolveAccountBranchAccess(account, requestedBranchId, roleAcces
   );
   const roleModules = roleAccess[account?.role] || [];
   const organizationModules = parsePermissionList(account?.organizationModules);
-  const baseModules = organizationWide && organizationModules.length
-    ? roleModules.filter((moduleId) => organizationModules.includes(moduleId))
+  const hasExplicitOrganizationModules = account?.organizationModules !== null && account?.organizationModules !== undefined;
+  const baseModules = organizationWide && hasExplicitOrganizationModules
+    ? organizationModules
     : roleModules;
   const organizationBranches = (account?.organization?.branches || []).filter((branch) => branch.status === "Active");
   const memberships = (account?.branchMemberships || []).filter((membership) => (
@@ -133,11 +135,9 @@ export function resolveAccountBranchAccess(account, requestedBranchId, roleAcces
     throw Object.assign(new Error("This account has no active branch assignment."), { status: 403 });
   }
 
-  const activeRole = activeBranch?.role || account?.role || "";
-  const activeRoleModules = roleAccess[activeRole] || baseModules;
   let modules = organizationWide
     ? (scope === "branch" ? baseModules.filter((moduleId) => activeBranch.modules.includes(moduleId)) : baseModules)
-    : activeRoleModules.filter((moduleId) => activeBranch.modules.includes(moduleId));
+    : [...activeBranch.modules];
   const organizationPermissions = parsePermissionList(account?.organizationPermissions);
   if (organizationPermissions.includes("branches.manage") && !modules.includes("branches")) modules = [...modules, "branches"];
 

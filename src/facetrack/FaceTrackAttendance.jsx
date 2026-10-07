@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Clock, FilePenLine, RefreshCw, Settings, ShieldCheck, TabletSmartphone, Timer, UserCheck, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, Clock, FilePenLine, LogOut, RefreshCw, Settings, ShieldCheck, TabletSmartphone, Timer, UserCheck, X } from "lucide-react";
 import {
   createFaceTrackChallenge,
   enrollFaceTrackProfile,
@@ -162,7 +162,7 @@ function CorrectionDialog({ record, onClose, onSaved }) {
   return <div className="facetrack-dialog-backdrop"><form className="facetrack-form-dialog" onSubmit={submit}><header><div><span className="facetrack-kicker">Employee request</span><h2>Request time correction</h2></div><button type="button" onClick={onClose}><X /></button></header><p>The original attendance remains unchanged until an administrator approves this request.</p><div className="facetrack-form-grid"><label><span>Requested Time In</span><input type="datetime-local" value={timeIn} onChange={(event) => setTimeIn(event.target.value)} /></label><label><span>Requested Time Out</span><input type="datetime-local" value={timeOut} onChange={(event) => setTimeOut(event.target.value)} /></label><label className="wide"><span>Reason</span><textarea required minLength={10} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why the attendance record needs correction." /></label><label className="wide"><span>Supporting attachment link (optional)</span><input type="url" value={attachmentUrl} onChange={(event) => setAttachmentUrl(event.target.value)} placeholder="https://…" /></label></div>{error && <div className="facetrack-error"><AlertCircle size={17} /> {error}</div>}<button className="facetrack-primary" disabled={saving} type="submit"><FilePenLine size={18} /> {saving ? "Submitting…" : "Submit for admin approval"}</button></form></div>;
 }
 
-export default function FaceTrackAttendance({ session, notify, onExit }) {
+export default function FaceTrackAttendance({ session, notify, onExit, onLogout }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -232,7 +232,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
     { id: "attendance", label: "Timesheets", icon: Clock },
     { id: "requests", label: "Corrections", icon: FilePenLine, count: pendingRequests },
     { id: "profiles", label: "Face profiles", icon: UserCheck },
-    ...(data.admin ? [{ id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true }] : []),
+    { id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true },
     ...(data.admin ? [
       { id: "settings", label: "Policies", icon: Settings },
       { id: "audit", label: "Audit trail", icon: ShieldCheck },
@@ -254,7 +254,8 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
           })}
         </nav>
         <div className="facetrack-module-account"><span>{session.name?.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{session.name}</strong><small>{session.role}</small></div></div>
-        <button className="facetrack-exit" type="button" onClick={onExit}><ArrowLeft size={17} /> Back to ClinicOS</button>
+        <button className="facetrack-exit" type="button" onClick={onExit}><ArrowLeft size={17} /> Open my apps</button>
+        <button className="facetrack-exit" type="button" onClick={onLogout}><LogOut size={17} /> Sign out</button>
       </aside>
 
       <div className="facetrack-page">
@@ -264,7 +265,7 @@ export default function FaceTrackAttendance({ session, notify, onExit }) {
           <section className="facetrack-hero">
             <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Face recognition attendance</span><h2>Scan a face to Time In or Time Out.</h2><p>The first successful face scan records Time In. The employee's next successful scan records Time Out automatically.</p></div>
             <div className="facetrack-hero-actions">
-              {data.admin && <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button>}
+              <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button>
               {data.admin && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Manage face profiles</button>}
               {!data.admin && <div className="facetrack-kiosk-only"><TabletSmartphone size={20} /><span>Use the registered office face scanner to Time In or Time Out. Personal devices cannot record attendance.</span></div>}
             </div>
