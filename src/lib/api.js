@@ -331,7 +331,7 @@ export function getFlipbook(id) {
   return requestJson(`/api/flipbooks/${encodeURIComponent(id)}`);
 }
 
-export function uploadFlipbookPdf(file, { title, description, pageCount }, onProgress = (_value) => {}) {
+export function uploadFlipbookPdf(file, { title, description, pageCount, branchId }, onProgress = (_value) => {}) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", `${apiBase}/api/flipbooks`);
@@ -339,7 +339,8 @@ export function uploadFlipbookPdf(file, { title, description, pageCount }, onPro
     request.responseType = "json";
     request.setRequestHeader("Content-Type", "application/pdf");
     request.setRequestHeader("X-Mace-Request", "app");
-    if (apiBranchId) request.setRequestHeader("X-Mace-Branch-Id", apiBranchId);
+    const requestedBranchId = String(branchId || apiBranchId || "").trim();
+    if (requestedBranchId) request.setRequestHeader("X-Mace-Branch-Id", requestedBranchId);
     request.setRequestHeader("X-Flipbook-Title", encodeURIComponent(title));
     request.setRequestHeader("X-Flipbook-Description", encodeURIComponent(description || ""));
     request.setRequestHeader("X-Flipbook-Pages", String(pageCount));
