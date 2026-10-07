@@ -118,7 +118,6 @@ import {
   invitationScopeWhere,
   isBranchManager,
   normalizeEmail,
-  roleRequiresPosAccess,
   sanitizeInvitationMessage,
   uniqueStrings,
 } from "./invitations.js";
@@ -4656,9 +4655,6 @@ async function normalizeInvitationInput(actor, payload, current = null) {
     ? [...new Set([...requestedPermissions, ...BRANCH_ADMIN_REQUIRED_PERMISSIONS])]
     : requestedPermissions);
   const modules = assertRequestedModules(actor, role, payload?.modules ?? (current ? parseJsonList(current.modules) : undefined), branches, roleAccess);
-  if (roleRequiresPosAccess(role, roleAccess) && !modules.includes("pos")) {
-    throw apiError("Branch users must retain POS access.", 400);
-  }
   return {
     ...names,
     role,
@@ -5080,6 +5076,9 @@ app.get("/api/invitations", asyncRoute(async (request, response) => {
       organizationManager: canManageOrganization(actor.role),
       roles,
       roleModules: Object.fromEntries(roles.map((role) => [role, roleAccess[role] || []])),
+      availableModules: canManageOrganization(actor.role)
+        ? [...new Set(Object.values(roleAccess).flat())]
+        : [...new Set(actor.access?.modules || roleAccess[actor.role] || [])],
       permissions: managedPermissions.map((id) => ({ id, label: INVITATION_PERMISSION_LABELS[id] || id })),
       branches: branches.map((branch) => ({
         id: branch.id,
@@ -5582,9 +5581,6 @@ app.patch("/api/accounts/:id/access", asyncRoute(async (request, response) => {
     return stored && parseJsonList(stored).length ? parseJsonList(stored) : undefined;
   })();
   const modules = assertRequestedModules(actor, nextRole, requestedModules, branches, roleAccess);
-  if (roleRequiresPosAccess(nextRole, roleAccess) && !modules.includes("pos")) {
-    throw apiError("Branch users must retain POS access.", 400);
-  }
   const primaryBranch = branches[0] || null;
 
   const result = await prisma.$transaction(async (tx) => {

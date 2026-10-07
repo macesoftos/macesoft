@@ -119,6 +119,7 @@ export function assertRequestedPermissions(actor, requested) {
 
 export function assertRequestedModules(actor, role, requested, branches, roleAccess) {
   const roleModules = new Set(roleAccess?.[role] || []);
+  const organizationModules = new Set(Object.values(roleAccess || {}).flat());
   const branchModuleSettings = (branches || []).map((branch) => new Map(
     (branch.modules || []).map((module) => [module.moduleId, module.enabled]),
   ));
@@ -126,9 +127,9 @@ export function assertRequestedModules(actor, role, requested, branches, roleAcc
     branchModuleSettings.every((modules) => modules.get(moduleId) !== false)
   ));
   const modules = requested === undefined ? defaults : uniqueStrings(requested, 100);
-  const invalidForRole = modules.find((moduleId) => !roleModules.has(moduleId));
-  if (invalidForRole) {
-    throw invitationError(`${invalidForRole} is not available to the selected role.`, 403);
+  const unknownModule = modules.find((moduleId) => !organizationModules.has(moduleId));
+  if (unknownModule) {
+    throw invitationError(`${unknownModule} is not a recognized module.`, 400);
   }
   const disabled = modules.find((moduleId) => branchModuleSettings.some((settings) => settings.get(moduleId) === false));
   if (disabled) {

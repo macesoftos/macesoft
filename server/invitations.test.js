@@ -66,7 +66,7 @@ test("organization-wide roles require an explicit owner confirmation", () => {
   assert.throws(() => assertPrivilegedConfirmation(manager, "Super Admin", true), /only an Owner or Super Admin/i);
 });
 
-test("managers cannot grant permissions or modules they do not possess", () => {
+test("managers cannot grant permissions or modules they do not possess, while owners can customize role modules", () => {
   assert.deepEqual(assertRequestedPermissions(manager, ["staff.manage"]), ["staff.manage"]);
   assert.throws(() => assertRequestedPermissions(manager, ["staff.invite_managers"]), /do not possess/i);
   assert.throws(() => assertRequestedPermissions(owner, ["billing.superuser"]), /unknown/i);
@@ -74,9 +74,9 @@ test("managers cannot grant permissions or modules they do not possess", () => {
     () => assertRequestedModules(manager, "Employee", ["reports"], [davao], roleAccess),
     /not available|disabled|do not possess/i,
   );
-  assert.throws(
-    () => assertRequestedModules(owner, "Branch Manager", ["reports"], [davao], roleAccess),
-    /not available|disabled/i,
+  assert.deepEqual(
+    assertRequestedModules(owner, "Branch Manager", ["reports"], [davao], roleAccess),
+    ["reports"],
   );
   assert.deepEqual(
     assertRequestedModules(manager, "Employee", ["pos"], [davao], roleAccess),
