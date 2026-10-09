@@ -1368,7 +1368,9 @@ function App() {
     if (typeof window === "undefined") return undefined;
 
     function syncModuleFromLocation() {
-      setCurrentPath(normalizedPathname(window.location.pathname));
+      const pathname = normalizedPathname(window.location.pathname);
+      setCurrentPath(pathname);
+      if (pathname === "/attendance/kiosk") return;
       const detailRoute = recordDetailRouteFromPath(window.location.pathname);
       if (detailRoute) {
         setActiveModuleState(detailRoute.moduleId);
