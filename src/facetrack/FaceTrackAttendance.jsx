@@ -232,7 +232,7 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
     { id: "attendance", label: "Timesheets", icon: Clock },
     { id: "requests", label: "Corrections", icon: FilePenLine, count: pendingRequests },
     { id: "profiles", label: "Face profiles", icon: UserCheck },
-    { id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true },
+    ...(data.admin ? [{ id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true }] : []),
     ...(data.admin ? [
       { id: "settings", label: "Policies", icon: Settings },
       { id: "audit", label: "Audit trail", icon: ShieldCheck },
@@ -265,9 +265,8 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
           <section className="facetrack-hero">
             <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Face recognition attendance</span><h2>Scan a face to Time In or Time Out.</h2><p>The first successful face scan records Time In. The employee's next successful scan records Time Out automatically.</p></div>
             <div className="facetrack-hero-actions">
-              <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button>
+              {data.admin ? <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button> : <div className="facetrack-kiosk-only"><TabletSmartphone size={20} /><span>Use the registered office face scanner to Time In or Time Out. Personal devices cannot record attendance.</span></div>}
               {data.admin && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Manage face profiles</button>}
-              {!data.admin && <div className="facetrack-kiosk-only"><TabletSmartphone size={20} /><span>Use the registered office face scanner to Time In or Time Out. Personal devices cannot record attendance.</span></div>}
             </div>
           </section>
           <section className="facetrack-clock-flow" aria-label="How face recognition attendance works">
