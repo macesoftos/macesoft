@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Camera, CheckCircle2, Clock3, LockKeyhole, ShieldCheck, TabletSmartphone, UserCheck } from "lucide-react";
 import {
   createFaceTrackKiosk,
@@ -75,7 +75,7 @@ export default function FaceTrackKiosk({ session }) {
     streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
-  async function startCamera() {
+  const startCamera = useCallback(async () => {
     setError("");
     setPhase("Loading secure face-recognition models...");
     try {
@@ -101,7 +101,11 @@ export default function FaceTrackKiosk({ session }) {
       setError(nextError?.name === "NotAllowedError" ? "Camera access was denied. Allow camera access in Safari settings and try again." : "The camera or face-recognition models could not be started.");
       setPhase("Camera unavailable");
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (view === "ready" && !cameraReady) void startCamera();
+  }, [cameraReady, startCamera, view]);
 
   async function captureSamples() {
     const faceapi = faceApiRef.current;
