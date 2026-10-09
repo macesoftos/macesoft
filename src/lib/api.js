@@ -32,7 +32,8 @@ async function requestJson(path, options = {}) {
   const payload = isJson ? await response.json().catch(() => ({})) : null;
 
   if (!response.ok) {
-    if (response.status === 401 && apiSessionActive && typeof window !== "undefined") {
+    const kioskRequest = path.startsWith("/api/facetrack-attendance/kiosk/");
+    if (response.status === 401 && apiSessionActive && !kioskRequest && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(apiAuthenticationRequiredEvent));
     }
     throw Object.assign(new Error(payload?.error || "The clinic API request failed."), { status: response.status, payload });
