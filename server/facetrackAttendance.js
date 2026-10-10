@@ -346,22 +346,23 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const account = requireAccount(request);
     const policy = await policyFor(prisma);
     const admin = ADMIN_ROLES.has(account.role);
+    const receptionist = account.role === "Receptionist";
     const organizationWide = account.access?.scope === "all";
     const personalStaff = admin ? null : await matchingStaffForAccount(prisma, account);
-    if (!admin && !personalStaff) throw apiError("This account is not linked to its matching employee profile.", 409);
+    if (!admin && !receptionist && !personalStaff) throw apiError("This account is not linked to its matching employee profile.", 409);
     const personalStaffId = personalStaff?.id;
     const activeBranch = clean(account.access?.activeBranch?.name || account.branch);
     const allowedBranches = organizationWide
       ? account.access?.branches?.map((branch) => clean(branch.name)).filter(Boolean) || []
       : [activeBranch].filter(Boolean);
     const branchWhere = admin ? { branch: { in: allowedBranches.length ? allowedBranches : ["__none__"] } } : {};
-    const recordWhere = admin ? branchWhere : { staffId: personalStaffId };
+    const recordWhere = admin ? branchWhere : { staffId: personalStaffId || "__no_matching_staff_profile__" };
     const requestWhere = admin ? { attendanceRecord: branchWhere } : { requestedById: account.id };
     const [records, requests, staffRows, profileRows, auditEntries] = await Promise.all([
       prisma.faceTrackAttendanceRecord.findMany({ where: recordWhere, include: { staff: true, correctionRequests: { orderBy: { createdAt: "desc" } } }, orderBy: { workDate: "desc" }, take: 150 }),
       prisma.faceTrackCorrectionRequest.findMany({ where: requestWhere, include: { attendanceRecord: { include: { staff: true } }, requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
       admin ? prisma.staffMember.findMany({ orderBy: { name: "asc" } }) : Promise.resolve([]),
-      admin ? prisma.faceTrackProfile.findMany({ where: { active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true, staff: { select: { branch: true, branches: true } } } }) : prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
+      admin ? prisma.faceTrackProfile.findMany({ where: { active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true, staff: { select: { branch: true, branches: true } } } }) : personalStaff ? prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }) : Promise.resolve([]),
       admin ? prisma.faceTrackAuditEntry.findMany({ where: { attendanceRecord: branchWhere }, include: { attendanceRecord: { include: { staff: { select: { name: true } } } } }, orderBy: { createdAt: "desc" }, take: 250 }) : Promise.resolve([]),
     ]);
     const visibleAtAllowedBranch = (staffMember) => allowedBranches.some((branch) => staffAssignedToBranch(staffMember, branch));

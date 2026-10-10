@@ -227,12 +227,13 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
   const records = data?.records || [];
   const requests = data?.requests || [];
   const pendingRequests = requests.filter((item) => item.status === "PENDING").length;
+  const canOpenScanner = data.admin || ["Receptionist", "Branch Manager"].includes(session.role);
   const navigation = [
     { id: "dashboard", label: "Dashboard", icon: CheckCircle2 },
     { id: "attendance", label: "Timesheets", icon: Clock },
     { id: "requests", label: "Corrections", icon: FilePenLine, count: pendingRequests },
     { id: "profiles", label: "Face profiles", icon: UserCheck },
-    ...(data.admin ? [{ id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true }] : []),
+    ...(canOpenScanner ? [{ id: "kiosk", label: "Face scanner", icon: TabletSmartphone, external: true }] : []),
     ...(data.admin ? [
       { id: "settings", label: "Policies", icon: Settings },
       { id: "audit", label: "Audit trail", icon: ShieldCheck },
@@ -265,7 +266,7 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
           <section className="facetrack-hero">
             <div><span className="facetrack-kicker"><ShieldCheck size={15} /> Face recognition attendance</span><h2>Scan a face to Time In or Time Out.</h2><p>The first successful face scan records Time In. The employee's next successful scan records Time Out automatically.</p></div>
             <div className="facetrack-hero-actions">
-              {data.admin ? <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button> : <div className="facetrack-kiosk-only"><TabletSmartphone size={20} /><span>Use the registered office face scanner to Time In or Time Out. Personal devices cannot record attendance.</span></div>}
+              {canOpenScanner ? <button className="facetrack-primary light" onClick={() => window.location.assign("/attendance/kiosk")} type="button"><Camera /> Open face scanner</button> : <div className="facetrack-kiosk-only"><TabletSmartphone size={20} /><span>Use the registered office face scanner to Time In or Time Out. Personal devices cannot record attendance.</span></div>}
               {data.admin && <button className="facetrack-secondary light" onClick={() => setTab("profiles")} type="button"><UserCheck /> Manage face profiles</button>}
             </div>
           </section>
@@ -276,7 +277,7 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
               <li><span>2</span><div><strong>Look at the camera</strong><p>No name selection is shown. FaceTrack recognizes the employee from the clinic's enrolled face profiles.</p></div></li>
               <li><span>3</span><div><strong>Attendance is recorded</strong><p>No manual choice is needed: the first verified scan is Time In and the next verified scan is Time Out.</p></div></li>
             </ol>
-            {data.admin && <footer><TabletSmartphone size={18} /><span>Register the office device once, then leave the face scanner open for employees.</span><button onClick={() => window.location.assign("/attendance/kiosk")} type="button">Open scanner</button></footer>}
+            {canOpenScanner && <footer><TabletSmartphone size={18} /><span>{data.admin ? "Register the office device once, then leave the face scanner open for employees." : "Open the registered office face scanner on this device."}</span><button onClick={() => window.location.assign("/attendance/kiosk")} type="button">Open scanner</button></footer>}
           </section>
           <section className="facetrack-stats">
             <article><UserCheck /><div><strong>{stats.clockedIn || 0}</strong><span>Clocked in</span></div></article>
