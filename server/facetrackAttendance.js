@@ -58,6 +58,15 @@ function requireAdmin(request) {
   return account;
 }
 
+function requireScannerBranch(request) {
+  const account = requireAccount(request);
+  const branch = clean(request.body?.branch || request.query?.branch || account.access?.activeBranch?.name || account.branch);
+  if (!branch || branch === "All branches" || !canAccessBranch(account, branch)) {
+    throw apiError("Choose a clinic branch assigned to your account.", 403);
+  }
+  return { account, branch };
+}
+
 async function matchingStaffForAccount(prisma, account) {
   if (!account.staffId) return null;
   const staff = await prisma.staffMember.findUnique({ where: { id: account.staffId } });
@@ -346,23 +355,21 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const account = requireAccount(request);
     const policy = await policyFor(prisma);
     const admin = ADMIN_ROLES.has(account.role);
-    const receptionist = account.role === "Receptionist";
     const organizationWide = account.access?.scope === "all";
     const personalStaff = admin ? null : await matchingStaffForAccount(prisma, account);
-    if (!admin && !receptionist && !personalStaff) throw apiError("This account is not linked to its matching employee profile.", 409);
     const personalStaffId = personalStaff?.id;
     const activeBranch = clean(account.access?.activeBranch?.name || account.branch);
     const allowedBranches = organizationWide
       ? account.access?.branches?.map((branch) => clean(branch.name)).filter(Boolean) || []
       : [activeBranch].filter(Boolean);
     const branchWhere = admin ? { branch: { in: allowedBranches.length ? allowedBranches : ["__none__"] } } : {};
-    const recordWhere = admin ? branchWhere : { staffId: personalStaffId || "__no_matching_staff_profile__" };
+    const recordWhere = admin ? branchWhere : { staffId: personalStaffId || "__unlinked__" };
     const requestWhere = admin ? { attendanceRecord: branchWhere } : { requestedById: account.id };
     const [records, requests, staffRows, profileRows, auditEntries] = await Promise.all([
       prisma.faceTrackAttendanceRecord.findMany({ where: recordWhere, include: { staff: true, correctionRequests: { orderBy: { createdAt: "desc" } } }, orderBy: { workDate: "desc" }, take: 150 }),
       prisma.faceTrackCorrectionRequest.findMany({ where: requestWhere, include: { attendanceRecord: { include: { staff: true } }, requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
       admin ? prisma.staffMember.findMany({ orderBy: { name: "asc" } }) : Promise.resolve([]),
-      admin ? prisma.faceTrackProfile.findMany({ where: { active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true, staff: { select: { branch: true, branches: true } } } }) : personalStaff ? prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId, active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }) : Promise.resolve([]),
+      admin ? prisma.faceTrackProfile.findMany({ where: { active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true, staff: { select: { branch: true, branches: true } } } }) : prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId || "__unlinked__", active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
       admin ? prisma.faceTrackAuditEntry.findMany({ where: { attendanceRecord: branchWhere }, include: { attendanceRecord: { include: { staff: { select: { name: true } } } } }, orderBy: { createdAt: "desc" }, take: 250 }) : Promise.resolve([]),
     ]);
     const visibleAtAllowedBranch = (staffMember) => allowedBranches.some((branch) => staffAssignedToBranch(staffMember, branch));
@@ -434,6 +441,88 @@ export function createFaceTrackAttendanceRouter(prisma) {
   router.post("/clock", asyncRoute(async (request) => {
     requireAccount(request);
     throw apiError("Attendance must be recorded on the registered office face scanner.", 403);
+  }));
+
+  router.get("/scanner/status", asyncRoute(async (request, response) => {
+    const { branch } = requireScannerBranch(request);
+    const enrolledProfiles = await prisma.faceTrackProfile.findMany({
+      where: { active: true, staff: { status: { not: "Inactive" } } },
+      include: { staff: true },
+    });
+    const enrolledEmployees = enrolledProfiles.filter((profile) => staffAssignedToBranch(profile.staff, branch)).length;
+    response.json({
+      device: { id: `account:${branch}`, name: "FaceTrack scanner", branch, active: true },
+      enrolledEmployees,
+      rawImagesStored: false,
+    });
+  }));
+
+  router.post("/scanner/challenge", asyncRoute(async (request, response) => {
+    const { account } = requireScannerBranch(request);
+    enforceVerificationRateLimit(request);
+    const challenge = await prisma.faceTrackChallenge.create({
+      data: {
+        accountId: account.id,
+        purpose: "KIOSK_CLOCK",
+        nonceHash: createHash("sha256").update(randomBytes(32)).digest("hex"),
+        expiresAt: new Date(Date.now() + 2 * 60_000),
+      },
+    });
+    response.status(201).json({ challengeId: challenge.id, expiresAt: challenge.expiresAt });
+  }));
+
+  router.post("/scanner/clock", asyncRoute(async (request, response) => {
+    const { account, branch } = requireScannerBranch(request);
+    enforceVerificationRateLimit(request);
+    const idempotencyKey = clean(request.body?.idempotencyKey);
+    if (idempotencyKey.length < 12) throw apiError("A valid attendance request key is required.");
+    const descriptor = averageDescriptors(request.body?.descriptors);
+    const policy = await policyFor(prisma);
+    if (!policy.enabled) throw apiError("FaceTrack Attendance is currently disabled.", 503);
+    const profiles = await prisma.faceTrackProfile.findMany({
+      where: { active: true, staff: { status: { not: "Inactive" } } },
+      include: { staff: true },
+    });
+    const candidates = [];
+    for (const profile of profiles) {
+      if (!staffAssignedToBranch(profile.staff, branch)) continue;
+      try {
+        candidates.push({ profile, staff: profile.staff, descriptor: decryptDescriptor(profile.encryptedDescriptor) });
+      } catch {
+        // Skip a damaged profile instead of blocking attendance for the whole branch.
+      }
+    }
+    if (!candidates.length) throw apiError("No enrolled employees are available for this clinic branch.", 409);
+    const match = selectUniqueMatch(candidates, descriptor, policy.matchThreshold);
+    const confidence = Math.max(0, Math.min(1, 1 - match.distance));
+    const { record, now } = await recordVerifiedClock(prisma, {
+      staff: match.staff,
+      profile: match.profile,
+      policy,
+      confidence,
+      idempotencyKey,
+      branch,
+      actor: {
+        id: account.id,
+        name: account.name,
+        role: account.role,
+        metadata: { scanner: "account", branch },
+      },
+      consume: (tx) => consumeChallenge(tx, account.id, request.body?.challengeId, "KIOSK_CLOCK"),
+    });
+    response.status(201).json({
+      action: record.action,
+      confidence,
+      occurredAt: now,
+      employee: {
+        id: match.staff.id,
+        name: match.staff.name,
+        photo: match.staff.photo?.startsWith("/brand/") ? match.staff.photo : "",
+        role: match.staff.role,
+        branch: record.branch,
+      },
+      record: serializeRecord(record),
+    });
   }));
 
   router.get("/kiosks", asyncRoute(async (request, response) => {
