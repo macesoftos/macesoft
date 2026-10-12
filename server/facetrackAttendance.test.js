@@ -81,13 +81,16 @@ test("daily branch assignment accepts primary and additional staff branches", ()
   assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: '["Makati"]' }, "Cebu"), false);
 });
 
-test("attendance is restricted to one registered office device per branch", () => {
+test("attendance scanner allows an authenticated account with FaceTrack branch access", () => {
   const source = readFileSync(new URL("./facetrackAttendance.js", import.meta.url), "utf8");
   const attendancePage = readFileSync(new URL("../src/facetrack/FaceTrackAttendance.jsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../prisma/migrations/20260821170000_one_facetrack_office_device/migration.sql", import.meta.url), "utf8");
   assert.match(source, /ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Manager"/);
-  assert.match(source, /Attendance must be recorded on the registered office face scanner/);
-  assert.match(attendancePage, /Use the registered office face scanner to Time In or Time Out/);
+  assert.match(source, /router\.get\("\/scanner\/status"/);
+  assert.match(source, /router\.post\("\/scanner\/challenge"/);
+  assert.match(source, /router\.post\("\/scanner\/clock"/);
+  assert.match(attendancePage, /facetrack-attendance/);
+  assert.match(attendancePage, /canOpenScanner/);
   assert.match(source, /already has an active attendance iPad/);
   assert.match(migration, /CREATE UNIQUE INDEX "FaceTrackKioskDevice_one_active_per_branch_key"/);
   assert.match(migration, /WHERE "active" = true/);

@@ -3,8 +3,11 @@ import { AlertCircle, Camera, CheckCircle2, Clock3, LockKeyhole, ShieldCheck, Ta
 import {
   createFaceTrackKiosk,
   createFaceTrackKioskChallenge,
+  createFaceTrackScannerChallenge,
   loadFaceTrackKioskStatus,
+  loadFaceTrackScannerStatus,
   recordFaceTrackKioskAttendance,
+  recordFaceTrackScannerAttendance,
   unlockFaceTrackKiosk,
 } from "../lib/api.js";
 import { ORGANIZATION_MANAGER_ROLES } from "../organizationRoles.js";
@@ -27,6 +30,7 @@ export default function FaceTrackKiosk({ session }) {
   const faceApiRef = useRef(null);
   const resetTimerRef = useRef(0);
   const [device, setDevice] = useState(null);
+  const [scannerMode, setScannerMode] = useState("kiosk");
   const [enrolledEmployees, setEnrolledEmployees] = useState(0);
   const [view, setView] = useState("loading");
   const [cameraReady, setCameraReady] = useState(false);
@@ -42,6 +46,11 @@ export default function FaceTrackKiosk({ session }) {
   const availableBranches = kioskBranches
     .filter((branch) => branch.branchStatus === "Active")
     .map((branch) => ({ id: branch.id, name: branch.name }));
+  const scannerBranch = setup.branch || session?.access?.activeBranch?.name || session?.branch || "";
+  const canUseAccountScanner = Boolean(session && (
+    session.access?.modules?.includes("facetrack-attendance")
+    || ADMIN_ROLES.has(session.role)
+  ));
 
   useEffect(() => {
     if (!setup.branch && availableBranches.length) {
@@ -56,19 +65,35 @@ export default function FaceTrackKiosk({ session }) {
 
   useEffect(() => {
     let cancelled = false;
-    loadFaceTrackKioskStatus()
-      .then((payload) => {
+    async function loadScanner() {
+      try {
+        const payload = await loadFaceTrackKioskStatus();
         if (cancelled) return;
+        setScannerMode("kiosk");
         setDevice(payload.device);
         setEnrolledEmployees(payload.enrolledEmployees || 0);
         setView("ready");
-      })
-      .catch(() => {
+      } catch {
         if (cancelled) return;
-        setView("setup");
-      });
+        if (canUseAccountScanner && scannerBranch) {
+          try {
+            const payload = await loadFaceTrackScannerStatus(scannerBranch);
+            if (cancelled) return;
+            setScannerMode("account");
+            setDevice(payload.device);
+            setEnrolledEmployees(payload.enrolledEmployees || 0);
+            setView("ready");
+            return;
+          } catch {
+            // Fall through to the existing kiosk setup screen when account access is unavailable.
+          }
+        }
+        if (!cancelled) setView("setup");
+      }
+    }
+    void loadScanner();
     return () => { cancelled = true; };
-  }, []);
+  }, [canUseAccountScanner, scannerBranch]);
 
   useEffect(() => () => {
     window.clearTimeout(resetTimerRef.current);
@@ -98,7 +123,7 @@ export default function FaceTrackKiosk({ session }) {
       setCameraReady(true);
       setPhase("Center one face in the oval, then tap Verify face.");
     } catch (nextError) {
-      setError(nextError?.name === "NotAllowedError" ? "Camera access was denied. Allow camera access in Safari settings and try again." : "The camera or face-recognition models could not be started.");
+      setError(nextError?.name === "NotAllowedError" ? "Camera access was denied. Allow camera access in your browser settings and try again." : "The camera or face-recognition models could not be started.");
       setPhase("Camera unavailable");
     }
   }, []);
@@ -132,13 +157,19 @@ export default function FaceTrackKiosk({ session }) {
     setView("scanning");
     setError("");
     try {
-      const challenge = await createFaceTrackKioskChallenge();
+      const challenge = scannerMode === "account"
+        ? await createFaceTrackScannerChallenge(device.branch)
+        : await createFaceTrackKioskChallenge();
       const descriptors = await captureSamples();
       setPhase("Recognizing employee and recording attendance...");
-      const payload = await recordFaceTrackKioskAttendance({
+      const recordAttendance = scannerMode === "account"
+        ? recordFaceTrackScannerAttendance
+        : recordFaceTrackKioskAttendance;
+      const payload = await recordAttendance({
         descriptors,
         challengeId: challenge.challengeId,
         idempotencyKey: crypto.randomUUID(),
+        ...(scannerMode === "account" ? { branch: device.branch } : {}),
       });
       setResult(payload);
       setView("success");
@@ -172,6 +203,10 @@ export default function FaceTrackKiosk({ session }) {
   }
 
   async function exitKiosk() {
+    if (scannerMode === "account") {
+      window.location.assign("/attendance");
+      return;
+    }
     const pin = window.prompt("Enter the 6-digit administrator PIN to leave kiosk mode.", "");
     if (pin === null) return;
     try {
@@ -192,10 +227,10 @@ export default function FaceTrackKiosk({ session }) {
   }
 
   return <main className={`facetrack-kiosk ${view}`}>
-    <header className="kiosk-header"><div className="kiosk-device"><span><TabletSmartphone /></span><div><strong>{device?.name}</strong><small>{device?.branch} · {enrolledEmployees} enrolled</small></div></div><div className="kiosk-clock"><strong>{displayTime(now)}</strong><span>{displayDate(now)}</span></div><button type="button" onClick={exitKiosk}><LockKeyhole /> Admin</button></header>
+    <header className="kiosk-header"><div className="kiosk-device"><span><TabletSmartphone /></span><div><strong>{device?.name}</strong><small>{device?.branch} · {enrolledEmployees} enrolled</small></div></div><div className="kiosk-clock"><strong>{displayTime(now)}</strong><span>{displayDate(now)}</span></div><button type="button" onClick={exitKiosk}><LockKeyhole /> {scannerMode === "account" ? "Back" : "Admin"}</button></header>
     <section className="kiosk-body">
       <div className="kiosk-camera-card"><div className="kiosk-video-wrap"><video muted playsInline ref={videoRef} /><div className="kiosk-face-guide" />{!cameraReady && <div className="kiosk-camera-placeholder"><Camera /><strong>Camera is off</strong><span>Tap Start camera to allow access.</span></div>}{view === "scanning" && <div className="kiosk-scanning"><span /><strong>Checking live face</strong></div>}</div><p>{phase}</p></div>
-      <aside className="kiosk-action-panel"><span className="kiosk-kicker">Face recognition attendance</span><h1>Time In / Time Out</h1><p>Stand directly in front of the iPad. FaceTrack recognizes who you are—there is no name list. Your first recognized scan records Time In; your next recognized scan records Time Out.</p><div className="kiosk-privacy"><ShieldCheck /><span>Live face template only. Raw camera images are not uploaded or stored.</span></div>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}{cameraReady ? <button className="kiosk-scan-button" disabled={view === "scanning"} type="button" onClick={verifyFace}><UserCheck />{view === "scanning" ? "Recognizing employee..." : "Recognize face — Time In / Out"}</button> : <button className="kiosk-scan-button" type="button" onClick={startCamera}><Camera />Start face scanner</button>}<small>No employee selection or manual attendance button is needed. Only employees enrolled for {device?.branch} can use this kiosk.</small></aside>
+      <aside className="kiosk-action-panel"><span className="kiosk-kicker">Face recognition attendance</span><h1>Time In / Time Out</h1><p>Stand in front of the camera. FaceTrack recognizes the employee without a name list. The first scan records Time In; the next scan records Time Out.</p><div className="kiosk-privacy"><ShieldCheck /><span>Live face template only. Raw camera images are not uploaded or stored.</span></div>{error && <div className="kiosk-message error"><AlertCircle />{error}</div>}{cameraReady ? <button className="kiosk-scan-button" disabled={view === "scanning"} type="button" onClick={verifyFace}><UserCheck />{view === "scanning" ? "Recognizing employee..." : "Recognize face — Time In / Out"}</button> : <button className="kiosk-scan-button" type="button" onClick={startCamera}><Camera />Start face scanner</button>}<small>No employee selection or manual attendance button is needed. Only employees enrolled for {device?.branch} can use this scanner.</small></aside>
     </section>
     {view === "success" && result && <section className="kiosk-success" aria-live="assertive"><span className="kiosk-success-icon"><CheckCircle2 /></span>{result.employee.photo ? <img src={result.employee.photo} alt="" /> : <span className="kiosk-result-avatar">{result.employee.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>}<p>{result.employee.name}</p><h2>{result.action === "TIME_IN" ? "Time In recorded" : "Time Out recorded"}</h2><div><Clock3 /><strong>{displayTime(new Date(result.occurredAt))}</strong></div><small>{result.employee.branch} · Returning to scanner...</small></section>}
   </main>;

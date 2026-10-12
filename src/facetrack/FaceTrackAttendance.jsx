@@ -227,7 +227,9 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
   const records = data?.records || [];
   const requests = data?.requests || [];
   const pendingRequests = requests.filter((item) => item.status === "PENDING").length;
-  const canOpenScanner = data.admin || ["Receptionist", "Branch Manager"].includes(session.role);
+  const canOpenScanner = data.admin
+    || session.access?.modules?.includes("facetrack-attendance")
+    || ["Receptionist", "Branch Manager"].includes(session.role);
   const navigation = [
     { id: "dashboard", label: "Dashboard", icon: CheckCircle2 },
     { id: "attendance", label: "Timesheets", icon: Clock },
@@ -277,7 +279,7 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
               <li><span>2</span><div><strong>Look at the camera</strong><p>No name selection is shown. FaceTrack recognizes the employee from the clinic's enrolled face profiles.</p></div></li>
               <li><span>3</span><div><strong>Attendance is recorded</strong><p>No manual choice is needed: the first verified scan is Time In and the next verified scan is Time Out.</p></div></li>
             </ol>
-            {canOpenScanner && <footer><TabletSmartphone size={18} /><span>{data.admin ? "Register the office device once, then leave the face scanner open for employees." : "Open the registered office face scanner on this device."}</span><button onClick={() => window.location.assign("/attendance/kiosk")} type="button">Open scanner</button></footer>}
+            {canOpenScanner && <footer><TabletSmartphone size={18} /><span>{data.admin ? "Open the scanner for your authorized branch, or manage enrolled employee profiles." : "Open the scanner for your assigned branch. No separate administrator approval is needed."}</span><button onClick={() => window.location.assign("/attendance/kiosk")} type="button">Open scanner</button></footer>}
           </section>
           <section className="facetrack-stats">
             <article><UserCheck /><div><strong>{stats.clockedIn || 0}</strong><span>Clocked in</span></div></article>

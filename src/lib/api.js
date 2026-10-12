@@ -470,6 +470,24 @@ export function loadFaceTrackKioskStatus() {
   return requestJson("/api/facetrack-attendance/kiosk/status");
 }
 
+export function loadFaceTrackScannerStatus(branch) {
+  return requestJson(`/api/facetrack-attendance/scanner/status?branch=${encodeURIComponent(branch || "")}`);
+}
+
+export function createFaceTrackScannerChallenge(branch) {
+  return requestJson("/api/facetrack-attendance/scanner/challenge", {
+    method: "POST",
+    body: JSON.stringify({ branch }),
+  });
+}
+
+export function recordFaceTrackScannerAttendance(payload) {
+  return requestJson("/api/facetrack-attendance/scanner/clock", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createFaceTrackKioskChallenge() {
   return requestJson("/api/facetrack-attendance/kiosk/challenge", {
     method: "POST",
