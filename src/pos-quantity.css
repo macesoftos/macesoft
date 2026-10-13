@@ -1573,6 +1573,34 @@
   gap: 4px;
 }
 
+.pos-visits-toolbar-actions,
+.pos-visits-date-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pos-visits-date-picker {
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  color: var(--text-muted, #6b7280);
+  background: var(--surface, #fff);
+}
+
+.pos-visits-date-picker span {
+  color: inherit;
+  white-space: nowrap;
+}
+
+.pos-visits-date-picker input {
+  min-width: 132px;
+  border: 0;
+  color: var(--text, #1f2937);
+  background: transparent;
+}
+
 .pos-visits-toolbar span,
 .pos-visit-card small,
 .pos-visit-detail span,
@@ -1710,6 +1738,11 @@
   .pos-visits-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .pos-visits-toolbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 }
 

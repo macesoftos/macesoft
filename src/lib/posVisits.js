@@ -5,7 +5,7 @@ function clientKey(record) {
   return `name:${name}`;
 }
 
-export function groupTodayPosVisits(appointments, transactions, date, branch) {
+export function groupTodayPosVisits(appointments, transactions, date, branch, openCarts = []) {
   const visits = [];
   const byClient = new Map();
   const byAppointment = new Map();
@@ -15,12 +15,33 @@ export function groupTodayPosVisits(appointments, transactions, date, branch) {
     const key = clientKey(appointment) || `appointment:${appointment.id}`;
     let visit = byClient.get(key);
     if (!visit) {
-      visit = { key, client: appointment.client || "Walk-in", appointment, appointments: [], transactions: [] };
+      visit = { key, client: appointment.client || "Walk-in", appointment, appointments: [], transactions: [], openCarts: [] };
       visits.push(visit);
       byClient.set(key, visit);
     }
     visit.appointments.push(appointment);
     byAppointment.set(appointment.id, visit);
+  }
+
+  for (const cart of openCarts) {
+    if ((cart.saleDate || date) !== date || cart.branch !== branch) continue;
+    const linkedIds = (Array.isArray(cart.items) ? cart.items : []).map((item) => item.appointmentId).filter(Boolean);
+    let visit = linkedIds.map((id) => byAppointment.get(id)).find(Boolean);
+    const key = clientKey(cart);
+    if (!visit && key) visit = byClient.get(key);
+    if (!visit) {
+      visit = {
+        key: key || `cart:${cart.id}`,
+        client: cart.client || "Walk-in",
+        appointment: null,
+        appointments: [],
+        transactions: [],
+        openCarts: [],
+      };
+      visits.push(visit);
+      if (key) byClient.set(key, visit);
+    }
+    visit.openCarts.push(cart);
   }
 
   for (const transaction of transactions) {
@@ -36,6 +57,7 @@ export function groupTodayPosVisits(appointments, transactions, date, branch) {
         appointment: null,
         appointments: [],
         transactions: [],
+        openCarts: [],
       };
       visits.push(visit);
       if (key) byClient.set(key, visit);

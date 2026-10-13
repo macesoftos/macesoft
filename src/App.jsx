@@ -6008,6 +6008,7 @@ function POSModule({
   const [catalogTab, setCatalogTab] = useState("Services");
   const [posScreen, setPosScreen] = useState("Today's visits");
   const [selectedVisitKey, setSelectedVisitKey] = useState("");
+  const [visitDate, setVisitDate] = useState(() => todayDate());
   const [visitContext, setVisitContext] = useState(null);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -6245,24 +6246,27 @@ function POSModule({
     const activeAppointments = appointments
       .filter((appointment) => !["Cancelled", "No Show"].includes(canonicalAppointmentStatus(appointment.status)))
       .sort((left, right) => parseTimeToMinutes(left.time) - parseTimeToMinutes(right.time));
-    return groupTodayPosVisits(activeAppointments, transactions, todayDate(), branch)
+    return groupTodayPosVisits(activeAppointments, transactions, visitDate, branch, openCartsForBranch)
       .map((visit) => {
         const unpaidAppointments = visit.appointments.filter((item) => appointmentPaymentSummary(item, services, transactions).due > 0);
         return { ...visit, unpaidAppointments, checkedOut: visit.appointments.length > 0 && unpaidAppointments.length === 0 };
       });
-  }, [appointments, branch, services, transactions]);
+  }, [appointments, branch, openCartsForBranch, services, transactions, visitDate]);
   const selectedVisit = todaysVisitCards.find((visit) => visit.key === selectedVisitKey) || todaysVisitCards[0] || null;
   const visitStatus = (visit) => visit.appointment
     ? (visit.checkedOut ? "Paid" : canonicalAppointmentStatus(visit.appointment.status))
-    : (visit.transactions[0]?.testMode ? "Test" : visit.transactions[0]?.status || "Paid");
-  const visitRooms = (visit) => [...new Set([...visit.appointments, ...visit.transactions].map((item) => item.room).filter(Boolean))].join(", ") || "Room not assigned";
+    : visit.openCarts?.length
+      ? "In checkout"
+      : (visit.transactions[0]?.testMode ? "Test" : visit.transactions[0]?.status || "Paid");
+  const visitRooms = (visit) => [...new Set([...visit.appointments, ...visit.transactions, ...(visit.openCarts || [])].map((item) => item.room).filter(Boolean))].join(", ") || "Room not assigned";
   const visitTime = (visit) => {
-    const time = visit.appointment?.time || visit.transactions[0]?.time;
+    const time = visit.appointment?.time || visit.transactions[0]?.time || visit.openCarts?.[0]?.arrivalTime;
     return time ? formatScheduleTime(parseTimeToMinutes(time)) : "Time not recorded";
   };
   const visitActivity = (visit) => [
     visit.appointments.length ? `${visit.appointments.length} booked service${visit.appointments.length === 1 ? "" : "s"}` : "",
     visit.transactions.length ? `${visit.transactions.length} POS transaction${visit.transactions.length === 1 ? "" : "s"}` : "",
+    visit.openCarts?.length ? `${visit.openCarts.length} checkout in progress` : "",
   ].filter(Boolean).join(" · ");
   const clientCredits = useMemo(() => packages.filter((pkg) => {
     if (!clientId || (pkg.clientId !== clientId && normalize(pkg.client) !== normalize(client?.fullName))) return false;
@@ -6425,7 +6429,17 @@ function POSModule({
     setPosScreen("Checkout");
   }
 
+  async function continueVisitCheckout(visit) {
+    const openCart = visit?.openCarts?.[0];
+    if (!openCart) return;
+    await activateOpenCart(openCart);
+    setVisitContext(null);
+    setCheckoutStep("review");
+    setPosScreen("Checkout");
+  }
+
   async function startWalkIn() {
+    setVisitDate(todayDate());
     await openCartForClient("");
     setVisitContext(null);
     setCart([]);
@@ -6788,11 +6802,15 @@ function POSModule({
         {posScreen === "Today's visits" ? (
           <div className="pos-visits-workspace">
             <div className="pos-visits-toolbar">
-              <div><strong>{formatDate(todayDate())}</strong><span>Select a client visit to review every service before checkout.</span></div>
-              <button className="primary-button" type="button" onClick={startWalkIn}><Plus size={17} /> Walk-in sale</button>
+              <div><strong>{visitDate === todayDate() ? "Today's visits" : `Visits for ${formatDate(visitDate)}`}</strong><span>{visitDate === todayDate() ? "Select a visit to review services, open checkouts, and transactions." : "Visit history for the selected date and branch."}</span></div>
+              <div className="pos-visits-toolbar-actions">
+                <label className="pos-visits-date-picker"><CalendarDays size={17} /><span>Visit date</span><input aria-label="Choose visit history date" type="date" max={todayDate()} value={visitDate} onChange={(event) => setVisitDate(event.target.value || todayDate())} /></label>
+                {visitDate !== todayDate() && <button className="secondary-button" type="button" onClick={() => setVisitDate(todayDate())}>Today</button>}
+                <button className="primary-button" type="button" onClick={startWalkIn}><Plus size={17} /> Walk-in sale</button>
+              </div>
             </div>
             <div className="pos-visits-grid">
-              <div className="pos-visit-card-list" role="list" aria-label="Today's client visits">
+              <div className="pos-visit-card-list" role="list" aria-label={visitDate === todayDate() ? "Today's client visits" : `Client visits for ${formatDate(visitDate)}`}>
                 {todaysVisitCards.map((visit) => (
                   <button className={`pos-visit-card${selectedVisit?.key === visit.key ? " selected" : ""}`} type="button" key={visit.key} onClick={() => setSelectedVisitKey(visit.key)}>
                     <span><strong>{visit.client}</strong><StatusBadge status={visitStatus(visit)} /></span>
@@ -6800,7 +6818,7 @@ function POSModule({
                     <small><Home size={14} /> {visitRooms(visit)}</small>
                   </button>
                 ))}
-                {!todaysVisitCards.length && <EmptyState title="No visits or POS transactions today" copy="Use Walk-in sale for an unscheduled client." />}
+                {!todaysVisitCards.length && <EmptyState title={visitDate === todayDate() ? "No visits or POS transactions today" : `No visits on ${formatDate(visitDate)}`} copy={visitDate === todayDate() ? "Use Walk-in sale to add a walk-in to today's visits." : "Choose another date to review visit history."} />}
               </div>
               {selectedVisit && (
                 <aside className="pos-visit-detail">
@@ -6821,6 +6839,18 @@ function POSModule({
                         <div><b>{money.format(transaction.total || 0)}</b><button type="button" className="pos-visit-receipt-button" onClick={() => onPrintReceipt(transaction)}><Printer size={14} /> Receipt</button></div>
                       </article>
                     ))}
+                    {(selectedVisit.openCarts || []).map((openCart) => {
+                      const items = Array.isArray(openCart.items) ? openCart.items : [];
+                      const subtotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1), 0);
+                      return <article key={`open-cart-${openCart.id}`}>
+                        <div>
+                          <strong>Walk-in checkout in progress</strong>
+                          <span>{items.map((item) => `${item.name}${Number(item.qty || 1) > 1 ? ` × ${item.qty}` : ""}`).join(", ") || "No services or products added yet"}</span>
+                          <small>Not yet posted as a transaction</small>
+                        </div>
+                        <div><b>{money.format(subtotal)}</b><button type="button" className="pos-visit-receipt-button" onClick={() => void continueVisitCheckout({ ...selectedVisit, openCarts: [openCart] })}><ReceiptText size={14} /> Continue checkout</button></div>
+                      </article>;
+                    })}
                   </div>
                   {selectedVisit.appointment && <button className="primary-button full" type="button" disabled={selectedVisit.checkedOut} onClick={() => loadVisitCheckout(selectedVisit)}><ReceiptText size={17} /> {selectedVisit.checkedOut ? "Visit checked out" : "Proceed to checkout"}</button>}
                 </aside>
