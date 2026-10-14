@@ -5953,9 +5953,9 @@ function RolePanel({ panel }) {
   );
 }
 
-function formatPosClientLabel(item) {
+function formatPosClientLabel(item, includeContact = true) {
   return item
-    ? `${item.fullName}${item.mobile ? ` · ${item.mobile}` : item.email ? ` · ${item.email}` : ` · ${item.id}`}`
+    ? `${item.fullName}${includeContact ? item.mobile ? ` · ${item.mobile}` : item.email ? ` · ${item.email}` : ` · ${item.id}` : ""}`
     : "Walk-in / Anonymous";
 }
 
@@ -5990,8 +5990,11 @@ function POSModule({
   canAdministerClients = false,
   settings,
 }) {
+  const canViewClientSensitive = canManageOrganization(sessionRole) || ["Branch Manager", "Doctor", "Receptionist"].includes(sessionRole);
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
-  const [clientSearch, setClientSearch] = useState(() => formatPosClientLabel(clients[0]));
+  const [clientSearch, setClientSearch] = useState(() => formatPosClientLabel(clients[0], canViewClientSensitive));
+  const [manualClientName, setManualClientName] = useState("");
+  const [isClientPickerOpen, setIsClientPickerOpen] = useState(false);
   const [branch, setBranch] = useState(branchScope === "All branches" ? branchRecords.find((item) => item.status === "Active")?.name || "" : branchScope);
   const [staffName, setStaffName] = useState(staff[0]?.name ?? "");
   const [discountId, setDiscountId] = useState("");
@@ -6032,14 +6035,29 @@ function POSModule({
     [branch, posCarts],
   );
   const posClientOptions = useMemo(
-    () => clients.map((item) => ({ id: item.id, label: formatPosClientLabel(item), client: item })),
-    [clients],
+    () => clients
+      .filter((item) => branch === "All branches"
+        || item.branch === branch
+        || splitList(item.branchesVisited).includes(branch)
+        || posCarts.some((openCart) => openCart.branch === branch && openCart.clientId === item.id))
+      .map((item) => ({ id: item.id, label: formatPosClientLabel(item, canViewClientSensitive), client: item })),
+    [branch, canViewClientSensitive, clients, posCarts],
   );
 
   useEffect(() => {
-    setClientSearch(formatPosClientLabel(clients.find((item) => item.id === clientId)));
-  }, [clientId, clients]);
+    if (clientId) {
+      if (manualClientName) return;
+      setClientSearch(formatPosClientLabel(clients.find((item) => item.id === clientId), canViewClientSensitive));
+    } else {
+      setClientSearch(manualClientName || formatPosClientLabel(null));
+    }
+  }, [canViewClientSensitive, clientId, clients, manualClientName]);
   const activeOpenCart = posCarts.find((openCart) => openCart.id === activeCartId);
+  useEffect(() => {
+    if (!clientId || posClientOptions.some((option) => option.id === clientId)) return;
+    setClientId("");
+    setManualClientName("");
+  }, [branch, clientId, posClientOptions]);
   const selectedBranchRecord = branchRecords.find((item) => item.name === branch);
   const roomOptions = useMemo(() => [
     ...(selectedBranchRecord?.rooms || []),
@@ -6061,6 +6079,7 @@ function POSModule({
     if (next) {
       setActiveCartId(next.id);
       setClientId(next.clientId || "");
+      setManualClientName(next.clientId || next.client === "Walk-in" ? "" : next.client || "");
       setStaffName(next.staff || "");
       setDiscountId(next.discountId || "");
       setManualDiscountType(next.manualDiscountType || "");
@@ -6074,6 +6093,8 @@ function POSModule({
       setCart(Array.isArray(next.items) ? next.items : []);
     } else {
       setActiveCartId("");
+      setClientId("");
+      setManualClientName("");
       setCart([]);
       setDiscountId("");
       setManualDiscountType("");
@@ -6092,7 +6113,7 @@ function POSModule({
     const nextDraft = {
       ...activeOpenCart,
       clientId,
-      client: clients.find((item) => item.id === clientId)?.fullName || "Walk-in",
+      client: manualClientName || clients.find((item) => item.id === clientId)?.fullName || "Walk-in",
       branch,
       staff: staffName,
       items: cart,
@@ -6106,14 +6127,14 @@ function POSModule({
       arrivalTime,
       testMode,
     };
-    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, manualDiscountType: activeOpenCart.manualDiscountType || "", manualDiscountValue: Number(activeOpenCart.manualDiscountValue || 0), manualDiscountScope: activeOpenCart.manualDiscountScope || "Transaction", manualDiscountTargetKey: activeOpenCart.manualDiscountTargetKey || "", saleDate: activeOpenCart.saleDate || todayDate(), room: activeOpenCart.room || "", arrivalTime: activeOpenCart.arrivalTime || "", testMode: Boolean(activeOpenCart.testMode) });
-    const pending = JSON.stringify({ clientId, staff: staffName, items: cart, discountId, manualDiscountType, manualDiscountValue: Number(manualDiscountValue || 0), manualDiscountScope, manualDiscountTargetKey, saleDate, room, arrivalTime, testMode });
+    const stored = JSON.stringify({ clientId: activeOpenCart.clientId, client: activeOpenCart.client || "Walk-in", staff: activeOpenCart.staff, items: activeOpenCart.items, discountId: activeOpenCart.discountId, manualDiscountType: activeOpenCart.manualDiscountType || "", manualDiscountValue: Number(activeOpenCart.manualDiscountValue || 0), manualDiscountScope: activeOpenCart.manualDiscountScope || "Transaction", manualDiscountTargetKey: activeOpenCart.manualDiscountTargetKey || "", saleDate: activeOpenCart.saleDate || todayDate(), room: activeOpenCart.room || "", arrivalTime: activeOpenCart.arrivalTime || "", testMode: Boolean(activeOpenCart.testMode) });
+    const pending = JSON.stringify({ clientId, client: manualClientName || clients.find((item) => item.id === clientId)?.fullName || "Walk-in", staff: staffName, items: cart, discountId, manualDiscountType, manualDiscountValue: Number(manualDiscountValue || 0), manualDiscountScope, manualDiscountTargetKey, saleDate, room, arrivalTime, testMode });
     if (stored === pending) return undefined;
     const timer = window.setTimeout(() => {
       void saveOpenCart(nextDraft).catch((error) => notify(error.message || "Unable to save the open POS cart.", "error"));
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [activeOpenCart, arrivalTime, branch, cart, clientId, clients, discountId, manualDiscountScope, manualDiscountTargetKey, manualDiscountType, manualDiscountValue, notify, room, saleDate, saveOpenCart, staffName, testMode]);
+  }, [activeOpenCart, arrivalTime, branch, cart, clientId, clients, discountId, manualClientName, manualDiscountScope, manualDiscountTargetKey, manualDiscountType, manualDiscountValue, notify, room, saleDate, saveOpenCart, staffName, testMode]);
 
   useEffect(() => {
     if (!canManagePosCatalog && posScreen === "Service Prices") setPosScreen("Today's visits");
@@ -6224,6 +6245,17 @@ function POSModule({
         ? `Automatic promotion · ${money.format(promotionDiscountAmount)}`
         : "No discount";
   const client = clients.find((item) => item.id === clientId);
+  const isSelectedClientLabel = clientId && normalize(clientSearch) === normalize(formatPosClientLabel(client, canViewClientSensitive));
+  const isWalkInLabel = normalize(clientSearch) === normalize("Walk-in / Anonymous");
+  const clientPickerQuery = isSelectedClientLabel || (!manualClientName && isWalkInLabel) ? "" : normalize(clientSearch);
+  const visiblePosClientOptions = posClientOptions
+    .filter((option) => !clientPickerQuery
+      || normalize(option.label).includes(clientPickerQuery)
+      || normalize(option.client.fullName).includes(clientPickerQuery)
+      || (canViewClientSensitive && normalize(option.client.mobile).includes(clientPickerQuery))
+      || (canViewClientSensitive && normalize(option.client.email).includes(clientPickerQuery))
+      || (canViewClientSensitive && normalize(option.client.id).includes(clientPickerQuery)))
+    .slice(0, 30);
   const cartProviders = [...new Set(
     cart
       .filter((item) => item.type === "Service")
@@ -6289,7 +6321,7 @@ function POSModule({
     return saveOpenCart({
       ...activeOpenCart,
       clientId,
-      client: visitContext?.clientName || client?.fullName || "Walk-in",
+      client: visitContext?.clientName || manualClientName || client?.fullName || "Walk-in",
       branch,
       staff: staffName,
       items: cart,
@@ -6311,6 +6343,7 @@ function POSModule({
       await persistActiveCart();
       setActiveCartId(openCart.id);
       setClientId(openCart.clientId || "");
+      setManualClientName(openCart.clientId || openCart.client === "Walk-in" ? "" : openCart.client || "");
       setStaffName(openCart.staff || "");
       setDiscountId(openCart.discountId || "");
       setManualDiscountType(openCart.manualDiscountType || "");
@@ -6355,6 +6388,7 @@ function POSModule({
       });
       setActiveCartId(created.id);
       setClientId(created.clientId || "");
+      setManualClientName("");
       setDiscountId("");
       setManualDiscountType("");
       setManualDiscountValue("");
@@ -6379,18 +6413,24 @@ function POSModule({
     setClientSearch(value);
     const normalizedValue = normalize(value);
     if (normalizedValue === "walk-in / anonymous" || normalizedValue === "walk in / anonymous") {
+      setManualClientName("");
       if (clientId) void openCartForClient("");
       return;
     }
     const match = posClientOptions.find((option) => (
       normalize(option.label) === normalizedValue
       || normalize(option.client.fullName) === normalizedValue
-      || normalize(option.client.mobile) === normalizedValue
-      || normalize(option.client.email) === normalizedValue
-      || normalize(option.client.id) === normalizedValue
+      || (canViewClientSensitive && normalize(option.client.mobile) === normalizedValue)
+      || (canViewClientSensitive && normalize(option.client.email) === normalizedValue)
+      || (canViewClientSensitive && normalize(option.client.id) === normalizedValue)
     ));
-    if (match && match.id !== clientId) void openCartForClient(match.id);
-    if (!normalizedValue && clientId) void openCartForClient("");
+    if (match) {
+      setManualClientName("");
+      if (match.id !== clientId) void openCartForClient(match.id);
+      return;
+    }
+    setManualClientName(value.trim());
+    if (clientId) void openCartForClient("");
   }
 
   async function addPosCartItem(item) {
@@ -6410,6 +6450,7 @@ function POSModule({
     const openCart = await openCartForClient(visit.appointment.clientId || "");
     if (!openCart) return;
     setClientId(visit.appointment.clientId || "");
+    setManualClientName("");
     setCart(draft.cart.map((item) => ({
       ...item,
       category: services.find((service) => service.id === item.serviceId)?.category || "Appointment",
@@ -6524,7 +6565,7 @@ function POSModule({
         event.preventDefault();
         openPayment({
           clientId,
-          clientName: visitContext?.clientName || client?.fullName || "Walk-in",
+          clientName: visitContext?.clientName || manualClientName || client?.fullName || "Walk-in",
           storeCredit: Number(client?.storeCredit || 0),
           branch,
           room,
@@ -6573,12 +6614,12 @@ function POSModule({
 
     window.addEventListener("keydown", handlePosShortcut);
     return () => window.removeEventListener("keydown", handlePosShortcut);
-  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, depositCredit, discount, discountAmount, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, saleStaffName, setCart, subtotal, testMode, total, visitContext]);
+  }, [activeCartId, arrivalTime, branch, cart, cartFocusIndex, catalogPage, catalogPageCount, checkoutStep, client?.fullName, client?.storeCredit, clientId, depositCredit, discount, discountAmount, manualClientName, manualDiscount, manualDiscountInvalid, manualDiscountValidationMessage, notify, openPayment, posPaymentOptions, posScreen, room, saleDate, saleStaffName, setCart, subtotal, testMode, total, visitContext]);
 
   function createPaymentDraft(patch = {}) {
     return {
       clientId,
-      clientName: visitContext?.clientName || client?.fullName || "Walk-in",
+      clientName: visitContext?.clientName || manualClientName || client?.fullName || "Walk-in",
       storeCredit: Number(client?.storeCredit || 0),
       branch,
       room,
@@ -6629,7 +6670,7 @@ function POSModule({
       invoice: "Current checkout",
       date: saleDate,
       time: new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }),
-      client: visitContext?.clientName || client?.fullName || "Walk-in",
+      client: visitContext?.clientName || manualClientName || client?.fullName || "Walk-in",
       branch,
       staff: saleStaffName,
       room,
@@ -7032,7 +7073,7 @@ function POSModule({
             title="Select client, branch, and visit details"
           >
             <div className="invoice-context-copy">
-              <h2>{client?.fullName ?? "Walk-in"}</h2>
+              <h2>{visitContext?.clientName || manualClientName || client?.fullName || "Walk-in"}</h2>
               <span>{branch} / {cartProviders.length ? `${cartProviders.length} assigned provider${cartProviders.length === 1 ? "" : "s"}` : "Assign providers per service"}</span>
             </div>
             <ChevronDown size={16} aria-hidden="true" />
@@ -7361,20 +7402,52 @@ function POSModule({
             <SectionHeader icon={Users} title="Select client" action="POS sale" />
             <div className="pos-context-fields">
               <label className="stacked-field">
-                <span>Select client</span>
-                <input
-                  ref={saleClientRef}
-                  type="search"
-                  list="pos-client-options"
-                  value={clientSearch}
-                  placeholder="Search name, mobile, email, or client ID"
-                  onChange={(event) => updateClientSearch(event.target.value)}
-                  onBlur={() => setClientSearch(formatPosClientLabel(clients.find((item) => item.id === clientId)))}
-                />
-                <datalist id="pos-client-options">
-                  <option value="Walk-in / Anonymous" />
-                  {posClientOptions.map((option) => <option key={option.id} value={option.label} />)}
-                </datalist>
+                <span>Select a client or enter a name</span>
+                <div className="pos-client-picker">
+                  <input
+                    ref={saleClientRef}
+                    type="search"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={isClientPickerOpen}
+                    aria-controls="pos-client-options"
+                    value={clientSearch}
+                    placeholder="Search clients or type a name"
+                    onFocus={() => setIsClientPickerOpen(true)}
+                    onChange={(event) => { updateClientSearch(event.target.value); setIsClientPickerOpen(true); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setIsClientPickerOpen(false);
+                      if (event.key === "Enter") setIsClientPickerOpen(false);
+                    }}
+                    onBlur={() => {
+                      setIsClientPickerOpen(false);
+                      setClientSearch(clientId ? formatPosClientLabel(clients.find((item) => item.id === clientId), canViewClientSensitive) : manualClientName || formatPosClientLabel(null));
+                    }}
+                  />
+                  {isClientPickerOpen && (
+                    <div className="pos-client-picker-options" id="pos-client-options" role="listbox" aria-label={`Clients at ${branch}`}>
+                      {(!clientPickerQuery || normalize("Walk-in / Anonymous").includes(clientPickerQuery)) && (
+                        <button type="button" role="option" aria-selected={!clientId && !manualClientName} onPointerDown={(event) => event.preventDefault()} onClick={() => { updateClientSearch("Walk-in / Anonymous"); setIsClientPickerOpen(false); }}>
+                          <strong>Walk-in / Anonymous</strong>
+                          <span>No registered client</span>
+                        </button>
+                      )}
+                      {visiblePosClientOptions.map((option) => (
+                        <button type="button" role="option" aria-selected={option.id === clientId} key={option.id} onPointerDown={(event) => event.preventDefault()} onClick={() => { updateClientSearch(option.label); setIsClientPickerOpen(false); }}>
+                          <strong>{option.client.fullName}</strong>
+                          <span>{canViewClientSensitive ? option.client.mobile || option.client.email || option.client.id : "Registered client"}</span>
+                        </button>
+                      ))}
+                      {manualClientName && (
+                        <button type="button" role="option" aria-selected={!clientId} onPointerDown={(event) => event.preventDefault()} onClick={() => { updateClientSearch(manualClientName); setIsClientPickerOpen(false); }}>
+                          <strong>Use “{manualClientName}”</strong>
+                          <span>Manual client name</span>
+                        </button>
+                      )}
+                      {clientPickerQuery && !visiblePosClientOptions.length && !manualClientName && <p>No matching clients in this branch. You can use the typed name.</p>}
+                    </div>
+                  )}
+                </div>
               </label>
               <button className="secondary-button pos-new-client-button" type="button" onClick={() => { setIsSaleContextOpen(false); openModal("client"); }}><Plus size={16} /> New client</button>
               <label className="stacked-field">
