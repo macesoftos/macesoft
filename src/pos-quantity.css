@@ -308,6 +308,64 @@
   gap: 12px;
 }
 
+.pos-client-picker {
+  position: relative;
+}
+
+.pos-client-picker-options {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(32, 22, 18, 0.18);
+}
+
+.pos-client-picker-options button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 12px;
+  text-align: left;
+}
+
+.pos-client-picker-options button:last-child {
+  border-bottom: 0;
+}
+
+.pos-client-picker-options button:hover,
+.pos-client-picker-options button:focus-visible,
+.pos-client-picker-options button[aria-selected="true"] {
+  background: #f8f3ef;
+  outline: none;
+}
+
+.pos-client-picker-options button strong {
+  font-size: 13px;
+}
+
+.pos-client-picker-options button span,
+.pos-client-picker-options p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pos-client-picker-options p {
+  margin: 0;
+  padding: 12px;
+}
+
 .pos-category-list {
   display: flex;
   gap: 8px;
