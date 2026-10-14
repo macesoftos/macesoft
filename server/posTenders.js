@@ -61,7 +61,7 @@ export function giftCertificateAfterPayment(certificate, amount) {
 
 /** @param {{ branch?: string, today?: Date }} [options] */
 export function assertPackageRedeemable(pkg, options = {}) {
-  const { branch, today = new Date() } = options;
+  const { today = new Date() } = options;
   if (!pkg) {
     throw tenderError("Package not found.", 404);
   }
@@ -71,11 +71,11 @@ export function assertPackageRedeemable(pkg, options = {}) {
   if (Number(pkg.used || 0) >= Number(pkg.sessions || 0)) {
     throw tenderError(`Package ${pkg.name} has no remaining sessions.`, 409);
   }
+  if (Number(pkg.amountPaid || 0) + 0.009 < Number(pkg.price || 0)) {
+    throw tenderError(`Package ${pkg.name} must be fully paid before its sessions can be redeemed.`, 409);
+  }
   if (isExpired(pkg.expires, today)) {
     throw tenderError(`Package ${pkg.name} expired on ${clean(pkg.expires)}.`, 409);
-  }
-  if (branch && !pkg.transferable && !branchMatches(pkg.branch, branch)) {
-    throw tenderError(`Package ${pkg.name} is only valid at ${pkg.branch}.`, 409);
   }
 }
 

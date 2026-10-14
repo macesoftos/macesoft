@@ -6361,8 +6361,13 @@ function POSModule({
     }
   }
 
-  async function openCartForClient(nextClientId) {
-    const existing = posCarts.find((openCart) => openCart.clientId === nextClientId && openCart.branch === branch);
+  async function openCartForClient(nextClientId, nextClientName = "", requestedDate = todayDate()) {
+    const normalizedClientName = normalize(nextClientName);
+    const existing = posCarts.find((openCart) => openCart.clientId === nextClientId
+      && openCart.branch === branch
+      && (openCart.saleDate || todayDate()) === requestedDate
+      && (nextClientId
+        || (normalizedClientName ? normalize(openCart.client) === normalizedClientName : normalize(openCart.client) === "walk-in")));
     if (existing) {
       await activateOpenCart(existing);
       return existing;
@@ -6372,7 +6377,7 @@ function POSModule({
       await persistActiveCart();
       const created = await saveOpenCart({
         clientId: nextClientId,
-        client: selectedClient?.fullName || "Walk-in",
+        client: selectedClient?.fullName || nextClientName || "Walk-in",
         branch,
         staff: staffName,
         items: [],
@@ -6381,14 +6386,14 @@ function POSModule({
         manualDiscountValue: 0,
         manualDiscountScope: "Transaction",
         manualDiscountTargetKey: "",
-        saleDate: todayDate(),
+        saleDate: requestedDate,
         room: "",
         arrivalTime: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }),
         testMode: false,
       });
       setActiveCartId(created.id);
       setClientId(created.clientId || "");
-      setManualClientName("");
+      setManualClientName(nextClientId ? "" : nextClientName);
       setDiscountId("");
       setManualDiscountType("");
       setManualDiscountValue("");
@@ -6430,7 +6435,7 @@ function POSModule({
       return;
     }
     setManualClientName(value.trim());
-    if (clientId) void openCartForClient("");
+    if (clientId) void openCartForClient("", value.trim());
   }
 
   async function addPosCartItem(item) {
@@ -6447,10 +6452,10 @@ function POSModule({
       notify("This visit has already been checked out.", "warning");
       return;
     }
-    const openCart = await openCartForClient(visit.appointment.clientId || "");
+    const openCart = await openCartForClient(visit.appointment.clientId || "", visit.appointment.client || "", visit.appointment.date || todayDate());
     if (!openCart) return;
     setClientId(visit.appointment.clientId || "");
-    setManualClientName("");
+    setManualClientName(visit.appointment.clientId ? "" : visit.appointment.client || "");
     setCart(draft.cart.map((item) => ({
       ...item,
       category: services.find((service) => service.id === item.serviceId)?.category || "Appointment",
@@ -7725,7 +7730,7 @@ function POSServicePriceScreen({ branch, saveService, services, staff }) {
           {form.priceModel === "Per unit" && <label>
             <span>Pricing unit</span>
             <select value={form.priceUnit} onChange={(event) => updateForm("priceUnit", event.target.value)}>
-              {["", "Per syringe", "Per ml", "Per vial", "Per ampoule"].map((unit) => <option key={unit} value={unit}>{unit || "Select a unit"}</option>)}
+              {["", "Per syringe", "Per ml", "Per vial", "Per ampoule", "Per shot"].map((unit) => <option key={unit} value={unit}>{unit || "Select a unit"}</option>)}
             </select>
           </label>}
           {form.serviceType === "Package" && <label>
@@ -15196,7 +15201,7 @@ function ModalHost({
         field("duration", "Duration minutes", "number"),
         field("priceModel", "Pricing model", "select", ["Fixed price", "Starts at", "Price after consultation/assessment", "Per unit"]),
         field("price", "Base price", "number"),
-        field("priceUnit", "Pricing unit", "select", ["", "Per syringe", "Per ml", "Per vial", "Per ampoule"], "", false),
+        field("priceUnit", "Pricing unit", "select", ["", "Per syringe", "Per ml", "Per vial", "Per ampoule", "Per shot"], "", false),
         field("packageSessions", "Package sessions", "number", null, "", false),
         field("packagePrice", "Package price", "number", null, "", false),
         field("serviceValue", "Service value per session", "number", null, "", false),
@@ -15879,15 +15884,15 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
     (pkg.creditType || "Package") === "Package"
     && pkg.status === "Active"
     && Number(pkg.used || 0) < Number(pkg.sessions || 0)
+    && Number(pkg.amountPaid || 0) + 0.009 >= Number(pkg.price || 0)
     && (!pkg.expires || pkg.expires >= today)
-    && (pkg.transferable || branchAccepts(pkg.branch))
     && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
   const usableServiceCredits = packages.filter((pkg) =>
     pkg.creditType === "Service Credit"
     && pkg.status === "Active"
     && Number(pkg.used || 0) < Number(pkg.sessions || 0)
+    && Number(pkg.amountPaid || 0) + 0.009 >= Number(pkg.price || 0)
     && (!pkg.expires || pkg.expires >= today)
-    && (pkg.transferable || branchAccepts(pkg.branch))
     && (draft.clientId ? pkg.clientId === draft.clientId : pkg.client === draft.clientName));
   const automaticCreditPayments = (() => {
     const rows = [];
@@ -16160,7 +16165,7 @@ function PaymentModal({ draft, packages = [], giftCertificates = [], staff = [],
                 <span className="payment-tender-hint">No active gift certificates for this branch.</span>
               )}
               {payment.method === "Package" && !usablePackages.length && (
-                <span className="payment-tender-hint">No active packages for this client at this branch.</span>
+                <span className="payment-tender-hint">No fully paid active packages are available for this client.</span>
               )}
               {payment.method === "Service Credit" && !usableServiceCredits.length && (
                 <span className="payment-tender-hint">No active service-session credits for this client at this branch.</span>
