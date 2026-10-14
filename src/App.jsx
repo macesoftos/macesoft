@@ -3079,7 +3079,7 @@ function App() {
       ? "Dashboard"
       : navItems.find((item) => item.id === activeModule)?.label ?? "Dashboard"
   );
-  const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor"].includes(session.role);
+  const sensitiveAllowed = canManageOrganization(session.role) || ["Branch Manager", "Doctor", "Receptionist"].includes(session.role);
   const isStandaloneWorkspaceView = !mainSystemModules.has(activeModule);
   const showSidebar = visibleNavSections.length > 0 && !isStandaloneWorkspaceView;
   const showEdgeSidebar = visibleNavSections.length > 0 && isStandaloneWorkspaceView;
