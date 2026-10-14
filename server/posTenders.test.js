@@ -31,6 +31,8 @@ function clinicPackage(overrides = {}) {
     client: "Maria Santos",
     sessions: 6,
     used: 2,
+    price: 6000,
+    amountPaid: 6000,
     expires: "",
     branch: "Makati",
     transferable: false,
@@ -86,10 +88,14 @@ test("exhausted, expired, or cancelled packages are rejected", () => {
   assert.throws(() => assertPackageRedeemable(clinicPackage({ status: "Cancelled" }), { branch: "Makati", today }), /is Cancelled/);
 });
 
-test("branch-bound packages only redeem at their branch unless transferable", () => {
-  assert.throws(() => assertPackageRedeemable(clinicPackage(), { branch: "BGC", today }), /only valid at Makati/);
+test("packages can be redeemed across branches regardless of transfer setting", () => {
+  assert.doesNotThrow(() => assertPackageRedeemable(clinicPackage(), { branch: "BGC", today }));
   assert.doesNotThrow(() => assertPackageRedeemable(clinicPackage({ transferable: true }), { branch: "BGC", today }));
   assert.doesNotThrow(() => assertPackageRedeemable(clinicPackage({ branch: "All branches" }), { branch: "BGC", today }));
+});
+
+test("unpaid package installments cannot be redeemed", () => {
+  assert.throws(() => assertPackageRedeemable(clinicPackage({ amountPaid: 5999 }), { branch: "Makati", today }), /must be fully paid/);
 });
 
 test("redeeming the final session completes the package and voiding restores it", () => {

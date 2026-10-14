@@ -1101,6 +1101,7 @@ try {
     branch: "Mace Davao",
     status: "Active",
     price: 4000,
+    amountPaid: 4000,
     serviceValue: 2000,
   });
   assert(payrollPackage.response.status === 201, "payroll package fixture create failed");

@@ -2038,6 +2038,7 @@ const resourceConfigs = {
     branchField: "branch",
     relatedClient: true,
     allowLegacyOrganizationScope: true,
+    crossBranchOrganization: true,
     posSelect: {
       id: true, name: true, clientId: true, client: true, creditType: true, sessions: true, used: true,
       expires: true, branch: true, transferable: true, status: true, price: true,
@@ -2241,11 +2242,25 @@ async function listResource(resource, actor = null) {
         const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
         where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
       }
+    } else if (config.crossBranchOrganization) {
+      const organizationBranches = await prisma.branch.findMany({
+        where: { organizationId: actor.organizationId },
+        select: { name: true },
+      });
+      const authorizedBranchNames = actor.access?.scope === "all"
+        ? organizationBranches.map((branch) => branch.name)
+        : [clean(actor.access?.activeBranch?.name || actor.branch)].filter(Boolean);
+      where = {
+        OR: [
+          { clientRecord: { is: { organizationId: actor.organizationId } } },
+          ...(authorizedBranchNames.length ? [{ branch: { in: authorizedBranchNames } }] : []),
+        ],
+      };
     } else if (config.multiBranchAssignments) {
       const organizationBranches = await prisma.branch.findMany({ where: { organizationId: actor.organizationId }, select: { name: true } });
       where = { branch: { in: organizationBranches.map((branch) => branch.name) } };
     } else if (config.branchField) where = branchWhere(actor, config.branchField);
-    if (config.branchField && config.allowLegacyOrganizationScope && actor.access?.scope === "branch") {
+    if (config.branchField && config.allowLegacyOrganizationScope && !config.crossBranchOrganization && actor.access?.scope === "branch") {
       where = { OR: [where, { [config.branchField]: "All branches" }] };
     }
     if (config.stableBranchField) {

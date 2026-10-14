@@ -55,7 +55,11 @@ export function enabledModulesForBranch(branch, fallbackModules = []) {
   return [...fallbackModules].filter((moduleId) => configured.get(moduleId) !== false);
 }
 
-function serializeBranchAccess(branch, membership, fallbackModules) {
+function serializeBranchAccess(branch, membership, fallbackModules, customModuleUniverse = fallbackModules) {
+  const configuredModules = Array.isArray(branch?.modules) ? branch.modules : [];
+  const branchEnabledModules = configuredModules.length
+    ? configuredModules.filter((item) => item.enabled).map((item) => item.moduleId)
+    : [...customModuleUniverse];
   return {
     id: branch.id,
     name: branch.name,
@@ -65,10 +69,10 @@ function serializeBranchAccess(branch, membership, fallbackModules) {
     role: membership?.role || "",
     permissions: parsePermissionList(membership?.permissions),
     modules: (() => {
-      const enabled = enabledModulesForBranch(branch, fallbackModules);
       const explicit = parsePermissionList(membership?.modules);
       const hasExplicitModules = membership?.modules !== null && membership?.modules !== undefined && clean(membership.modules) !== "";
-      return hasExplicitModules ? explicit.filter((moduleId) => enabled.includes(moduleId)) : enabled;
+      if (hasExplicitModules) return explicit.filter((moduleId) => branchEnabledModules.includes(moduleId));
+      return enabledModulesForBranch(branch, fallbackModules);
     })(),
     isPrimary: Boolean(membership?.isPrimary),
   };
@@ -79,6 +83,7 @@ export function resolveAccountBranchAccess(account, requestedBranchId, roleAcces
     canManageOrganization(account?.role) || account?.organizationWideAccess,
   );
   const roleModules = roleAccess[account?.role] || [];
+  const allRoleModules = [...new Set(Object.values(roleAccess || {}).flat())];
   const organizationModules = parsePermissionList(account?.organizationModules);
   const hasExplicitOrganizationModules = account?.organizationModules !== null && account?.organizationModules !== undefined;
   const baseModules = organizationWide && hasExplicitOrganizationModules
@@ -95,6 +100,7 @@ export function resolveAccountBranchAccess(account, requestedBranchId, roleAcces
       membership.branch,
       membership,
       roleAccess[membership.role] || baseModules,
+      allRoleModules,
     ));
   if (!organizationWide && !branches.length && clean(account?.branch) && account.branch !== "All branches") {
     branches = [{
