@@ -5,6 +5,7 @@ import { ORGANIZATION_MANAGER_ROLES } from "../src/organizationRoles.js";
 import { accountMatchesStaffIdentity, branchWhere, canAccessBranch } from "./accessControl.js";
 
 const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Manager"]);
+const SCANNER_OPERATOR_ROLES = new Set([...ADMIN_ROLES, "Receptionist"]);
 const MODULE_ID = "facetrack-attendance";
 const verificationAttempts = new Map();
 const kioskVerificationAttempts = new Map();
@@ -69,6 +70,12 @@ function requireScannerBranch(request) {
     throw apiError("Choose a clinic branch assigned to your account.", 403);
   }
   return { account, branch };
+}
+
+function scannerAccountCanRecordStaff(account, staff) {
+  if (SCANNER_OPERATOR_ROLES.has(clean(account?.role))) return true;
+  if (!account?.staffId || account.staffId !== staff?.id) return false;
+  return accountMatchesStaffIdentity({ ...account, branch: staff.branch }, staff);
 }
 
 async function matchingStaffForAccount(prisma, account) {
@@ -565,6 +572,9 @@ export function createFaceTrackAttendanceRouter(prisma) {
     }
     if (!candidates.length) throw apiError("No enrolled employees are available for this clinic branch.", 409);
     const match = selectUniqueMatch(candidates, descriptors, policy.matchThreshold);
+    if (!scannerAccountCanRecordStaff(account, match.staff)) {
+      throw apiError("This employee account can record attendance only for its linked employee profile.", 403);
+    }
     const confidence = Math.max(0, Math.min(1, 1 - match.distance));
     const { record, now } = await recordVerifiedClock(prisma, {
       staff: match.staff,
@@ -869,6 +879,7 @@ export const faceTrackInternals = {
   parseSchedule,
   scheduleFor,
   selectUniqueMatch,
+  scannerAccountCanRecordStaff,
   storedDescriptorSamples,
   staffAssignedToBranch,
   zonedWorkDate,
