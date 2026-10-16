@@ -8,12 +8,14 @@ import {
   loadFaceTrackScannerStatus,
   recordFaceTrackKioskAttendance,
   recordFaceTrackScannerAttendance,
+  reportFaceTrackScannerDiagnostic,
+  reportFaceTrackKioskDiagnostic,
   unlockFaceTrackKiosk,
 } from "../lib/api.js";
+import { captureFaceSamples, loadFaceRecognitionModels } from "./faceCapture.js";
 import { ORGANIZATION_MANAGER_ROLES } from "../organizationRoles.js";
 import "./facetrack-kiosk.css";
 
-const MODEL_URL = "/facetrack-models";
 const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Manager"]);
 
 function displayTime(value) {
@@ -24,11 +26,25 @@ function displayDate(value) {
   return new Intl.DateTimeFormat("en-PH", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(value);
 }
 
+function scanFailureCode(error, stage) {
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("more than one person")) return "MULTIPLE_FACES";
+  if (message.includes("turn your head") || message.includes("live movement")) return "LIVENESS";
+  if (message.includes("ambiguous")) return "AMBIGUOUS_MATCH";
+  if (message.includes("face not recognized")) return "NO_MATCH";
+  if (message.includes("please wait") || message.includes("already complete")) return "ATTENDANCE_STATE";
+  if (message.includes("network") || message.includes("fetch")) return "NETWORK";
+  if (stage === "camera") return "CAMERA";
+  if (stage === "capture") return "FACE_QUALITY";
+  return "OTHER";
+}
+
 export default function FaceTrackKiosk({ session }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const faceApiRef = useRef(null);
   const resetTimerRef = useRef(0);
+  const scannerModeRef = useRef("kiosk");
   const [device, setDevice] = useState(null);
   const [scannerMode, setScannerMode] = useState("kiosk");
   const [enrolledEmployees, setEnrolledEmployees] = useState(0);
@@ -51,6 +67,8 @@ export default function FaceTrackKiosk({ session }) {
     session.access?.modules?.includes("facetrack-attendance")
     || ADMIN_ROLES.has(session.role)
   ));
+
+  useEffect(() => { scannerModeRef.current = scannerMode; }, [scannerMode]);
 
   useEffect(() => {
     if (!setup.branch && availableBranches.length) {
@@ -101,18 +119,14 @@ export default function FaceTrackKiosk({ session }) {
   }, []);
 
   const startCamera = useCallback(async () => {
+    const startedAt = performance.now();
     setError("");
     setPhase("Loading secure face-recognition models...");
     try {
-      const faceapi = await import("face-api.js");
+      const faceapi = await loadFaceRecognitionModels();
       faceApiRef.current = faceapi;
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-      ]);
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
+        video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
         audio: false,
       });
       streamRef.current = stream;
@@ -125,6 +139,8 @@ export default function FaceTrackKiosk({ session }) {
     } catch (nextError) {
       setError(nextError?.name === "NotAllowedError" ? "Camera access was denied. Allow camera access in your browser settings and try again." : "The camera or face-recognition models could not be started.");
       setPhase("Camera unavailable");
+      const reportFailure = scannerModeRef.current === "account" ? reportFaceTrackScannerDiagnostic : reportFaceTrackKioskDiagnostic;
+      void reportFailure({ outcome: "FAILURE", failureStage: "camera", failureCode: scanFailureCode(nextError, "camera"), elapsedMs: performance.now() - startedAt }).catch(() => {});
     }
   }, []);
 
@@ -133,35 +149,24 @@ export default function FaceTrackKiosk({ session }) {
   }, [cameraReady, startCamera, view]);
 
   async function captureSamples() {
-    const faceapi = faceApiRef.current;
-    const descriptors = [];
-    const centers = [];
-    const prompts = ["Look straight at the camera...", "Turn slightly left...", "Turn slightly right..."];
-    for (let index = 0; index < prompts.length; index += 1) {
-      setPhase(prompts[index]);
-      await new Promise((resolve) => window.setTimeout(resolve, 850));
-      const match = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.55 }))
-        .withFaceLandmarks(true)
-        .withFaceDescriptor();
-      if (!match) throw new Error("Keep one well-lit face fully visible inside the oval.");
-      const box = match.detection.box;
-      descriptors.push(Array.from(match.descriptor));
-      centers.push(box.x + box.width / 2);
-    }
-    if (Math.max(...centers) - Math.min(...centers) < 3) throw new Error("Follow the left and right prompts so FaceTrack can confirm live movement.");
-    return descriptors;
+    if (!faceApiRef.current) throw new Error("Face-recognition models are not ready yet.");
+    return captureFaceSamples(faceApiRef.current, videoRef.current, setPhase);
   }
 
   async function verifyFace() {
+    const startedAt = performance.now();
+    let stage = "challenge";
+    const reportDiagnostic = scannerMode === "account" ? reportFaceTrackScannerDiagnostic : reportFaceTrackKioskDiagnostic;
     setView("scanning");
     setError("");
     try {
       const challenge = scannerMode === "account"
         ? await createFaceTrackScannerChallenge(device.branch)
         : await createFaceTrackKioskChallenge();
+      stage = "capture";
       const descriptors = await captureSamples();
       setPhase("Recognizing employee and recording attendance...");
+      stage = "match";
       const recordAttendance = scannerMode === "account"
         ? recordFaceTrackScannerAttendance
         : recordFaceTrackKioskAttendance;
@@ -174,6 +179,7 @@ export default function FaceTrackKiosk({ session }) {
       setResult(payload);
       setView("success");
       setPhase(payload.action === "TIME_IN" ? "Time In recorded" : "Time Out recorded");
+      void reportDiagnostic({ outcome: "SUCCESS", elapsedMs: performance.now() - startedAt }).catch(() => {});
       resetTimerRef.current = window.setTimeout(() => {
         setResult(null);
         setError("");
@@ -184,6 +190,7 @@ export default function FaceTrackKiosk({ session }) {
       setError(nextError.message || "Face verification failed.");
       setPhase("Please reposition and try again.");
       setView("ready");
+      void reportDiagnostic({ outcome: "FAILURE", failureStage: stage, failureCode: scanFailureCode(nextError, stage), elapsedMs: performance.now() - startedAt }).catch(() => {});
     }
   }
 

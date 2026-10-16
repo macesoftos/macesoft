@@ -502,6 +502,20 @@ export function recordFaceTrackKioskAttendance(payload) {
   });
 }
 
+export function reportFaceTrackScannerDiagnostic(payload) {
+  return requestJson("/api/facetrack-attendance/scanner/diagnostics", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reportFaceTrackKioskDiagnostic(payload) {
+  return requestJson("/api/facetrack-attendance/kiosk/diagnostics", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function unlockFaceTrackKiosk(pin) {
   return requestJson("/api/facetrack-attendance/kiosk/unlock", {
     method: "POST",
