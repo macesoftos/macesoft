@@ -16,3 +16,6 @@ CREATE INDEX "FaceTrackScanDiagnostic_outcome_createdAt_idx"
   ON "FaceTrackScanDiagnostic"("outcome", "createdAt");
 CREATE INDEX "FaceTrackScanDiagnostic_failureCode_createdAt_idx"
   ON "FaceTrackScanDiagnostic"("failureCode", "createdAt");
+
+ALTER TABLE "FaceTrackScanDiagnostic" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "deny_direct_api_access" ON "FaceTrackScanDiagnostic" AS RESTRICTIVE FOR ALL TO "anon", "authenticated" USING (false) WITH CHECK (false);
