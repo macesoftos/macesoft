@@ -8,6 +8,10 @@ const ADMIN_ROLES = new Set([...ORGANIZATION_MANAGER_ROLES, "Admin", "Branch Man
 const MODULE_ID = "facetrack-attendance";
 const verificationAttempts = new Map();
 const kioskVerificationAttempts = new Map();
+const scanDiagnosticAttempts = new Map();
+let lastScanDiagnosticCleanup = 0;
+const SCAN_DIAGNOSTIC_CODES = new Set(["MULTIPLE_FACES", "FACE_QUALITY", "LIVENESS", "NO_MATCH", "AMBIGUOUS_MATCH", "NETWORK", "CAMERA", "ATTENDANCE_STATE", "OTHER"]);
+const SCAN_DIAGNOSTIC_STAGES = new Set(["camera", "challenge", "capture", "match", "recorded"]);
 
 function apiError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -92,6 +96,43 @@ function enforceKioskRateLimit(request, device) {
   kioskVerificationAttempts.set(key, recent);
 }
 
+function enforceScanDiagnosticRateLimit(request, scannerKey) {
+  const key = scannerKey + ":" + request.ip;
+  const now = Date.now();
+  const recent = (scanDiagnosticAttempts.get(key) || []).filter((timestamp) => now - timestamp < 60_000);
+  if (recent.length >= 120) throw apiError("Too many scanner diagnostics were sent.", 429);
+  recent.push(now);
+  scanDiagnosticAttempts.set(key, recent);
+}
+
+function scanDiagnosticData(request) {
+  const outcome = clean(request.body?.outcome).toUpperCase();
+  if (!["SUCCESS", "FAILURE"].includes(outcome)) throw apiError("A valid scan diagnostic outcome is required.");
+  const failureStage = clean(request.body?.failureStage).toLowerCase();
+  const failureCode = clean(request.body?.failureCode).toUpperCase();
+  if (outcome === "FAILURE" && (!SCAN_DIAGNOSTIC_STAGES.has(failureStage) || !SCAN_DIAGNOSTIC_CODES.has(failureCode))) {
+    throw apiError("The scan diagnostic category is invalid.");
+  }
+  return {
+    outcome,
+    failureStage: outcome === "FAILURE" ? failureStage : "",
+    failureCode: outcome === "FAILURE" ? failureCode : "",
+    elapsedMs: Math.max(0, Math.min(120_000, Math.round(Number(request.body?.elapsedMs) || 0))),
+  };
+}
+
+async function saveScanDiagnostic(prisma, data) {
+  const diagnostic = await prisma.faceTrackScanDiagnostic.create({ data });
+  const now = Date.now();
+  if (now - lastScanDiagnosticCleanup >= 6 * 60 * 60 * 1000) {
+    lastScanDiagnosticCleanup = now;
+    void prisma.faceTrackScanDiagnostic.deleteMany({
+      where: { createdAt: { lt: new Date(now - 90 * 24 * 60 * 60 * 1000) } },
+    }).catch(() => {});
+  }
+  return diagnostic;
+}
+
 function hashSecret(value) {
   const salt = randomBytes(16).toString("hex");
   return `scrypt$${salt}$${scryptSync(String(value), salt, 64).toString("hex")}`;
@@ -141,13 +182,39 @@ function averageDescriptors(descriptors) {
   return Array.from({ length: 128 }, (_, index) => descriptors.reduce((sum, sample) => sum + Number(sample[index]), 0) / descriptors.length);
 }
 
+function descriptorSamples(value) {
+  if (validDescriptor(value)) return [value];
+  if (!Array.isArray(value) || value.length < 3 || value.length > 5 || !value.every(validDescriptor)) {
+    throw apiError("Three to five valid live face samples are required.");
+  }
+  return value;
+}
+
+function storedDescriptorSamples(value) {
+  if (validDescriptor(value)) return [value];
+  if (Array.isArray(value?.templates) && value.templates.length >= 3 && value.templates.length <= 5 && value.templates.every(validDescriptor)) {
+    return value.templates;
+  }
+  throw apiError("The enrolled face profile is invalid.", 500);
+}
+
 function euclideanDistance(left, right) {
   return Math.sqrt(left.reduce((sum, value, index) => sum + (Number(value) - Number(right[index])) ** 2, 0));
 }
 
 function selectUniqueMatch(candidates, descriptor, threshold, ambiguityGap = 0.05) {
+  const querySamples = descriptorSamples(descriptor);
+  const median = (values) => {
+    const sorted = [...values].sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  };
   const ranked = candidates
-    .map((candidate) => ({ ...candidate, distance: euclideanDistance(candidate.descriptor, descriptor) }))
+    .map((candidate) => {
+      const enrolledSamples = candidate.templates || storedDescriptorSamples(candidate.descriptor);
+      const sampleDistances = querySamples.map((sample) => Math.min(...enrolledSamples.map((template) => euclideanDistance(template, sample))));
+      return { ...candidate, distance: median(sampleDistances) };
+    })
     .sort((left, right) => left.distance - right.distance);
   const best = ranked[0];
   if (!best || best.distance > threshold) throw apiError("Face not recognized. Ask an administrator to confirm enrollment.", 403);
@@ -365,12 +432,13 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const branchWhere = admin ? { branch: { in: allowedBranches.length ? allowedBranches : ["__none__"] } } : {};
     const recordWhere = admin ? branchWhere : { staffId: personalStaffId || "__unlinked__" };
     const requestWhere = admin ? { attendanceRecord: branchWhere } : { requestedById: account.id };
-    const [records, requests, staffRows, profileRows, auditEntries] = await Promise.all([
+    const [records, requests, staffRows, profileRows, auditEntries, scanDiagnostics] = await Promise.all([
       prisma.faceTrackAttendanceRecord.findMany({ where: recordWhere, include: { staff: true, correctionRequests: { orderBy: { createdAt: "desc" } } }, orderBy: { workDate: "desc" }, take: 150 }),
       prisma.faceTrackCorrectionRequest.findMany({ where: requestWhere, include: { attendanceRecord: { include: { staff: true } }, requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
       admin ? prisma.staffMember.findMany({ orderBy: { name: "asc" } }) : Promise.resolve([]),
       admin ? prisma.faceTrackProfile.findMany({ where: { active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true, staff: { select: { branch: true, branches: true } } } }) : prisma.faceTrackProfile.findMany({ where: { staffId: personalStaffId || "__unlinked__", active: true }, select: { staffId: true, consentAt: true, lastVerifiedAt: true } }),
       admin ? prisma.faceTrackAuditEntry.findMany({ where: { attendanceRecord: branchWhere }, include: { attendanceRecord: { include: { staff: { select: { name: true } } } } }, orderBy: { createdAt: "desc" }, take: 250 }) : Promise.resolve([]),
+      admin ? prisma.faceTrackScanDiagnostic.findMany({ where: { branch: { in: allowedBranches.length ? allowedBranches : ["__none__"] } }, orderBy: { createdAt: "desc" }, take: 100 }) : Promise.resolve([]),
     ]);
     const visibleAtAllowedBranch = (staffMember) => allowedBranches.some((branch) => staffAssignedToBranch(staffMember, branch));
     const staff = admin ? staffRows.filter(visibleAtAllowedBranch) : staffRows;
@@ -392,6 +460,7 @@ export function createFaceTrackAttendanceRouter(prisma) {
       staff,
       profiles,
       auditEntries,
+      scanDiagnostics,
       stats: {
         clockedIn: todayRecords.filter((record) => record.status === "OPEN").length,
         completedToday: todayRecords.filter((record) => record.status === "COMPLETE").length,
@@ -419,7 +488,8 @@ export function createFaceTrackAttendanceRouter(prisma) {
     const staffId = clean(request.body?.staffId);
     if (!staffId) throw apiError("Choose the employee being enrolled.");
     if (request.body?.consent !== true) throw apiError("Employee biometric consent is required.");
-    const descriptor = averageDescriptors(request.body?.descriptors);
+    const templates = request.body?.descriptors;
+    averageDescriptors(templates);
     const staff = await prisma.staffMember.findUnique({ where: { id: staffId } });
     if (!staff) throw apiError("Employee profile was not found.", 404);
     const assignedBranches = [staff.branch, ...parseBranchAssignments(staff.branches)].filter(Boolean);
@@ -430,8 +500,8 @@ export function createFaceTrackAttendanceRouter(prisma) {
       await consumeChallenge(tx, account.id, request.body?.challengeId, "ENROLL");
       return tx.faceTrackProfile.upsert({
         where: { staffId },
-        update: { encryptedDescriptor: encryptDescriptor(descriptor), descriptorVersion: "face-api-v1", consentAt: new Date(), enrolledById: account.id, active: true },
-        create: { staffId, encryptedDescriptor: encryptDescriptor(descriptor), descriptorVersion: "face-api-v1", consentAt: new Date(), enrolledById: account.id },
+        update: { encryptedDescriptor: encryptDescriptor({ templates }), descriptorVersion: "face-api-v2", consentAt: new Date(), enrolledById: account.id, active: true },
+        create: { staffId, encryptedDescriptor: encryptDescriptor({ templates }), descriptorVersion: "face-api-v2", consentAt: new Date(), enrolledById: account.id },
         select: { staffId: true, consentAt: true, lastVerifiedAt: true, active: true },
       });
     });
@@ -476,7 +546,8 @@ export function createFaceTrackAttendanceRouter(prisma) {
     enforceVerificationRateLimit(request);
     const idempotencyKey = clean(request.body?.idempotencyKey);
     if (idempotencyKey.length < 12) throw apiError("A valid attendance request key is required.");
-    const descriptor = averageDescriptors(request.body?.descriptors);
+    const descriptors = request.body?.descriptors;
+    averageDescriptors(descriptors);
     const policy = await policyFor(prisma);
     if (!policy.enabled) throw apiError("FaceTrack Attendance is currently disabled.", 503);
     const profiles = await prisma.faceTrackProfile.findMany({
@@ -487,13 +558,13 @@ export function createFaceTrackAttendanceRouter(prisma) {
     for (const profile of profiles) {
       if (!staffAssignedToBranch(profile.staff, branch)) continue;
       try {
-        candidates.push({ profile, staff: profile.staff, descriptor: decryptDescriptor(profile.encryptedDescriptor) });
+        candidates.push({ profile, staff: profile.staff, templates: storedDescriptorSamples(decryptDescriptor(profile.encryptedDescriptor)) });
       } catch {
         // Skip a damaged profile instead of blocking attendance for the whole branch.
       }
     }
     if (!candidates.length) throw apiError("No enrolled employees are available for this clinic branch.", 409);
-    const match = selectUniqueMatch(candidates, descriptor, policy.matchThreshold);
+    const match = selectUniqueMatch(candidates, descriptors, policy.matchThreshold);
     const confidence = Math.max(0, Math.min(1, 1 - match.distance));
     const { record, now } = await recordVerifiedClock(prisma, {
       staff: match.staff,
@@ -523,6 +594,14 @@ export function createFaceTrackAttendanceRouter(prisma) {
       },
       record: serializeRecord(record),
     });
+  }));
+
+  router.post("/scanner/diagnostics", asyncRoute(async (request, response) => {
+    const { branch } = requireScannerBranch(request);
+    enforceScanDiagnosticRateLimit(request, "account:" + branch);
+    const data = scanDiagnosticData(request);
+    await saveScanDiagnostic(prisma, { ...data, branch, scannerType: "ACCOUNT" });
+    response.status(201).json({ saved: true });
   }));
 
   router.get("/kiosks", asyncRoute(async (request, response) => {
@@ -621,7 +700,8 @@ export function createFaceTrackAttendanceRouter(prisma) {
     enforceKioskRateLimit(request, device);
     const idempotencyKey = clean(request.body?.idempotencyKey);
     if (idempotencyKey.length < 12) throw apiError("A valid kiosk attendance request key is required.");
-    const descriptor = averageDescriptors(request.body?.descriptors);
+    const descriptors = request.body?.descriptors;
+    averageDescriptors(descriptors);
     const policy = await policyFor(prisma);
     if (!policy.enabled) throw apiError("FaceTrack Attendance is currently disabled.", 503);
     const profiles = await prisma.faceTrackProfile.findMany({
@@ -632,13 +712,13 @@ export function createFaceTrackAttendanceRouter(prisma) {
     for (const profile of profiles) {
       if (!staffAssignedToBranch(profile.staff, device.branch)) continue;
       try {
-        candidates.push({ profile, staff: profile.staff, descriptor: decryptDescriptor(profile.encryptedDescriptor) });
+        candidates.push({ profile, staff: profile.staff, templates: storedDescriptorSamples(decryptDescriptor(profile.encryptedDescriptor)) });
       } catch {
         // Skip a damaged profile instead of blocking attendance for the whole branch.
       }
     }
     if (!candidates.length) throw apiError("No enrolled employees are available for this kiosk branch.", 409);
-    const match = selectUniqueMatch(candidates, descriptor, policy.matchThreshold);
+    const match = selectUniqueMatch(candidates, descriptors, policy.matchThreshold);
     const confidence = Math.max(0, Math.min(1, 1 - match.distance));
     const { record, now } = await recordVerifiedClock(prisma, {
       staff: match.staff,
@@ -669,6 +749,14 @@ export function createFaceTrackAttendanceRouter(prisma) {
       },
       record: serializeRecord(record),
     });
+  }));
+
+  router.post("/kiosk/diagnostics", asyncRoute(async (request, response) => {
+    const device = await kioskFromRequest(prisma, request);
+    enforceScanDiagnosticRateLimit(request, device.id);
+    const data = scanDiagnosticData(request);
+    await saveScanDiagnostic(prisma, { ...data, branch: device.branch, scannerType: "KIOSK" });
+    response.status(201).json({ saved: true });
   }));
 
   router.post("/kiosk/unlock", asyncRoute(async (request, response) => {
@@ -777,9 +865,11 @@ export const faceTrackInternals = {
   calculatedFields,
   dateAtWorkClock,
   euclideanDistance,
+  descriptorSamples,
   parseSchedule,
   scheduleFor,
   selectUniqueMatch,
+  storedDescriptorSamples,
   staffAssignedToBranch,
   zonedWorkDate,
 };

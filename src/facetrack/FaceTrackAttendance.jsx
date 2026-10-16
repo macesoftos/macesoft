@@ -9,10 +9,9 @@ import {
   saveFaceTrackPolicy,
   submitFaceTrackCorrection,
 } from "../lib/api.js";
+import { captureFaceSamples, loadFaceRecognitionModels } from "./faceCapture.js";
 import "./facetrack-attendance.css";
 import "./facetrack-clock-flow.css";
-
-const MODEL_URL = "/facetrack-models";
 
 function dateTime(value) {
   if (!value) return "—";
@@ -51,16 +50,11 @@ function CameraDialog({ staffId, staffName, onClose, onComplete }) {
     let cancelled = false;
     async function initialize() {
       try {
-        const faceapi = await import("face-api.js");
+        const faceapi = await loadFaceRecognitionModels();
         faceApiRef.current = faceapi;
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-        ]);
         if (cancelled) return;
         setPhase("Allow camera access and center one face in the frame.");
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 540 } }, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } }, audio: false });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -79,24 +73,8 @@ function CameraDialog({ staffId, staffName, onClose, onComplete }) {
   }, []);
 
   async function captureSamples() {
-    const faceapi = faceApiRef.current;
-    if (!faceapi) throw new Error("Face-recognition models are not ready yet.");
-    const descriptors = [];
-    const centers = [];
-    for (let index = 0; index < 3; index += 1) {
-      setPhase(index === 0 ? "Look straight at the camera…" : index === 1 ? "Turn your head slightly left…" : "Turn your head slightly right…");
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
-      const result = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.55 }))
-        .withFaceLandmarks(true)
-        .withFaceDescriptor();
-      if (!result) throw new Error("Keep one well-lit face fully visible in the camera.");
-      descriptors.push(Array.from(result.descriptor));
-      centers.push(result.detection.box.x + result.detection.box.width / 2);
-    }
-    const movement = Math.max(...centers) - Math.min(...centers);
-    if (movement < 3) throw new Error("Liveness check needs visible head movement. Follow the left and right prompts and try again.");
-    return descriptors;
+    if (!faceApiRef.current) throw new Error("Face-recognition models are not ready yet.");
+    return captureFaceSamples(faceApiRef.current, videoRef.current, setPhase);
   }
 
   async function verify() {
@@ -306,7 +284,10 @@ export default function FaceTrackAttendance({ session, notify, onExit, onLogout 
 
       {tab === "settings" && data.admin && policyDraft && <form className="facetrack-policy" onSubmit={savePolicy}><header><div><span className="facetrack-kicker">Configurable rules</span><h2>Attendance policy</h2></div><label className="facetrack-switch"><input type="checkbox" checked={policyDraft.enabled} onChange={(event) => setPolicyDraft({ ...policyDraft, enabled: event.target.checked })} /><span>Module enabled</span></label></header><div className="facetrack-form-grid"><label><span>Timezone</span><input value={policyDraft.timezone} onChange={(event) => setPolicyDraft({ ...policyDraft, timezone: event.target.value })} /></label><label><span>Late grace period (minutes)</span><input min="0" max="120" type="number" value={policyDraft.graceMinutes} onChange={(event) => setPolicyDraft({ ...policyDraft, graceMinutes: event.target.value })} /></label><label><span>Face-match threshold</span><input min="0.35" max="0.65" step="0.01" type="number" value={policyDraft.matchThreshold} onChange={(event) => setPolicyDraft({ ...policyDraft, matchThreshold: event.target.value })} /></label><label><span>Minimum overtime (minutes)</span><input min="0" max="240" type="number" value={policyDraft.overtimeMinimumMinutes} onChange={(event) => setPolicyDraft({ ...policyDraft, overtimeMinimumMinutes: event.target.value })} /></label><label><span>Biometric retention (days)</span><input min="30" max="3650" type="number" value={policyDraft.retentionDays} onChange={(event) => setPolicyDraft({ ...policyDraft, retentionDays: event.target.value })} /></label><label className="facetrack-consent"><input type="checkbox" checked={policyDraft.overtimeRequiresApproval} onChange={(event) => setPolicyDraft({ ...policyDraft, overtimeRequiresApproval: event.target.checked })} /><span>Overtime requires admin approval</span></label></div><button className="facetrack-primary" type="submit"><ShieldCheck size={18} /> Save policy</button></form>}
 
-      {tab === "audit" && data.admin && <section className="facetrack-table-panel"><header><div><span className="facetrack-kicker">Append-only history</span><h2>FaceTrack audit trail</h2></div><span>{data.auditEntries?.length || 0} entries</span></header><div className="facetrack-table-scroll"><table><thead><tr><th>Date and time</th><th>Employee</th><th>Actor</th><th>Action</th><th>Reason / comment</th></tr></thead><tbody>{data.auditEntries?.length ? data.auditEntries.map((entry) => <tr key={entry.id}><td>{dateTime(entry.createdAt)}</td><td><strong>{entry.attendanceRecord?.staff?.name}</strong><span>{entry.attendanceRecord?.workDate}</span></td><td><strong>{entry.actorName}</strong><span>{entry.actorRole}</span></td><td>{entry.action.startsWith("CLOCK:") ? "FACE VERIFIED CLOCK EVENT" : entry.action.replaceAll("_", " ")}</td><td>{entry.reason || entry.comment || "—"}</td></tr>) : <tr><td className="facetrack-empty" colSpan="5">No audit entries yet.</td></tr>}</tbody></table></div></section>}
+      {tab === "audit" && data.admin && <>
+        <section className="facetrack-table-panel"><header><div><span className="facetrack-kicker">Append-only history</span><h2>FaceTrack audit trail</h2></div><span>{data.auditEntries?.length || 0} entries</span></header><div className="facetrack-table-scroll"><table><thead><tr><th>Date and time</th><th>Employee</th><th>Actor</th><th>Action</th><th>Reason / comment</th></tr></thead><tbody>{data.auditEntries?.length ? data.auditEntries.map((entry) => <tr key={entry.id}><td>{dateTime(entry.createdAt)}</td><td><strong>{entry.attendanceRecord?.staff?.name}</strong><span>{entry.attendanceRecord?.workDate}</span></td><td><strong>{entry.actorName}</strong><span>{entry.actorRole}</span></td><td>{entry.action.startsWith("CLOCK:") ? "FACE VERIFIED CLOCK EVENT" : entry.action.replaceAll("_", " ")}</td><td>{entry.reason || entry.comment || "—"}</td></tr>) : <tr><td className="facetrack-empty" colSpan="5">No audit entries yet.</td></tr>}</tbody></table></div></section>
+        <section className="facetrack-table-panel"><header><div><span className="facetrack-kicker">Reliability monitoring · last 100 scans</span><h2>Scanner diagnostics</h2></div><span>{data.scanDiagnostics?.length || 0} events</span></header><div className="facetrack-table-scroll"><table><thead><tr><th>Date and time</th><th>Branch / scanner</th><th>Result</th><th>Issue</th><th>Scan duration</th></tr></thead><tbody>{data.scanDiagnostics?.length ? data.scanDiagnostics.map((item) => <tr key={item.id}><td>{dateTime(item.createdAt)}</td><td><strong>{item.branch}</strong><span>{item.scannerType === "KIOSK" ? "Registered iPad" : "Account scanner"}</span></td><td><Status value={item.outcome} /></td><td>{item.outcome === "FAILURE" ? `${item.failureCode.replaceAll("_", " ")} · ${item.failureStage}` : "—"}</td><td>{(item.elapsedMs / 1000).toFixed(1)} sec</td></tr>) : <tr><td className="facetrack-empty" colSpan="5">No scan diagnostics yet. New scan attempts will appear here.</td></tr>}</tbody></table></div></section>
+      </>}
 
       {camera && <CameraDialog {...camera} onClose={() => setCamera(null)} onComplete={() => { setCamera(null); notify("Face profile enrolled."); refresh(); }} />}
       {correction && <CorrectionDialog record={correction} onClose={() => setCorrection(null)} onSaved={() => { setCorrection(null); notify("Correction request sent for administrator approval."); refresh(); }} />}

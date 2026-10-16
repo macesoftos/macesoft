@@ -521,6 +521,21 @@ model FaceTrackPolicy {
   updatedAt                DateTime @updatedAt
 }
 
+model FaceTrackScanDiagnostic {
+  id           String   @id @default(cuid())
+  branch       String
+  scannerType  String
+  outcome      String
+  failureStage String   @default("")
+  failureCode  String   @default("")
+  elapsedMs    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([branch, createdAt])
+  @@index([outcome, createdAt])
+  @@index([failureCode, createdAt])
+}
+
 model FaceTrackKioskDevice {
   id            String                    @id @default(cuid())
   name          String
