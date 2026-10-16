@@ -729,6 +729,9 @@ export function createFaceTrackAttendanceRouter(prisma) {
     }
     if (!candidates.length) throw apiError("No enrolled employees are available for this kiosk branch.", 409);
     const match = selectUniqueMatch(candidates, descriptors, policy.matchThreshold);
+    if (request.authAccount && !scannerAccountCanRecordStaff(request.authAccount, match.staff)) {
+      throw apiError("This employee account can record attendance only for its linked employee profile.", 403);
+    }
     const confidence = Math.max(0, Math.min(1, 1 - match.distance));
     const { record, now } = await recordVerifiedClock(prisma, {
       staff: match.staff,
