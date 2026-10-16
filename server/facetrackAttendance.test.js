@@ -121,6 +121,18 @@ test("the account scanner rejects another employee before writing attendance", (
   assert.ok(attendanceWrite > identityGuard, "identity must be checked before attendance is written");
 });
 
+test("the kiosk scanner binds signed-in employee accounts to their linked employee before writing attendance", () => {
+  const source = readFileSync(new URL("./facetrackAttendance.js", import.meta.url), "utf8");
+  const start = source.indexOf('router.post("/kiosk/clock"');
+  const end = source.indexOf('router.post("/kiosk/diagnostics"', start);
+  const kioskClockRoute = source.slice(start, end);
+
+  const identityGuard = kioskClockRoute.indexOf("scannerAccountCanRecordStaff(request.authAccount, match.staff)");
+  const attendanceWrite = kioskClockRoute.indexOf("recordVerifiedClock(prisma");
+  assert.ok(identityGuard >= 0, "signed-in employee accounts must enforce linked employee identity in kiosk mode");
+  assert.ok(attendanceWrite > identityGuard, "identity must be checked before kiosk attendance is written");
+});
+
 test("daily branch assignment accepts primary and additional staff branches", () => {
   assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: "[]" }, "BGC"), true);
   assert.equal(faceTrackInternals.staffAssignedToBranch({ branch: "BGC", branches: '["Makati", "Alabang"]' }, "Makati"), true);
